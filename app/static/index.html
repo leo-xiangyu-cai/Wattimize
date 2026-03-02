@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wattimize Dashboard</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div>
+          <h1>Wattimize</h1>
+          <p>SAJ monitoring panel</p>
+        </div>
+        <button id="refreshBtn" class="btn">Refresh</button>
+      </header>
+
+      <section class="status-grid">
+        <article class="card">
+          <h2>System</h2>
+          <p id="healthValue" class="value">-</p>
+        </article>
+        <article class="card">
+          <h2>Home Assistant</h2>
+          <p id="haValue" class="value">-</p>
+        </article>
+        <article class="card">
+          <h2>Core Entities</h2>
+          <p id="coreCount" class="value">-</p>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="section-header">
+          <h2>Core Metrics</h2>
+          <span id="coreUpdatedAt" class="muted"></span>
+        </div>
+        <div id="coreMetrics" class="metrics"></div>
+      </section>
+
+      <section class="card">
+        <h2>Entity Explorer</h2>
+        <form id="filterForm" class="filters">
+          <label>
+            Domain
+            <input id="domainInput" type="text" placeholder="sensor" />
+          </label>
+          <label>
+            Brand
+            <input id="brandInput" type="text" value="saj" placeholder="saj" />
+          </label>
+          <label>
+            Query
+            <input id="qInput" type="text" placeholder="battery" />
+          </label>
+          <button type="submit" class="btn">Search</button>
+        </form>
+        <p id="entityCount" class="muted">-</p>
+        <div class="pager">
+          <button id="prevPageBtn" class="btn secondary" type="button">Prev</button>
+          <span id="pageInfo" class="muted">Page -</span>
+          <button id="nextPageBtn" class="btn secondary" type="button">Next</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Entity</th>
+                <th>State</th>
+                <th>Unit</th>
+                <th>Name</th>
+              </tr>
+            </thead>
+            <tbody id="entitiesBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

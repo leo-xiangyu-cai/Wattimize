@@ -1,0 +1,9 @@
+services:
+  wattimize-api:
+    build: .
+    container_name: wattimize-api
+    env_file:
+      - .env
+    ports:
+      - "18000:8000"
+    restart: unless-stopped
