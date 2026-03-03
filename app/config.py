@@ -16,6 +16,7 @@ def _parse_entity_ids(raw: str | None) -> tuple[str, ...]:
         return (
             "sensor.saj_pv_power",
             "sensor.saj_battery_power",
+            "sensor.saj_ct_grid_power_total",
             "sensor.saj_total_grid_power",
             "sensor.saj_total_load_power",
             "sensor.saj_battery_energy_percent",

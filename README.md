@@ -16,7 +16,7 @@ Fill your token in `.env`:
 ```env
 HA_URL=http://192.168.68.61:8123
 HA_TOKEN=YOUR_HOME_ASSISTANT_LONG_LIVED_TOKEN
-CORE_ENTITY_IDS=sensor.saj_pv_power,sensor.saj_battery_power,sensor.saj_total_grid_power,sensor.saj_total_load_power,sensor.saj_battery_energy_percent,sensor.saj_inverter_status
+CORE_ENTITY_IDS=sensor.saj_pv_power,sensor.saj_battery_power,sensor.saj_ct_grid_power_total,sensor.saj_total_grid_power,sensor.saj_total_load_power,sensor.saj_battery_energy_percent,sensor.saj_inverter_status
 ```
 
 ## 3) Run

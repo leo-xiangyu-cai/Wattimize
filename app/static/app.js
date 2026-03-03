@@ -51,6 +51,12 @@ const I18N = {
     stateDischarging: "Discharging",
     stateBatteryIdle: "Idle",
     balanceLabel: "Balance",
+    balanceStatusTitle: "Dynamic Balance Status",
+    balanceStatusBalanced: "Cleared",
+    balanceStatusUnbalanced: "Not Cleared",
+    balanceStatusNoData: "Not enough data",
+    balanceResidualLabel: "Net {value}",
+    balanceFormulaLabel: "Balance Formula",
     updatedAt: "Updated",
     connected: "Connected",
     error: "Error",
@@ -106,6 +112,12 @@ const I18N = {
     stateDischarging: "正在放电",
     stateBatteryIdle: "空闲",
     balanceLabel: "功率平衡",
+    balanceStatusTitle: "动态平衡状态",
+    balanceStatusBalanced: "已清零",
+    balanceStatusUnbalanced: "未清零",
+    balanceStatusNoData: "数据不足",
+    balanceResidualLabel: "净值 {value}",
+    balanceFormulaLabel: "平衡公式",
     updatedAt: "更新时间",
     connected: "已连接",
     error: "错误",
@@ -128,7 +140,6 @@ const pager = {
 const PAGE_SIZE = 80;
 const AUTO_REFRESH_KEY = "autoRefreshSeconds";
 const AUTO_REFRESH_OPTIONS = [0, 5, 10];
-
 const stateCache = {
   lastSummary: null,
   lastEntities: null,
@@ -215,6 +226,18 @@ function powerToWatts(value, unit = "W") {
   return value;
 }
 
+function formatPowerKw(value, unit = "W") {
+  const watts = powerToWatts(value, unit);
+  if (watts === null) return "-";
+  return `${(watts / 1000).toFixed(3)} kW`;
+}
+
+function formatSignedKwFromWatts(watts) {
+  if (watts === null) return "-";
+  const sign = watts >= 0 ? "+" : "-";
+  return `${sign}${Math.abs(watts / 1000).toFixed(3)} kW`;
+}
+
 function formatPower(value, unit = "W") {
   if (value === null) return "-";
   const abs = Math.abs(value);
@@ -236,6 +259,44 @@ function setModeClass(id, mode) {
   el.classList.remove("mode-positive", "mode-negative");
   if (mode === "positive") el.classList.add("mode-positive");
   if (mode === "negative") el.classList.add("mode-negative");
+}
+
+function setBalanceStatus(balanceW) {
+  const statusEl = document.getElementById("balanceStatusText");
+  if (!statusEl) return;
+
+  statusEl.classList.remove("status-balanced", "status-unbalanced");
+  if (balanceW === null) {
+    setText("balanceStatusText", t("balanceStatusNoData"));
+    setText("balanceResidualValue", t("balanceResidualLabel", { value: "-" }));
+    return;
+  }
+
+  const balanced = Math.round(balanceW) === 0;
+  setText("balanceStatusText", balanced ? t("balanceStatusBalanced") : t("balanceStatusUnbalanced"));
+  statusEl.classList.add(balanced ? "status-balanced" : "status-unbalanced");
+  setText("balanceResidualValue", t("balanceResidualLabel", { value: formatPowerKw(balanceW, "W") }));
+}
+
+function setBalanceFormula(pvW, gridW, batteryW, loadW, netW) {
+  if (pvW === null || gridW === null || batteryW === null || loadW === null || netW === null) {
+    setText("balanceFormulaText", `${t("balanceFormulaLabel")}: -`);
+    return;
+  }
+  const batteryDischargeW = Math.max(batteryW, 0);
+  const batteryChargeW = Math.max(-batteryW, 0);
+  const gridImportW = Math.max(gridW, 0);
+  const gridExportW = Math.max(-gridW, 0);
+  const formula =
+    `${t("balanceFormulaLabel")}: ` +
+    `(${formatPowerKw(pvW, "W")}) + ` +
+    `(${formatPowerKw(batteryDischargeW, "W")}) + ` +
+    `(${formatPowerKw(gridImportW, "W")}) - ` +
+    `(${formatPowerKw(loadW, "W")}) - ` +
+    `(${formatPowerKw(batteryChargeW, "W")}) - ` +
+    `(${formatPowerKw(gridExportW, "W")}) = ` +
+    `${formatSignedKwFromWatts(netW)}`;
+  setText("balanceFormulaText", formula);
 }
 
 function findCoreItem(items, entityId) {
@@ -292,11 +353,12 @@ function renderEnergyFlow(items) {
   else if (inverterStateRaw === "standby") inverterStateText = t("inverterStandby");
   else if (!inverterStateRaw) inverterStateText = t("inverterUnknown");
 
-  setText("solarPowerValue", formatPower(pvPower, pv?.unit || "W"));
-  setText("gridPowerValue", formatPower(gridPower, grid?.unit || "W"));
+  setText("solarPowerValue", formatPowerKw(pvPower, pv?.unit || "W"));
+  const gridPowerAbs = gridPower === null ? null : Math.abs(gridPower);
+  setText("gridPowerValue", formatPowerKw(gridPowerAbs, grid?.unit || "W"));
   const batteryPowerAbs = batteryPower === null ? null : Math.abs(batteryPower);
-  setText("batteryPowerValue", formatPower(batteryPowerAbs, battery?.unit || "W"));
-  setText("loadPowerValue", formatPower(loadPower, load?.unit || "W"));
+  setText("batteryPowerValue", formatPowerKw(batteryPowerAbs, battery?.unit || "W"));
+  setText("loadPowerValue", formatPowerKw(loadPower, load?.unit || "W"));
   setText("inverterStatusValue", inverterStateText);
 
   const solarActive = pvW !== null && pvW > 5;
@@ -307,6 +369,13 @@ function renderEnergyFlow(items) {
   const gridImport = gridW !== null && gridW > 0;
   setText("gridState", gridActive ? (gridImport ? t("stateImporting") : t("stateExporting")) : t("stateIdle"));
   setFlowLine("lineGrid", gridActive, !gridImport);
+  if (gridActive) {
+    setModeClass("gridPowerValue", gridImport ? "positive" : "negative");
+    setModeClass("gridState", gridImport ? "positive" : "negative");
+  } else {
+    setModeClass("gridPowerValue", "");
+    setModeClass("gridState", "");
+  }
 
   const loadActive = loadW !== null && loadW > 5;
   setText("loadState", loadActive ? t("stateConsuming") : t("stateIdle"));
@@ -347,9 +416,17 @@ function renderEnergyFlow(items) {
 
   if (pvW === null || gridW === null || batteryW === null || loadW === null) {
     setText("systemBalance", `${t("balanceLabel")} -`);
+    setBalanceStatus(null);
+    setBalanceFormula(null, null, null, null, null);
   } else {
-    const balance = pvW + gridW + batteryW - loadW;
-    setText("systemBalance", `${t("balanceLabel")} ${formatPower(balance, "W")}`);
+    const batteryDischargeW = Math.max(batteryW, 0);
+    const batteryChargeW = Math.max(-batteryW, 0);
+    const gridImportW = Math.max(gridW, 0);
+    const gridExportW = Math.max(-gridW, 0);
+    const net = pvW + batteryDischargeW + gridImportW - loadW - batteryChargeW - gridExportW;
+    setText("systemBalance", `${t("balanceLabel")} ${formatPowerKw(net, "W")}`);
+    setBalanceStatus(net);
+    setBalanceFormula(pvW, gridW, batteryW, loadW, net);
   }
 }
 
@@ -422,6 +499,9 @@ async function loadSummary() {
     setText("haValue", t("error"));
     setText("coreCount", "-");
     setText("coreUpdatedAt", String(err));
+    setText("systemBalance", `${t("balanceLabel")} -`);
+    setBalanceStatus(null);
+    setBalanceFormula(null, null, null, null, null);
   }
 }
 
