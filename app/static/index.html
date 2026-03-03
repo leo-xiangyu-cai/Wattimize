@@ -261,7 +261,7 @@
         <form id="configForm" class="config-form">
           <label data-i18n="configHaUrlLabel">
             HA URL
-            <input id="cfgHaUrl" type="text" placeholder="http://192.168.68.61:8123" data-i18n-placeholder="configHaUrlPlaceholder" required />
+            <input id="cfgHaUrl" type="text" placeholder="http://<home-assistant-host>:8123" data-i18n-placeholder="configHaUrlPlaceholder" required />
           </label>
           <label data-i18n="configHaTokenLabel">
             HA Token
@@ -269,7 +269,7 @@
           </label>
           <label data-i18n="configDongleHostLabel">
             Solplanet Dongle Host
-            <input id="cfgDongleHost" type="text" placeholder="192.168.68.70" data-i18n-placeholder="configDongleHostPlaceholder" />
+            <input id="cfgDongleHost" type="text" placeholder="<solplanet-dongle-host>" data-i18n-placeholder="configDongleHostPlaceholder" />
           </label>
           <div class="config-actions">
             <button id="configCloseBtn" type="button" class="btn secondary" data-i18n="configCloseBtn">关闭</button>
