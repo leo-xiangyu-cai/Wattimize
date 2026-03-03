@@ -8,11 +8,21 @@ from time import monotonic
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 
-from app.config import load_settings
+from app.config import (
+    Settings,
+    config_file_exists,
+    get_config_path,
+    get_missing_required_fields_from_payload,
+    load_settings,
+    read_config_file,
+    save_settings,
+    settings_to_dict,
+)
 from app.home_assistant import HomeAssistantClient
 from app.solplanet_cgi import SolplanetCgiClient
 
@@ -41,6 +51,13 @@ solplanet_flow_cache: dict[str, object] = {"payload": None, "at_monotonic": 0.0}
 solplanet_flow_lock = asyncio.Lock()
 solplanet_context_cache: dict[str, object] = {"payload": None, "at_monotonic": 0.0}
 solplanet_context_lock = asyncio.Lock()
+runtime_lock = asyncio.Lock()
+
+
+class ConfigPayload(BaseModel):
+    ha_url: str = Field(default="")
+    ha_token: str = Field(default="")
+    solplanet_dongle_host: str = Field(default="")
 
 
 def _split_entity_id(entity_id: str) -> tuple[str, str]:
@@ -691,9 +708,121 @@ def _build_solplanet_single_endpoint_response(
     }
 
 
+def _build_saj_single_endpoint_response(
+    name: str,
+    path: str,
+    payload: dict[str, object] | None,
+    error: str | None,
+    started_at: float,
+) -> dict[str, object]:
+    return {
+        "system": "saj",
+        "endpoint": name,
+        "path": path,
+        "ok": error is None,
+        "error": error,
+        "payload": payload,
+        "fetch_ms": round((monotonic() - started_at) * 1000, 1),
+        "updated_at": datetime.now(UTC).isoformat(),
+        "source": {
+            "type": "home_assistant",
+            "ha_url": settings.ha_url,
+        },
+    }
+
+
+def _compact_raw_ha_state(state: dict[str, object] | None) -> dict[str, object] | None:
+    if not isinstance(state, dict):
+        return None
+    attributes = state.get("attributes")
+    attrs = attributes if isinstance(attributes, dict) else {}
+    return {
+        "entity_id": state.get("entity_id"),
+        "state": state.get("state"),
+        "unit": attrs.get("unit_of_measurement"),
+        "friendly_name": attrs.get("friendly_name"),
+        "device_class": attrs.get("device_class"),
+        "state_class": attrs.get("state_class"),
+        "last_changed": state.get("last_changed"),
+        "last_updated": state.get("last_updated"),
+    }
+
+
+def _reset_solplanet_caches() -> None:
+    solplanet_flow_cache["payload"] = None
+    solplanet_flow_cache["at_monotonic"] = 0.0
+    solplanet_context_cache["payload"] = None
+    solplanet_context_cache["at_monotonic"] = 0.0
+
+
+def _missing_required_config() -> list[str]:
+    if not config_file_exists():
+        return ["ha_url", "ha_token"]
+    file_payload = read_config_file()
+    return get_missing_required_fields_from_payload(file_payload)
+
+
+def _ensure_ha_configured() -> None:
+    missing = _missing_required_config()
+    if missing:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Service is not configured yet",
+                "missing_required": missing,
+                "configure_path": "/api/config",
+            },
+        )
+
+
+async def _replace_runtime(new_settings: Settings) -> None:
+    global settings, ha_client, solplanet_client  # noqa: PLW0603
+    async with runtime_lock:
+        old_solplanet = solplanet_client
+        settings = new_settings
+        ha_client = HomeAssistantClient(base_url=settings.ha_url, token=settings.ha_token)
+        solplanet_client = SolplanetCgiClient(
+            host=settings.solplanet_dongle_host,
+            port=settings.solplanet_dongle_port,
+            scheme=settings.solplanet_dongle_scheme,
+            verify_ssl=settings.solplanet_verify_ssl,
+            timeout_seconds=settings.solplanet_request_timeout_seconds,
+        )
+        _reset_solplanet_caches()
+        await old_solplanet.aclose()
+
+
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/config/status")
+async def config_status() -> dict[str, object]:
+    missing = _missing_required_config()
+    return {
+        "configured": len(missing) == 0,
+        "missing_required": missing,
+        "config_path": str(get_config_path()),
+    }
+
+
+@app.get("/api/config")
+async def get_config() -> dict[str, object]:
+    payload = settings_to_dict(settings)
+    payload["configured"] = len(_missing_required_config()) == 0
+    payload["config_path"] = str(get_config_path())
+    return payload
+
+
+@app.put("/api/config")
+async def put_config(payload: ConfigPayload) -> dict[str, object]:
+    persisted = save_settings(payload.model_dump())
+    await _replace_runtime(persisted)
+    response = settings_to_dict(settings)
+    response["configured"] = len(_missing_required_config()) == 0
+    response["config_path"] = str(get_config_path())
+    return response
 
 
 @app.get("/")
@@ -749,6 +878,7 @@ async def get_core_entities_by_system(system: str) -> dict[str, object]:
         except (TimeoutError, asyncio.TimeoutError) as exc:
             raise HTTPException(status_code=504, detail=f"Solplanet CGI timed out: {exc}") from exc
 
+    _ensure_ha_configured()
     try:
         entity_ids = _get_system_entity_ids(normalized)
         data = await ha_client.core_entities(entity_ids)
@@ -782,6 +912,7 @@ async def get_energy_flow(system: str) -> dict[str, object]:
         except (TimeoutError, asyncio.TimeoutError) as exc:
             raise HTTPException(status_code=504, detail=f"Solplanet CGI timed out: {exc}") from exc
 
+    _ensure_ha_configured()
     try:
         states = await ha_client.all_states()
         return _build_energy_flow_payload(normalized, states)
@@ -799,6 +930,100 @@ async def get_energy_flow(system: str) -> dict[str, object]:
 @app.get("/api/saj/energy-flow")
 async def get_energy_flow_saj() -> dict[str, object]:
     return await get_energy_flow("saj")
+
+
+@app.get("/api/saj/raw/dashboard-sources")
+async def get_saj_raw_dashboard_sources() -> dict[str, object]:
+    started_at = monotonic()
+    _ensure_ha_configured()
+    try:
+        states = await ha_client.all_states()
+        flow = _build_energy_flow_payload("saj", states)
+        states_by_entity_id = {str(item.get("entity_id", "")): item for item in states}
+        entities = flow.get("entities")
+        entities_map = entities if isinstance(entities, dict) else {}
+
+        def _entity_raw(key: str) -> dict[str, object] | None:
+            item = entities_map.get(key)
+            if not isinstance(item, dict):
+                return None
+            entity_id = str(item.get("entity_id") or "")
+            if not entity_id:
+                return None
+            return _compact_raw_ha_state(states_by_entity_id.get(entity_id))
+
+        metrics = flow.get("metrics")
+        metrics_map = metrics if isinstance(metrics, dict) else {}
+        payload = {
+            "dashboard_values": {
+                "solar_power_w": metrics_map.get("pv_w"),
+                "grid_power_w": metrics_map.get("grid_w"),
+                "battery_power_w": metrics_map.get("battery_w"),
+                "home_load_power_w": metrics_map.get("load_w"),
+                "battery_soc_percent": metrics_map.get("battery_soc_percent"),
+                "inverter_status": metrics_map.get("inverter_status"),
+                "balance_w": metrics_map.get("balance_w"),
+            },
+            "source_entities": {
+                "pv": _entity_raw("pv"),
+                "grid": _entity_raw("grid"),
+                "battery": _entity_raw("battery"),
+                "load": _entity_raw("load"),
+                "soc": _entity_raw("soc"),
+                "inverter": _entity_raw("inverter"),
+            },
+            "matched_entities": metrics_map.get("matched_entities"),
+        }
+        return _build_saj_single_endpoint_response(
+            name="dashboard_sources",
+            path="HA /api/states (derived via energy-flow matching)",
+            payload=payload,
+            error=None,
+            started_at=started_at,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _build_saj_single_endpoint_response(
+            name="dashboard_sources",
+            path="HA /api/states (derived via energy-flow matching)",
+            payload=None,
+            error=f"{type(exc).__name__}: {exc}",
+            started_at=started_at,
+        )
+
+
+@app.get("/api/saj/raw/core-entities")
+async def get_saj_raw_core_entities() -> dict[str, object]:
+    started_at = monotonic()
+    _ensure_ha_configured()
+    try:
+        states = await ha_client.all_states()
+        states_by_entity_id = {str(item.get("entity_id", "")): item for item in states}
+        configured_ids = list(settings.saj_core_entity_ids)
+        payload = {
+            "configured_entity_ids": configured_ids,
+            "items": [
+                {
+                    "configured_entity_id": entity_id,
+                    "state": _compact_raw_ha_state(states_by_entity_id.get(entity_id)),
+                }
+                for entity_id in configured_ids
+            ],
+        }
+        return _build_saj_single_endpoint_response(
+            name="core_entities",
+            path="HA /api/states (configured SAJ core entity ids)",
+            payload=payload,
+            error=None,
+            started_at=started_at,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _build_saj_single_endpoint_response(
+            name="core_entities",
+            path="HA /api/states (configured SAJ core entity ids)",
+            payload=None,
+            error=f"{type(exc).__name__}: {exc}",
+            started_at=started_at,
+        )
 
 
 @app.get("/api/soulplanet/energy-flow")
@@ -967,6 +1192,7 @@ async def on_shutdown() -> None:
 
 @app.get("/api/catalog/domains")
 async def list_domains() -> dict[str, object]:
+    _ensure_ha_configured()
     try:
         states = await ha_client.all_states()
         counter: Counter[str] = Counter()
@@ -990,6 +1216,7 @@ async def list_domains() -> dict[str, object]:
 
 @app.get("/api/catalog/brands")
 async def list_brands() -> dict[str, object]:
+    _ensure_ha_configured()
     try:
         states = await ha_client.all_states()
         counter: Counter[str] = Counter()
@@ -1018,6 +1245,7 @@ async def list_entities(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=80, ge=1, le=500),
 ) -> dict[str, object]:
+    _ensure_ha_configured()
     try:
         states = await ha_client.all_states()
         filtered: list[dict[str, object]] = []
@@ -1067,6 +1295,7 @@ async def list_entities(
 
 @app.get("/api/ha/ping")
 async def ping_home_assistant() -> dict[str, object]:
+    _ensure_ha_configured()
     try:
         payload = await ha_client.api_status()
         return {"ok": True, "ha": payload}

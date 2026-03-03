@@ -29,6 +29,7 @@
               <option value="10" data-i18n="autoRefresh10s">Every 10s</option>
             </select>
           </label>
+          <button id="configBtn" class="btn secondary" data-i18n="configBtn">Config</button>
           <button id="refreshBtn" class="btn" data-i18n="refreshBtn">Refresh</button>
         </div>
       </header>
@@ -39,6 +40,9 @@
         </button>
         <button id="tabSolplanetRaw" class="tab-btn" type="button" data-tab="solplanetRaw" data-i18n="solplanetRawTab">
           Solplanet Raw
+        </button>
+        <button id="tabSajRaw" class="tab-btn" type="button" data-tab="sajRaw" data-i18n="sajRawTab">
+          SAJ Raw
         </button>
         <button id="tabEntities" class="tab-btn" type="button" data-tab="entities" data-i18n="entitiesTab">
           Entities
@@ -198,6 +202,17 @@
         </section>
       </section>
 
+      <section id="sajRawView" class="view hidden">
+        <section class="card">
+          <div class="section-header">
+            <h2 data-i18n="sajRawTitle">SAJ Raw Data</h2>
+            <span id="sajRawUpdatedAt" class="muted">-</span>
+          </div>
+          <p id="sajRawMeta" class="muted">-</p>
+          <div id="sajRawBody" class="raw-grid"></div>
+        </section>
+      </section>
+
       <section id="entitiesView" class="view hidden">
         <section class="card">
           <h2 data-i18n="entityExplorerTitle">Entity Explorer</h2>
@@ -238,6 +253,32 @@
         </section>
       </section>
     </main>
+
+    <div id="configModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="configModalTitle">
+      <div class="modal-card">
+        <h2 id="configModalTitle" data-i18n="configModalTitle">首次配置</h2>
+        <p id="configModalDesc" class="muted" data-i18n="configModalDesc">请先填写 Home Assistant 连接信息，保存后立即生效。</p>
+        <form id="configForm" class="config-form">
+          <label data-i18n="configHaUrlLabel">
+            HA URL
+            <input id="cfgHaUrl" type="text" placeholder="http://192.168.68.61:8123" data-i18n-placeholder="configHaUrlPlaceholder" required />
+          </label>
+          <label data-i18n="configHaTokenLabel">
+            HA Token
+            <input id="cfgHaToken" type="password" placeholder="Long-lived access token" data-i18n-placeholder="configHaTokenPlaceholder" required />
+          </label>
+          <label data-i18n="configDongleHostLabel">
+            Solplanet Dongle Host
+            <input id="cfgDongleHost" type="text" placeholder="192.168.68.70" data-i18n-placeholder="configDongleHostPlaceholder" />
+          </label>
+          <div class="config-actions">
+            <button id="configCloseBtn" type="button" class="btn secondary" data-i18n="configCloseBtn">关闭</button>
+            <button id="configSaveBtn" type="submit" class="btn" data-i18n="configSaveBtn">保存配置</button>
+            <span id="configSaveMsg" class="muted">-</span>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <script src="/static/app.js"></script>
   </body>
