@@ -712,7 +712,21 @@ async def frontend_index() -> Response:
 
 @app.get("/api/entities/core")
 async def get_core_entities() -> dict[str, object]:
+    payload = await get_core_entities_by_system("saj")
+    payload["deprecated"] = True
+    payload["preferred_path"] = "/api/saj/entities/core"
+    return payload
+
+
+@app.get("/api/saj/entities/core")
+async def get_core_entities_saj() -> dict[str, object]:
     return await get_core_entities_by_system("saj")
+
+
+@app.get("/api/soulplanet/entities/core")
+@app.get("/api/solplanet/entities/core")
+async def get_core_entities_soulplanet() -> dict[str, object]:
+    return await get_core_entities_by_system("solplanet")
 
 
 @app.get("/api/entities/core/{system}")
@@ -782,6 +796,18 @@ async def get_energy_flow(system: str) -> dict[str, object]:
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
+@app.get("/api/saj/energy-flow")
+async def get_energy_flow_saj() -> dict[str, object]:
+    return await get_energy_flow("saj")
+
+
+@app.get("/api/soulplanet/energy-flow")
+@app.get("/api/solplanet/energy-flow")
+async def get_energy_flow_soulplanet() -> dict[str, object]:
+    return await get_energy_flow("solplanet")
+
+
+@app.get("/api/soulplanet/cgi-dump")
 @app.get("/api/solplanet/cgi-dump")
 async def get_solplanet_cgi_dump() -> dict[str, object]:
     try:
@@ -799,6 +825,7 @@ async def get_solplanet_cgi_dump() -> dict[str, object]:
         raise HTTPException(status_code=504, detail=f"Solplanet CGI timed out: {exc}") from exc
 
 
+@app.get("/api/soulplanet/cgi/getdev-device-2")
 @app.get("/api/solplanet/cgi/getdev-device-2")
 async def get_solplanet_getdev_device_2() -> dict[str, object]:
     started_at = monotonic()
@@ -821,6 +848,7 @@ async def get_solplanet_getdev_device_2() -> dict[str, object]:
         )
 
 
+@app.get("/api/soulplanet/cgi/getdevdata-device-2")
 @app.get("/api/solplanet/cgi/getdevdata-device-2")
 async def get_solplanet_getdevdata_device_2() -> dict[str, object]:
     started_at = monotonic()
@@ -850,6 +878,7 @@ async def get_solplanet_getdevdata_device_2() -> dict[str, object]:
         )
 
 
+@app.get("/api/soulplanet/cgi/getdevdata-device-3")
 @app.get("/api/solplanet/cgi/getdevdata-device-3")
 async def get_solplanet_getdevdata_device_3() -> dict[str, object]:
     started_at = monotonic()
@@ -875,6 +904,7 @@ async def get_solplanet_getdevdata_device_3() -> dict[str, object]:
         )
 
 
+@app.get("/api/soulplanet/cgi/getdevdata-device-4")
 @app.get("/api/solplanet/cgi/getdevdata-device-4")
 async def get_solplanet_getdevdata_device_4() -> dict[str, object]:
     started_at = monotonic()
@@ -904,6 +934,7 @@ async def get_solplanet_getdevdata_device_4() -> dict[str, object]:
         )
 
 
+@app.get("/api/soulplanet/cgi/getdefine")
 @app.get("/api/solplanet/cgi/getdefine")
 async def get_solplanet_getdefine() -> dict[str, object]:
     started_at = monotonic()

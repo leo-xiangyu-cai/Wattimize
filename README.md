@@ -1,5 +1,7 @@
 # Wattimize API (MVP)
 
+API inventory (for keep/remove decisions): `docs/API_INVENTORY.md`
+
 ## 1) Setup
 
 ```bash
@@ -44,22 +46,21 @@ open http://127.0.0.1:18000/
 ```bash
 curl -s http://127.0.0.1:18000/api/health
 curl -s http://127.0.0.1:18000/api/ha/ping | jq
-curl -s http://127.0.0.1:18000/api/entities/core | jq
-curl -s http://127.0.0.1:18000/api/entities/core/saj | jq
-curl -s http://127.0.0.1:18000/api/entities/core/solplanet | jq
-curl -s http://127.0.0.1:18000/api/energy-flow/saj | jq
-curl -s http://127.0.0.1:18000/api/energy-flow/solplanet | jq
-curl -s http://127.0.0.1:18000/api/solplanet/cgi/getdev-device-2 | jq
-curl -s http://127.0.0.1:18000/api/solplanet/cgi/getdevdata-device-2 | jq
-curl -s http://127.0.0.1:18000/api/solplanet/cgi/getdevdata-device-3 | jq
-curl -s http://127.0.0.1:18000/api/solplanet/cgi/getdevdata-device-4 | jq
-curl -s http://127.0.0.1:18000/api/solplanet/cgi/getdefine | jq
+curl -s http://127.0.0.1:18000/api/saj/entities/core | jq
+curl -s http://127.0.0.1:18000/api/soulplanet/entities/core | jq
+curl -s http://127.0.0.1:18000/api/saj/energy-flow | jq
+curl -s http://127.0.0.1:18000/api/soulplanet/energy-flow | jq
+curl -s http://127.0.0.1:18000/api/soulplanet/cgi/getdev-device-2 | jq
+curl -s http://127.0.0.1:18000/api/soulplanet/cgi/getdevdata-device-2 | jq
+curl -s http://127.0.0.1:18000/api/soulplanet/cgi/getdevdata-device-3 | jq
+curl -s http://127.0.0.1:18000/api/soulplanet/cgi/getdevdata-device-4 | jq
+curl -s http://127.0.0.1:18000/api/soulplanet/cgi/getdefine | jq
 curl -s http://127.0.0.1:18000/api/catalog/domains | jq
 curl -s http://127.0.0.1:18000/api/catalog/brands | jq
 curl -s "http://127.0.0.1:18000/api/entities?brand=saj&domain=sensor&page=1&page_size=20" | jq
 ```
 
-`/api/energy-flow/solplanet` behavior:
+`/api/soulplanet/energy-flow` behavior:
 - If `SOLPLANET_DONGLE_HOST` is set, backend reads Solplanet dongle CGI directly (`getdev*.cgi`).
 - If not set, backend falls back to Home Assistant entity mapping.
 - `SOLPLANET_CACHE_SECONDS` controls short-lived API cache for CGI responses (recommended 2-5s).
@@ -70,5 +71,5 @@ curl -s "http://127.0.0.1:18000/api/entities?brand=saj&domain=sensor&page=1&page
 ```bash
 cd /Users/caixy/Leo/Wattimize
 docker compose up -d --build
-curl -s http://127.0.0.1:18000/api/entities/core | jq
+curl -s http://127.0.0.1:18000/api/saj/entities/core | jq
 ```
