@@ -11,7 +11,7 @@
       <header class="topbar">
         <div>
           <h1>Wattimize</h1>
-          <p data-i18n="subtitle">SAJ monitoring panel</p>
+          <p data-i18n="subtitle">SAJ + Solplanet monitoring panel</p>
         </div>
         <div class="topbar-actions">
           <label class="lang-switch">
@@ -37,6 +37,9 @@
         <button id="tabDashboard" class="tab-btn active" type="button" data-tab="dashboard" data-i18n="dashboardTab">
           Dashboard
         </button>
+        <button id="tabSolplanetRaw" class="tab-btn" type="button" data-tab="solplanetRaw" data-i18n="solplanetRawTab">
+          Solplanet Raw
+        </button>
         <button id="tabEntities" class="tab-btn" type="button" data-tab="entities" data-i18n="entitiesTab">
           Entities
         </button>
@@ -60,60 +63,138 @@
 
         <section class="card">
           <div class="section-header">
-            <h2 data-i18n="flowTitle">Real-time Energy Flow</h2>
-            <span id="coreUpdatedAt" class="muted"></span>
+            <h2 data-i18n="flowTitle">Real-time Energy Flow Comparison</h2>
           </div>
-          <div id="energyFlow" class="flow-board">
-            <div id="lineSolar" class="flow-line v-line line-solar"></div>
-            <div id="lineGrid" class="flow-line h-line line-grid"></div>
-            <div id="lineLoad" class="flow-line h-line line-load"></div>
-            <div id="lineBattery" class="flow-line v-line line-battery"></div>
-
-            <article class="flow-node node-solar">
-              <p class="node-title" data-i18n="solarTitle">Solar</p>
-              <p id="solarPowerValue" class="node-value">-</p>
-              <p id="solarState" class="node-state muted">idle</p>
-            </article>
-
-            <article class="flow-node node-grid">
-              <p class="node-title" data-i18n="gridTitle">Grid</p>
-              <p id="gridPowerValue" class="node-value">-</p>
-              <p id="gridState" class="node-state muted">idle</p>
-            </article>
-
-            <article class="flow-node node-center">
-              <p class="node-title" data-i18n="inverterTitle">Inverter</p>
-              <p id="inverterStatusValue" class="node-value">-</p>
-              <p id="systemBalance" class="node-state muted">balance -</p>
-            </article>
-
-            <article class="flow-node node-load">
-              <p class="node-title" data-i18n="loadTitle">Home Load</p>
-              <p id="loadPowerValue" class="node-value">-</p>
-              <p id="loadState" class="node-state muted">idle</p>
-            </article>
-
-            <article class="flow-node node-battery">
-              <p class="node-title" data-i18n="batteryTitle">Battery</p>
-              <p id="batteryPowerValue" class="node-value">-</p>
-              <p id="batteryState" class="node-state muted">idle</p>
-              <div class="soc-wrap">
-                <div class="soc-label">
-                  <span data-i18n="socLabel">SOC</span>
-                  <span id="batterySocValue">-</span>
-                </div>
-                <div class="soc-track">
-                  <div id="batterySocFill" class="soc-fill"></div>
-                </div>
+          <div class="flow-compare-grid">
+            <section class="flow-system-card">
+              <h3 class="flow-system-title">SAJ</h3>
+              <div class="flow-meta">
+                <span id="saj-loadingSpinner" class="loading-spinner is-hidden" aria-hidden="true"></span>
+                <span id="saj-updatedAt" class="muted">-</span>
               </div>
-            </article>
+              <div id="energyFlowSaj" class="flow-board">
+                <div id="saj-lineSolar" class="flow-line v-line line-solar"></div>
+                <div id="saj-lineGrid" class="flow-line h-line line-grid"></div>
+                <div id="saj-lineLoad" class="flow-line h-line line-load"></div>
+                <div id="saj-lineBattery" class="flow-line v-line line-battery"></div>
+
+                <article class="flow-node node-solar">
+                  <p class="node-title" data-i18n="solarTitle">Solar</p>
+                  <p id="saj-solarPowerValue" class="node-value">-</p>
+                  <p id="saj-solarState" class="node-state muted">idle</p>
+                </article>
+
+                <article class="flow-node node-grid">
+                  <p class="node-title" data-i18n="gridTitle">Grid</p>
+                  <p id="saj-gridPowerValue" class="node-value">-</p>
+                  <p id="saj-gridState" class="node-state muted">idle</p>
+                </article>
+
+                <article class="flow-node node-center">
+                  <p class="node-title" data-i18n="inverterTitle">Inverter</p>
+                  <p id="saj-inverterStatusValue" class="node-value">-</p>
+                  <p id="saj-systemBalance" class="node-state muted">balance -</p>
+                </article>
+
+                <article class="flow-node node-load">
+                  <p class="node-title" data-i18n="loadTitle">Home Load</p>
+                  <p id="saj-loadPowerValue" class="node-value">-</p>
+                  <p id="saj-loadState" class="node-state muted">idle</p>
+                </article>
+
+                <article class="flow-node node-battery">
+                  <p class="node-title" data-i18n="batteryTitle">Battery</p>
+                  <p id="saj-batteryPowerValue" class="node-value">-</p>
+                  <p id="saj-batteryState" class="node-state muted">idle</p>
+                  <div class="soc-wrap">
+                    <div class="soc-label">
+                      <span data-i18n="socLabel">SOC</span>
+                      <span id="saj-batterySocValue">-</span>
+                    </div>
+                    <div class="soc-track">
+                      <div id="saj-batterySocFill" class="soc-fill"></div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+              <p class="balance-status-inline">
+                <span class="muted" data-i18n="balanceStatusTitle">Dynamic Balance Status</span>
+                <span id="saj-balanceStatusText" class="balance-status-text">-</span>
+                <span id="saj-balanceResidualValue" class="muted">-</span>
+              </p>
+              <p id="saj-balanceFormulaText" class="balance-formula muted">-</p>
+            </section>
+
+            <section class="flow-system-card">
+              <h3 class="flow-system-title">Solplanet</h3>
+              <div class="flow-meta">
+                <span id="solplanet-loadingSpinner" class="loading-spinner is-hidden" aria-hidden="true"></span>
+                <span id="solplanet-updatedAt" class="muted">-</span>
+              </div>
+              <div id="energyFlowSolplanet" class="flow-board">
+                <div id="solplanet-lineSolar" class="flow-line v-line line-solar"></div>
+                <div id="solplanet-lineGrid" class="flow-line h-line line-grid"></div>
+                <div id="solplanet-lineLoad" class="flow-line h-line line-load"></div>
+                <div id="solplanet-lineBattery" class="flow-line v-line line-battery"></div>
+
+                <article class="flow-node node-solar">
+                  <p class="node-title" data-i18n="solarTitle">Solar</p>
+                  <p id="solplanet-solarPowerValue" class="node-value">-</p>
+                  <p id="solplanet-solarState" class="node-state muted">idle</p>
+                </article>
+
+                <article class="flow-node node-grid">
+                  <p class="node-title" data-i18n="gridTitle">Grid</p>
+                  <p id="solplanet-gridPowerValue" class="node-value">-</p>
+                  <p id="solplanet-gridState" class="node-state muted">idle</p>
+                </article>
+
+                <article class="flow-node node-center">
+                  <p class="node-title" data-i18n="inverterTitle">Inverter</p>
+                  <p id="solplanet-inverterStatusValue" class="node-value">-</p>
+                  <p id="solplanet-systemBalance" class="node-state muted">balance -</p>
+                </article>
+
+                <article class="flow-node node-load">
+                  <p class="node-title" data-i18n="loadTitle">Home Load</p>
+                  <p id="solplanet-loadPowerValue" class="node-value">-</p>
+                  <p id="solplanet-loadState" class="node-state muted">idle</p>
+                </article>
+
+                <article class="flow-node node-battery">
+                  <p class="node-title" data-i18n="batteryTitle">Battery</p>
+                  <p id="solplanet-batteryPowerValue" class="node-value">-</p>
+                  <p id="solplanet-batteryState" class="node-state muted">idle</p>
+                  <div class="soc-wrap">
+                    <div class="soc-label">
+                      <span data-i18n="socLabel">SOC</span>
+                      <span id="solplanet-batterySocValue">-</span>
+                    </div>
+                    <div class="soc-track">
+                      <div id="solplanet-batterySocFill" class="soc-fill"></div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+              <p class="balance-status-inline">
+                <span class="muted" data-i18n="balanceStatusTitle">Dynamic Balance Status</span>
+                <span id="solplanet-balanceStatusText" class="balance-status-text">-</span>
+                <span id="solplanet-balanceResidualValue" class="muted">-</span>
+              </p>
+              <p id="solplanet-balanceFormulaText" class="balance-formula muted">-</p>
+            </section>
           </div>
-          <p class="balance-status-inline">
-            <span class="muted" data-i18n="balanceStatusTitle">Dynamic Balance Status</span>
-            <span id="balanceStatusText" class="balance-status-text">-</span>
-            <span id="balanceResidualValue" class="muted">-</span>
-          </p>
-          <p id="balanceFormulaText" class="balance-formula muted">-</p>
+        </section>
+      </section>
+
+      <section id="solplanetRawView" class="view hidden">
+        <section class="card">
+          <div class="section-header">
+            <h2 data-i18n="solplanetRawTitle">Solplanet Raw API Dump</h2>
+            <span id="solplanetRawUpdatedAt" class="muted">-</span>
+          </div>
+          <p id="solplanetRawMeta" class="muted">-</p>
+          <div id="solplanetRawBody" class="raw-grid"></div>
         </section>
       </section>
 
