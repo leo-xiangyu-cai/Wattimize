@@ -11,6 +11,10 @@ const I18N = {
   en: {
     subtitle: "SAJ monitoring panel",
     languageLabel: "Language",
+    autoRefreshLabel: "Auto Refresh",
+    autoRefreshOff: "Off",
+    autoRefresh5s: "Every 5s",
+    autoRefresh10s: "Every 10s",
     refreshBtn: "Refresh",
     dashboardTab: "Dashboard",
     entitiesTab: "Entities",
@@ -62,6 +66,10 @@ const I18N = {
   zh: {
     subtitle: "SAJ 监控面板",
     languageLabel: "语言",
+    autoRefreshLabel: "自动刷新",
+    autoRefreshOff: "关闭",
+    autoRefresh5s: "每 5 秒",
+    autoRefresh10s: "每 10 秒",
     refreshBtn: "刷新",
     dashboardTab: "总览",
     entitiesTab: "实体",
@@ -118,6 +126,8 @@ const pager = {
   hasPrev: false,
 };
 const PAGE_SIZE = 80;
+const AUTO_REFRESH_KEY = "autoRefreshSeconds";
+const AUTO_REFRESH_OPTIONS = [0, 5, 10];
 
 const stateCache = {
   lastSummary: null,
@@ -133,6 +143,14 @@ function getLang() {
 
 let currentLang = getLang();
 let currentTab = localStorage.getItem("activeTab") === "entities" ? "entities" : "dashboard";
+let autoRefreshTimerId = null;
+let isLoadingCurrentTab = false;
+let autoRefreshSeconds = getAutoRefreshSeconds();
+
+function getAutoRefreshSeconds() {
+  const saved = Number(localStorage.getItem(AUTO_REFRESH_KEY));
+  return AUTO_REFRESH_OPTIONS.includes(saved) ? saved : 5;
+}
 
 function t(key, params = {}) {
   const table = I18N[currentLang] || I18N.en;
@@ -176,6 +194,9 @@ function applyTranslations() {
     el.setAttribute("placeholder", t(key));
   });
 
+  const autoRefreshSelect = document.getElementById("autoRefreshSelect");
+  if (autoRefreshSelect) autoRefreshSelect.value = String(autoRefreshSeconds);
+
   if (stateCache.lastSummary) renderSummary(stateCache.lastSummary);
   if (stateCache.lastEntities) renderEntitiesPage(stateCache.lastEntities);
 }
@@ -184,6 +205,14 @@ function toNumber(value) {
   if (value === null || value === undefined) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function powerToWatts(value, unit = "W") {
+  if (value === null) return null;
+  const normalized = String(unit || "W").trim().toLowerCase();
+  if (normalized === "kw") return value * 1000;
+  if (normalized === "mw") return value * 1000000;
+  return value;
 }
 
 function formatPower(value, unit = "W") {
@@ -227,6 +256,10 @@ function renderEnergyFlow(items) {
     findCoreByKeywords(items, ["pv", "power"]) ||
     findCoreByKeywords(items, ["solar", "power"]);
   const grid =
+    findCoreItem(items, "sensor.saj_ct_grid_power_total") ||
+    findCoreItem(items, "sensor.saj_fast_ct_grid_power_watt") ||
+    findCoreItem(items, "sensor.saj_grid_load_power") ||
+    findCoreItem(items, "sensor.saj_fast_grid_load_power") ||
     findCoreItem(items, "sensor.saj_total_grid_power") ||
     findCoreByKeywords(items, ["grid", "power"]);
   const battery =
@@ -247,6 +280,10 @@ function renderEnergyFlow(items) {
   const gridPower = toNumber(grid?.state);
   const batteryPower = toNumber(battery?.state);
   const loadPower = toNumber(load?.state);
+  const pvW = powerToWatts(pvPower, pv?.unit || "W");
+  const gridW = powerToWatts(gridPower, grid?.unit || "W");
+  const batteryW = powerToWatts(batteryPower, battery?.unit || "W");
+  const loadW = powerToWatts(loadPower, load?.unit || "W");
   const batterySoc = toNumber(soc?.state);
   const inverterStateRaw = String(inverter?.state || "").toLowerCase();
   let inverterStateText = String(inverter?.state || "-");
@@ -262,22 +299,22 @@ function renderEnergyFlow(items) {
   setText("loadPowerValue", formatPower(loadPower, load?.unit || "W"));
   setText("inverterStatusValue", inverterStateText);
 
-  const solarActive = pvPower !== null && pvPower > 5;
+  const solarActive = pvW !== null && pvW > 5;
   setText("solarState", solarActive ? t("stateProducing") : t("stateIdle"));
   setFlowLine("lineSolar", solarActive, false);
 
-  const gridActive = gridPower !== null && Math.abs(gridPower) > 5;
-  const gridImport = gridPower !== null && gridPower > 0;
+  const gridActive = gridW !== null && Math.abs(gridW) > 5;
+  const gridImport = gridW !== null && gridW > 0;
   setText("gridState", gridActive ? (gridImport ? t("stateImporting") : t("stateExporting")) : t("stateIdle"));
   setFlowLine("lineGrid", gridActive, !gridImport);
 
-  const loadActive = loadPower !== null && loadPower > 5;
+  const loadActive = loadW !== null && loadW > 5;
   setText("loadState", loadActive ? t("stateConsuming") : t("stateIdle"));
   setFlowLine("lineLoad", loadActive, false);
 
   // SAJ sign convention assumption: positive battery power means discharging.
-  const batteryActive = batteryPower !== null && Math.abs(batteryPower) > 5;
-  const batteryDischarging = batteryPower !== null && batteryPower > 0;
+  const batteryActive = batteryW !== null && Math.abs(batteryW) > 5;
+  const batteryDischarging = batteryW !== null && batteryW > 0;
   const batteryModeText = batteryActive
     ? batteryDischarging
       ? t("stateDischarging")
@@ -308,10 +345,10 @@ function renderEnergyFlow(items) {
     if (socFill) socFill.style.width = `${clampedSoc}%`;
   }
 
-  if (pvPower === null || gridPower === null || batteryPower === null || loadPower === null) {
+  if (pvW === null || gridW === null || batteryW === null || loadW === null) {
     setText("systemBalance", `${t("balanceLabel")} -`);
   } else {
-    const balance = pvPower + gridPower + batteryPower - loadPower;
+    const balance = pvW + gridW + batteryW - loadW;
     setText("systemBalance", `${t("balanceLabel")} ${formatPower(balance, "W")}`);
   }
 }
@@ -404,11 +441,35 @@ async function loadEntities() {
 }
 
 async function loadCurrentTab() {
+  if (isLoadingCurrentTab) return;
+  isLoadingCurrentTab = true;
+  try {
   if (currentTab === "entities") {
     await loadEntities();
     return;
   }
   await loadSummary();
+  } finally {
+    isLoadingCurrentTab = false;
+  }
+}
+
+function setAutoRefresh(seconds) {
+  const safeSeconds = AUTO_REFRESH_OPTIONS.includes(seconds) ? seconds : 5;
+  autoRefreshSeconds = safeSeconds;
+  localStorage.setItem(AUTO_REFRESH_KEY, String(safeSeconds));
+
+  if (autoRefreshTimerId) clearInterval(autoRefreshTimerId);
+  autoRefreshTimerId = null;
+
+  if (safeSeconds > 0) {
+    autoRefreshTimerId = window.setInterval(() => {
+      void loadCurrentTab();
+    }, safeSeconds * 1000);
+  }
+
+  const autoRefreshSelect = document.getElementById("autoRefreshSelect");
+  if (autoRefreshSelect) autoRefreshSelect.value = String(safeSeconds);
 }
 
 function setActiveTab(tab, load = true) {
@@ -436,6 +497,9 @@ document.getElementById("langSelect").addEventListener("change", (event) => {
   currentLang = nextLang;
   localStorage.setItem("lang", nextLang);
   applyTranslations();
+});
+document.getElementById("autoRefreshSelect").addEventListener("change", (event) => {
+  setAutoRefresh(Number(event.target.value));
 });
 
 document.getElementById("refreshBtn").addEventListener("click", () => {
@@ -465,4 +529,5 @@ document.getElementById("nextPageBtn").addEventListener("click", async () => {
 
 applyTranslations();
 setActiveTab(currentTab, false);
+setAutoRefresh(autoRefreshSeconds);
 void loadCurrentTab();
