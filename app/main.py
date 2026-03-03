@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from collections import Counter
 from datetime import UTC, date, datetime
 from pathlib import Path
 from time import monotonic
+from typing import Literal
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query
@@ -30,6 +32,8 @@ from app.persistence import (
     DEFAULT_SAMPLE_INTERVAL_SECONDS,
     EnergySample,
     compute_daily_usage,
+    compute_usage_between,
+    get_series_samples,
     get_storage_status,
     init_db,
     insert_sample,
@@ -84,6 +88,33 @@ class ConfigPayload(BaseModel):
     ha_url: str = Field(default="")
     ha_token: str = Field(default="")
     solplanet_dongle_host: str = Field(default="")
+
+
+SAJ_SLOT_MIN = 1
+SAJ_SLOT_MAX = 7
+SAJ_DAY_MASK_MIN = 0
+SAJ_DAY_MASK_MAX = 127
+SAJ_MODE_MIN = 0
+SAJ_MODE_MAX = 3
+SAJ_TIME_REGEX = re.compile(r"^(0[0-9]|1[0-9]|2[0-3]):([0-5][0-9])$")
+
+
+class SajWorkingModePayload(BaseModel):
+    mode_code: int = Field(..., ge=SAJ_MODE_MIN, le=SAJ_MODE_MAX)
+
+
+class SajSlotPayload(BaseModel):
+    start_time: str | None = Field(default=None)
+    end_time: str | None = Field(default=None)
+    power_percent: int | None = Field(default=None, ge=0, le=100)
+    day_mask: int | None = Field(default=None, ge=SAJ_DAY_MASK_MIN, le=SAJ_DAY_MASK_MAX)
+
+
+class SajTogglePayload(BaseModel):
+    charging_control: bool | None = Field(default=None)
+    discharging_control: bool | None = Field(default=None)
+    charge_time_enable_mask: int | None = Field(default=None, ge=SAJ_DAY_MASK_MIN, le=SAJ_DAY_MASK_MAX)
+    discharge_time_enable_mask: int | None = Field(default=None, ge=SAJ_DAY_MASK_MIN, le=SAJ_DAY_MASK_MAX)
 
 
 def _split_entity_id(entity_id: str) -> tuple[str, str]:
@@ -145,6 +176,20 @@ def _to_number(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return number
+
+
+def _parse_iso_utc_datetime(text: str, *, field_name: str) -> datetime:
+    raw = text.strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail=f"{field_name} is required")
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}, expected ISO-8601 datetime") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _power_to_watts(value: float | None, unit: str | None) -> float | None:
@@ -801,6 +846,230 @@ def _ensure_ha_configured() -> None:
         )
 
 
+def _validate_saj_slot(slot: int) -> int:
+    if slot < SAJ_SLOT_MIN or slot > SAJ_SLOT_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"slot must be between {SAJ_SLOT_MIN} and {SAJ_SLOT_MAX}",
+        )
+    return slot
+
+
+def _validate_hhmm(value: str, field_name: str) -> str:
+    normalized = value.strip()
+    if not SAJ_TIME_REGEX.fullmatch(normalized):
+        raise HTTPException(status_code=400, detail=f"{field_name} must match HH:MM (24-hour)")
+    return normalized
+
+
+def _entity_number_value(
+    states_by_id: dict[str, dict[str, object]],
+    entity_id: str,
+) -> int | float | None:
+    state = states_by_id.get(entity_id)
+    if not state:
+        return None
+    value = _to_number(state.get("state"))
+    if value is None:
+        return None
+    if float(value).is_integer():
+        return int(value)
+    return value
+
+
+def _entity_text_value(
+    states_by_id: dict[str, dict[str, object]],
+    entity_id: str,
+) -> str | None:
+    state = states_by_id.get(entity_id)
+    if not state:
+        return None
+    raw = state.get("state")
+    if raw is None:
+        return None
+    return str(raw)
+
+
+def _entity_switch_value(
+    states_by_id: dict[str, dict[str, object]],
+    entity_id: str,
+) -> bool | None:
+    value = _entity_text_value(states_by_id, entity_id)
+    if value is None:
+        return None
+    if value.lower() == "on":
+        return True
+    if value.lower() == "off":
+        return False
+    return None
+
+
+def _entity_metadata(
+    states_by_id: dict[str, dict[str, object]],
+    entity_id: str,
+) -> dict[str, object]:
+    state = states_by_id.get(entity_id)
+    attrs = state.get("attributes") if isinstance(state, dict) else {}
+    attrs_map = attrs if isinstance(attrs, dict) else {}
+    return {
+        "entity_id": entity_id,
+        "friendly_name": attrs_map.get("friendly_name"),
+        "unit": attrs_map.get("unit_of_measurement"),
+        "min": attrs_map.get("min"),
+        "max": attrs_map.get("max"),
+        "step": attrs_map.get("step"),
+        "pattern": attrs_map.get("pattern"),
+    }
+
+
+async def _saj_control_states() -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
+    states = await ha_client.all_states()
+    states_by_id = {str(item.get("entity_id", "")): item for item in states}
+    return states, states_by_id
+
+
+def _build_saj_control_state(
+    states_by_id: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    charge_slots: list[dict[str, object]] = []
+    discharge_slots: list[dict[str, object]] = []
+    for slot in range(SAJ_SLOT_MIN, SAJ_SLOT_MAX + 1):
+        charge_slots.append(
+            {
+                "slot": slot,
+                "start_time": _entity_text_value(states_by_id, f"text.saj_charge{slot}_start_time_time"),
+                "end_time": _entity_text_value(states_by_id, f"text.saj_charge{slot}_end_time_time"),
+                "power_percent": _entity_number_value(states_by_id, f"number.saj_charge{slot}_power_percent_input"),
+                "day_mask": _entity_number_value(states_by_id, f"number.saj_charge{slot}_day_mask_input"),
+            }
+        )
+        discharge_slots.append(
+            {
+                "slot": slot,
+                "start_time": _entity_text_value(states_by_id, f"text.saj_discharge{slot}_start_time_time"),
+                "end_time": _entity_text_value(states_by_id, f"text.saj_discharge{slot}_end_time_time"),
+                "power_percent": _entity_number_value(states_by_id, f"number.saj_discharge{slot}_power_percent_input"),
+                "day_mask": _entity_number_value(states_by_id, f"number.saj_discharge{slot}_day_mask_input"),
+            }
+        )
+
+    return {
+        "updated_at": datetime.now(UTC).isoformat(),
+        "working_mode": {
+            "mode_input": _entity_number_value(states_by_id, "number.saj_app_mode_input"),
+            "mode_sensor": _entity_number_value(states_by_id, "sensor.saj_app_mode"),
+            "inverter_working_mode_sensor": _entity_number_value(states_by_id, "sensor.saj_inverter_working_mode"),
+            "range": {"min": SAJ_MODE_MIN, "max": SAJ_MODE_MAX},
+        },
+        "charge": {
+            "time_enable_mask": _entity_number_value(states_by_id, "number.saj_charge_time_enable_input"),
+            "control_switch": _entity_switch_value(states_by_id, "switch.saj_charging_control"),
+            "slots": charge_slots,
+        },
+        "discharge": {
+            "time_enable_mask": _entity_number_value(states_by_id, "number.saj_discharge_time_enable_input"),
+            "control_switch": _entity_switch_value(states_by_id, "switch.saj_discharging_control"),
+            "slots": discharge_slots,
+        },
+        "limits": {
+            "battery_charge_power_limit": _entity_number_value(states_by_id, "number.saj_battery_charge_power_limit_input"),
+            "battery_discharge_power_limit": _entity_number_value(states_by_id, "number.saj_battery_discharge_power_limit_input"),
+            "grid_max_charge_power": _entity_number_value(states_by_id, "number.saj_grid_max_charge_power_input"),
+            "grid_max_discharge_power": _entity_number_value(states_by_id, "number.saj_grid_max_discharge_power_input"),
+        },
+    }
+
+
+def _build_saj_control_capabilities(
+    states_by_id: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "updated_at": datetime.now(UTC).isoformat(),
+        "working_mode": {
+            "entity": _entity_metadata(states_by_id, "number.saj_app_mode_input"),
+            "range": {"min": SAJ_MODE_MIN, "max": SAJ_MODE_MAX, "step": 1},
+            "accepted_values_note": "Mode labels can differ by SAJ firmware; use mode_code 0..3.",
+        },
+        "slot": {
+            "slot_range": {"min": SAJ_SLOT_MIN, "max": SAJ_SLOT_MAX},
+            "time_format": "HH:MM",
+            "day_mask_range": {"min": SAJ_DAY_MASK_MIN, "max": SAJ_DAY_MASK_MAX},
+            "power_percent_range": {"min": 0, "max": 100},
+            "charge_slot_template": {
+                "start_entity_template": "text.saj_charge{slot}_start_time_time",
+                "end_entity_template": "text.saj_charge{slot}_end_time_time",
+                "power_entity_template": "number.saj_charge{slot}_power_percent_input",
+                "day_mask_entity_template": "number.saj_charge{slot}_day_mask_input",
+            },
+            "discharge_slot_template": {
+                "start_entity_template": "text.saj_discharge{slot}_start_time_time",
+                "end_entity_template": "text.saj_discharge{slot}_end_time_time",
+                "power_entity_template": "number.saj_discharge{slot}_power_percent_input",
+                "day_mask_entity_template": "number.saj_discharge{slot}_day_mask_input",
+            },
+        },
+        "switches": {
+            "charging_control_entity": _entity_metadata(states_by_id, "switch.saj_charging_control"),
+            "discharging_control_entity": _entity_metadata(states_by_id, "switch.saj_discharging_control"),
+            "charge_time_enable_entity": _entity_metadata(states_by_id, "number.saj_charge_time_enable_input"),
+            "discharge_time_enable_entity": _entity_metadata(states_by_id, "number.saj_discharge_time_enable_input"),
+        },
+    }
+
+
+async def _saj_set_number(entity_id: str, value: int | float) -> None:
+    await ha_client.call_service("number", "set_value", {"entity_id": entity_id, "value": value})
+
+
+async def _saj_set_text(entity_id: str, value: str) -> None:
+    await ha_client.call_service("text", "set_value", {"entity_id": entity_id, "value": value})
+
+
+async def _saj_set_switch(entity_id: str, enabled: bool) -> None:
+    service = "turn_on" if enabled else "turn_off"
+    await ha_client.call_service("switch", service, {"entity_id": entity_id})
+
+
+async def _saj_apply_slot(
+    slot_kind: Literal["charge", "discharge"],
+    slot: int,
+    payload: SajSlotPayload,
+) -> dict[str, object]:
+    safe_slot = _validate_saj_slot(slot)
+    changed: list[dict[str, object]] = []
+
+    if payload.start_time is not None:
+        start_time = _validate_hhmm(payload.start_time, "start_time")
+        start_entity = f"text.saj_{slot_kind}{safe_slot}_start_time_time"
+        await _saj_set_text(start_entity, start_time)
+        changed.append({"entity_id": start_entity, "value": start_time})
+    if payload.end_time is not None:
+        end_time = _validate_hhmm(payload.end_time, "end_time")
+        end_entity = f"text.saj_{slot_kind}{safe_slot}_end_time_time"
+        await _saj_set_text(end_entity, end_time)
+        changed.append({"entity_id": end_entity, "value": end_time})
+    if payload.power_percent is not None:
+        power_entity = f"number.saj_{slot_kind}{safe_slot}_power_percent_input"
+        await _saj_set_number(power_entity, payload.power_percent)
+        changed.append({"entity_id": power_entity, "value": payload.power_percent})
+    if payload.day_mask is not None:
+        day_mask_entity = f"number.saj_{slot_kind}{safe_slot}_day_mask_input"
+        await _saj_set_number(day_mask_entity, payload.day_mask)
+        changed.append({"entity_id": day_mask_entity, "value": payload.day_mask})
+
+    if not changed:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    _, states_by_id = await _saj_control_states()
+    return {
+        "ok": True,
+        "slot_kind": slot_kind,
+        "slot": safe_slot,
+        "changed": changed,
+        "state": _build_saj_control_state(states_by_id),
+    }
+
+
 async def _replace_runtime(new_settings: Settings) -> None:
     global settings, ha_client, solplanet_client  # noqa: PLW0603
     async with runtime_lock:
@@ -932,18 +1201,95 @@ async def storage_daily_usage(
 @app.get("/api/storage/samples")
 async def storage_samples(
     system: str | None = Query(default=None, description="saj or solplanet"),
+    day_utc: str | None = Query(default=None, description="UTC day in YYYY-MM-DD"),
+    start_utc: str | None = Query(default=None, description="UTC datetime in ISO-8601"),
+    end_utc: str | None = Query(default=None, description="UTC datetime in ISO-8601"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=100, ge=1, le=500),
 ) -> dict[str, object]:
     normalized: str | None = None
     if system:
         normalized = _normalize_system_name(system)
+    target_day: date | None = None
+    start_at: datetime | None = None
+    end_at: datetime | None = None
+    if day_utc:
+        try:
+            target_day = date.fromisoformat(day_utc)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid day_utc format, expected YYYY-MM-DD") from exc
+    if start_utc:
+        start_at = _parse_iso_utc_datetime(start_utc, field_name="start_utc")
+    if end_utc:
+        end_at = _parse_iso_utc_datetime(end_utc, field_name="end_utc")
+    if start_at and end_at and start_at >= end_at:
+        raise HTTPException(status_code=400, detail="start_utc must be earlier than end_utc")
     return await asyncio.to_thread(
         list_samples,
         storage_db_path,
         system=normalized,
+        target_day_utc=target_day,
+        start_at_utc=start_at,
+        end_at_utc=end_at,
         page=page,
         page_size=page_size,
+    )
+
+
+@app.get("/api/storage/series")
+async def storage_series(
+    system: str = Query(default="saj", description="saj or solplanet"),
+    day_utc: str | None = Query(default=None, description="UTC day in YYYY-MM-DD"),
+    start_utc: str | None = Query(default=None, description="UTC datetime in ISO-8601"),
+    end_utc: str | None = Query(default=None, description="UTC datetime in ISO-8601"),
+    hours: int = Query(default=24, ge=1, le=168),
+    max_points: int = Query(default=800, ge=50, le=5000),
+) -> dict[str, object]:
+    normalized = _normalize_system_name(system)
+    target_day: date | None = None
+    start_at: datetime | None = None
+    end_at: datetime | None = None
+    if day_utc:
+        try:
+            target_day = date.fromisoformat(day_utc)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid day_utc format, expected YYYY-MM-DD") from exc
+    if start_utc:
+        start_at = _parse_iso_utc_datetime(start_utc, field_name="start_utc")
+    if end_utc:
+        end_at = _parse_iso_utc_datetime(end_utc, field_name="end_utc")
+    if start_at and end_at and start_at >= end_at:
+        raise HTTPException(status_code=400, detail="start_utc must be earlier than end_utc")
+    return await asyncio.to_thread(
+        get_series_samples,
+        storage_db_path,
+        system=normalized,
+        hours=hours,
+        max_points=max_points,
+        target_day_utc=target_day,
+        start_at_utc=start_at,
+        end_at_utc=end_at,
+    )
+
+
+@app.get("/api/storage/usage-range")
+async def storage_usage_range(
+    system: str = Query(default="saj", description="saj or solplanet"),
+    start_utc: str = Query(..., description="UTC datetime in ISO-8601"),
+    end_utc: str = Query(..., description="UTC datetime in ISO-8601"),
+) -> dict[str, object]:
+    normalized = _normalize_system_name(system)
+    start_at = _parse_iso_utc_datetime(start_utc, field_name="start_utc")
+    end_at = _parse_iso_utc_datetime(end_utc, field_name="end_utc")
+    if start_at >= end_at:
+        raise HTTPException(status_code=400, detail="start_utc must be earlier than end_utc")
+    return await asyncio.to_thread(
+        compute_usage_between,
+        storage_db_path,
+        system=normalized,
+        start_at_utc=start_at,
+        end_at_utc=end_at,
+        sample_interval_seconds=sample_interval_seconds,
     )
 
 
@@ -1174,6 +1520,134 @@ async def get_saj_raw_core_entities() -> dict[str, object]:
             error=f"{type(exc).__name__}: {exc}",
             started_at=started_at,
         )
+
+
+@app.get("/api/saj/control/state")
+async def get_saj_control_state() -> dict[str, object]:
+    _ensure_ha_configured()
+    try:
+        _, states_by_id = await _saj_control_states()
+        return {"system": "saj", "control_state": _build_saj_control_state(states_by_id)}
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+@app.get("/api/saj/control/capabilities")
+async def get_saj_control_capabilities() -> dict[str, object]:
+    _ensure_ha_configured()
+    try:
+        _, states_by_id = await _saj_control_states()
+        return {"system": "saj", "capabilities": _build_saj_control_capabilities(states_by_id)}
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+@app.put("/api/saj/control/working-mode")
+async def put_saj_working_mode(payload: SajWorkingModePayload) -> dict[str, object]:
+    _ensure_ha_configured()
+    try:
+        await _saj_set_number("number.saj_app_mode_input", payload.mode_code)
+        _, states_by_id = await _saj_control_states()
+        return {
+            "ok": True,
+            "changed": [{"entity_id": "number.saj_app_mode_input", "value": payload.mode_code}],
+            "state": _build_saj_control_state(states_by_id),
+        }
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+@app.put("/api/saj/control/charge-slots/{slot}")
+async def put_saj_charge_slot(slot: int, payload: SajSlotPayload) -> dict[str, object]:
+    _ensure_ha_configured()
+    try:
+        return await _saj_apply_slot("charge", slot, payload)
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+@app.put("/api/saj/control/discharge-slots/{slot}")
+async def put_saj_discharge_slot(slot: int, payload: SajSlotPayload) -> dict[str, object]:
+    _ensure_ha_configured()
+    try:
+        return await _saj_apply_slot("discharge", slot, payload)
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+@app.put("/api/saj/control/toggles")
+async def put_saj_control_toggles(payload: SajTogglePayload) -> dict[str, object]:
+    _ensure_ha_configured()
+    changed: list[dict[str, object]] = []
+    try:
+        if payload.charging_control is not None:
+            await _saj_set_switch("switch.saj_charging_control", payload.charging_control)
+            changed.append({"entity_id": "switch.saj_charging_control", "value": payload.charging_control})
+        if payload.discharging_control is not None:
+            await _saj_set_switch("switch.saj_discharging_control", payload.discharging_control)
+            changed.append({"entity_id": "switch.saj_discharging_control", "value": payload.discharging_control})
+        if payload.charge_time_enable_mask is not None:
+            await _saj_set_number("number.saj_charge_time_enable_input", payload.charge_time_enable_mask)
+            changed.append(
+                {"entity_id": "number.saj_charge_time_enable_input", "value": payload.charge_time_enable_mask}
+            )
+        if payload.discharge_time_enable_mask is not None:
+            await _saj_set_number("number.saj_discharge_time_enable_input", payload.discharge_time_enable_mask)
+            changed.append(
+                {
+                    "entity_id": "number.saj_discharge_time_enable_input",
+                    "value": payload.discharge_time_enable_mask,
+                }
+            )
+        if not changed:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        _, states_by_id = await _saj_control_states()
+        return {"ok": True, "changed": changed, "state": _build_saj_control_state(states_by_id)}
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
 @app.get("/api/soulplanet/energy-flow")

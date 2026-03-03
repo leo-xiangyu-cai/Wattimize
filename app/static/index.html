@@ -36,6 +36,9 @@
         <button id="tabSajRaw" class="tab-btn" type="button" data-tab="sajRaw" data-i18n="sajRawTab">
           SAJ Raw
         </button>
+        <button id="tabSajControl" class="tab-btn" type="button" data-tab="sajControl" data-i18n="sajControlTab">
+          SAJ Control
+        </button>
         <button id="tabEntities" class="tab-btn" type="button" data-tab="entities" data-i18n="entitiesTab">
           Entities
         </button>
@@ -216,6 +219,77 @@
         </section>
       </section>
 
+      <section id="sajControlView" class="view hidden">
+        <section class="card">
+          <div class="section-header">
+            <h2 data-i18n="sajControlTitle">SAJ Control</h2>
+            <span id="sajControlUpdatedAt" class="muted">-</span>
+          </div>
+          <p id="sajControlMeta" class="muted">-</p>
+
+          <div class="saj-control-grid">
+            <article class="saj-control-panel">
+              <h3 data-i18n="sajControlModeTitle">Working Mode</h3>
+              <div class="saj-control-row">
+                <label data-i18n="sajControlModeCodeLabel">
+                  Mode Code
+                  <input id="sajModeCodeInput" type="number" min="0" max="3" step="1" value="0" />
+                </label>
+                <button id="sajModeApplyBtn" class="btn" type="button" data-i18n="sajControlApplyBtn">Apply</button>
+              </div>
+            </article>
+
+            <article class="saj-control-panel">
+              <h3 data-i18n="sajControlChargeTitle">Charge Slot</h3>
+              <div class="saj-control-row">
+                <label data-i18n="sajControlSlotLabel">
+                  Slot
+                  <input id="sajChargeSlotInput" type="number" min="1" max="7" step="1" value="1" />
+                </label>
+                <label data-i18n="sajControlStartLabel">
+                  Start
+                  <input id="sajChargeStartInput" type="time" value="01:00" />
+                </label>
+                <label data-i18n="sajControlEndLabel">
+                  End
+                  <input id="sajChargeEndInput" type="time" value="01:10" />
+                </label>
+                <label data-i18n="sajControlPowerLabel">
+                  Power (%)
+                  <input id="sajChargePowerInput" type="number" min="0" max="100" step="1" value="10" />
+                </label>
+                <button id="sajChargeApplyBtn" class="btn" type="button" data-i18n="sajControlApplyBtn">Apply</button>
+              </div>
+            </article>
+
+            <article class="saj-control-panel">
+              <h3 data-i18n="sajControlDischargeTitle">Discharge Slot</h3>
+              <div class="saj-control-row">
+                <label data-i18n="sajControlSlotLabel">
+                  Slot
+                  <input id="sajDischargeSlotInput" type="number" min="1" max="7" step="1" value="1" />
+                </label>
+                <label data-i18n="sajControlStartLabel">
+                  Start
+                  <input id="sajDischargeStartInput" type="time" value="02:00" />
+                </label>
+                <label data-i18n="sajControlEndLabel">
+                  End
+                  <input id="sajDischargeEndInput" type="time" value="02:10" />
+                </label>
+                <label data-i18n="sajControlPowerLabel">
+                  Power (%)
+                  <input id="sajDischargePowerInput" type="number" min="0" max="100" step="1" value="10" />
+                </label>
+                <button id="sajDischargeApplyBtn" class="btn" type="button" data-i18n="sajControlApplyBtn">Apply</button>
+              </div>
+            </article>
+          </div>
+
+          <pre id="sajControlStateJson" class="raw-pre">-</pre>
+        </section>
+      </section>
+
       <section id="entitiesView" class="view hidden">
         <section class="card">
           <h2 data-i18n="entityExplorerTitle">Entity Explorer</h2>
@@ -262,23 +336,44 @@
             <h2 data-i18n="samplingTitle">Sampling Records</h2>
             <span id="samplingUpdatedAt" class="muted">-</span>
           </div>
-          <p id="samplingStorageMeta" class="muted">-</p>
-          <p id="samplingDailyMeta" class="muted">-</p>
-          <form id="samplingFilterForm" class="filters">
+          <div id="samplingFilterBar" class="sampling-top-filters">
             <label data-i18n="samplingSystemLabel">
               System
               <select id="samplingSystemSelect">
-                <option value="" data-i18n="samplingSystemAll">All</option>
                 <option value="saj">SAJ</option>
                 <option value="solplanet">Solplanet</option>
               </select>
             </label>
-            <label data-i18n="samplingDayLabel">
-              Day (UTC)
-              <input id="samplingDayInput" type="date" />
+            <label data-i18n="samplingRangeModeLabel">
+              Range
+              <select id="samplingRangeModeSelect">
+                <option value="day" data-i18n="samplingRangeDay">Day</option>
+                <option value="week" data-i18n="samplingRangeWeek">Week</option>
+                <option value="month" data-i18n="samplingRangeMonth">Month</option>
+                <option value="custom_date" data-i18n="samplingRangeCustomDate">Custom Date</option>
+                <option value="custom_datetime" data-i18n="samplingRangeCustomDateTime">Custom Date + Time</option>
+              </select>
             </label>
-            <button type="submit" class="btn" data-i18n="samplingApplyBtn">Apply</button>
-          </form>
+            <div id="samplingRangeInputContainer"></div>
+          </div>
+          <p id="samplingStorageMeta" class="muted">-</p>
+          <p id="samplingDailyMeta" class="muted">-</p>
+          <section class="sampling-chart-card">
+            <div class="section-header">
+              <h3 data-i18n="samplingChartTitle">Power Trend</h3>
+              <label class="sampling-smoothness-select">
+                <span data-i18n="samplingSmoothLabel">Smoothing</span>
+                <select id="samplingSmoothModeSelect">
+                  <option value="detail" data-i18n="samplingSmoothModeDetail">Detail</option>
+                  <option value="smooth" data-i18n="samplingSmoothModeSmooth">Smooth</option>
+                </select>
+              </label>
+            </div>
+            <p id="samplingChartMeta" class="muted">-</p>
+            <div class="sampling-chart-wrap">
+              <div id="samplingChartCanvas" class="sampling-chart"></div>
+            </div>
+          </section>
           <p id="samplingCount" class="muted">-</p>
           <div class="pager">
             <button id="samplingPrevPageBtn" class="btn secondary" type="button" data-i18n="prevBtn">Prev</button>
@@ -333,6 +428,7 @@
       </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>

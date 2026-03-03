@@ -46,8 +46,22 @@ const I18N = {
     dashboardTab: "Dashboard",
     solplanetRawTab: "Solplanet Raw",
     sajRawTab: "SAJ Raw",
+    sajControlTab: "SAJ Control",
     entitiesTab: "Entities",
     samplingTab: "Sampling",
+    sajControlTitle: "SAJ Control",
+    sajControlModeTitle: "Working Mode",
+    sajControlModeCodeLabel: "Mode Code",
+    sajControlChargeTitle: "Charge Slot",
+    sajControlDischargeTitle: "Discharge Slot",
+    sajControlSlotLabel: "Slot",
+    sajControlStartLabel: "Start",
+    sajControlEndLabel: "End",
+    sajControlPowerLabel: "Power (%)",
+    sajControlApplyBtn: "Apply",
+    sajControlLoadFailed: "Control state load failed: {error}",
+    sajControlApplyFailed: "Control apply failed: {error}",
+    sajControlApplyDone: "Applied",
     systemTitle: "System",
     haTitle: "Home Assistant",
     coreTitle: "Core Entities",
@@ -61,12 +75,32 @@ const I18N = {
     entityExplorerTitle: "Entity Explorer",
     samplingTitle: "Sampling Records",
     samplingSystemLabel: "System",
-    samplingSystemAll: "All",
+    samplingRangeModeLabel: "Range",
+    samplingRangeDay: "Day",
+    samplingRangeWeek: "Week",
+    samplingRangeMonth: "Month",
+    samplingRangeCustomDate: "Custom Date",
+    samplingRangeCustomDateTime: "Custom Date + Time",
+    samplingWeekDisplay: "Week {week} ({start} ~ {end})",
+    samplingMonthYear: "{year} UTC",
     samplingDayLabel: "Day (UTC)",
-    samplingApplyBtn: "Apply",
+    samplingWeekLabel: "Week Anchor (UTC)",
+    samplingMonthLabel: "Month (UTC)",
+    samplingStartLabel: "Start (UTC)",
+    samplingEndLabel: "End (UTC)",
     samplingStorageMeta: "DB {sizeMb} MB · Rows {rows} · Interval {interval}s · Estimated/day {estMb} MB",
-    samplingDailyMeta: "Daily usage ({system}, {day} UTC): Load {load} kWh · PV {pv} kWh · Grid import {gridImport} kWh · Grid export {gridExport} kWh",
-    samplingDailyMetaNoData: "Daily usage ({system}, {day} UTC): not enough samples yet",
+    samplingUsageMeta: "Range usage ({system}, {range}): Load {load} kWh · PV {pv} kWh · Grid import {gridImport} kWh · Grid export {gridExport} kWh",
+    samplingUsageMetaNoData: "Range usage ({system}, {range}): not enough samples yet",
+    samplingChartTitle: "Power Trend",
+    samplingChartMeta: "{system} · {range} · {count} points",
+    samplingChartNoData: "No chart data yet for this range",
+    samplingSmoothLabel: "Smoothing",
+    samplingSmoothModeDetail: "Detail",
+    samplingSmoothModeSmooth: "Smooth",
+    samplingSeriesPv: "PV",
+    samplingSeriesGrid: "Grid",
+    samplingSeriesBattery: "Battery",
+    samplingSeriesLoad: "Load",
     samplingTableTime: "Sampled At (UTC)",
     samplingTableSystem: "System",
     samplingTablePv: "PV(W)",
@@ -188,8 +222,22 @@ const I18N = {
     dashboardTab: "总览",
     solplanetRawTab: "Solplanet 原始",
     sajRawTab: "SAJ 原始",
+    sajControlTab: "SAJ 管理",
     entitiesTab: "实体",
     samplingTab: "采样",
+    sajControlTitle: "SAJ 管理",
+    sajControlModeTitle: "工作模式",
+    sajControlModeCodeLabel: "模式编码",
+    sajControlChargeTitle: "充电时段",
+    sajControlDischargeTitle: "放电时段",
+    sajControlSlotLabel: "时段",
+    sajControlStartLabel: "开始",
+    sajControlEndLabel: "结束",
+    sajControlPowerLabel: "功率 (%)",
+    sajControlApplyBtn: "应用",
+    sajControlLoadFailed: "管理状态加载失败：{error}",
+    sajControlApplyFailed: "应用失败：{error}",
+    sajControlApplyDone: "已应用",
     systemTitle: "系统状态",
     haTitle: "Home Assistant",
     coreTitle: "核心实体",
@@ -203,12 +251,32 @@ const I18N = {
     entityExplorerTitle: "实体浏览",
     samplingTitle: "采样记录",
     samplingSystemLabel: "系统",
-    samplingSystemAll: "全部",
+    samplingRangeModeLabel: "范围",
+    samplingRangeDay: "天",
+    samplingRangeWeek: "周",
+    samplingRangeMonth: "月",
+    samplingRangeCustomDate: "自定义日期",
+    samplingRangeCustomDateTime: "自定义日期+时间",
+    samplingWeekDisplay: "第{week}周（{start} ~ {end}）",
+    samplingMonthYear: "{year} UTC",
     samplingDayLabel: "日期 (UTC)",
-    samplingApplyBtn: "应用",
+    samplingWeekLabel: "周锚点 (UTC)",
+    samplingMonthLabel: "月份 (UTC)",
+    samplingStartLabel: "开始时间 (UTC)",
+    samplingEndLabel: "结束时间 (UTC)",
     samplingStorageMeta: "数据库 {sizeMb} MB · 记录 {rows} 条 · 采样间隔 {interval}s · 预计每天 {estMb} MB",
-    samplingDailyMeta: "日统计 ({system}, {day} UTC): 负载 {load} kWh · 光伏 {pv} kWh · 电网购电 {gridImport} kWh · 电网上网 {gridExport} kWh",
-    samplingDailyMetaNoData: "日统计 ({system}, {day} UTC): 当前样本不足",
+    samplingUsageMeta: "区间统计 ({system}, {range}): 负载 {load} kWh · 光伏 {pv} kWh · 电网购电 {gridImport} kWh · 电网上网 {gridExport} kWh",
+    samplingUsageMetaNoData: "区间统计 ({system}, {range}): 当前样本不足",
+    samplingChartTitle: "功率趋势图",
+    samplingChartMeta: "{system} · {range} · {count} 个点",
+    samplingChartNoData: "当前时间范围暂无图表数据",
+    samplingSmoothLabel: "平滑度",
+    samplingSmoothModeDetail: "细节优先",
+    samplingSmoothModeSmooth: "平滑",
+    samplingSeriesPv: "光伏",
+    samplingSeriesGrid: "电网",
+    samplingSeriesBattery: "电池",
+    samplingSeriesLoad: "负载",
     samplingTableTime: "采样时间 (UTC)",
     samplingTableSystem: "系统",
     samplingTablePv: "光伏(W)",
@@ -327,6 +395,12 @@ const SOLPLANET_RAW_APIS = [
 const SAJ_RAW_APIS = [
   { key: "saj_dashboard_sources", titleKey: "rawApiSajDashboardSources", url: "/api/saj/raw/dashboard-sources" },
   { key: "saj_core_entities", titleKey: "rawApiSajCoreEntities", url: "/api/saj/raw/core-entities" },
+];
+const SAMPLING_SERIES = [
+  { key: "pv_w", labelKey: "samplingSeriesPv", color: "#f59e0b" },
+  { key: "grid_w", labelKey: "samplingSeriesGrid", color: "#2563eb" },
+  { key: "battery_w", labelKey: "samplingSeriesBattery", color: "#10b981" },
+  { key: "load_w", labelKey: "samplingSeriesLoad", color: "#ef4444" },
 ];
 const SOLPLANET_RAW_FIELD_HELP = {
   getdev_device_2: {
@@ -517,9 +591,11 @@ const stateCache = {
   lastEntities: null,
   lastSolplanetRaw: {},
   lastSajRaw: {},
+  lastSajControl: null,
   lastSamplingStatus: null,
   lastSamplingDaily: null,
   lastSamplingPage: null,
+  lastSamplingSeries: null,
   rawCardMode: {},
   systemLoadMeta: {
     saj: { phase: "idle", updatedAt: null, quality: "ok", count: 0 },
@@ -535,7 +611,7 @@ function getLang() {
 }
 
 let currentLang = getLang();
-let currentTab = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sampling"].includes(localStorage.getItem("activeTab"))
+let currentTab = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sajControl", "sampling"].includes(localStorage.getItem("activeTab"))
   ? localStorage.getItem("activeTab")
   : "dashboard";
 let autoRefreshTimerId = null;
@@ -543,6 +619,22 @@ let isLoadingCurrentTab = false;
 let autoRefreshSeconds = getAutoRefreshSeconds();
 let summaryRequestId = 0;
 let configReady = false;
+let samplingChart = null;
+let samplingChartFocusSeries = null;
+let samplingChartLastPayload = null;
+let samplingChartHandlersBound = false;
+let samplingRangeApplyingFromBrush = false;
+let samplingLegendSyncing = false;
+const samplingRangeState = {
+  day: "",
+  week: "",
+  month: "",
+  monthYear: 0,
+  startDate: "",
+  endDate: "",
+  startDateTime: "",
+  endDateTime: "",
+};
 
 function getAutoRefreshSeconds() {
   const saved = Number(localStorage.getItem(AUTO_REFRESH_KEY));
@@ -556,6 +648,64 @@ function t(key, params = {}) {
     text = text.replaceAll(`{${name}}`, String(value));
   }
   return text;
+}
+
+function monthLabel(month) {
+  const m = Number(month);
+  if (currentLang === "zh") return `${m}月`;
+  const enMonths = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+  return enMonths[m - 1] || `Month ${m}`;
+}
+
+function wattsToKwText(value, digits = 2) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${(n / 1000).toFixed(digits)} kW`;
+}
+
+function downsampleByBucket(points, targetCount) {
+  if (!Array.isArray(points) || points.length <= targetCount) return points;
+  const size = points.length;
+  const bucketSize = Math.max(1, Math.floor(size / targetCount));
+  const out = [];
+  for (let i = 0; i < size; i += bucketSize) {
+    const slice = points.slice(i, Math.min(size, i + bucketSize));
+    if (!slice.length) continue;
+    const mid = slice[Math.floor(slice.length / 2)];
+    out.push(mid);
+  }
+  if (out[out.length - 1]?.[0] !== points[points.length - 1]?.[0]) out.push(points[points.length - 1]);
+  return out;
+}
+
+function movingAverage(points, windowSize) {
+  if (!Array.isArray(points) || points.length < 3) return points;
+  const half = Math.max(1, Math.floor(windowSize / 2));
+  const out = [];
+  for (let i = 0; i < points.length; i += 1) {
+    let sum = 0;
+    let count = 0;
+    for (let j = i - half; j <= i + half; j += 1) {
+      if (j < 0 || j >= points.length) continue;
+      sum += Number(points[j][1]);
+      count += 1;
+    }
+    out.push([points[i][0], count > 0 ? sum / count : points[i][1]]);
+  }
+  return out;
 }
 
 function setText(id, text) {
@@ -617,13 +767,13 @@ function applyTranslations() {
     if (!key) return;
     const text = t(key);
     if (el.tagName === "LABEL") {
-      const input = el.querySelector("input");
+      const control = el.querySelector("input, select, textarea");
       el.childNodes.forEach((node) => {
         if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
           node.textContent = `${text}\n            `;
         }
       });
-      if (!input && el.textContent) el.textContent = text;
+      if (!control && el.textContent) el.textContent = text;
       return;
     }
     el.textContent = text;
@@ -643,6 +793,7 @@ function applyTranslations() {
   renderSystemLoadMeta("solplanet");
   renderSolplanetRawFromCache();
   renderSajRawFromCache();
+  renderSajControlFromCache();
   if (stateCache.lastEntities) renderEntitiesPage(stateCache.lastEntities);
 }
 
@@ -936,10 +1087,325 @@ function formatMaybeNumber(value, digits = 1) {
   return Number(value).toFixed(digits);
 }
 
+function toUtcIsoFromDateOnly(dateText) {
+  const d = new Date(`${dateText}T00:00:00Z`);
+  return d.toISOString();
+}
+
+function toUtcIsoFromDateEndExclusive(dateText) {
+  const d = new Date(`${dateText}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString();
+}
+
+function toUtcIsoFromDateTimeLocal(dateTimeText) {
+  const d = new Date(dateTimeText);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+function toLocalDateTimeInputValueFromMs(ms) {
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${y}-${m}-${day}T${hh}:${mm}`;
+}
+
+function toEpochMs(value) {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
+    // ECharts time axis usually uses ms; keep seconds fallback just in case.
+    return value > 1e11 ? value : value * 1000;
+  }
+  if (typeof value === "string") {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.getTime();
+  }
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return value.getTime();
+  }
+  return null;
+}
+
+function extractBrushTimeRange(areas) {
+  const list = Array.isArray(areas) ? areas : [];
+  if (!list.length) return null;
+  const first = list[0];
+  const coordRange = first?.coordRange;
+  if (!Array.isArray(coordRange) || coordRange.length < 2) return null;
+  const xRange = Array.isArray(coordRange[0]) ? coordRange[0] : coordRange;
+  if (!Array.isArray(xRange) || xRange.length < 2) return null;
+  const rawStart = xRange[0];
+  const rawEnd = xRange[1];
+  const startMs = toEpochMs(rawStart);
+  const endMs = toEpochMs(rawEnd);
+  if (startMs === null || endMs === null) return null;
+  const from = Math.min(startMs, endMs);
+  const to = Math.max(startMs, endMs);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) return null;
+  return { startMs: from, endMs: to };
+}
+
+async function applyChartSelectionRange(startMs, endMs) {
+  if (samplingRangeApplyingFromBrush) return;
+  const start = Number(startMs);
+  const end = Number(endMs);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) return;
+  samplingRangeApplyingFromBrush = true;
+  samplingRangeState.startDateTime = toLocalDateTimeInputValueFromMs(start);
+  samplingRangeState.endDateTime = toLocalDateTimeInputValueFromMs(end);
+  const modeSelect = document.getElementById("samplingRangeModeSelect");
+  if (modeSelect) modeSelect.value = "custom_datetime";
+  renderSamplingRangeInputContainer();
+  samplingPager.page = 1;
+  try {
+    await loadSampling();
+  } finally {
+    samplingRangeApplyingFromBrush = false;
+  }
+}
+
+function getUtcDateText(offsetDays = 0) {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + offsetDays);
+  return d.toISOString().slice(0, 10);
+}
+
+function getWeekInfo(anchorDateText) {
+  const base = new Date(`${anchorDateText}T00:00:00Z`);
+  const anchor = Number.isNaN(base.getTime()) ? new Date(`${getUtcDateText()}T00:00:00Z`) : base;
+  const day = anchor.getUTCDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(anchor);
+  monday.setUTCDate(anchor.getUTCDate() + diffToMonday);
+  const endExclusive = new Date(monday);
+  endExclusive.setUTCDate(monday.getUTCDate() + 7);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+
+  const thursday = new Date(monday);
+  thursday.setUTCDate(monday.getUTCDate() + 3);
+  const year = thursday.getUTCFullYear();
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const jan4Day = jan4.getUTCDay() || 7;
+  const firstThursday = new Date(Date.UTC(year, 0, 4 + (4 - jan4Day)));
+  const week = 1 + Math.floor((thursday.getTime() - firstThursday.getTime()) / (7 * 86400000));
+
+  return {
+    anchor: anchor.toISOString().slice(0, 10),
+    week,
+    monday: monday.toISOString().slice(0, 10),
+    sunday: sunday.toISOString().slice(0, 10),
+    startUtc: monday.toISOString(),
+    endUtc: endExclusive.toISOString(),
+  };
+}
+
+function getSamplingRange() {
+  const mode = document.getElementById("samplingRangeModeSelect")?.value || "day";
+  const dayText = samplingRangeState.day || getUtcDateText();
+  const weekText = samplingRangeState.week || dayText;
+  const monthNumber = Number(samplingRangeState.month || `${new Date().getUTCMonth() + 1}`);
+  const monthYear = Number(samplingRangeState.monthYear || new Date().getUTCFullYear());
+  const startDate = samplingRangeState.startDate || "";
+  const endDate = samplingRangeState.endDate || "";
+  const startDateTime = samplingRangeState.startDateTime || "";
+  const endDateTime = samplingRangeState.endDateTime || "";
+
+  if (mode === "week") {
+    const info = getWeekInfo(weekText);
+    return {
+      mode,
+      startUtc: info.startUtc,
+      endUtc: info.endUtc,
+      label: t("samplingWeekDisplay", { week: info.week, start: info.monday, end: info.sunday }),
+    };
+  }
+  if (mode === "month") {
+    const safeMonth = Math.max(1, Math.min(12, monthNumber || 1));
+    const start = new Date(Date.UTC(monthYear, safeMonth - 1, 1, 0, 0, 0));
+    const end = new Date(Date.UTC(monthYear, safeMonth, 1, 0, 0, 0));
+    return {
+      mode,
+      startUtc: start.toISOString(),
+      endUtc: end.toISOString(),
+      label: `${monthYear}-${String(safeMonth).padStart(2, "0")} UTC`,
+    };
+  }
+  if (mode === "custom_date") {
+    const startUtc = startDate ? toUtcIsoFromDateOnly(startDate) : null;
+    const endUtc = endDate ? toUtcIsoFromDateEndExclusive(endDate) : null;
+    const startLabel = startDate || "-";
+    const endLabel = endDate || "-";
+    return {
+      mode,
+      startUtc,
+      endUtc,
+      label: `${startLabel} ~ ${endLabel} UTC`,
+      invalid: !startUtc || !endUtc || startUtc >= endUtc,
+    };
+  }
+  if (mode === "custom_datetime") {
+    const startUtc = toUtcIsoFromDateTimeLocal(startDateTime);
+    const endUtc = toUtcIsoFromDateTimeLocal(endDateTime);
+    const startLabel = startUtc ? startUtc.replace("T", " ").slice(0, 16) : "-";
+    const endLabel = endUtc ? endUtc.replace("T", " ").slice(0, 16) : "-";
+    return {
+      mode,
+      startUtc,
+      endUtc,
+      label: `${startLabel} ~ ${endLabel} UTC`,
+      invalid: !startUtc || !endUtc || startUtc >= endUtc,
+    };
+  }
+  const startUtc = toUtcIsoFromDateOnly(dayText);
+  const dayEndDate = new Date(startUtc);
+  dayEndDate.setUTCDate(dayEndDate.getUTCDate() + 1);
+  return {
+    mode: "day",
+    startUtc,
+    endUtc: dayEndDate.toISOString(),
+    label: `${dayText} UTC`,
+  };
+}
+
+function renderSamplingRangeInputContainer() {
+  const mode = document.getElementById("samplingRangeModeSelect")?.value || "day";
+  const container = document.getElementById("samplingRangeInputContainer");
+  if (!container) return;
+
+  if (mode === "week") {
+    const info = getWeekInfo(samplingRangeState.week || getUtcDateText());
+    samplingRangeState.week = info.anchor;
+    container.innerHTML = `
+      <label>
+        ${t("samplingWeekLabel")}
+        <div class="sampling-week-nav">
+          <button id="samplingWeekPrevBtn" type="button" class="btn secondary">${t("prevBtn")}</button>
+          <div id="samplingWeekDisplayText" class="sampling-week-display">${t("samplingWeekDisplay", { week: info.week, start: info.monday, end: info.sunday })}</div>
+          <button id="samplingWeekNextBtn" type="button" class="btn secondary">${t("nextBtn")}</button>
+        </div>
+      </label>
+    `;
+  } else if (mode === "month") {
+    const year = Number(samplingRangeState.monthYear || new Date().getUTCFullYear());
+    const selectedMonth = Number(samplingRangeState.month || `${new Date().getUTCMonth() + 1}`);
+    const monthOptions = Array.from({ length: 12 }, (_, i) => i + 1)
+      .map((m) => `<option value="${m}"${m === selectedMonth ? " selected" : ""}>${monthLabel(m)}</option>`)
+      .join("");
+    container.innerHTML = `
+      <label>
+        ${t("samplingMonthLabel")}
+        <div class="sampling-month-row">
+          <span class="muted">${t("samplingMonthYear", { year })}</span>
+          <div id="samplingMonthField" class="sampling-field">
+            <select id="samplingMonthInput">${monthOptions}</select>
+          </div>
+        </div>
+      </label>
+    `;
+  } else if (mode === "custom_date" || mode === "custom_datetime") {
+    const isDateTime = mode === "custom_datetime";
+    container.innerHTML = `
+      <div class="sampling-custom-grid">
+        <label>
+          ${t("samplingStartLabel")}
+          <div id="samplingStartField" class="sampling-field">
+            <input id="samplingStartInput" type="${isDateTime ? "datetime-local" : "date"}" ${isDateTime ? 'step="60"' : ""} value="${isDateTime ? (samplingRangeState.startDateTime || "") : (samplingRangeState.startDate || "")}" />
+          </div>
+        </label>
+        <label>
+          ${t("samplingEndLabel")}
+          <div id="samplingEndField" class="sampling-field">
+            <input id="samplingEndInput" type="${isDateTime ? "datetime-local" : "date"}" ${isDateTime ? 'step="60"' : ""} value="${isDateTime ? (samplingRangeState.endDateTime || "") : (samplingRangeState.endDate || "")}" />
+          </div>
+        </label>
+      </div>
+    `;
+  } else {
+    container.innerHTML = `
+      <label data-i18n="samplingDayLabel">
+        ${t("samplingDayLabel")}
+        <div id="samplingDayField" class="sampling-field">
+          <input id="samplingDayInput" type="date" value="${samplingRangeState.day || ""}" />
+        </div>
+      </label>
+    `;
+  }
+
+  bindSamplingRangeInputEvents();
+}
+
+function bindSamplingRangeInputEvents() {
+  const mode = document.getElementById("samplingRangeModeSelect")?.value || "day";
+  const bindPicker = (fieldId, inputId, onChange) => {
+    const field = document.getElementById(fieldId);
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    input.addEventListener("change", async () => {
+      onChange(input.value || "");
+      samplingPager.page = 1;
+      await loadSampling();
+    });
+    if (field) {
+      field.addEventListener("click", () => {
+        if (typeof input.showPicker === "function") input.showPicker();
+        else input.focus();
+      });
+    }
+  };
+
+  if (mode === "week") {
+    const prevBtn = document.getElementById("samplingWeekPrevBtn");
+    const nextBtn = document.getElementById("samplingWeekNextBtn");
+    const moveWeek = async (deltaDays) => {
+      const current = new Date(`${samplingRangeState.week || getUtcDateText()}T00:00:00Z`);
+      current.setUTCDate(current.getUTCDate() + deltaDays);
+      samplingRangeState.week = current.toISOString().slice(0, 10);
+      renderSamplingRangeInputContainer();
+      samplingPager.page = 1;
+      await loadSampling();
+    };
+    if (prevBtn) prevBtn.addEventListener("click", async () => moveWeek(-7));
+    if (nextBtn) nextBtn.addEventListener("click", async () => moveWeek(7));
+    return;
+  }
+  if (mode === "month") {
+    bindPicker("samplingMonthField", "samplingMonthInput", (v) => {
+      samplingRangeState.month = v;
+    });
+    return;
+  }
+  if (mode === "custom_date" || mode === "custom_datetime") {
+    const isDateTime = mode === "custom_datetime";
+    bindPicker("samplingStartField", "samplingStartInput", (v) => {
+      if (isDateTime) samplingRangeState.startDateTime = v;
+      else samplingRangeState.startDate = v;
+    });
+    bindPicker("samplingEndField", "samplingEndInput", (v) => {
+      if (isDateTime) samplingRangeState.endDateTime = v;
+      else samplingRangeState.endDate = v;
+    });
+    return;
+  }
+  bindPicker("samplingDayField", "samplingDayInput", (v) => {
+    samplingRangeState.day = v;
+  });
+}
+
 function buildSamplingUrl() {
   const params = new URLSearchParams();
   const system = document.getElementById("samplingSystemSelect")?.value || "";
+  const range = getSamplingRange();
   if (system) params.set("system", system);
+  if (range.startUtc) params.set("start_utc", range.startUtc);
+  if (range.endUtc) params.set("end_utc", range.endUtc);
   params.set("page", String(samplingPager.page));
   params.set("page_size", String(SAMPLING_PAGE_SIZE));
   return `/api/storage/samples?${params.toString()}`;
@@ -998,26 +1464,260 @@ function renderSamplingStatus(status) {
   setText("samplingUpdatedAt", `${t("updatedAt")}: ${updatedAt}`);
 }
 
-function renderSamplingDaily(daily) {
-  const system = daily?.system || "-";
-  const day = daily?.day_utc || "-";
-  const energy = daily?.energy_kwh || {};
-  const hasData = Number(daily?.samples || 0) >= 2;
+function renderSamplingUsage(usage, rangeLabel) {
+  const system = usage?.system || "-";
+  const energy = usage?.energy_kwh || {};
+  const hasData = Number(usage?.samples || 0) >= 2;
   if (!hasData) {
-    setText("samplingDailyMeta", t("samplingDailyMetaNoData", { system, day }));
+    setText("samplingDailyMeta", t("samplingUsageMetaNoData", { system, range: rangeLabel }));
     return;
   }
   setText(
     "samplingDailyMeta",
-    t("samplingDailyMeta", {
+    t("samplingUsageMeta", {
       system,
-      day,
+      range: rangeLabel,
       load: formatMaybeNumber(energy.home_load, 3),
       pv: formatMaybeNumber(energy.solar_generation, 3),
       gridImport: formatMaybeNumber(energy.grid_import, 3),
       gridExport: formatMaybeNumber(energy.grid_export, 3),
     }),
   );
+}
+
+function ensureSamplingChart() {
+  if (samplingChart) return samplingChart;
+  const canvas = document.getElementById("samplingChartCanvas");
+  if (!canvas) return null;
+  if (typeof window.echarts === "undefined") return null;
+  samplingChart = window.echarts.init(canvas, null, { renderer: "canvas" });
+  if (!samplingChartHandlersBound) {
+    samplingChart.on("click", (params) => {
+      if (params?.componentType !== "series") return;
+      const picked = params.seriesName || params.name;
+      if (!picked) return;
+      samplingChartFocusSeries = samplingChartFocusSeries === picked ? null : picked;
+      if (samplingChartLastPayload) renderSamplingChart(samplingChartLastPayload);
+    });
+    samplingChart.on("legendselectchanged", (params) => {
+      if (samplingLegendSyncing) return;
+      const picked = params?.name;
+      if (!picked) return;
+      samplingChartFocusSeries = samplingChartFocusSeries === picked ? null : picked;
+      if (samplingChartLastPayload) renderSamplingChart(samplingChartLastPayload);
+      // Keep all legend items selected; focus is controlled by line styles, not hide/show.
+      if (samplingChart) {
+        samplingLegendSyncing = true;
+        samplingChart.dispatchAction({ type: "legendAllSelect" });
+        samplingLegendSyncing = false;
+      }
+    });
+    samplingChart.on("restore", () => {
+      samplingChartFocusSeries = null;
+      if (samplingChartLastPayload) renderSamplingChart(samplingChartLastPayload);
+    });
+    const applyFromAreas = (areas) => {
+      const range = extractBrushTimeRange(areas);
+      if (!range) return;
+      if (samplingChart) samplingChart.dispatchAction({ type: "brush", areas: [] });
+      void applyChartSelectionRange(range.startMs, range.endMs);
+    };
+    samplingChart.on("brushEnd", (event) => {
+      applyFromAreas(event?.areas);
+    });
+    samplingChart.on("brushSelected", (event) => {
+      const batch = Array.isArray(event?.batch) ? event.batch : [];
+      applyFromAreas(batch[0]?.areas);
+    });
+    samplingChartHandlersBound = true;
+  }
+  return samplingChart;
+}
+
+function getSamplingSmoothConfig() {
+  const mode = document.getElementById("samplingSmoothModeSelect")?.value || "smooth";
+  if (mode === "detail") {
+    return { targetCount: 420, window1: 5, window2: 1, smooth: 0.35 };
+  }
+  return { targetCount: 180, window1: 15, window2: 11, smooth: 0.85 };
+}
+
+function renderSamplingChart(seriesPayload) {
+  samplingChartLastPayload = seriesPayload;
+  const chart = ensureSamplingChart();
+  if (!chart) return;
+  const items = Array.isArray(seriesPayload?.items) ? seriesPayload.items : [];
+  const startMs = new Date(seriesPayload?.start_at_utc || "").getTime();
+  const endMs = new Date(seriesPayload?.end_at_utc || "").getTime();
+  const xMin = Number.isFinite(startMs) ? startMs : null;
+  const xMax = Number.isFinite(endMs) ? endMs : null;
+
+  const smoothCfg = getSamplingSmoothConfig();
+  const preparedSeries = SAMPLING_SERIES.map((meta) => {
+    const focused = !samplingChartFocusSeries || samplingChartFocusSeries === meta.key;
+    const color = focused ? meta.color : "#b8c2bc";
+    const lineOpacity = focused ? 0.95 : 0.35;
+    const lineWidth = focused ? 2.8 : 1.4;
+    const rawData = items
+      .map((item) => [new Date(item.sampled_at_utc || "").getTime(), Number(item[meta.key])])
+      .filter((pair) => Number.isFinite(pair[0]) && Number.isFinite(pair[1]));
+    // Visual-only heavy smoothing for dashboard readability.
+    const sampledData = downsampleByBucket(rawData, smoothCfg.targetCount);
+    const pass1 = movingAverage(sampledData, smoothCfg.window1);
+    const data = movingAverage(pass1, smoothCfg.window2);
+
+    return {
+      meta,
+      focused,
+      color,
+      lineOpacity,
+      lineWidth,
+      data,
+    };
+  });
+
+  let maxPoint = null;
+  const maxCandidates = preparedSeries.filter((item) => item.focused && Array.isArray(item.data));
+  for (const item of maxCandidates) {
+    for (const pair of item.data) {
+      const y = Number(pair[1]);
+      if (!Number.isFinite(y)) continue;
+      if (!maxPoint || y > maxPoint.y) {
+        maxPoint = { x: Number(pair[0]), y, key: item.meta.key };
+      }
+    }
+  }
+
+  const series = preparedSeries.map((item) => {
+    const withMax = Boolean(maxPoint && maxPoint.key === item.meta.key);
+    return {
+      name: item.meta.key,
+      type: "line",
+      smooth: smoothCfg.smooth,
+      showSymbol: false,
+      data: item.data,
+      lineStyle: { width: Math.max(2.2, item.lineWidth), opacity: item.lineOpacity, color: item.color, cap: "round", join: "round" },
+      itemStyle: { color: item.color },
+      emphasis: { focus: "series" },
+      blur: { lineStyle: { opacity: 0.2 } },
+      markPoint: withMax
+        ? {
+            symbol: "circle",
+            symbolSize: 10,
+            data: [{ coord: [maxPoint.x, maxPoint.y], value: maxPoint.y }],
+            itemStyle: { color: item.color, borderColor: "#fff", borderWidth: 2 },
+            label: {
+              show: true,
+              position: "top",
+              distance: 7,
+              offset: [0, -2],
+              color: "#fff",
+              backgroundColor: item.color,
+              borderRadius: 4,
+              padding: [3, 6],
+              formatter: ({ value }) => wattsToKwText(value, 2),
+            },
+          }
+        : undefined,
+      animation: false,
+    };
+  });
+
+  chart.setOption(
+    {
+      animation: false,
+      grid: { left: 58, right: 18, top: 58, bottom: 62 },
+      legend: {
+        top: 10,
+        left: 12,
+        selectedMode: true,
+        selected: Object.fromEntries(SAMPLING_SERIES.map((item) => [item.key, true])),
+        itemWidth: 12,
+        itemHeight: 8,
+        formatter: (name) => {
+          const hit = SAMPLING_SERIES.find((item) => item.key === name);
+          const label = hit ? t(hit.labelKey) : String(name);
+          if (!samplingChartFocusSeries) return label;
+          return samplingChartFocusSeries === name ? `● ${label}` : `○ ${label}`;
+        },
+        textStyle: { color: "#56675d", fontSize: 12 },
+      },
+      tooltip: {
+        trigger: "axis",
+        axisPointer: {
+          type: "cross",
+          lineStyle: { type: "dashed", color: "#7d9588" },
+          crossStyle: { color: "#7d9588" },
+        },
+        formatter: (params) => {
+          if (!Array.isArray(params) || !params.length) return "";
+          const ts = params[0].axisValue;
+          const d = new Date(ts);
+          const hh = String(d.getUTCHours()).padStart(2, "0");
+          const mm = String(d.getUTCMinutes()).padStart(2, "0");
+          const lines = [`${hh}:${mm} UTC`];
+          for (const p of params) {
+            const hit = SAMPLING_SERIES.find((item) => item.key === p.seriesName);
+            const label = hit ? t(hit.labelKey) : p.seriesName;
+            lines.push(`${p.marker}${label}: ${wattsToKwText(Number(p.value?.[1] ?? p.value), 2)}`);
+          }
+          return lines.join("<br/>");
+        },
+      },
+      xAxis: {
+        type: "time",
+        min: xMin,
+        max: xMax,
+        axisLine: { lineStyle: { color: "#adc2b5" } },
+        splitLine: { lineStyle: { color: "#eef4ee" } },
+        axisLabel: {
+          color: "#6b7f72",
+          formatter: (value) => {
+            const d = new Date(value);
+            const hh = String(d.getUTCHours()).padStart(2, "0");
+            const mm = String(d.getUTCMinutes()).padStart(2, "0");
+            return `${hh}:${mm}`;
+          },
+        },
+      },
+      yAxis: {
+        type: "value",
+        scale: true,
+        name: "kW",
+        nameTextStyle: { color: "#6b7f72", fontSize: 12, padding: [0, 0, 0, 8] },
+        axisLine: { lineStyle: { color: "#adc2b5" } },
+        splitLine: { lineStyle: { color: "#dbe7df", type: "dashed" } },
+        axisLabel: { color: "#6b7f72", formatter: (v) => Number(v / 1000).toFixed(2) },
+      },
+      brush: {
+        toolbox: false,
+        xAxisIndex: 0,
+        brushMode: "single",
+        throttleType: "debounce",
+        throttleDelay: 200,
+      },
+      series,
+      graphic: items.length
+        ? []
+        : [
+            {
+              type: "text",
+              left: "center",
+              top: "middle",
+              style: { text: t("samplingChartNoData"), fill: "#6b7f72", fontSize: 14 },
+            },
+          ],
+    },
+    true,
+  );
+  chart.dispatchAction({
+    type: "takeGlobalCursor",
+    key: "brush",
+    brushOption: {
+      brushType: "rect",
+      brushMode: "single",
+    },
+  });
 }
 
 function getRawCardMode(key) {
@@ -1300,6 +2000,85 @@ function renderSajRawFromCache() {
   renderRawSummary(stateCache.lastSajRaw, "sajRawMeta", "sajRawUpdatedAt");
 }
 
+function setSajControlInputsFromState(controlState) {
+  if (!controlState || typeof controlState !== "object") return;
+  const modeInputValue = controlState?.working_mode?.mode_input;
+  if (modeInputValue !== null && modeInputValue !== undefined) {
+    const el = document.getElementById("sajModeCodeInput");
+    if (el) el.value = String(modeInputValue);
+  }
+}
+
+function renderSajControlFromCache() {
+  const payload = stateCache.lastSajControl;
+  if (!payload) {
+    setText("sajControlMeta", "-");
+    setText("sajControlUpdatedAt", `${t("updatedAt")}: -`);
+    setText("sajControlStateJson", "-");
+    return;
+  }
+  const state = payload?.control_state || payload?.state || null;
+  const updatedAt = state?.updated_at ? new Date(state.updated_at).toLocaleString() : "-";
+  setText("sajControlUpdatedAt", `${t("updatedAt")}: ${updatedAt}`);
+  setText("sajControlMeta", t("sajControlApplyDone"));
+  const pre = document.getElementById("sajControlStateJson");
+  if (pre) pre.textContent = JSON.stringify(state || payload, null, 2);
+  setSajControlInputsFromState(state);
+}
+
+async function loadSajControl() {
+  try {
+    const payload = await fetchJson("/api/saj/control/state", { timeoutMs: 8000 });
+    stateCache.lastSajControl = payload;
+    renderSajControlFromCache();
+  } catch (err) {
+    setText("sajControlMeta", t("sajControlLoadFailed", { error: String(err) }));
+  }
+}
+
+async function applySajWorkingMode() {
+  const modeCode = Number(document.getElementById("sajModeCodeInput")?.value || "0");
+  try {
+    const payload = await fetchJson("/api/saj/control/working-mode", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode_code: modeCode }),
+      timeoutMs: 10000,
+    });
+    stateCache.lastSajControl = payload;
+    renderSajControlFromCache();
+  } catch (err) {
+    setText("sajControlMeta", t("sajControlApplyFailed", { error: String(err) }));
+  }
+}
+
+async function applySajSlot(kind) {
+  const slotInputId = kind === "charge" ? "sajChargeSlotInput" : "sajDischargeSlotInput";
+  const startInputId = kind === "charge" ? "sajChargeStartInput" : "sajDischargeStartInput";
+  const endInputId = kind === "charge" ? "sajChargeEndInput" : "sajDischargeEndInput";
+  const powerInputId = kind === "charge" ? "sajChargePowerInput" : "sajDischargePowerInput";
+  const slot = Number(document.getElementById(slotInputId)?.value || "1");
+  const start = document.getElementById(startInputId)?.value || "";
+  const end = document.getElementById(endInputId)?.value || "";
+  const power = Number(document.getElementById(powerInputId)?.value || "0");
+  try {
+    const payload = await fetchJson(`/api/saj/control/${kind}-slots/${slot}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        start_time: start,
+        end_time: end,
+        power_percent: power,
+      }),
+      timeoutMs: 12000,
+    });
+    stateCache.lastSajControl = payload;
+    renderSajControlFromCache();
+  } catch (err) {
+    setText("sajControlMeta", t("sajControlApplyFailed", { error: String(err) }));
+  }
+}
+
 function buildEntityUrl() {
   const params = new URLSearchParams();
   const domain = document.getElementById("domainInput").value.trim();
@@ -1437,14 +2216,23 @@ async function loadSajRaw() {
 
 async function loadSampling() {
   const system = document.getElementById("samplingSystemSelect")?.value || "saj";
-  const dayInput = document.getElementById("samplingDayInput")?.value || "";
-  const dayParam = dayInput || new Date().toISOString().slice(0, 10);
-  const dailyUrl = `/api/storage/daily-usage?system=${encodeURIComponent(system || "saj")}&day_utc=${encodeURIComponent(dayParam)}`;
+  const range = getSamplingRange();
+  if (!range.startUtc || !range.endUtc || range.invalid) {
+    setText("samplingDailyMeta", t("loadFailed", { error: "Invalid time range" }));
+    renderSamplingRows([]);
+    renderSamplingChart({ items: [] });
+    return;
+  }
+  const usageUrl =
+    `/api/storage/usage-range?system=${encodeURIComponent(system)}&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}`;
+  const seriesUrl =
+    `/api/storage/series?system=${encodeURIComponent(system)}&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}&max_points=500`;
 
-  const [statusResult, dailyResult, samplesResult] = await Promise.allSettled([
+  const [statusResult, usageResult, samplesResult, seriesResult] = await Promise.allSettled([
     fetchJson("/api/storage/status", { timeoutMs: 6000 }),
-    fetchJson(dailyUrl, { timeoutMs: 6000 }),
+    fetchJson(usageUrl, { timeoutMs: 6000 }),
     fetchJson(buildSamplingUrl(), { timeoutMs: 6000 }),
+    fetchJson(seriesUrl, { timeoutMs: 6000 }),
   ]);
 
   if (statusResult.status === "fulfilled") {
@@ -1454,11 +2242,11 @@ async function loadSampling() {
     setText("samplingStorageMeta", t("loadFailed", { error: String(statusResult.reason) }));
   }
 
-  if (dailyResult.status === "fulfilled") {
-    stateCache.lastSamplingDaily = dailyResult.value;
-    renderSamplingDaily(dailyResult.value);
+  if (usageResult.status === "fulfilled") {
+    stateCache.lastSamplingDaily = usageResult.value;
+    renderSamplingUsage(usageResult.value, range.label);
   } else {
-    setText("samplingDailyMeta", t("loadFailed", { error: String(dailyResult.reason) }));
+    setText("samplingDailyMeta", t("loadFailed", { error: String(usageResult.reason) }));
   }
 
   if (samplesResult.status === "fulfilled") {
@@ -1471,6 +2259,23 @@ async function loadSampling() {
     setText("samplingCount", t("loadFailed", { error: String(samplesResult.reason) }));
     setText("samplingPageInfo", t("pageDash"));
     renderSamplingRows([]);
+  }
+
+  if (seriesResult.status === "fulfilled") {
+    const payload = seriesResult.value;
+    stateCache.lastSamplingSeries = payload;
+    setText(
+      "samplingChartMeta",
+      t("samplingChartMeta", {
+        system: payload.system || system,
+        range: range.label,
+        count: payload.count || 0,
+      }),
+    );
+    renderSamplingChart(payload);
+  } else {
+    setText("samplingChartMeta", t("loadFailed", { error: String(seriesResult.reason) }));
+    renderSamplingChart({ items: [] });
   }
 }
 
@@ -1489,6 +2294,10 @@ async function loadCurrentTab() {
     }
     if (currentTab === "sajRaw") {
       await loadSajRaw();
+      return;
+    }
+    if (currentTab === "sajControl") {
+      await loadSajControl();
       return;
     }
     if (currentTab === "sampling") {
@@ -1522,33 +2331,41 @@ function setAutoRefresh(seconds) {
 }
 
 function setActiveTab(tab, load = true) {
-  currentTab = tab === "entities" || tab === "solplanetRaw" || tab === "sajRaw" || tab === "sampling" ? tab : "dashboard";
+  currentTab =
+    tab === "entities" || tab === "solplanetRaw" || tab === "sajRaw" || tab === "sajControl" || tab === "sampling"
+      ? tab
+      : "dashboard";
   localStorage.setItem("activeTab", currentTab);
 
   const dashboardView = document.getElementById("dashboardView");
   const solplanetRawView = document.getElementById("solplanetRawView");
   const sajRawView = document.getElementById("sajRawView");
+  const sajControlView = document.getElementById("sajControlView");
   const entitiesView = document.getElementById("entitiesView");
   const samplingView = document.getElementById("samplingView");
   const tabDashboard = document.getElementById("tabDashboard");
   const tabSolplanetRaw = document.getElementById("tabSolplanetRaw");
   const tabSajRaw = document.getElementById("tabSajRaw");
+  const tabSajControl = document.getElementById("tabSajControl");
   const tabEntities = document.getElementById("tabEntities");
   const tabSampling = document.getElementById("tabSampling");
 
   const dashboardActive = currentTab === "dashboard";
   const solplanetRawActive = currentTab === "solplanetRaw";
   const sajRawActive = currentTab === "sajRaw";
+  const sajControlActive = currentTab === "sajControl";
   const samplingActive = currentTab === "sampling";
   const anyRawActive = solplanetRawActive || sajRawActive;
   dashboardView.classList.toggle("hidden", !dashboardActive);
   solplanetRawView.classList.toggle("hidden", !solplanetRawActive);
   sajRawView.classList.toggle("hidden", !sajRawActive);
-  entitiesView.classList.toggle("hidden", dashboardActive || anyRawActive || samplingActive);
+  sajControlView.classList.toggle("hidden", !sajControlActive);
+  entitiesView.classList.toggle("hidden", dashboardActive || anyRawActive || samplingActive || sajControlActive);
   samplingView.classList.toggle("hidden", !samplingActive);
   tabDashboard.classList.toggle("active", dashboardActive);
   tabSolplanetRaw.classList.toggle("active", solplanetRawActive);
   tabSajRaw.classList.toggle("active", sajRawActive);
+  tabSajControl.classList.toggle("active", sajControlActive);
   tabEntities.classList.toggle("active", currentTab === "entities");
   tabSampling.classList.toggle("active", samplingActive);
 
@@ -1562,6 +2379,7 @@ document.getElementById("langSelect").addEventListener("change", (event) => {
   currentLang = nextLang;
   localStorage.setItem("lang", nextLang);
   applyTranslations();
+  renderSamplingRangeInputContainer();
 });
 
 document.getElementById("autoRefreshSelect").addEventListener("change", (event) => {
@@ -1583,6 +2401,9 @@ document.getElementById("tabSolplanetRaw").addEventListener("click", () => {
 });
 document.getElementById("tabSajRaw").addEventListener("click", () => {
   setActiveTab("sajRaw");
+});
+document.getElementById("tabSajControl").addEventListener("click", () => {
+  setActiveTab("sajControl");
 });
 
 document.getElementById("tabEntities").addEventListener("click", () => {
@@ -1610,12 +2431,6 @@ document.getElementById("nextPageBtn").addEventListener("click", async () => {
   await loadEntities();
 });
 
-document.getElementById("samplingFilterForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  samplingPager.page = 1;
-  await loadSampling();
-});
-
 document.getElementById("samplingPrevPageBtn").addEventListener("click", async () => {
   if (!samplingPager.hasPrev || samplingPager.page <= 1) return;
   samplingPager.page -= 1;
@@ -1626,6 +2441,31 @@ document.getElementById("samplingNextPageBtn").addEventListener("click", async (
   if (!samplingPager.hasNext) return;
   samplingPager.page += 1;
   await loadSampling();
+});
+
+document.getElementById("samplingSystemSelect").addEventListener("change", async () => {
+  samplingPager.page = 1;
+  await loadSampling();
+});
+
+document.getElementById("samplingRangeModeSelect").addEventListener("change", async () => {
+  renderSamplingRangeInputContainer();
+  samplingPager.page = 1;
+  await loadSampling();
+});
+
+document.getElementById("samplingSmoothModeSelect").addEventListener("change", () => {
+  if (samplingChartLastPayload) renderSamplingChart(samplingChartLastPayload);
+});
+
+document.getElementById("sajModeApplyBtn").addEventListener("click", () => {
+  void applySajWorkingMode();
+});
+document.getElementById("sajChargeApplyBtn").addEventListener("click", () => {
+  void applySajSlot("charge");
+});
+document.getElementById("sajDischargeApplyBtn").addEventListener("click", () => {
+  void applySajSlot("discharge");
 });
 
 document.getElementById("configForm").addEventListener("submit", async (event) => {
@@ -1660,11 +2500,24 @@ document.getElementById("configCloseBtn").addEventListener("click", () => {
   if (saveMsg) saveMsg.textContent = "-";
 });
 
+window.addEventListener("resize", () => {
+  if (samplingChart) samplingChart.resize();
+});
+
 applyTranslations();
-const samplingDayInput = document.getElementById("samplingDayInput");
-if (samplingDayInput && !samplingDayInput.value) {
-  samplingDayInput.value = new Date().toISOString().slice(0, 10);
+samplingRangeState.day = new Date().toISOString().slice(0, 10);
+samplingRangeState.week = samplingRangeState.day;
+samplingRangeState.monthYear = new Date().getUTCFullYear();
+samplingRangeState.month = String(new Date().getUTCMonth() + 1);
+samplingRangeState.endDate = samplingRangeState.day;
+samplingRangeState.startDate = getUtcDateText(-1);
+{
+  const now = new Date();
+  now.setUTCMinutes(0, 0, 0);
+  samplingRangeState.endDateTime = now.toISOString().slice(0, 16);
+  samplingRangeState.startDateTime = new Date(now.getTime() - 6 * 3600 * 1000).toISOString().slice(0, 16);
 }
+renderSamplingRangeInputContainer();
 setActiveTab(currentTab, false);
 setAutoRefresh(autoRefreshSeconds);
 void ensureConfigReady().then((ready) => {

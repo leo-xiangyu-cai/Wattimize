@@ -57,7 +57,9 @@ Health and connectivity:
 - `GET /api/ha/ping`
 - `GET /api/storage/status`
 - `GET /api/storage/daily-usage?system=saj|solplanet&day_utc=YYYY-MM-DD`
-- `GET /api/storage/samples?system=saj|solplanet&page=1&page_size=100`
+- `GET /api/storage/samples?system=saj|solplanet&start_utc=<ISO>&end_utc=<ISO>&page=1&page_size=100`
+- `GET /api/storage/series?system=saj|solplanet&start_utc=<ISO>&end_utc=<ISO>&max_points=500`
+- `GET /api/storage/usage-range?system=saj|solplanet&start_utc=<ISO>&end_utc=<ISO>`
 
 Core SAJ metrics:
 - `GET /api/entities/core`
@@ -73,7 +75,7 @@ Entity explorer:
 Frontend:
 - `GET /` serves static dashboard
 - `GET /static/*` serves JS/CSS
-- Added `Sampling` tab for SQLite sample table + daily usage/status summary
+- Added `Sampling` tab for SQLite sample table + daily usage/status summary + line chart
 
 ## 6) Important Data Semantics
 
