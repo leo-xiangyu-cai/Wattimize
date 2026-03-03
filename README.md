@@ -54,6 +54,8 @@ curl -s http://<wattimize-host>:18000/api/energy-flow/solplanet | jq
 curl -s http://<wattimize-host>:18000/api/saj/control/state | jq
 curl -s http://<wattimize-host>:18000/api/saj/control/capabilities | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/working-mode -H 'Content-Type: application/json' -d '{"mode_code":1}' | jq
+curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/toggles -H 'Content-Type: application/json' -d '{"charging_control":true,"discharging_control":false,"charge_time_enable_mask":127,"discharge_time_enable_mask":127}' | jq
+curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/limits -H 'Content-Type: application/json' -d '{"battery_charge_power_limit":1100,"battery_discharge_power_limit":1100,"grid_max_charge_power":1100,"grid_max_discharge_power":1100}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/charge-slots/1 -H 'Content-Type: application/json' -d '{"start_time":"01:00","end_time":"02:00","power_percent":25}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/discharge-slots/1 -H 'Content-Type: application/json' -d '{"start_time":"18:00","end_time":"20:00","power_percent":30}' | jq
 curl -s http://<wattimize-host>:18000/api/solplanet/cgi/getdev-device-2 | jq
@@ -69,6 +71,8 @@ curl -s "http://<wattimize-host>:18000/api/storage/daily-usage?system=saj" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/samples?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z&page=1&page_size=20" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/series?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z&max_points=500" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/usage-range?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z" | jq
+curl -s "http://<wattimize-host>:18000/api/storage/export.csv" -o energy_samples.csv
+curl -s -X POST "http://<wattimize-host>:18000/api/storage/import.csv?replace_existing=true" -F "file=@energy_samples.csv" | jq
 ```
 
 `/api/energy-flow/solplanet` behavior:

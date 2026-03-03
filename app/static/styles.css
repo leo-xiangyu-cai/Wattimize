@@ -69,6 +69,10 @@ body {
   display: none;
 }
 
+.hidden {
+  display: none !important;
+}
+
 .lang-switch {
   display: flex;
   align-items: center;
@@ -292,6 +296,58 @@ select {
   grid-template-columns: minmax(180px, 260px) minmax(280px, 1fr) minmax(220px, 1fr);
   gap: 10px;
   align-items: end;
+}
+
+.sampling-actions {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.sampling-action-btn {
+  border: 1px solid #c7d6cb;
+  border-radius: 999px;
+  padding: 6px 12px;
+  min-height: 30px;
+  font-size: 12px;
+  line-height: 1;
+  background: #eef4ee;
+  color: #29463a;
+  font-weight: 700;
+  transition: all 0.15s ease;
+}
+
+.sampling-action-btn:hover {
+  border-color: #9db7a8;
+  background: #e3efe7;
+}
+
+.sampling-action-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+#samplingExportBtn.sampling-action-btn {
+  border-color: #8cbfa6;
+  background: #e6f4eb;
+}
+
+#samplingExportBtn.sampling-action-btn:hover {
+  border-color: #6ea78d;
+  background: #d8efdf;
+}
+
+#samplingImportBtn.sampling-action-btn {
+  border-color: #b8c4d7;
+  background: #edf2fa;
+  color: #30445f;
+}
+
+#samplingImportBtn.sampling-action-btn:hover {
+  border-color: #95a8c4;
+  background: #e2ebf8;
 }
 
 .sampling-field {
@@ -968,6 +1024,48 @@ td {
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 8px;
   align-items: end;
+}
+
+.saj-control-table th,
+.saj-control-table td {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.saj-mask-grid {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.saj-mask-box {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  background: #f4f8f5;
+}
+
+.saj-check-grid {
+  margin-top: 6px;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(68px, 1fr));
+}
+
+.saj-check-grid label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.saj-check-grid.weekdays {
+  margin-top: 8px;
+}
+
+.saj-mask-input-trigger {
+  cursor: pointer;
 }
 
 @keyframes rawBarPulse {

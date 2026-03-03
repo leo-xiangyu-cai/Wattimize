@@ -10,7 +10,7 @@ from time import monotonic
 from typing import Literal
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,8 +33,10 @@ from app.persistence import (
     EnergySample,
     compute_daily_usage,
     compute_usage_between,
+    export_samples_csv,
     get_series_samples,
     get_storage_status,
+    import_samples_csv,
     init_db,
     insert_sample,
     list_samples,
@@ -95,7 +97,9 @@ SAJ_SLOT_MAX = 7
 SAJ_DAY_MASK_MIN = 0
 SAJ_DAY_MASK_MAX = 127
 SAJ_MODE_MIN = 0
-SAJ_MODE_MAX = 3
+SAJ_MODE_MAX = 2
+SAJ_MODE_BLOCKED_VALUES = frozenset({3})
+SAJ_RATED_POWER_W = 5000
 SAJ_TIME_REGEX = re.compile(r"^(0[0-9]|1[0-9]|2[0-3]):([0-5][0-9])$")
 
 
@@ -115,6 +119,13 @@ class SajTogglePayload(BaseModel):
     discharging_control: bool | None = Field(default=None)
     charge_time_enable_mask: int | None = Field(default=None, ge=SAJ_DAY_MASK_MIN, le=SAJ_DAY_MASK_MAX)
     discharge_time_enable_mask: int | None = Field(default=None, ge=SAJ_DAY_MASK_MIN, le=SAJ_DAY_MASK_MAX)
+
+
+class SajLimitsPayload(BaseModel):
+    battery_charge_power_limit: int | None = Field(default=None, ge=0, le=1100)
+    battery_discharge_power_limit: int | None = Field(default=None, ge=0, le=1100)
+    grid_max_charge_power: int | None = Field(default=None, ge=0, le=1100)
+    grid_max_discharge_power: int | None = Field(default=None, ge=0, le=1100)
 
 
 def _split_entity_id(entity_id: str) -> tuple[str, str]:
@@ -161,6 +172,17 @@ def _normalize_system_name(system: str) -> str:
             detail={"message": "Unsupported system", "supported": list(SUPPORTED_SYSTEMS)},
         )
     return normalized
+
+
+def _ensure_saj_mode_code_allowed(mode_code: int) -> None:
+    if mode_code in SAJ_MODE_BLOCKED_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": f"SAJ mode_code {mode_code} is blocked by server policy",
+                "allowed_range": [SAJ_MODE_MIN, SAJ_MODE_MAX],
+            },
+        )
 
 
 def _matches_prefix(entity_id: str, prefixes: tuple[str, ...]) -> bool:
@@ -931,8 +953,26 @@ async def _saj_control_states() -> tuple[list[dict[str, object]], dict[str, dict
 def _build_saj_control_state(
     states_by_id: dict[str, dict[str, object]],
 ) -> dict[str, object]:
+    charge_power_limit = _entity_number_value(states_by_id, "number.saj_battery_charge_power_limit_input")
+    discharge_power_limit = _entity_number_value(states_by_id, "number.saj_battery_discharge_power_limit_input")
+
+    def _slot_power_w_estimate(power_percent: object) -> int | None:
+        percent = _to_number(power_percent)
+        if percent is None:
+            return None
+        return int(round(SAJ_RATED_POWER_W * percent / 100.0))
+
+    def _sensor_slot_value(slot_kind: Literal["charge", "discharge"], slot: int, field: str) -> str | int | float | None:
+        suffix = "" if slot == 1 else f"_{slot}"
+        entity_id = f"sensor.saj_{slot_kind}{suffix}_{field}"
+        if field in {"power_percent", "day_mask"}:
+            return _entity_number_value(states_by_id, entity_id)
+        return _entity_text_value(states_by_id, entity_id)
+
     charge_slots: list[dict[str, object]] = []
     discharge_slots: list[dict[str, object]] = []
+    charge_effective_slots: list[dict[str, object]] = []
+    discharge_effective_slots: list[dict[str, object]] = []
     for slot in range(SAJ_SLOT_MIN, SAJ_SLOT_MAX + 1):
         charge_slots.append(
             {
@@ -952,6 +992,26 @@ def _build_saj_control_state(
                 "day_mask": _entity_number_value(states_by_id, f"number.saj_discharge{slot}_day_mask_input"),
             }
         )
+        charge_effective_slots.append(
+            {
+                "slot": slot,
+                "start_time": _sensor_slot_value("charge", slot, "start_time"),
+                "end_time": _sensor_slot_value("charge", slot, "end_time"),
+                "power_percent": _sensor_slot_value("charge", slot, "power_percent"),
+                "power_w_estimate": _slot_power_w_estimate(_sensor_slot_value("charge", slot, "power_percent")),
+                "day_mask": _sensor_slot_value("charge", slot, "day_mask"),
+            }
+        )
+        discharge_effective_slots.append(
+            {
+                "slot": slot,
+                "start_time": _sensor_slot_value("discharge", slot, "start_time"),
+                "end_time": _sensor_slot_value("discharge", slot, "end_time"),
+                "power_percent": _sensor_slot_value("discharge", slot, "power_percent"),
+                "power_w_estimate": _slot_power_w_estimate(_sensor_slot_value("discharge", slot, "power_percent")),
+                "day_mask": _sensor_slot_value("discharge", slot, "day_mask"),
+            }
+        )
 
     return {
         "updated_at": datetime.now(UTC).isoformat(),
@@ -965,17 +1025,26 @@ def _build_saj_control_state(
             "time_enable_mask": _entity_number_value(states_by_id, "number.saj_charge_time_enable_input"),
             "control_switch": _entity_switch_value(states_by_id, "switch.saj_charging_control"),
             "slots": charge_slots,
+            "effective_slots": charge_effective_slots,
         },
         "discharge": {
             "time_enable_mask": _entity_number_value(states_by_id, "number.saj_discharge_time_enable_input"),
             "control_switch": _entity_switch_value(states_by_id, "switch.saj_discharging_control"),
             "slots": discharge_slots,
+            "effective_slots": discharge_effective_slots,
         },
         "limits": {
-            "battery_charge_power_limit": _entity_number_value(states_by_id, "number.saj_battery_charge_power_limit_input"),
-            "battery_discharge_power_limit": _entity_number_value(states_by_id, "number.saj_battery_discharge_power_limit_input"),
+            "battery_charge_power_limit": charge_power_limit,
+            "battery_discharge_power_limit": discharge_power_limit,
             "grid_max_charge_power": _entity_number_value(states_by_id, "number.saj_grid_max_charge_power_input"),
             "grid_max_discharge_power": _entity_number_value(states_by_id, "number.saj_grid_max_discharge_power_input"),
+        },
+        "battery": {
+            "soc_percent": _entity_number_value(states_by_id, "sensor.saj_battery_energy_percent"),
+            "power_w": _entity_number_value(states_by_id, "sensor.saj_battery_power"),
+        },
+        "inverter": {
+            "rated_power_w": SAJ_RATED_POWER_W,
         },
     }
 
@@ -988,7 +1057,7 @@ def _build_saj_control_capabilities(
         "working_mode": {
             "entity": _entity_metadata(states_by_id, "number.saj_app_mode_input"),
             "range": {"min": SAJ_MODE_MIN, "max": SAJ_MODE_MAX, "step": 1},
-            "accepted_values_note": "Mode labels can differ by SAJ firmware; use mode_code 0..3.",
+            "accepted_values_note": "Mode labels can differ by SAJ firmware; this API allows mode_code 0..2 only (3 is blocked).",
         },
         "slot": {
             "slot_range": {"min": SAJ_SLOT_MIN, "max": SAJ_SLOT_MAX},
@@ -1028,6 +1097,17 @@ async def _saj_set_text(entity_id: str, value: str) -> None:
 async def _saj_set_switch(entity_id: str, enabled: bool) -> None:
     service = "turn_on" if enabled else "turn_off"
     await ha_client.call_service("switch", service, {"entity_id": entity_id})
+
+
+async def _saj_touch_switch(entity_id: str) -> bool:
+    _, states_by_id = await _saj_control_states()
+    current = _entity_switch_value(states_by_id, entity_id)
+    if current is None:
+        raise HTTPException(status_code=400, detail=f"Switch unavailable or not boolean: {entity_id}")
+    # Force a readback-triggering edge while restoring original state.
+    await _saj_set_switch(entity_id, not current)
+    await _saj_set_switch(entity_id, current)
+    return current
 
 
 async def _saj_apply_slot(
@@ -1291,6 +1371,34 @@ async def storage_usage_range(
         end_at_utc=end_at,
         sample_interval_seconds=sample_interval_seconds,
     )
+
+
+@app.get("/api/storage/export.csv")
+async def storage_export_csv() -> Response:
+    csv_text = await asyncio.to_thread(export_samples_csv, storage_db_path)
+    exported_at = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    headers = {"Content-Disposition": f'attachment; filename="energy_samples_{exported_at}.csv"'}
+    return Response(content=csv_text, media_type="text/csv; charset=utf-8", headers=headers)
+
+
+@app.post("/api/storage/import.csv")
+async def storage_import_csv(
+    file: UploadFile = File(...),
+    replace_existing: bool = Query(default=True, description="clear existing rows before import"),
+) -> dict[str, object]:
+    raw = await file.read()
+    try:
+        csv_text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded") from exc
+
+    try:
+        result = await asyncio.to_thread(import_samples_csv, storage_db_path, csv_text, replace_existing=replace_existing)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    status = await asyncio.to_thread(get_storage_status, storage_db_path, sample_interval_seconds)
+    return {"ok": True, **result, "storage_status": status}
 
 
 @app.get("/api/config/status")
@@ -1559,6 +1667,7 @@ async def get_saj_control_capabilities() -> dict[str, object]:
 @app.put("/api/saj/control/working-mode")
 async def put_saj_working_mode(payload: SajWorkingModePayload) -> dict[str, object]:
     _ensure_ha_configured()
+    _ensure_saj_mode_code_allowed(payload.mode_code)
     try:
         await _saj_set_number("number.saj_app_mode_input", payload.mode_code)
         _, states_by_id = await _saj_control_states()
@@ -1639,6 +1748,74 @@ async def put_saj_control_toggles(payload: SajTogglePayload) -> dict[str, object
 
         _, states_by_id = await _saj_control_states()
         return {"ok": True, "changed": changed, "state": _build_saj_control_state(states_by_id)}
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+@app.put("/api/saj/control/limits")
+async def put_saj_control_limits(payload: SajLimitsPayload) -> dict[str, object]:
+    _ensure_ha_configured()
+    changed: list[dict[str, object]] = []
+    try:
+        if payload.battery_charge_power_limit is not None:
+            await _saj_set_number("number.saj_battery_charge_power_limit_input", payload.battery_charge_power_limit)
+            changed.append(
+                {"entity_id": "number.saj_battery_charge_power_limit_input", "value": payload.battery_charge_power_limit}
+            )
+        if payload.battery_discharge_power_limit is not None:
+            await _saj_set_number(
+                "number.saj_battery_discharge_power_limit_input",
+                payload.battery_discharge_power_limit,
+            )
+            changed.append(
+                {
+                    "entity_id": "number.saj_battery_discharge_power_limit_input",
+                    "value": payload.battery_discharge_power_limit,
+                }
+            )
+        if payload.grid_max_charge_power is not None:
+            await _saj_set_number("number.saj_grid_max_charge_power_input", payload.grid_max_charge_power)
+            changed.append({"entity_id": "number.saj_grid_max_charge_power_input", "value": payload.grid_max_charge_power})
+        if payload.grid_max_discharge_power is not None:
+            await _saj_set_number("number.saj_grid_max_discharge_power_input", payload.grid_max_discharge_power)
+            changed.append(
+                {"entity_id": "number.saj_grid_max_discharge_power_input", "value": payload.grid_max_discharge_power}
+            )
+        if not changed:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        _, states_by_id = await _saj_control_states()
+        return {"ok": True, "changed": changed, "state": _build_saj_control_state(states_by_id)}
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+@app.post("/api/saj/control/refresh-touch")
+async def post_saj_control_refresh_touch() -> dict[str, object]:
+    _ensure_ha_configured()
+    entity_id = "switch.saj_passive_charge_control"
+    try:
+        kept_state = await _saj_touch_switch(entity_id)
+        _, states_by_id = await _saj_control_states()
+        return {
+            "ok": True,
+            "entity_id": entity_id,
+            "kept_state": kept_state,
+            "state": _build_saj_control_state(states_by_id),
+        }
     except httpx.HTTPStatusError as exc:
         detail = {
             "message": "Home Assistant API returned an error",

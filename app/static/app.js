@@ -16,6 +16,18 @@ async function fetchJson(url, options = {}) {
   return response.json();
 }
 
+async function readErrorMessage(response) {
+  const text = await response.text();
+  if (!text) return `HTTP ${response.status}`;
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed?.detail === "string") return parsed.detail;
+  } catch (_err) {
+    // Ignore parse failures and fallback to raw text.
+  }
+  return text;
+}
+
 const I18N = {
   en: {
     subtitle: "SAJ + Solplanet monitoring panel",
@@ -51,17 +63,59 @@ const I18N = {
     samplingTab: "Sampling",
     sajControlTitle: "SAJ Control",
     sajControlModeTitle: "Working Mode",
+    sajControlModeExplain: "Mode code mapping may differ by firmware. Test 0~2 against app labels.",
     sajControlModeCodeLabel: "Mode Code",
+    sajModeOption0: "0 - Self-Consumption Mode",
+    sajModeOption1: "1 - Time of Use Mode",
+    sajModeOption2: "2 - Backup Mode",
+    sajControlEnableTitle: "Enable & Switches",
+    sajControlChargeEnableMaskLabel: "Charge Enable Mask",
+    sajControlDischargeEnableMaskLabel: "Discharge Enable Mask",
+    sajControlChargeSwitchLabel: "Charge Switch",
+    sajControlDischargeSwitchLabel: "Discharge Switch",
+    sajControlChargeSlotsEnableLabel: "Charge Slots Enable",
+    sajControlDischargeSlotsEnableLabel: "Discharge Slots Enable",
+    sajControlLimitsTitle: "Power Limits",
+    sajControlBatteryChargeLimitLabel: "Battery Charge Limit",
+    sajControlBatteryDischargeLimitLabel: "Battery Discharge Limit",
+    sajControlGridChargeLimitLabel: "Grid Max Charge",
+    sajControlGridDischargeLimitLabel: "Grid Max Discharge",
     sajControlChargeTitle: "Charge Slot",
     sajControlDischargeTitle: "Discharge Slot",
     sajControlSlotLabel: "Slot",
     sajControlStartLabel: "Start",
     sajControlEndLabel: "End",
     sajControlPowerLabel: "Power (%)",
+    sajControlDayMaskLabel: "Day Mask",
     sajControlApplyBtn: "Apply",
     sajControlLoadFailed: "Control state load failed: {error}",
     sajControlApplyFailed: "Control apply failed: {error}",
     sajControlApplyDone: "Applied",
+    sajControlCurrentStateTitle: "Current Slot State",
+    sajControlEnableCol: "Enable",
+    sajControlTypeCol: "Type",
+    sajControlSlotCol: "Slot",
+    sajControlInputStartCol: "Input Start",
+    sajControlInputEndCol: "Input End",
+    sajControlInputPowerCol: "Input Power(%)",
+    sajControlInputMaskCol: "Input Mask",
+    sajControlActualStartCol: "Actual Start",
+    sajControlActualEndCol: "Actual End",
+    sajControlActualPowerCol: "Actual Power(%/W)",
+    sajControlActualMaskCol: "Actual Mask",
+    sajDayMaskPopupTitle: "Select Weekdays",
+    sajDayMaskAllDays: "All",
+    sajDayMaskCancelBtn: "Cancel",
+    sajDayMaskConfirmBtn: "Confirm",
+    sajControlTypeCharge: "charge",
+    sajControlTypeDischarge: "discharge",
+    weekdayMon: "Mon",
+    weekdayTue: "Tue",
+    weekdayWed: "Wed",
+    weekdayThu: "Thu",
+    weekdayFri: "Fri",
+    weekdaySat: "Sat",
+    weekdaySun: "Sun",
     systemTitle: "System",
     haTitle: "Home Assistant",
     coreTitle: "Core Entities",
@@ -110,6 +164,12 @@ const I18N = {
     samplingTableSoc: "SOC(%)",
     samplingTableBalance: "Balance(W)",
     samplingTableInverter: "Inverter",
+    samplingExportBtn: "Export CSV",
+    samplingImportBtn: "Import CSV",
+    samplingExporting: "Exporting...",
+    samplingImporting: "Importing...",
+    samplingImportConfirmReplace: "Import will replace all existing sampling records. Continue?",
+    samplingImportDone: "Import completed: {count} rows",
     totalSamples: "Total {total} samples",
     samplePageInfo: "Page {page}/{totalPages} (showing {count})",
     domainLabel: "Domain",
@@ -148,6 +208,8 @@ const I18N = {
     pageInfo: "Page {page}/{totalPages} (showing {count})",
     pageDash: "Page -",
     loadFailed: "Load failed: {error}",
+    samplingExportFailed: "Export failed: {error}",
+    samplingImportFailed: "Import failed: {error}",
     inverterRunning: "Running",
     inverterOffline: "Offline",
     inverterStandby: "Standby",
@@ -227,17 +289,59 @@ const I18N = {
     samplingTab: "采样",
     sajControlTitle: "SAJ 管理",
     sajControlModeTitle: "工作模式",
+    sajControlModeExplain: "mode code 与名称可能因固件不同，请按 APP 对照测试 0~2。",
     sajControlModeCodeLabel: "模式编码",
+    sajModeOption0: "0 - 自发自用模式",
+    sajModeOption1: "1 - 分时电价模式",
+    sajModeOption2: "2 - 备电模式",
+    sajControlEnableTitle: "启用与开关",
+    sajControlChargeEnableMaskLabel: "充电启用掩码",
+    sajControlDischargeEnableMaskLabel: "放电启用掩码",
+    sajControlChargeSwitchLabel: "充电开关",
+    sajControlDischargeSwitchLabel: "放电开关",
+    sajControlChargeSlotsEnableLabel: "充电时段启用",
+    sajControlDischargeSlotsEnableLabel: "放电时段启用",
+    sajControlLimitsTitle: "功率上限",
+    sajControlBatteryChargeLimitLabel: "电池充电上限",
+    sajControlBatteryDischargeLimitLabel: "电池放电上限",
+    sajControlGridChargeLimitLabel: "电网最大充电",
+    sajControlGridDischargeLimitLabel: "电网最大放电",
     sajControlChargeTitle: "充电时段",
     sajControlDischargeTitle: "放电时段",
     sajControlSlotLabel: "时段",
     sajControlStartLabel: "开始",
     sajControlEndLabel: "结束",
     sajControlPowerLabel: "功率 (%)",
+    sajControlDayMaskLabel: "星期掩码",
     sajControlApplyBtn: "应用",
     sajControlLoadFailed: "管理状态加载失败：{error}",
     sajControlApplyFailed: "应用失败：{error}",
     sajControlApplyDone: "已应用",
+    sajControlCurrentStateTitle: "当前时段状态",
+    sajControlEnableCol: "启用",
+    sajControlTypeCol: "类型",
+    sajControlSlotCol: "时段",
+    sajControlInputStartCol: "输入开始",
+    sajControlInputEndCol: "输入结束",
+    sajControlInputPowerCol: "输入功率(%)",
+    sajControlInputMaskCol: "输入掩码",
+    sajControlActualStartCol: "生效开始",
+    sajControlActualEndCol: "生效结束",
+    sajControlActualPowerCol: "生效功率(%/W)",
+    sajControlActualMaskCol: "生效掩码",
+    sajDayMaskPopupTitle: "选择生效星期",
+    sajDayMaskAllDays: "全选",
+    sajDayMaskCancelBtn: "取消",
+    sajDayMaskConfirmBtn: "确认",
+    sajControlTypeCharge: "充电",
+    sajControlTypeDischarge: "放电",
+    weekdayMon: "周一",
+    weekdayTue: "周二",
+    weekdayWed: "周三",
+    weekdayThu: "周四",
+    weekdayFri: "周五",
+    weekdaySat: "周六",
+    weekdaySun: "周日",
     systemTitle: "系统状态",
     haTitle: "Home Assistant",
     coreTitle: "核心实体",
@@ -286,6 +390,12 @@ const I18N = {
     samplingTableSoc: "SOC(%)",
     samplingTableBalance: "平衡(W)",
     samplingTableInverter: "逆变器",
+    samplingExportBtn: "导出 CSV",
+    samplingImportBtn: "导入 CSV",
+    samplingExporting: "导出中...",
+    samplingImporting: "导入中...",
+    samplingImportConfirmReplace: "导入会覆盖现有采样数据，是否继续？",
+    samplingImportDone: "导入完成：{count} 条",
     totalSamples: "共 {total} 条采样",
     samplePageInfo: "第 {page}/{totalPages} 页（当前 {count} 条）",
     domainLabel: "域",
@@ -324,6 +434,8 @@ const I18N = {
     pageInfo: "第 {page}/{totalPages} 页（当前 {count} 条）",
     pageDash: "第 - 页",
     loadFailed: "加载失败：{error}",
+    samplingExportFailed: "导出失败：{error}",
+    samplingImportFailed: "导入失败：{error}",
     inverterRunning: "运行中",
     inverterOffline: "离线",
     inverterStandby: "待机",
@@ -2000,13 +2112,291 @@ function renderSajRawFromCache() {
   renderRawSummary(stateCache.lastSajRaw, "sajRawMeta", "sajRawUpdatedAt");
 }
 
+const WEEKDAY_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+let sajDayMaskEditingTargetId = null;
+
+function clampMask7(raw) {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(127, Math.trunc(value)));
+}
+
+function _enableMaskInputId(kind, quick = false) {
+  if (quick) return kind === "charge" ? "sajQuickChargeEnableMaskInput" : "sajQuickDischargeEnableMaskInput";
+  return kind === "charge" ? "sajChargeEnableMaskInput" : "sajDischargeEnableMaskInput";
+}
+
+function _enableSlotCheckboxId(kind, slot, quick = false) {
+  if (quick) return kind === "charge" ? `sajTableChargeEnableSlot${slot}` : `sajTableDischargeEnableSlot${slot}`;
+  return kind === "charge" ? `sajChargeEnableSlot${slot}` : `sajDischargeEnableSlot${slot}`;
+}
+
+function syncEnableCheckboxesFromInput(kind, quick = false) {
+  const inputId = _enableMaskInputId(kind, quick);
+  const mask = clampMask7(document.getElementById(inputId)?.value || "0");
+  for (let i = 1; i <= 7; i += 1) {
+    const id = _enableSlotCheckboxId(kind, i, quick);
+    const chk = document.getElementById(id);
+    if (chk) chk.checked = (mask & (1 << (i - 1))) !== 0;
+  }
+}
+
+function syncEnableInputFromCheckboxes(kind, quick = false) {
+  let mask = 0;
+  for (let i = 1; i <= 7; i += 1) {
+    const id = _enableSlotCheckboxId(kind, i, quick);
+    const chk = document.getElementById(id);
+    if (chk?.checked) mask |= 1 << (i - 1);
+  }
+  const inputId = _enableMaskInputId(kind, quick);
+  const input = document.getElementById(inputId);
+  if (input) input.value = String(mask);
+}
+
+function mirrorQuickEnableMaskInputsToMain() {
+  const quickCharge = document.getElementById("sajQuickChargeEnableMaskInput");
+  const quickDischarge = document.getElementById("sajQuickDischargeEnableMaskInput");
+  const mainCharge = document.getElementById("sajChargeEnableMaskInput");
+  const mainDischarge = document.getElementById("sajDischargeEnableMaskInput");
+  if (quickCharge && mainCharge) mainCharge.value = quickCharge.value;
+  if (quickDischarge && mainDischarge) mainDischarge.value = quickDischarge.value;
+}
+
+function _normalizeSajTimeForInput(value) {
+  if (typeof value !== "string") return "";
+  const normalized = value.trim();
+  return /^(0\d|1\d|2[0-3]):[0-5]\d$/.test(normalized) ? normalized : "";
+}
+
+function setSajDayMaskModalVisible(visible) {
+  const modal = document.getElementById("sajDayMaskModal");
+  if (!modal) return;
+  modal.classList.toggle("hidden", !visible);
+}
+
+function _getSajDayMaskPopupMask() {
+  let mask = 0;
+  WEEKDAY_ORDER.forEach((key, idx) => {
+    const chk = document.getElementById(`sajDayMask${key}`);
+    if (chk?.checked) mask |= 1 << idx;
+  });
+  return mask;
+}
+
+function _syncSajDayMaskAllDaysCheckbox() {
+  const allDays = document.getElementById("sajDayMaskAllDays");
+  if (!allDays) return;
+  allDays.checked = _getSajDayMaskPopupMask() === 127;
+}
+
+function _setSajDayMaskPopupFromMask(rawMask) {
+  const mask = clampMask7(rawMask);
+  WEEKDAY_ORDER.forEach((key, idx) => {
+    const chk = document.getElementById(`sajDayMask${key}`);
+    if (chk) chk.checked = (mask & (1 << idx)) !== 0;
+  });
+  _syncSajDayMaskAllDaysCheckbox();
+}
+
+function openSajDayMaskModalForInput(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  sajDayMaskEditingTargetId = inputId;
+  _setSajDayMaskPopupFromMask(input.value || "0");
+  setSajDayMaskModalVisible(true);
+}
+
+function confirmSajDayMaskModal() {
+  if (!sajDayMaskEditingTargetId) {
+    setSajDayMaskModalVisible(false);
+    return;
+  }
+  const input = document.getElementById(sajDayMaskEditingTargetId);
+  if (input) input.value = String(_getSajDayMaskPopupMask());
+  sajDayMaskEditingTargetId = null;
+  setSajDayMaskModalVisible(false);
+}
+
+function cancelSajDayMaskModal() {
+  sajDayMaskEditingTargetId = null;
+  setSajDayMaskModalVisible(false);
+}
+
+function syncDayCheckboxesFromInput(kind) {
+  const inputId = kind === "charge" ? "sajChargeDayMaskInput" : "sajDischargeDayMaskInput";
+  const mask = clampMask7(document.getElementById(inputId)?.value || "0");
+  WEEKDAY_ORDER.forEach((key, idx) => {
+    const id = kind === "charge" ? `sajChargeDay${key}` : `sajDischargeDay${key}`;
+    const chk = document.getElementById(id);
+    if (chk) chk.checked = (mask & (1 << idx)) !== 0;
+  });
+}
+
+function syncDayInputFromCheckboxes(kind) {
+  let mask = 0;
+  WEEKDAY_ORDER.forEach((key, idx) => {
+    const id = kind === "charge" ? `sajChargeDay${key}` : `sajDischargeDay${key}`;
+    const chk = document.getElementById(id);
+    if (chk?.checked) mask |= 1 << idx;
+  });
+  const inputId = kind === "charge" ? "sajChargeDayMaskInput" : "sajDischargeDayMaskInput";
+  const input = document.getElementById(inputId);
+  if (input) input.value = String(mask);
+}
+
 function setSajControlInputsFromState(controlState) {
   if (!controlState || typeof controlState !== "object") return;
   const modeInputValue = controlState?.working_mode?.mode_input;
-  if (modeInputValue !== null && modeInputValue !== undefined) {
+  if (modeInputValue !== null && modeInputValue !== undefined && Number(modeInputValue) >= 0 && Number(modeInputValue) <= 2) {
     const el = document.getElementById("sajModeCodeInput");
     if (el) el.value = String(modeInputValue);
   }
+
+  const chargeSlot = Number(document.getElementById("sajChargeSlotInput")?.value || "1");
+  const dischargeSlot = Number(document.getElementById("sajDischargeSlotInput")?.value || "1");
+  const chargeItems = Array.isArray(controlState?.charge?.slots) ? controlState.charge.slots : [];
+  const dischargeItems = Array.isArray(controlState?.discharge?.slots) ? controlState.discharge.slots : [];
+  const charge = chargeItems.find((item) => Number(item?.slot) === chargeSlot);
+  const discharge = dischargeItems.find((item) => Number(item?.slot) === dischargeSlot);
+
+  if (charge) {
+    const startEl = document.getElementById("sajChargeStartInput");
+    const endEl = document.getElementById("sajChargeEndInput");
+    const powerEl = document.getElementById("sajChargePowerInput");
+    const dayMaskEl = document.getElementById("sajChargeDayMaskInput");
+    if (startEl && charge.start_time) startEl.value = String(charge.start_time);
+    if (endEl && charge.end_time) endEl.value = String(charge.end_time);
+    if (powerEl && charge.power_percent !== null && charge.power_percent !== undefined) {
+      powerEl.value = String(charge.power_percent);
+    }
+    if (dayMaskEl && charge.day_mask !== null && charge.day_mask !== undefined) {
+      dayMaskEl.value = String(charge.day_mask);
+    }
+  }
+  if (discharge) {
+    const startEl = document.getElementById("sajDischargeStartInput");
+    const endEl = document.getElementById("sajDischargeEndInput");
+    const powerEl = document.getElementById("sajDischargePowerInput");
+    const dayMaskEl = document.getElementById("sajDischargeDayMaskInput");
+    if (startEl && discharge.start_time) startEl.value = String(discharge.start_time);
+    if (endEl && discharge.end_time) endEl.value = String(discharge.end_time);
+    if (powerEl && discharge.power_percent !== null && discharge.power_percent !== undefined) {
+      powerEl.value = String(discharge.power_percent);
+    }
+    if (dayMaskEl && discharge.day_mask !== null && discharge.day_mask !== undefined) {
+      dayMaskEl.value = String(discharge.day_mask);
+    }
+  }
+
+  const chargeEnableMask = controlState?.charge?.time_enable_mask;
+  const dischargeEnableMask = controlState?.discharge?.time_enable_mask;
+  const chargeSwitch = controlState?.charge?.control_switch;
+  const dischargeSwitch = controlState?.discharge?.control_switch;
+  const batteryChargeLimit = controlState?.limits?.battery_charge_power_limit;
+  const batteryDischargeLimit = controlState?.limits?.battery_discharge_power_limit;
+  const gridChargeLimit = controlState?.limits?.grid_max_charge_power;
+  const gridDischargeLimit = controlState?.limits?.grid_max_discharge_power;
+
+  const chargeEnableEl = document.getElementById("sajChargeEnableMaskInput");
+  const dischargeEnableEl = document.getElementById("sajDischargeEnableMaskInput");
+  const chargeSwitchEl = document.getElementById("sajChargeSwitchInput");
+  const dischargeSwitchEl = document.getElementById("sajDischargeSwitchInput");
+  const batteryChargeLimitEl = document.getElementById("sajBatteryChargeLimitInput");
+  const batteryDischargeLimitEl = document.getElementById("sajBatteryDischargeLimitInput");
+  const gridChargeLimitEl = document.getElementById("sajGridChargeLimitInput");
+  const gridDischargeLimitEl = document.getElementById("sajGridDischargeLimitInput");
+
+  if (chargeEnableEl && chargeEnableMask !== null && chargeEnableMask !== undefined) {
+    chargeEnableEl.value = String(chargeEnableMask);
+  }
+  if (dischargeEnableEl && dischargeEnableMask !== null && dischargeEnableMask !== undefined) {
+    dischargeEnableEl.value = String(dischargeEnableMask);
+  }
+  const quickChargeEnableEl = document.getElementById("sajQuickChargeEnableMaskInput");
+  const quickDischargeEnableEl = document.getElementById("sajQuickDischargeEnableMaskInput");
+  if (quickChargeEnableEl && chargeEnableMask !== null && chargeEnableMask !== undefined) {
+    quickChargeEnableEl.value = String(chargeEnableMask);
+  }
+  if (quickDischargeEnableEl && dischargeEnableMask !== null && dischargeEnableMask !== undefined) {
+    quickDischargeEnableEl.value = String(dischargeEnableMask);
+  }
+  if (chargeSwitchEl && typeof chargeSwitch === "boolean") {
+    chargeSwitchEl.value = chargeSwitch ? "on" : "off";
+  }
+  if (dischargeSwitchEl && typeof dischargeSwitch === "boolean") {
+    dischargeSwitchEl.value = dischargeSwitch ? "on" : "off";
+  }
+  if (batteryChargeLimitEl && batteryChargeLimit !== null && batteryChargeLimit !== undefined) {
+    batteryChargeLimitEl.value = String(batteryChargeLimit);
+  }
+  if (batteryDischargeLimitEl && batteryDischargeLimit !== null && batteryDischargeLimit !== undefined) {
+    batteryDischargeLimitEl.value = String(batteryDischargeLimit);
+  }
+  if (gridChargeLimitEl && gridChargeLimit !== null && gridChargeLimit !== undefined) {
+    gridChargeLimitEl.value = String(gridChargeLimit);
+  }
+  if (gridDischargeLimitEl && gridDischargeLimit !== null && gridDischargeLimit !== undefined) {
+    gridDischargeLimitEl.value = String(gridDischargeLimit);
+  }
+
+  syncEnableCheckboxesFromInput("charge");
+  syncEnableCheckboxesFromInput("discharge");
+  syncEnableCheckboxesFromInput("charge", true);
+  syncEnableCheckboxesFromInput("discharge", true);
+  syncDayCheckboxesFromInput("charge");
+  syncDayCheckboxesFromInput("discharge");
+}
+
+function renderSajControlSlotsTable(controlState) {
+  const body = document.getElementById("sajControlSlotsBody");
+  if (!body) return;
+  body.innerHTML = "";
+
+  const chargeInput = Array.isArray(controlState?.charge?.slots) ? controlState.charge.slots : [];
+  const dischargeInput = Array.isArray(controlState?.discharge?.slots) ? controlState.discharge.slots : [];
+  const chargeActual = Array.isArray(controlState?.charge?.effective_slots) ? controlState.charge.effective_slots : [];
+  const dischargeActual = Array.isArray(controlState?.discharge?.effective_slots) ? controlState.discharge.effective_slots : [];
+  const chargeEnableMask = clampMask7(controlState?.charge?.time_enable_mask ?? 0);
+  const dischargeEnableMask = clampMask7(controlState?.discharge?.time_enable_mask ?? 0);
+
+  const renderActualPower = (actual) => {
+    const percent = actual?.power_percent;
+    const watts = actual?.power_w_estimate;
+    if (percent === null || percent === undefined) return "-";
+    if (watts === null || watts === undefined) return `${percent}%`;
+    return `${percent}% (${watts}W)`;
+  };
+
+  const renderRows = (kind, typeLabel, inputRows, actualRows, enableMask) => {
+    for (let slot = 1; slot <= 7; slot += 1) {
+      const input = inputRows.find((item) => Number(item?.slot) === slot) || {};
+      const actual = actualRows.find((item) => Number(item?.slot) === slot) || {};
+      const checked = (enableMask & (1 << (slot - 1))) !== 0 ? "checked" : "";
+      const checkboxId = kind === "charge" ? `sajTableChargeEnableSlot${slot}` : `sajTableDischargeEnableSlot${slot}`;
+      const startValue = _normalizeSajTimeForInput(input.start_time);
+      const endValue = _normalizeSajTimeForInput(input.end_time);
+      const powerValue = input.power_percent === null || input.power_percent === undefined ? "" : String(input.power_percent);
+      const dayMaskValue = input.day_mask === null || input.day_mask === undefined ? "0" : String(clampMask7(input.day_mask));
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><input id="${checkboxId}" type="checkbox" ${checked} /></td>
+        <td>${typeLabel}</td>
+        <td>${slot}</td>
+        <td><input id="sajTable${kind}Slot${slot}StartInput" type="time" value="${startValue}" /></td>
+        <td><input id="sajTable${kind}Slot${slot}EndInput" type="time" value="${endValue}" /></td>
+        <td><input id="sajTable${kind}Slot${slot}PowerInput" type="number" min="0" max="100" step="1" value="${powerValue}" /></td>
+        <td><input id="sajTable${kind}Slot${slot}DayMaskInput" class="saj-mask-input-trigger" type="text" value="${dayMaskValue}" readonly /></td>
+        <td>${actual.start_time ?? "-"}</td>
+        <td>${actual.end_time ?? "-"}</td>
+        <td>${renderActualPower(actual)}</td>
+        <td>${actual.day_mask ?? "-"}</td>
+      `;
+      body.appendChild(tr);
+    }
+  };
+
+  renderRows("charge", t("sajControlTypeCharge"), chargeInput, chargeActual, chargeEnableMask);
+  renderRows("discharge", t("sajControlTypeDischarge"), dischargeInput, dischargeActual, dischargeEnableMask);
 }
 
 function renderSajControlFromCache() {
@@ -2015,14 +2405,30 @@ function renderSajControlFromCache() {
     setText("sajControlMeta", "-");
     setText("sajControlUpdatedAt", `${t("updatedAt")}: -`);
     setText("sajControlStateJson", "-");
+    const body = document.getElementById("sajControlSlotsBody");
+    if (body) body.innerHTML = "";
     return;
   }
   const state = payload?.control_state || payload?.state || null;
   const updatedAt = state?.updated_at ? new Date(state.updated_at).toLocaleString() : "-";
   setText("sajControlUpdatedAt", `${t("updatedAt")}: ${updatedAt}`);
-  setText("sajControlMeta", t("sajControlApplyDone"));
+  const chargeEnableMask = state?.charge?.time_enable_mask ?? "-";
+  const dischargeEnableMask = state?.discharge?.time_enable_mask ?? "-";
+  const chargeSwitch = state?.charge?.control_switch;
+  const dischargeSwitch = state?.discharge?.control_switch;
+  const batterySoc = state?.battery?.soc_percent;
+  const batteryPowerW = state?.battery?.power_w;
+  const ratedPowerW = state?.inverter?.rated_power_w;
+  setText(
+    "sajControlMeta",
+    `charge_enable=${chargeEnableMask}, discharge_enable=${dischargeEnableMask}, ` +
+      `charge_switch=${chargeSwitch}, discharge_switch=${dischargeSwitch}, ` +
+      `battery_soc=${batterySoc ?? "-"}%, battery_power=${batteryPowerW ?? "-"}W, ` +
+      `rated_power=${ratedPowerW ?? "-"}W`,
+  );
   const pre = document.getElementById("sajControlStateJson");
   if (pre) pre.textContent = JSON.stringify(state || payload, null, 2);
+  renderSajControlSlotsTable(state);
   setSajControlInputsFromState(state);
 }
 
@@ -2057,10 +2463,12 @@ async function applySajSlot(kind) {
   const startInputId = kind === "charge" ? "sajChargeStartInput" : "sajDischargeStartInput";
   const endInputId = kind === "charge" ? "sajChargeEndInput" : "sajDischargeEndInput";
   const powerInputId = kind === "charge" ? "sajChargePowerInput" : "sajDischargePowerInput";
+  const dayMaskInputId = kind === "charge" ? "sajChargeDayMaskInput" : "sajDischargeDayMaskInput";
   const slot = Number(document.getElementById(slotInputId)?.value || "1");
   const start = document.getElementById(startInputId)?.value || "";
   const end = document.getElementById(endInputId)?.value || "";
   const power = Number(document.getElementById(powerInputId)?.value || "0");
+  const dayMask = Number(document.getElementById(dayMaskInputId)?.value || "127");
   try {
     const payload = await fetchJson(`/api/saj/control/${kind}-slots/${slot}`, {
       method: "PUT",
@@ -2069,6 +2477,121 @@ async function applySajSlot(kind) {
         start_time: start,
         end_time: end,
         power_percent: power,
+        day_mask: dayMask,
+      }),
+      timeoutMs: 12000,
+    });
+    stateCache.lastSajControl = payload;
+    renderSajControlFromCache();
+  } catch (err) {
+    setText("sajControlMeta", t("sajControlApplyFailed", { error: String(err) }));
+  }
+}
+
+async function applySajToggles() {
+  const chargeEnableMask = Number(document.getElementById("sajChargeEnableMaskInput")?.value || "0");
+  const dischargeEnableMask = Number(document.getElementById("sajDischargeEnableMaskInput")?.value || "0");
+  const chargeSwitch = (document.getElementById("sajChargeSwitchInput")?.value || "off") === "on";
+  const dischargeSwitch = (document.getElementById("sajDischargeSwitchInput")?.value || "off") === "on";
+  try {
+    const payload = await fetchJson("/api/saj/control/toggles", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        charging_control: chargeSwitch,
+        discharging_control: dischargeSwitch,
+        charge_time_enable_mask: chargeEnableMask,
+        discharge_time_enable_mask: dischargeEnableMask,
+      }),
+      timeoutMs: 12000,
+    });
+    stateCache.lastSajControl = payload;
+    renderSajControlFromCache();
+  } catch (err) {
+    setText("sajControlMeta", t("sajControlApplyFailed", { error: String(err) }));
+  }
+}
+
+async function applySajEnableMasksOnly() {
+  const state = stateCache.lastSajControl?.control_state || stateCache.lastSajControl?.state;
+  const chargeEnableMask = clampMask7(document.getElementById("sajQuickChargeEnableMaskInput")?.value || "0");
+  const dischargeEnableMask = clampMask7(document.getElementById("sajQuickDischargeEnableMaskInput")?.value || "0");
+  mirrorQuickEnableMaskInputsToMain();
+
+  const edits = [];
+  for (const kind of ["charge", "discharge"]) {
+    const source = Array.isArray(state?.[kind]?.slots) ? state[kind].slots : [];
+    for (let slot = 1; slot <= 7; slot += 1) {
+      const original = source.find((item) => Number(item?.slot) === slot) || {};
+      const startId = `sajTable${kind}Slot${slot}StartInput`;
+      const endId = `sajTable${kind}Slot${slot}EndInput`;
+      const powerId = `sajTable${kind}Slot${slot}PowerInput`;
+      const dayMaskId = `sajTable${kind}Slot${slot}DayMaskInput`;
+      const startInput = document.getElementById(startId)?.value || "";
+      const endInput = document.getElementById(endId)?.value || "";
+      const powerRaw = document.getElementById(powerId)?.value || "";
+      const dayMaskRaw = document.getElementById(dayMaskId)?.value || "";
+
+      const payload = {};
+      if (startInput && startInput !== String(original.start_time || "")) payload.start_time = startInput;
+      if (endInput && endInput !== String(original.end_time || "")) payload.end_time = endInput;
+      if (powerRaw !== "") {
+        const powerValue = Math.max(0, Math.min(100, Math.trunc(Number(powerRaw))));
+        if (Number.isFinite(powerValue) && powerValue !== Number(original.power_percent)) {
+          payload.power_percent = powerValue;
+        }
+      }
+      if (dayMaskRaw !== "") {
+        const dayMaskValue = clampMask7(dayMaskRaw);
+        if (dayMaskValue !== clampMask7(original.day_mask)) payload.day_mask = dayMaskValue;
+      }
+      if (Object.keys(payload).length) edits.push({ kind, slot, payload });
+    }
+  }
+
+  try {
+    let payload = await fetchJson("/api/saj/control/toggles", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        charge_time_enable_mask: chargeEnableMask,
+        discharge_time_enable_mask: dischargeEnableMask,
+      }),
+      timeoutMs: 12000,
+    });
+    for (const edit of edits) {
+      payload = await fetchJson(`/api/saj/control/${edit.kind}-slots/${edit.slot}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(edit.payload),
+        timeoutMs: 12000,
+      });
+    }
+    payload = await fetchJson("/api/saj/control/refresh-touch", {
+      method: "POST",
+      timeoutMs: 12000,
+    });
+    stateCache.lastSajControl = payload;
+    renderSajControlFromCache();
+  } catch (err) {
+    setText("sajControlMeta", t("sajControlApplyFailed", { error: String(err) }));
+  }
+}
+
+async function applySajLimits() {
+  const batteryCharge = Number(document.getElementById("sajBatteryChargeLimitInput")?.value || "0");
+  const batteryDischarge = Number(document.getElementById("sajBatteryDischargeLimitInput")?.value || "0");
+  const gridCharge = Number(document.getElementById("sajGridChargeLimitInput")?.value || "0");
+  const gridDischarge = Number(document.getElementById("sajGridDischargeLimitInput")?.value || "0");
+  try {
+    const payload = await fetchJson("/api/saj/control/limits", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        battery_charge_power_limit: batteryCharge,
+        battery_discharge_power_limit: batteryDischarge,
+        grid_max_charge_power: gridCharge,
+        grid_max_discharge_power: gridDischarge,
       }),
       timeoutMs: 12000,
     });
@@ -2212,6 +2735,73 @@ async function loadSolplanetRaw() {
 
 async function loadSajRaw() {
   await loadRawPanel(SAJ_RAW_APIS, stateCache.lastSajRaw, "sajRawBody", "sajRawMeta", "sajRawUpdatedAt");
+}
+
+function setSamplingActionBusy(busy, exporting = false, importing = false) {
+  const exportBtn = document.getElementById("samplingExportBtn");
+  const importBtn = document.getElementById("samplingImportBtn");
+  if (exportBtn) {
+    exportBtn.disabled = busy;
+    exportBtn.textContent = exporting ? t("samplingExporting") : t("samplingExportBtn");
+  }
+  if (importBtn) {
+    importBtn.disabled = busy;
+    importBtn.textContent = importing ? t("samplingImporting") : t("samplingImportBtn");
+  }
+}
+
+async function exportSamplingCsv() {
+  setSamplingActionBusy(true, true, false);
+  try {
+    const response = await fetch("/api/storage/export.csv", { method: "GET" });
+    if (!response.ok) {
+      const message = await readErrorMessage(response);
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    const filenameMatch = (response.headers.get("Content-Disposition") || "").match(/filename=\"([^\"]+)\"/);
+    const filename = filenameMatch?.[1] || "energy_samples.csv";
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    window.alert(t("samplingExportFailed", { error: String(err) }));
+  } finally {
+    setSamplingActionBusy(false, false, false);
+  }
+}
+
+async function importSamplingCsv(file) {
+  if (!file) return;
+  if (!window.confirm(t("samplingImportConfirmReplace"))) return;
+  setSamplingActionBusy(true, false, true);
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch("/api/storage/import.csv?replace_existing=true", {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      const message = await readErrorMessage(response);
+      throw new Error(message);
+    }
+    const payload = await response.json();
+    window.alert(t("samplingImportDone", { count: payload.imported_rows || 0 }));
+    samplingPager.page = 1;
+    await loadSampling();
+  } catch (err) {
+    window.alert(t("samplingImportFailed", { error: String(err) }));
+  } finally {
+    setSamplingActionBusy(false, false, false);
+    const input = document.getElementById("samplingImportFileInput");
+    if (input) input.value = "";
+  }
 }
 
 async function loadSampling() {
@@ -2457,16 +3047,152 @@ document.getElementById("samplingRangeModeSelect").addEventListener("change", as
 document.getElementById("samplingSmoothModeSelect").addEventListener("change", () => {
   if (samplingChartLastPayload) renderSamplingChart(samplingChartLastPayload);
 });
+document.getElementById("samplingExportBtn").addEventListener("click", () => {
+  void exportSamplingCsv();
+});
+document.getElementById("samplingImportBtn").addEventListener("click", () => {
+  const fileInput = document.getElementById("samplingImportFileInput");
+  if (!fileInput) return;
+  if (typeof fileInput.showPicker === "function") {
+    fileInput.showPicker();
+    return;
+  }
+  fileInput.click();
+});
+document.getElementById("samplingImportFileInput").addEventListener("change", (event) => {
+  const input = event.target;
+  const file = input?.files?.[0];
+  if (!file) return;
+  void importSamplingCsv(file);
+});
 
-document.getElementById("sajModeApplyBtn").addEventListener("click", () => {
+function bindClickIfPresent(id, handler) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("click", handler);
+}
+
+function bindInputIfPresent(id, handler) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("input", handler);
+}
+
+function bindChangeIfPresent(id, handler) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("change", handler);
+}
+
+bindClickIfPresent("sajModeApplyBtn", () => {
   void applySajWorkingMode();
 });
-document.getElementById("sajChargeApplyBtn").addEventListener("click", () => {
+const sajMaskSaveBtn = document.getElementById("sajMaskSaveBtn");
+if (sajMaskSaveBtn) {
+  sajMaskSaveBtn.addEventListener("click", () => {
+    void applySajEnableMasksOnly();
+  });
+}
+bindClickIfPresent("sajToggleApplyBtn", () => {
+  void applySajToggles();
+});
+bindClickIfPresent("sajLimitsApplyBtn", () => {
+  void applySajLimits();
+});
+bindClickIfPresent("sajChargeApplyBtn", () => {
   void applySajSlot("charge");
 });
-document.getElementById("sajDischargeApplyBtn").addEventListener("click", () => {
+bindClickIfPresent("sajDischargeApplyBtn", () => {
   void applySajSlot("discharge");
 });
+bindChangeIfPresent("sajChargeSlotInput", () => {
+  const state = stateCache.lastSajControl?.control_state || stateCache.lastSajControl?.state;
+  setSajControlInputsFromState(state);
+});
+bindChangeIfPresent("sajDischargeSlotInput", () => {
+  const state = stateCache.lastSajControl?.control_state || stateCache.lastSajControl?.state;
+  setSajControlInputsFromState(state);
+});
+bindInputIfPresent("sajChargeEnableMaskInput", () => {
+  syncEnableCheckboxesFromInput("charge");
+});
+bindInputIfPresent("sajDischargeEnableMaskInput", () => {
+  syncEnableCheckboxesFromInput("discharge");
+});
+const sajQuickChargeEnableMaskInput = document.getElementById("sajQuickChargeEnableMaskInput");
+if (sajQuickChargeEnableMaskInput) {
+  sajQuickChargeEnableMaskInput.addEventListener("input", () => {
+    syncEnableCheckboxesFromInput("charge", true);
+    mirrorQuickEnableMaskInputsToMain();
+  });
+}
+const sajQuickDischargeEnableMaskInput = document.getElementById("sajQuickDischargeEnableMaskInput");
+if (sajQuickDischargeEnableMaskInput) {
+  sajQuickDischargeEnableMaskInput.addEventListener("input", () => {
+    syncEnableCheckboxesFromInput("discharge", true);
+    mirrorQuickEnableMaskInputsToMain();
+  });
+}
+const sajControlSlotsBody = document.getElementById("sajControlSlotsBody");
+if (sajControlSlotsBody) {
+  sajControlSlotsBody.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (target.id.includes("DayMaskInput")) openSajDayMaskModalForInput(target.id);
+  });
+  sajControlSlotsBody.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (target.id.startsWith("sajTableChargeEnableSlot")) {
+      syncEnableInputFromCheckboxes("charge", true);
+      mirrorQuickEnableMaskInputsToMain();
+      return;
+    }
+    if (target.id.startsWith("sajTableDischargeEnableSlot")) {
+      syncEnableInputFromCheckboxes("discharge", true);
+      mirrorQuickEnableMaskInputsToMain();
+    }
+  });
+}
+
+bindClickIfPresent("sajDayMaskCancelBtn", () => {
+  cancelSajDayMaskModal();
+});
+bindClickIfPresent("sajDayMaskConfirmBtn", () => {
+  confirmSajDayMaskModal();
+});
+bindChangeIfPresent("sajDayMaskAllDays", () => {
+  const allDays = document.getElementById("sajDayMaskAllDays");
+  _setSajDayMaskPopupFromMask(allDays?.checked ? 127 : 0);
+});
+for (const key of WEEKDAY_ORDER) {
+  bindChangeIfPresent(`sajDayMask${key}`, () => {
+    _syncSajDayMaskAllDaysCheckbox();
+  });
+}
+for (let i = 1; i <= 7; i += 1) {
+  const chargeEnableId = `sajChargeEnableSlot${i}`;
+  const dischargeEnableId = `sajDischargeEnableSlot${i}`;
+  bindChangeIfPresent(chargeEnableId, () => {
+    syncEnableInputFromCheckboxes("charge");
+  });
+  bindChangeIfPresent(dischargeEnableId, () => {
+    syncEnableInputFromCheckboxes("discharge");
+  });
+}
+bindInputIfPresent("sajChargeDayMaskInput", () => {
+  syncDayCheckboxesFromInput("charge");
+});
+bindInputIfPresent("sajDischargeDayMaskInput", () => {
+  syncDayCheckboxesFromInput("discharge");
+});
+for (const key of WEEKDAY_ORDER) {
+  const chargeDayId = `sajChargeDay${key}`;
+  const dischargeDayId = `sajDischargeDay${key}`;
+  bindChangeIfPresent(chargeDayId, () => {
+    syncDayInputFromCheckboxes("charge");
+  });
+  bindChangeIfPresent(dischargeDayId, () => {
+    syncDayInputFromCheckboxes("discharge");
+  });
+}
 
 document.getElementById("configForm").addEventListener("submit", async (event) => {
   event.preventDefault();

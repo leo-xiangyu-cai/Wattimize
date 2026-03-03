@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -9,6 +11,20 @@ from pathlib import Path
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "energy_samples.sqlite3"
 DEFAULT_SAMPLE_INTERVAL_SECONDS = 5.0
+CSV_HEADERS: tuple[str, ...] = (
+    "system",
+    "sampled_at_utc",
+    "sampled_at_epoch",
+    "source",
+    "pv_w",
+    "grid_w",
+    "battery_w",
+    "load_w",
+    "battery_soc_percent",
+    "inverter_status",
+    "balance_w",
+    "payload_json",
+)
 
 
 @dataclass(frozen=True)
@@ -94,6 +110,139 @@ def insert_sample(db_path: Path, sample: EnergySample) -> None:
             ),
         )
         conn.commit()
+
+
+def export_samples_csv(db_path: Path) -> str:
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=list(CSV_HEADERS))
+    writer.writeheader()
+
+    if not db_path.exists():
+        return output.getvalue()
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    system,
+                    sampled_at_utc,
+                    sampled_at_epoch,
+                    source,
+                    pv_w,
+                    grid_w,
+                    battery_w,
+                    load_w,
+                    battery_soc_percent,
+                    inverter_status,
+                    balance_w,
+                    payload_json
+                FROM energy_samples
+                ORDER BY sampled_at_epoch ASC;
+                """
+            ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+
+    for row in rows:
+        writer.writerow(
+            {
+                "system": row[0],
+                "sampled_at_utc": row[1],
+                "sampled_at_epoch": row[2],
+                "source": row[3],
+                "pv_w": row[4],
+                "grid_w": row[5],
+                "battery_w": row[6],
+                "load_w": row[7],
+                "battery_soc_percent": row[8],
+                "inverter_status": row[9],
+                "balance_w": row[10],
+                "payload_json": row[11],
+            }
+        )
+    return output.getvalue()
+
+
+def _csv_nullable_float(value: str | None) -> float | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    return float(text)
+
+
+def import_samples_csv(db_path: Path, csv_text: str, *, replace_existing: bool = False) -> dict[str, object]:
+    init_db(db_path)
+    reader = csv.DictReader(io.StringIO(csv_text))
+    fieldnames = tuple(reader.fieldnames or ())
+    missing = [column for column in CSV_HEADERS if column not in fieldnames]
+    if missing:
+        raise ValueError(f"CSV missing required columns: {', '.join(missing)}")
+
+    imported = 0
+    with sqlite3.connect(db_path) as conn:
+        if replace_existing:
+            conn.execute("DELETE FROM energy_samples;")
+        for row in reader:
+            system = str(row.get("system") or "").strip().lower()
+            if not system:
+                raise ValueError("CSV row missing system")
+            sampled_at_utc_text = str(row.get("sampled_at_utc") or "").strip()
+            if not sampled_at_utc_text:
+                raise ValueError("CSV row missing sampled_at_utc")
+            sampled_at = datetime.fromisoformat(sampled_at_utc_text.replace("Z", "+00:00"))
+            if sampled_at.tzinfo is None:
+                sampled_at = sampled_at.replace(tzinfo=UTC)
+            sampled_at = sampled_at.astimezone(UTC)
+            sampled_at_epoch = _csv_nullable_float(row.get("sampled_at_epoch"))
+            if sampled_at_epoch is None:
+                sampled_at_epoch = sampled_at.timestamp()
+            source = str(row.get("source") or "").strip() or "imported_csv"
+            payload_json = str(row.get("payload_json") or "").strip() or "{}"
+            try:
+                payload_obj = json.loads(payload_json)
+                if not isinstance(payload_obj, dict):
+                    payload_json = "{}"
+            except json.JSONDecodeError:
+                payload_json = "{}"
+
+            conn.execute(
+                """
+                INSERT INTO energy_samples (
+                    system,
+                    sampled_at_utc,
+                    sampled_at_epoch,
+                    source,
+                    pv_w,
+                    grid_w,
+                    battery_w,
+                    load_w,
+                    battery_soc_percent,
+                    inverter_status,
+                    balance_w,
+                    payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    system,
+                    sampled_at.isoformat(),
+                    sampled_at_epoch,
+                    source,
+                    _csv_nullable_float(row.get("pv_w")),
+                    _csv_nullable_float(row.get("grid_w")),
+                    _csv_nullable_float(row.get("battery_w")),
+                    _csv_nullable_float(row.get("load_w")),
+                    _csv_nullable_float(row.get("battery_soc_percent")),
+                    (str(row.get("inverter_status") or "").strip() or None),
+                    _csv_nullable_float(row.get("balance_w")),
+                    payload_json,
+                ),
+            )
+            imported += 1
+        conn.commit()
+    return {"imported_rows": imported, "replaced": replace_existing}
 
 
 def get_storage_status(db_path: Path, sample_interval_seconds: float) -> dict[str, object]:

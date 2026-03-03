@@ -230,60 +230,57 @@
           <div class="saj-control-grid">
             <article class="saj-control-panel">
               <h3 data-i18n="sajControlModeTitle">Working Mode</h3>
+              <p id="sajModeExplain" class="muted" data-i18n="sajControlModeExplain">
+                Mode code mapping may differ by firmware. Test 0~2 against app labels.
+              </p>
               <div class="saj-control-row">
                 <label data-i18n="sajControlModeCodeLabel">
                   Mode Code
-                  <input id="sajModeCodeInput" type="number" min="0" max="3" step="1" value="0" />
+                  <select id="sajModeCodeInput">
+                    <option value="0" data-i18n="sajModeOption0">0 - Self-Consumption Mode</option>
+                    <option value="1" data-i18n="sajModeOption1">1 - Time of Use Mode</option>
+                    <option value="2" data-i18n="sajModeOption2">2 - Backup Mode</option>
+                  </select>
                 </label>
                 <button id="sajModeApplyBtn" class="btn" type="button" data-i18n="sajControlApplyBtn">Apply</button>
               </div>
             </article>
 
             <article class="saj-control-panel">
-              <h3 data-i18n="sajControlChargeTitle">Charge Slot</h3>
+              <h3 data-i18n="sajControlCurrentStateTitle">Current Slot State</h3>
               <div class="saj-control-row">
-                <label data-i18n="sajControlSlotLabel">
-                  Slot
-                  <input id="sajChargeSlotInput" type="number" min="1" max="7" step="1" value="1" />
+                <label data-i18n="sajControlChargeEnableMaskLabel">
+                  Charge Enable Mask
+                  <input id="sajQuickChargeEnableMaskInput" type="number" min="0" max="127" step="1" value="0" />
                 </label>
-                <label data-i18n="sajControlStartLabel">
-                  Start
-                  <input id="sajChargeStartInput" type="time" value="01:00" />
+                <label data-i18n="sajControlDischargeEnableMaskLabel">
+                  Discharge Enable Mask
+                  <input id="sajQuickDischargeEnableMaskInput" type="number" min="0" max="127" step="1" value="0" />
                 </label>
-                <label data-i18n="sajControlEndLabel">
-                  End
-                  <input id="sajChargeEndInput" type="time" value="01:10" />
-                </label>
-                <label data-i18n="sajControlPowerLabel">
-                  Power (%)
-                  <input id="sajChargePowerInput" type="number" min="0" max="100" step="1" value="10" />
-                </label>
-                <button id="sajChargeApplyBtn" class="btn" type="button" data-i18n="sajControlApplyBtn">Apply</button>
+                <button id="sajMaskSaveBtn" class="btn" type="button" data-i18n="configSaveBtn">Save</button>
+              </div>
+              <div class="table-wrap">
+                <table class="saj-control-table">
+                  <thead>
+                    <tr>
+                      <th data-i18n="sajControlEnableCol">Enable</th>
+                      <th data-i18n="sajControlTypeCol">Type</th>
+                      <th data-i18n="sajControlSlotCol">Slot</th>
+                      <th data-i18n="sajControlInputStartCol">Input Start</th>
+                      <th data-i18n="sajControlInputEndCol">Input End</th>
+                      <th data-i18n="sajControlInputPowerCol">Input Power(%)</th>
+                      <th data-i18n="sajControlInputMaskCol">Input Mask</th>
+                      <th data-i18n="sajControlActualStartCol">Actual Start</th>
+                      <th data-i18n="sajControlActualEndCol">Actual End</th>
+                      <th data-i18n="sajControlActualPowerCol">Actual Power(%)</th>
+                      <th data-i18n="sajControlActualMaskCol">Actual Mask</th>
+                    </tr>
+                  </thead>
+                  <tbody id="sajControlSlotsBody"></tbody>
+                </table>
               </div>
             </article>
 
-            <article class="saj-control-panel">
-              <h3 data-i18n="sajControlDischargeTitle">Discharge Slot</h3>
-              <div class="saj-control-row">
-                <label data-i18n="sajControlSlotLabel">
-                  Slot
-                  <input id="sajDischargeSlotInput" type="number" min="1" max="7" step="1" value="1" />
-                </label>
-                <label data-i18n="sajControlStartLabel">
-                  Start
-                  <input id="sajDischargeStartInput" type="time" value="02:00" />
-                </label>
-                <label data-i18n="sajControlEndLabel">
-                  End
-                  <input id="sajDischargeEndInput" type="time" value="02:10" />
-                </label>
-                <label data-i18n="sajControlPowerLabel">
-                  Power (%)
-                  <input id="sajDischargePowerInput" type="number" min="0" max="100" step="1" value="10" />
-                </label>
-                <button id="sajDischargeApplyBtn" class="btn" type="button" data-i18n="sajControlApplyBtn">Apply</button>
-              </div>
-            </article>
           </div>
 
           <pre id="sajControlStateJson" class="raw-pre">-</pre>
@@ -356,6 +353,11 @@
             </label>
             <div id="samplingRangeInputContainer"></div>
           </div>
+          <div class="sampling-actions">
+            <button id="samplingExportBtn" class="btn sampling-action-btn" type="button" data-i18n="samplingExportBtn">Export CSV</button>
+            <button id="samplingImportBtn" class="btn sampling-action-btn" type="button" data-i18n="samplingImportBtn">Import CSV</button>
+            <input id="samplingImportFileInput" type="file" accept=".csv,text/csv" class="hidden" hidden />
+          </div>
           <p id="samplingStorageMeta" class="muted">-</p>
           <p id="samplingDailyMeta" class="muted">-</p>
           <section class="sampling-chart-card">
@@ -425,6 +427,28 @@
             <span id="configSaveMsg" class="muted">-</span>
           </div>
         </form>
+      </div>
+    </div>
+
+    <div id="sajDayMaskModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="sajDayMaskModalTitle">
+      <div class="modal-card">
+        <h2 id="sajDayMaskModalTitle" data-i18n="sajDayMaskPopupTitle">Select Weekdays</h2>
+        <div class="saj-check-grid weekdays">
+          <label><input id="sajDayMaskAllDays" type="checkbox" /><span data-i18n="sajDayMaskAllDays">All</span></label>
+        </div>
+        <div class="saj-check-grid weekdays">
+          <label><input id="sajDayMaskMon" type="checkbox" /><span data-i18n="weekdayMon">Mon</span></label>
+          <label><input id="sajDayMaskTue" type="checkbox" /><span data-i18n="weekdayTue">Tue</span></label>
+          <label><input id="sajDayMaskWed" type="checkbox" /><span data-i18n="weekdayWed">Wed</span></label>
+          <label><input id="sajDayMaskThu" type="checkbox" /><span data-i18n="weekdayThu">Thu</span></label>
+          <label><input id="sajDayMaskFri" type="checkbox" /><span data-i18n="weekdayFri">Fri</span></label>
+          <label><input id="sajDayMaskSat" type="checkbox" /><span data-i18n="weekdaySat">Sat</span></label>
+          <label><input id="sajDayMaskSun" type="checkbox" /><span data-i18n="weekdaySun">Sun</span></label>
+        </div>
+        <div class="config-actions">
+          <button id="sajDayMaskCancelBtn" type="button" class="btn secondary" data-i18n="sajDayMaskCancelBtn">Cancel</button>
+          <button id="sajDayMaskConfirmBtn" type="button" class="btn" data-i18n="sajDayMaskConfirmBtn">Confirm</button>
+        </div>
       </div>
     </div>
 
