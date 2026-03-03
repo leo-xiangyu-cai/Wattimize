@@ -32,21 +32,25 @@ Not implemented yet:
 - `requirements.txt`: Python deps
 - `docker-compose.yml`: container run config
 - `Dockerfile`: image build
-- `.env.example`: config template
 - `.env`: real local secrets (ignored)
 
-## 4) Environment Variables
+## 4) Runtime Config
 
 Required:
-- `HA_URL` (example: `http://192.168.68.61:8123`)
-- `HA_TOKEN` (HA long-lived token)
+- `ha_url` (example: `http://192.168.68.61:8123`)
+- `ha_token` (HA long-lived token)
 
 Optional:
-- `CORE_ENTITY_IDS` comma-separated entity ids used by `/api/entities/core`
+- `solplanet_dongle_host`
+
+Config source:
+- `data/config.json` locally
+- `/app/data/config.json` in Docker
+- override path with `WATTIMIZE_CONFIG_PATH`
 
 Security:
-- Never commit `.env`
-- Keep token in env only
+- Never commit secrets
+- Keep token in config file or runtime env only
 
 ## 5) API Endpoints
 
@@ -82,7 +86,6 @@ Local dev mode (recommended while iterating):
 ```bash
 cd /Users/caixy/Leo/Wattimize
 source .venv/bin/activate
-set -a; source .env; set +a
 uvicorn app.main:app --host 0.0.0.0 --port 18000 --reload
 ```
 
@@ -129,6 +132,7 @@ docker compose up -d --build
 
 - Prefer local dev mode first; use Docker after APIs are stable.
 - Do not expose or log `HA_TOKEN`.
-- Keep `.env` ignored.
 - Keep API changes reflected in frontend and README.
 - Preserve backward compatibility for existing endpoints when possible.
+- All code comments in submitted changes must be written in English.
+- Any user-facing UI text must support multilingual/i18n; backend/internal-only text can remain English.
