@@ -21,14 +21,6 @@
               <option value="zh">中文</option>
             </select>
           </label>
-          <label class="refresh-switch">
-            <span data-i18n="autoRefreshLabel">Auto Refresh</span>
-            <select id="autoRefreshSelect">
-              <option value="0" data-i18n="autoRefreshOff">Off</option>
-              <option value="5" data-i18n="autoRefresh5s">Every 5s</option>
-              <option value="10" data-i18n="autoRefresh10s">Every 10s</option>
-            </select>
-          </label>
           <button id="configBtn" class="btn secondary" data-i18n="configBtn">Config</button>
           <button id="refreshBtn" class="btn" data-i18n="refreshBtn">Refresh</button>
         </div>
@@ -68,6 +60,14 @@
         <section class="card">
           <div class="section-header">
             <h2 data-i18n="flowTitle">Real-time Energy Flow Comparison</h2>
+            <label class="refresh-switch">
+              <span data-i18n="autoRefreshLabel">Auto Refresh</span>
+              <select id="autoRefreshSelect">
+                <option value="0" data-i18n="autoRefreshOff">Off</option>
+                <option value="5" data-i18n="autoRefresh5s">Every 5s</option>
+                <option value="10" data-i18n="autoRefresh10s">Every 10s</option>
+              </select>
+            </label>
           </div>
           <div class="flow-compare-grid">
             <section class="flow-system-card">

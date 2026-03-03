@@ -137,6 +137,8 @@ p {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .metrics {
@@ -346,10 +348,10 @@ td {
 .flow-node {
   border: 1px solid #bdd0c1;
   border-radius: 14px;
-  padding: 10px;
+  padding: 8px;
   background: linear-gradient(160deg, #fbfdf9 0%, #eef7f1 100%);
   z-index: 2;
-  width: 170px;
+  width: 152px;
   justify-self: center;
   align-self: center;
 }
@@ -364,13 +366,13 @@ td {
 
 .node-value {
   margin-top: 8px;
-  font-size: 19px;
+  font-size: 17px;
   font-weight: 700;
 }
 
 .node-state {
   margin-top: 4px;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .node-solar {
@@ -433,23 +435,23 @@ td {
 }
 
 .line-solar {
-  top: 23%;
-  height: 27%;
+  top: 22%;
+  height: 28%;
 }
 
 .line-grid {
-  left: 10%;
-  width: 38%;
+  left: 8%;
+  width: 42%;
 }
 
 .line-load {
-  left: 52%;
-  width: 38%;
+  left: 50%;
+  width: 42%;
 }
 
 .line-battery {
   top: 50%;
-  height: 27%;
+  height: 28%;
 }
 
 .h-line::after {
@@ -583,18 +585,18 @@ td {
   }
 
   .flow-node {
-    width: 150px;
-    padding: 9px;
+    width: 132px;
+    padding: 8px;
   }
 
   .line-grid {
-    left: 8%;
-    width: 40%;
+    left: 7%;
+    width: 43%;
   }
 
   .line-load {
-    left: 52%;
-    width: 40%;
+    left: 50%;
+    width: 43%;
   }
 }
 
