@@ -12,6 +12,8 @@ const I18N = {
     subtitle: "SAJ monitoring panel",
     languageLabel: "Language",
     refreshBtn: "Refresh",
+    dashboardTab: "Dashboard",
+    entitiesTab: "Entities",
     systemTitle: "System",
     haTitle: "Home Assistant",
     coreTitle: "Core Entities",
@@ -61,6 +63,8 @@ const I18N = {
     subtitle: "SAJ 监控面板",
     languageLabel: "语言",
     refreshBtn: "刷新",
+    dashboardTab: "总览",
+    entitiesTab: "实体",
     systemTitle: "系统状态",
     haTitle: "Home Assistant",
     coreTitle: "核心实体",
@@ -128,6 +132,7 @@ function getLang() {
 }
 
 let currentLang = getLang();
+let currentTab = localStorage.getItem("activeTab") === "entities" ? "entities" : "dashboard";
 
 function t(key, params = {}) {
   const table = I18N[currentLang] || I18N.en;
@@ -398,19 +403,50 @@ async function loadEntities() {
   }
 }
 
-async function reloadAll() {
+async function loadCurrentTab() {
+  if (currentTab === "entities") {
+    await loadEntities();
+    return;
+  }
   await loadSummary();
-  await loadEntities();
 }
 
-document.getElementById("langSelect").addEventListener("change", async (event) => {
+function setActiveTab(tab, load = true) {
+  currentTab = tab === "entities" ? "entities" : "dashboard";
+  localStorage.setItem("activeTab", currentTab);
+
+  const dashboardView = document.getElementById("dashboardView");
+  const entitiesView = document.getElementById("entitiesView");
+  const tabDashboard = document.getElementById("tabDashboard");
+  const tabEntities = document.getElementById("tabEntities");
+
+  const dashboardActive = currentTab === "dashboard";
+  dashboardView.classList.toggle("hidden", !dashboardActive);
+  entitiesView.classList.toggle("hidden", dashboardActive);
+  tabDashboard.classList.toggle("active", dashboardActive);
+  tabEntities.classList.toggle("active", !dashboardActive);
+
+  if (load) {
+    void loadCurrentTab();
+  }
+}
+
+document.getElementById("langSelect").addEventListener("change", (event) => {
   const nextLang = event.target.value === "zh" ? "zh" : "en";
   currentLang = nextLang;
   localStorage.setItem("lang", nextLang);
   applyTranslations();
 });
 
-document.getElementById("refreshBtn").addEventListener("click", reloadAll);
+document.getElementById("refreshBtn").addEventListener("click", () => {
+  void loadCurrentTab();
+});
+document.getElementById("tabDashboard").addEventListener("click", () => {
+  setActiveTab("dashboard");
+});
+document.getElementById("tabEntities").addEventListener("click", () => {
+  setActiveTab("entities");
+});
 document.getElementById("filterForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   pager.page = 1;
@@ -428,4 +464,5 @@ document.getElementById("nextPageBtn").addEventListener("click", async () => {
 });
 
 applyTranslations();
-reloadAll();
+setActiveTab(currentTab, false);
+void loadCurrentTab();
