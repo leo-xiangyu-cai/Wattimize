@@ -1,7 +1,36 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+
+DEFAULT_SAJ_ENTITY_IDS: tuple[str, ...] = (
+    "sensor.saj_pv_power",
+    "sensor.saj_battery_power",
+    "sensor.saj_ct_grid_power_total",
+    "sensor.saj_total_grid_power",
+    "sensor.saj_total_load_power",
+    "sensor.saj_battery_energy_percent",
+    "sensor.saj_inverter_status",
+)
+
+DEFAULT_SOLPLANET_ENTITY_IDS: tuple[str, ...] = (
+    "sensor.solplanet_pv_power",
+    "sensor.solplanet_battery_power",
+    "sensor.solplanet_ct_grid_power_total",
+    "sensor.solplanet_total_grid_power",
+    "sensor.solplanet_total_load_power",
+    "sensor.solplanet_battery_energy_percent",
+    "sensor.solplanet_inverter_status",
+)
+
+CONST_SOLPLANET_DONGLE_PORT = 443
+CONST_SOLPLANET_DONGLE_SCHEME = "https"
+CONST_SOLPLANET_VERIFY_SSL = False
+CONST_SOLPLANET_CACHE_SECONDS = 3.0
+CONST_SOLPLANET_REQUEST_TIMEOUT_SECONDS = 12.0
 
 
 @dataclass(frozen=True)
@@ -18,69 +47,88 @@ class Settings:
     solplanet_request_timeout_seconds: float
 
 
-def _parse_entity_ids(raw: str | None, default: tuple[str, ...]) -> tuple[str, ...]:
-    if not raw:
-        return default
-    return tuple(item.strip() for item in raw.split(",") if item.strip())
+def get_config_path() -> Path:
+    configured = os.getenv("WATTIMIZE_CONFIG_PATH", "").strip()
+    if configured:
+        return Path(configured)
+    container_default = Path("/app/data/config.json")
+    if Path("/app").exists():
+        return container_default
+    project_default = Path(__file__).resolve().parent.parent / "data" / "config.json"
+    return project_default
+
+
+def read_config_file() -> dict[str, object]:
+    path = get_config_path()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def config_file_exists() -> bool:
+    return get_config_path().exists()
+
+
+def _env_values() -> dict[str, object]:
+    return {
+        "ha_url": os.getenv("HA_URL", "").strip(),
+        "ha_token": os.getenv("HA_TOKEN", "").strip(),
+        "solplanet_dongle_host": os.getenv("SOLPLANET_DONGLE_HOST", "").strip(),
+    }
+
+
+def _build_settings(raw: dict[str, object]) -> Settings:
+    return Settings(
+        ha_url=str(raw.get("ha_url") or "").strip().rstrip("/"),
+        ha_token=str(raw.get("ha_token") or "").strip(),
+        saj_core_entity_ids=DEFAULT_SAJ_ENTITY_IDS,
+        solplanet_core_entity_ids=DEFAULT_SOLPLANET_ENTITY_IDS,
+        solplanet_dongle_host=str(raw.get("solplanet_dongle_host") or "").strip(),
+        solplanet_dongle_port=CONST_SOLPLANET_DONGLE_PORT,
+        solplanet_dongle_scheme=CONST_SOLPLANET_DONGLE_SCHEME,
+        solplanet_verify_ssl=CONST_SOLPLANET_VERIFY_SSL,
+        solplanet_cache_seconds=CONST_SOLPLANET_CACHE_SECONDS,
+        solplanet_request_timeout_seconds=CONST_SOLPLANET_REQUEST_TIMEOUT_SECONDS,
+    )
 
 
 def load_settings() -> Settings:
-    ha_url = os.getenv("HA_URL", "").strip()
-    ha_token = os.getenv("HA_TOKEN", "").strip()
-    saj_default = (
-        "sensor.saj_pv_power",
-        "sensor.saj_battery_power",
-        "sensor.saj_ct_grid_power_total",
-        "sensor.saj_total_grid_power",
-        "sensor.saj_total_load_power",
-        "sensor.saj_battery_energy_percent",
-        "sensor.saj_inverter_status",
-    )
-    solplanet_default = (
-        "sensor.solplanet_pv_power",
-        "sensor.solplanet_battery_power",
-        "sensor.solplanet_ct_grid_power_total",
-        "sensor.solplanet_total_grid_power",
-        "sensor.solplanet_total_load_power",
-        "sensor.solplanet_battery_energy_percent",
-        "sensor.solplanet_inverter_status",
-    )
-    saj_entity_ids = _parse_entity_ids(
-        os.getenv("SAJ_CORE_ENTITY_IDS") or os.getenv("CORE_ENTITY_IDS"),
-        saj_default,
-    )
-    solplanet_entity_ids = _parse_entity_ids(
-        os.getenv("SOLPLANET_CORE_ENTITY_IDS"),
-        solplanet_default,
-    )
-    solplanet_dongle_host = os.getenv("SOLPLANET_DONGLE_HOST", "").strip()
-    solplanet_dongle_port = int(os.getenv("SOLPLANET_DONGLE_PORT", "443").strip() or "443")
-    solplanet_dongle_scheme = os.getenv("SOLPLANET_DONGLE_SCHEME", "https").strip().lower()
-    solplanet_verify_ssl = os.getenv("SOLPLANET_VERIFY_SSL", "false").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    solplanet_cache_seconds = float(os.getenv("SOLPLANET_CACHE_SECONDS", "3").strip() or "3")
-    solplanet_request_timeout_seconds = float(
-        os.getenv("SOLPLANET_REQUEST_TIMEOUT_SECONDS", "12").strip() or "12"
-    )
+    merged = {**_env_values(), **read_config_file()}
+    return _build_settings(merged)
 
+
+def settings_to_dict(settings: Settings) -> dict[str, object]:
+    return {
+        "ha_url": settings.ha_url,
+        "ha_token": settings.ha_token,
+        "solplanet_dongle_host": settings.solplanet_dongle_host,
+    }
+
+
+def save_settings(payload: dict[str, object]) -> Settings:
+    base = settings_to_dict(load_settings())
+    base.update(payload)
+    normalized = _build_settings(base)
+
+    path = get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(settings_to_dict(normalized), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return normalized
+
+
+def get_missing_required_fields_from_payload(payload: dict[str, object]) -> list[str]:
+    missing: list[str] = []
+    ha_url = str(payload.get("ha_url") or "").strip()
+    ha_token = str(payload.get("ha_token") or "").strip()
     if not ha_url:
-        raise ValueError("Missing HA_URL environment variable")
+        missing.append("ha_url")
     if not ha_token:
-        raise ValueError("Missing HA_TOKEN environment variable")
-
-    return Settings(
-        ha_url=ha_url.rstrip("/"),
-        ha_token=ha_token,
-        saj_core_entity_ids=saj_entity_ids,
-        solplanet_core_entity_ids=solplanet_entity_ids,
-        solplanet_dongle_host=solplanet_dongle_host,
-        solplanet_dongle_port=solplanet_dongle_port,
-        solplanet_dongle_scheme=solplanet_dongle_scheme if solplanet_dongle_scheme in ("http", "https") else "https",
-        solplanet_verify_ssl=solplanet_verify_ssl,
-        solplanet_cache_seconds=max(0.0, solplanet_cache_seconds),
-        solplanet_request_timeout_seconds=max(0.5, solplanet_request_timeout_seconds),
-    )
+        missing.append("ha_token")
+    return missing

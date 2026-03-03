@@ -73,3 +73,11 @@ cd /Users/caixy/Leo/Wattimize
 docker compose up -d --build
 curl -s http://127.0.0.1:18000/api/saj/entities/core | jq
 ```
+
+First-run configuration:
+- Open `http://NAS_IP:18000/`.
+- If `config.json` is missing, the page shows a config dialog.
+- Only three fields are stored in config: `HA_URL`, `HA_TOKEN`, `SOLPLANET_DONGLE_HOST`.
+- Other values are hardcoded constants in backend (entity ids, port/scheme/ssl/cache/timeout).
+- Saved config is written to `/app/data/config.json` in the container by default.
+- You can override config file path with `WATTIMIZE_CONFIG_PATH`.
