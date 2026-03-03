@@ -11,65 +11,118 @@
       <header class="topbar">
         <div>
           <h1>Wattimize</h1>
-          <p>SAJ monitoring panel</p>
+          <p data-i18n="subtitle">SAJ monitoring panel</p>
         </div>
-        <button id="refreshBtn" class="btn">Refresh</button>
+        <div class="topbar-actions">
+          <label class="lang-switch">
+            <span data-i18n="languageLabel">Language</span>
+            <select id="langSelect">
+              <option value="en">English</option>
+              <option value="zh">中文</option>
+            </select>
+          </label>
+          <button id="refreshBtn" class="btn" data-i18n="refreshBtn">Refresh</button>
+        </div>
       </header>
 
       <section class="status-grid">
         <article class="card">
-          <h2>System</h2>
+          <h2 data-i18n="systemTitle">System</h2>
           <p id="healthValue" class="value">-</p>
         </article>
         <article class="card">
-          <h2>Home Assistant</h2>
+          <h2 data-i18n="haTitle">Home Assistant</h2>
           <p id="haValue" class="value">-</p>
         </article>
         <article class="card">
-          <h2>Core Entities</h2>
+          <h2 data-i18n="coreTitle">Core Entities</h2>
           <p id="coreCount" class="value">-</p>
         </article>
       </section>
 
       <section class="card">
         <div class="section-header">
-          <h2>Core Metrics</h2>
+          <h2 data-i18n="flowTitle">Real-time Energy Flow</h2>
           <span id="coreUpdatedAt" class="muted"></span>
         </div>
-        <div id="coreMetrics" class="metrics"></div>
+        <div id="energyFlow" class="flow-board">
+          <div id="lineSolar" class="flow-line v-line line-solar"></div>
+          <div id="lineGrid" class="flow-line h-line line-grid"></div>
+          <div id="lineLoad" class="flow-line h-line line-load"></div>
+          <div id="lineBattery" class="flow-line v-line line-battery"></div>
+
+          <article class="flow-node node-solar">
+            <p class="node-title" data-i18n="solarTitle">Solar</p>
+            <p id="solarPowerValue" class="node-value">-</p>
+            <p id="solarState" class="node-state muted">idle</p>
+          </article>
+
+          <article class="flow-node node-grid">
+            <p class="node-title" data-i18n="gridTitle">Grid</p>
+            <p id="gridPowerValue" class="node-value">-</p>
+            <p id="gridState" class="node-state muted">idle</p>
+          </article>
+
+          <article class="flow-node node-center">
+            <p class="node-title" data-i18n="inverterTitle">Inverter</p>
+            <p id="inverterStatusValue" class="node-value">-</p>
+            <p id="systemBalance" class="node-state muted">balance -</p>
+          </article>
+
+          <article class="flow-node node-load">
+            <p class="node-title" data-i18n="loadTitle">Home Load</p>
+            <p id="loadPowerValue" class="node-value">-</p>
+            <p id="loadState" class="node-state muted">idle</p>
+          </article>
+
+          <article class="flow-node node-battery">
+            <p class="node-title" data-i18n="batteryTitle">Battery</p>
+            <p id="batteryPowerValue" class="node-value">-</p>
+            <p id="batteryState" class="node-state muted">idle</p>
+            <div class="soc-wrap">
+              <div class="soc-label">
+                <span data-i18n="socLabel">SOC</span>
+                <span id="batterySocValue">-</span>
+              </div>
+              <div class="soc-track">
+                <div id="batterySocFill" class="soc-fill"></div>
+              </div>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section class="card">
-        <h2>Entity Explorer</h2>
+        <h2 data-i18n="entityExplorerTitle">Entity Explorer</h2>
         <form id="filterForm" class="filters">
-          <label>
+          <label data-i18n="domainLabel">
             Domain
-            <input id="domainInput" type="text" placeholder="sensor" />
+            <input id="domainInput" type="text" placeholder="sensor" data-i18n-placeholder="domainPlaceholder" />
           </label>
-          <label>
+          <label data-i18n="brandLabel">
             Brand
-            <input id="brandInput" type="text" value="saj" placeholder="saj" />
+            <input id="brandInput" type="text" value="saj" placeholder="saj" data-i18n-placeholder="brandPlaceholder" />
           </label>
-          <label>
+          <label data-i18n="queryLabel">
             Query
-            <input id="qInput" type="text" placeholder="battery" />
+            <input id="qInput" type="text" placeholder="battery" data-i18n-placeholder="queryPlaceholder" />
           </label>
-          <button type="submit" class="btn">Search</button>
+          <button type="submit" class="btn" data-i18n="searchBtn">Search</button>
         </form>
         <p id="entityCount" class="muted">-</p>
         <div class="pager">
-          <button id="prevPageBtn" class="btn secondary" type="button">Prev</button>
+          <button id="prevPageBtn" class="btn secondary" type="button" data-i18n="prevBtn">Prev</button>
           <span id="pageInfo" class="muted">Page -</span>
-          <button id="nextPageBtn" class="btn secondary" type="button">Next</button>
+          <button id="nextPageBtn" class="btn secondary" type="button" data-i18n="nextBtn">Next</button>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Entity</th>
-                <th>State</th>
-                <th>Unit</th>
-                <th>Name</th>
+                <th data-i18n="tableEntity">Entity</th>
+                <th data-i18n="tableState">State</th>
+                <th data-i18n="tableUnit">Unit</th>
+                <th data-i18n="tableName">Name</th>
               </tr>
             </thead>
             <tbody id="entitiesBody"></tbody>
