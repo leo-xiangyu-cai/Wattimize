@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from time import monotonic
 
@@ -24,6 +25,16 @@ from app.config import (
     settings_to_dict,
 )
 from app.home_assistant import HomeAssistantClient
+from app.persistence import (
+    DEFAULT_DB_PATH,
+    DEFAULT_SAMPLE_INTERVAL_SECONDS,
+    EnergySample,
+    compute_daily_usage,
+    get_storage_status,
+    init_db,
+    insert_sample,
+    list_samples,
+)
 from app.solplanet_cgi import SolplanetCgiClient
 
 
@@ -52,6 +63,21 @@ solplanet_flow_lock = asyncio.Lock()
 solplanet_context_cache: dict[str, object] = {"payload": None, "at_monotonic": 0.0}
 solplanet_context_lock = asyncio.Lock()
 runtime_lock = asyncio.Lock()
+collector_task: asyncio.Task[None] | None = None
+collector_stop_event = asyncio.Event()
+storage_db_path = Path(os.getenv("WATTIMIZE_DB_PATH", "").strip() or DEFAULT_DB_PATH)
+
+
+def _read_sample_interval_seconds() -> float:
+    raw = os.getenv("WATTIMIZE_SAMPLE_INTERVAL_SECONDS", "").strip()
+    try:
+        value = float(raw) if raw else DEFAULT_SAMPLE_INTERVAL_SECONDS
+    except ValueError:
+        value = DEFAULT_SAMPLE_INTERVAL_SECONDS
+    return max(1.0, value)
+
+
+sample_interval_seconds = _read_sample_interval_seconds()
 
 
 class ConfigPayload(BaseModel):
@@ -792,9 +818,133 @@ async def _replace_runtime(new_settings: Settings) -> None:
         await old_solplanet.aclose()
 
 
+def _sample_from_flow(system: str, flow: dict[str, object]) -> EnergySample:
+    metrics = flow.get("metrics")
+    metrics_map = metrics if isinstance(metrics, dict) else {}
+    source = "solplanet_cgi" if system == "solplanet" else "home_assistant"
+    return EnergySample(
+        system=system,
+        sampled_at_utc=datetime.now(UTC),
+        source=source,
+        pv_w=_to_number(metrics_map.get("pv_w")),
+        grid_w=_to_number(metrics_map.get("grid_w")),
+        battery_w=_to_number(metrics_map.get("battery_w")),
+        load_w=_to_number(metrics_map.get("load_w")),
+        battery_soc_percent=_to_number(metrics_map.get("battery_soc_percent")),
+        inverter_status=str(metrics_map.get("inverter_status"))
+        if metrics_map.get("inverter_status") is not None
+        else None,
+        balance_w=_to_number(metrics_map.get("balance_w")),
+        payload=flow,
+    )
+
+
+async def _store_flow_sample(system: str, flow: dict[str, object]) -> None:
+    sample = _sample_from_flow(system, flow)
+    await asyncio.to_thread(insert_sample, storage_db_path, sample)
+
+
+async def _collect_for_system(system: str) -> None:
+    if system == "saj":
+        if _missing_required_config():
+            return
+        states = await ha_client.all_states()
+        flow = _build_energy_flow_payload("saj", states)
+        await _store_flow_sample("saj", flow)
+        return
+
+    if system == "solplanet":
+        if not solplanet_client.configured:
+            return
+        flow = await _get_solplanet_flow_cached()
+        await _store_flow_sample("solplanet", flow)
+        return
+
+
+async def _collector_loop() -> None:
+    while not collector_stop_event.is_set():
+        loop_started = monotonic()
+        for system in SUPPORTED_SYSTEMS:
+            try:
+                await _collect_for_system(system)
+            except Exception:  # noqa: BLE001
+                # Keep collector alive even if one round fails.
+                continue
+
+        elapsed = monotonic() - loop_started
+        sleep_seconds = max(0.1, sample_interval_seconds - elapsed)
+        try:
+            await asyncio.wait_for(collector_stop_event.wait(), timeout=sleep_seconds)
+        except asyncio.TimeoutError:
+            continue
+
+
+async def _start_collector() -> None:
+    global collector_task  # noqa: PLW0603
+    await asyncio.to_thread(init_db, storage_db_path)
+    collector_stop_event.clear()
+    collector_task = asyncio.create_task(_collector_loop())
+
+
+async def _stop_collector() -> None:
+    global collector_task  # noqa: PLW0603
+    collector_stop_event.set()
+    if collector_task:
+        collector_task.cancel()
+        try:
+            await collector_task
+        except asyncio.CancelledError:
+            pass
+        collector_task = None
+
+
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/storage/status")
+async def storage_status() -> dict[str, object]:
+    return await asyncio.to_thread(get_storage_status, storage_db_path, sample_interval_seconds)
+
+
+@app.get("/api/storage/daily-usage")
+async def storage_daily_usage(
+    system: str = Query(default="saj", description="saj or solplanet"),
+    day_utc: str | None = Query(default=None, description="UTC day in YYYY-MM-DD, default=today"),
+) -> dict[str, object]:
+    normalized = _normalize_system_name(system)
+    target_day = datetime.now(UTC).date()
+    if day_utc:
+        try:
+            target_day = date.fromisoformat(day_utc)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid day_utc format, expected YYYY-MM-DD") from exc
+    return await asyncio.to_thread(
+        compute_daily_usage,
+        storage_db_path,
+        system=normalized,
+        target_day_utc=target_day,
+        sample_interval_seconds=sample_interval_seconds,
+    )
+
+
+@app.get("/api/storage/samples")
+async def storage_samples(
+    system: str | None = Query(default=None, description="saj or solplanet"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+) -> dict[str, object]:
+    normalized: str | None = None
+    if system:
+        normalized = _normalize_system_name(system)
+    return await asyncio.to_thread(
+        list_samples,
+        storage_db_path,
+        system=normalized,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @app.get("/api/config/status")
@@ -1187,7 +1337,13 @@ async def get_solplanet_getdefine() -> dict[str, object]:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    await _stop_collector()
     await solplanet_client.aclose()
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    await _start_collector()
 
 
 @app.get("/api/catalog/domains")

@@ -39,6 +39,9 @@
         <button id="tabEntities" class="tab-btn" type="button" data-tab="entities" data-i18n="entitiesTab">
           Entities
         </button>
+        <button id="tabSampling" class="tab-btn" type="button" data-tab="sampling" data-i18n="samplingTab">
+          Sampling
+        </button>
       </nav>
 
       <section id="dashboardView" class="view">
@@ -248,6 +251,56 @@
                 </tr>
               </thead>
               <tbody id="entitiesBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="samplingView" class="view hidden">
+        <section class="card">
+          <div class="section-header">
+            <h2 data-i18n="samplingTitle">Sampling Records</h2>
+            <span id="samplingUpdatedAt" class="muted">-</span>
+          </div>
+          <p id="samplingStorageMeta" class="muted">-</p>
+          <p id="samplingDailyMeta" class="muted">-</p>
+          <form id="samplingFilterForm" class="filters">
+            <label data-i18n="samplingSystemLabel">
+              System
+              <select id="samplingSystemSelect">
+                <option value="" data-i18n="samplingSystemAll">All</option>
+                <option value="saj">SAJ</option>
+                <option value="solplanet">Solplanet</option>
+              </select>
+            </label>
+            <label data-i18n="samplingDayLabel">
+              Day (UTC)
+              <input id="samplingDayInput" type="date" />
+            </label>
+            <button type="submit" class="btn" data-i18n="samplingApplyBtn">Apply</button>
+          </form>
+          <p id="samplingCount" class="muted">-</p>
+          <div class="pager">
+            <button id="samplingPrevPageBtn" class="btn secondary" type="button" data-i18n="prevBtn">Prev</button>
+            <span id="samplingPageInfo" class="muted">Page -</span>
+            <button id="samplingNextPageBtn" class="btn secondary" type="button" data-i18n="nextBtn">Next</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th data-i18n="samplingTableTime">Sampled At</th>
+                  <th data-i18n="samplingTableSystem">System</th>
+                  <th data-i18n="samplingTablePv">PV(W)</th>
+                  <th data-i18n="samplingTableGrid">Grid(W)</th>
+                  <th data-i18n="samplingTableBattery">Battery(W)</th>
+                  <th data-i18n="samplingTableLoad">Load(W)</th>
+                  <th data-i18n="samplingTableSoc">SOC(%)</th>
+                  <th data-i18n="samplingTableBalance">Balance(W)</th>
+                  <th data-i18n="samplingTableInverter">Inverter</th>
+                </tr>
+              </thead>
+              <tbody id="samplingBody"></tbody>
             </table>
           </div>
         </section>

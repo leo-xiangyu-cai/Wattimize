@@ -27,6 +27,10 @@ Config file path:
 - Docker default: `/app/data/config.json`
 - Override with `WATTIMIZE_CONFIG_PATH`
 
+Persistence config (optional):
+- `WATTIMIZE_DB_PATH` (default: `data/energy_samples.sqlite3`)
+- `WATTIMIZE_SAMPLE_INTERVAL_SECONDS` (default: `5`, min `1`)
+
 ## 3) Run
 
 ```bash
@@ -55,6 +59,10 @@ curl -s http://<wattimize-host>:18000/api/solplanet/cgi/getdefine | jq
 curl -s http://<wattimize-host>:18000/api/catalog/domains | jq
 curl -s http://<wattimize-host>:18000/api/catalog/brands | jq
 curl -s "http://<wattimize-host>:18000/api/entities?brand=saj&domain=sensor&page=1&page_size=20" | jq
+curl -s http://<wattimize-host>:18000/api/storage/status | jq
+curl -s "http://<wattimize-host>:18000/api/storage/daily-usage?system=saj" | jq
+curl -s "http://<wattimize-host>:18000/api/storage/daily-usage?system=solplanet&day_utc=2026-03-03" | jq
+curl -s "http://<wattimize-host>:18000/api/storage/samples?system=saj&page=1&page_size=20" | jq
 ```
 
 `/api/energy-flow/solplanet` behavior:
@@ -77,3 +85,10 @@ First-run configuration:
 - Other values are backend constants (entity ids, port/scheme/ssl/cache/timeout).
 - Saved config is written to `/app/data/config.json` in the container by default.
 - You can override config file path with `WATTIMIZE_CONFIG_PATH`.
+
+## 6) Built-in SQLite Sampling
+
+- Backend starts a background collector at startup.
+- Default sampling frequency is every 5 seconds.
+- Every sample stores current `pv_w/grid_w/battery_w/load_w/soc/inverter_status/balance` and raw flow payload.
+- Daily usage endpoint integrates power snapshots into kWh (UTC day).

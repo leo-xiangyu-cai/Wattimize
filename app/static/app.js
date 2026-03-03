@@ -47,6 +47,7 @@ const I18N = {
     solplanetRawTab: "Solplanet Raw",
     sajRawTab: "SAJ Raw",
     entitiesTab: "Entities",
+    samplingTab: "Sampling",
     systemTitle: "System",
     haTitle: "Home Assistant",
     coreTitle: "Core Entities",
@@ -58,6 +59,25 @@ const I18N = {
     batteryTitle: "Battery",
     socLabel: "SOC",
     entityExplorerTitle: "Entity Explorer",
+    samplingTitle: "Sampling Records",
+    samplingSystemLabel: "System",
+    samplingSystemAll: "All",
+    samplingDayLabel: "Day (UTC)",
+    samplingApplyBtn: "Apply",
+    samplingStorageMeta: "DB {sizeMb} MB · Rows {rows} · Interval {interval}s · Estimated/day {estMb} MB",
+    samplingDailyMeta: "Daily usage ({system}, {day} UTC): Load {load} kWh · PV {pv} kWh · Grid import {gridImport} kWh · Grid export {gridExport} kWh",
+    samplingDailyMetaNoData: "Daily usage ({system}, {day} UTC): not enough samples yet",
+    samplingTableTime: "Sampled At (UTC)",
+    samplingTableSystem: "System",
+    samplingTablePv: "PV(W)",
+    samplingTableGrid: "Grid(W)",
+    samplingTableBattery: "Battery(W)",
+    samplingTableLoad: "Load(W)",
+    samplingTableSoc: "SOC(%)",
+    samplingTableBalance: "Balance(W)",
+    samplingTableInverter: "Inverter",
+    totalSamples: "Total {total} samples",
+    samplePageInfo: "Page {page}/{totalPages} (showing {count})",
     domainLabel: "Domain",
     brandLabel: "Brand",
     queryLabel: "Query",
@@ -169,6 +189,7 @@ const I18N = {
     solplanetRawTab: "Solplanet 原始",
     sajRawTab: "SAJ 原始",
     entitiesTab: "实体",
+    samplingTab: "采样",
     systemTitle: "系统状态",
     haTitle: "Home Assistant",
     coreTitle: "核心实体",
@@ -180,6 +201,25 @@ const I18N = {
     batteryTitle: "电池",
     socLabel: "电池电量",
     entityExplorerTitle: "实体浏览",
+    samplingTitle: "采样记录",
+    samplingSystemLabel: "系统",
+    samplingSystemAll: "全部",
+    samplingDayLabel: "日期 (UTC)",
+    samplingApplyBtn: "应用",
+    samplingStorageMeta: "数据库 {sizeMb} MB · 记录 {rows} 条 · 采样间隔 {interval}s · 预计每天 {estMb} MB",
+    samplingDailyMeta: "日统计 ({system}, {day} UTC): 负载 {load} kWh · 光伏 {pv} kWh · 电网购电 {gridImport} kWh · 电网上网 {gridExport} kWh",
+    samplingDailyMetaNoData: "日统计 ({system}, {day} UTC): 当前样本不足",
+    samplingTableTime: "采样时间 (UTC)",
+    samplingTableSystem: "系统",
+    samplingTablePv: "光伏(W)",
+    samplingTableGrid: "电网(W)",
+    samplingTableBattery: "电池(W)",
+    samplingTableLoad: "负载(W)",
+    samplingTableSoc: "SOC(%)",
+    samplingTableBalance: "平衡(W)",
+    samplingTableInverter: "逆变器",
+    totalSamples: "共 {total} 条采样",
+    samplePageInfo: "第 {page}/{totalPages} 页（当前 {count} 条）",
     domainLabel: "域",
     brandLabel: "品牌",
     queryLabel: "查询",
@@ -268,7 +308,13 @@ const pager = {
   hasNext: false,
   hasPrev: false,
 };
+const samplingPager = {
+  page: 1,
+  hasNext: false,
+  hasPrev: false,
+};
 const PAGE_SIZE = 80;
+const SAMPLING_PAGE_SIZE = 100;
 const AUTO_REFRESH_KEY = "autoRefreshSeconds";
 const AUTO_REFRESH_OPTIONS = [0, 5, 10];
 const SOLPLANET_RAW_APIS = [
@@ -471,6 +517,9 @@ const stateCache = {
   lastEntities: null,
   lastSolplanetRaw: {},
   lastSajRaw: {},
+  lastSamplingStatus: null,
+  lastSamplingDaily: null,
+  lastSamplingPage: null,
   rawCardMode: {},
   systemLoadMeta: {
     saj: { phase: "idle", updatedAt: null, quality: "ok", count: 0 },
@@ -486,7 +535,7 @@ function getLang() {
 }
 
 let currentLang = getLang();
-let currentTab = ["dashboard", "entities", "solplanetRaw", "sajRaw"].includes(localStorage.getItem("activeTab"))
+let currentTab = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sampling"].includes(localStorage.getItem("activeTab"))
   ? localStorage.getItem("activeTab")
   : "dashboard";
 let autoRefreshTimerId = null;
@@ -880,6 +929,95 @@ function renderEntitiesPage(payload) {
   document.getElementById("prevPageBtn").disabled = !Boolean(payload.has_prev);
   document.getElementById("nextPageBtn").disabled = !Boolean(payload.has_next);
   renderEntities(payload.items || []);
+}
+
+function formatMaybeNumber(value, digits = 1) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  return Number(value).toFixed(digits);
+}
+
+function buildSamplingUrl() {
+  const params = new URLSearchParams();
+  const system = document.getElementById("samplingSystemSelect")?.value || "";
+  if (system) params.set("system", system);
+  params.set("page", String(samplingPager.page));
+  params.set("page_size", String(SAMPLING_PAGE_SIZE));
+  return `/api/storage/samples?${params.toString()}`;
+}
+
+function renderSamplingRows(items) {
+  const body = document.getElementById("samplingBody");
+  body.innerHTML = "";
+  for (const item of items) {
+    const tr = document.createElement("tr");
+    const sampledAt = item.sampled_at_utc ? new Date(item.sampled_at_utc).toLocaleString() : "-";
+    tr.innerHTML = `
+      <td>${sampledAt}</td>
+      <td>${item.system || "-"}</td>
+      <td>${formatMaybeNumber(item.pv_w, 1)}</td>
+      <td>${formatMaybeNumber(item.grid_w, 1)}</td>
+      <td>${formatMaybeNumber(item.battery_w, 1)}</td>
+      <td>${formatMaybeNumber(item.load_w, 1)}</td>
+      <td>${formatMaybeNumber(item.battery_soc_percent, 1)}</td>
+      <td>${formatMaybeNumber(item.balance_w, 1)}</td>
+      <td>${item.inverter_status || "-"}</td>
+    `;
+    body.appendChild(tr);
+  }
+}
+
+function renderSamplingPage(payload) {
+  const totalPages = Math.max(1, Math.ceil((payload.total || 0) / (payload.page_size || SAMPLING_PAGE_SIZE)));
+  setText("samplingCount", t("totalSamples", { total: payload.total || 0 }));
+  setText(
+    "samplingPageInfo",
+    t("samplePageInfo", {
+      page: payload.page || 1,
+      totalPages,
+      count: payload.count || 0,
+    }),
+  );
+  document.getElementById("samplingPrevPageBtn").disabled = !Boolean(payload.has_prev);
+  document.getElementById("samplingNextPageBtn").disabled = !Boolean(payload.has_next);
+  renderSamplingRows(payload.items || []);
+}
+
+function renderSamplingStatus(status) {
+  const sizeMb = status?.db_size_bytes ? (Number(status.db_size_bytes) / (1024 * 1024)).toFixed(2) : "0.00";
+  const estMb = status?.estimated_mb_per_day_total ?? 0;
+  setText(
+    "samplingStorageMeta",
+    t("samplingStorageMeta", {
+      sizeMb,
+      rows: status?.rows ?? 0,
+      interval: status?.sample_interval_seconds ?? "-",
+      estMb: Number(estMb).toFixed(2),
+    }),
+  );
+  const updatedAt = status?.last_sample_utc ? new Date(status.last_sample_utc).toLocaleString() : "-";
+  setText("samplingUpdatedAt", `${t("updatedAt")}: ${updatedAt}`);
+}
+
+function renderSamplingDaily(daily) {
+  const system = daily?.system || "-";
+  const day = daily?.day_utc || "-";
+  const energy = daily?.energy_kwh || {};
+  const hasData = Number(daily?.samples || 0) >= 2;
+  if (!hasData) {
+    setText("samplingDailyMeta", t("samplingDailyMetaNoData", { system, day }));
+    return;
+  }
+  setText(
+    "samplingDailyMeta",
+    t("samplingDailyMeta", {
+      system,
+      day,
+      load: formatMaybeNumber(energy.home_load, 3),
+      pv: formatMaybeNumber(energy.solar_generation, 3),
+      gridImport: formatMaybeNumber(energy.grid_import, 3),
+      gridExport: formatMaybeNumber(energy.grid_export, 3),
+    }),
+  );
 }
 
 function getRawCardMode(key) {
@@ -1297,6 +1435,45 @@ async function loadSajRaw() {
   await loadRawPanel(SAJ_RAW_APIS, stateCache.lastSajRaw, "sajRawBody", "sajRawMeta", "sajRawUpdatedAt");
 }
 
+async function loadSampling() {
+  const system = document.getElementById("samplingSystemSelect")?.value || "saj";
+  const dayInput = document.getElementById("samplingDayInput")?.value || "";
+  const dayParam = dayInput || new Date().toISOString().slice(0, 10);
+  const dailyUrl = `/api/storage/daily-usage?system=${encodeURIComponent(system || "saj")}&day_utc=${encodeURIComponent(dayParam)}`;
+
+  const [statusResult, dailyResult, samplesResult] = await Promise.allSettled([
+    fetchJson("/api/storage/status", { timeoutMs: 6000 }),
+    fetchJson(dailyUrl, { timeoutMs: 6000 }),
+    fetchJson(buildSamplingUrl(), { timeoutMs: 6000 }),
+  ]);
+
+  if (statusResult.status === "fulfilled") {
+    stateCache.lastSamplingStatus = statusResult.value;
+    renderSamplingStatus(statusResult.value);
+  } else {
+    setText("samplingStorageMeta", t("loadFailed", { error: String(statusResult.reason) }));
+  }
+
+  if (dailyResult.status === "fulfilled") {
+    stateCache.lastSamplingDaily = dailyResult.value;
+    renderSamplingDaily(dailyResult.value);
+  } else {
+    setText("samplingDailyMeta", t("loadFailed", { error: String(dailyResult.reason) }));
+  }
+
+  if (samplesResult.status === "fulfilled") {
+    const payload = samplesResult.value;
+    samplingPager.hasNext = Boolean(payload.has_next);
+    samplingPager.hasPrev = Boolean(payload.has_prev);
+    stateCache.lastSamplingPage = payload;
+    renderSamplingPage(payload);
+  } else {
+    setText("samplingCount", t("loadFailed", { error: String(samplesResult.reason) }));
+    setText("samplingPageInfo", t("pageDash"));
+    renderSamplingRows([]);
+  }
+}
+
 async function loadCurrentTab() {
   if (!configReady) return;
   if (isLoadingCurrentTab) return;
@@ -1312,6 +1489,10 @@ async function loadCurrentTab() {
     }
     if (currentTab === "sajRaw") {
       await loadSajRaw();
+      return;
+    }
+    if (currentTab === "sampling") {
+      await loadSampling();
       return;
     }
     await loadSummary();
@@ -1341,30 +1522,35 @@ function setAutoRefresh(seconds) {
 }
 
 function setActiveTab(tab, load = true) {
-  currentTab = tab === "entities" || tab === "solplanetRaw" || tab === "sajRaw" ? tab : "dashboard";
+  currentTab = tab === "entities" || tab === "solplanetRaw" || tab === "sajRaw" || tab === "sampling" ? tab : "dashboard";
   localStorage.setItem("activeTab", currentTab);
 
   const dashboardView = document.getElementById("dashboardView");
   const solplanetRawView = document.getElementById("solplanetRawView");
   const sajRawView = document.getElementById("sajRawView");
   const entitiesView = document.getElementById("entitiesView");
+  const samplingView = document.getElementById("samplingView");
   const tabDashboard = document.getElementById("tabDashboard");
   const tabSolplanetRaw = document.getElementById("tabSolplanetRaw");
   const tabSajRaw = document.getElementById("tabSajRaw");
   const tabEntities = document.getElementById("tabEntities");
+  const tabSampling = document.getElementById("tabSampling");
 
   const dashboardActive = currentTab === "dashboard";
   const solplanetRawActive = currentTab === "solplanetRaw";
   const sajRawActive = currentTab === "sajRaw";
+  const samplingActive = currentTab === "sampling";
   const anyRawActive = solplanetRawActive || sajRawActive;
   dashboardView.classList.toggle("hidden", !dashboardActive);
   solplanetRawView.classList.toggle("hidden", !solplanetRawActive);
   sajRawView.classList.toggle("hidden", !sajRawActive);
-  entitiesView.classList.toggle("hidden", dashboardActive || anyRawActive);
+  entitiesView.classList.toggle("hidden", dashboardActive || anyRawActive || samplingActive);
+  samplingView.classList.toggle("hidden", !samplingActive);
   tabDashboard.classList.toggle("active", dashboardActive);
   tabSolplanetRaw.classList.toggle("active", solplanetRawActive);
   tabSajRaw.classList.toggle("active", sajRawActive);
   tabEntities.classList.toggle("active", currentTab === "entities");
+  tabSampling.classList.toggle("active", samplingActive);
 
   if (load) {
     void loadCurrentTab();
@@ -1402,6 +1588,9 @@ document.getElementById("tabSajRaw").addEventListener("click", () => {
 document.getElementById("tabEntities").addEventListener("click", () => {
   setActiveTab("entities");
 });
+document.getElementById("tabSampling").addEventListener("click", () => {
+  setActiveTab("sampling");
+});
 
 document.getElementById("filterForm").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1419,6 +1608,24 @@ document.getElementById("nextPageBtn").addEventListener("click", async () => {
   if (!pager.hasNext) return;
   pager.page += 1;
   await loadEntities();
+});
+
+document.getElementById("samplingFilterForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  samplingPager.page = 1;
+  await loadSampling();
+});
+
+document.getElementById("samplingPrevPageBtn").addEventListener("click", async () => {
+  if (!samplingPager.hasPrev || samplingPager.page <= 1) return;
+  samplingPager.page -= 1;
+  await loadSampling();
+});
+
+document.getElementById("samplingNextPageBtn").addEventListener("click", async () => {
+  if (!samplingPager.hasNext) return;
+  samplingPager.page += 1;
+  await loadSampling();
 });
 
 document.getElementById("configForm").addEventListener("submit", async (event) => {
@@ -1454,6 +1661,10 @@ document.getElementById("configCloseBtn").addEventListener("click", () => {
 });
 
 applyTranslations();
+const samplingDayInput = document.getElementById("samplingDayInput");
+if (samplingDayInput && !samplingDayInput.value) {
+  samplingDayInput.value = new Date().toISOString().slice(0, 10);
+}
 setActiveTab(currentTab, false);
 setAutoRefresh(autoRefreshSeconds);
 void ensureConfigReady().then((ready) => {

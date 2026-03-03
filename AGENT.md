@@ -16,8 +16,6 @@ Long-term goal is multi-brand support (SAJ, Soulplanet, Tesla, others) with unif
 - Current focus: read SAJ entities and explore entities via filters + pagination
 
 Not implemented yet:
-- Persistent database
-- Background collector/scheduler
 - Write/control commands to HA services
 - Integration-level catalog (real HA config entries)
 
@@ -57,6 +55,9 @@ Security:
 Health and connectivity:
 - `GET /api/health`
 - `GET /api/ha/ping`
+- `GET /api/storage/status`
+- `GET /api/storage/daily-usage?system=saj|solplanet&day_utc=YYYY-MM-DD`
+- `GET /api/storage/samples?system=saj|solplanet&page=1&page_size=100`
 
 Core SAJ metrics:
 - `GET /api/entities/core`
@@ -72,6 +73,7 @@ Entity explorer:
 Frontend:
 - `GET /` serves static dashboard
 - `GET /static/*` serves JS/CSS
+- Added `Sampling` tab for SQLite sample table + daily usage/status summary
 
 ## 6) Important Data Semantics
 
@@ -112,7 +114,7 @@ docker compose up -d --build
 ## 9) Known Constraints
 
 - No caching yet: every query fetches HA states live
-- No persistence yet
+- Persistence currently uses local SQLite (single-node design)
 - No auth on FastAPI endpoints yet (LAN-only assumption)
 - Error handling is basic but functional
 
