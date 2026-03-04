@@ -3191,7 +3191,6 @@ function setAutoRefresh(seconds) {
   if (safeSeconds > 0) {
     autoRefreshTimerId = window.setInterval(() => {
       if (!configReady) return;
-      if (currentTab !== "dashboard") return;
       void loadCurrentTab();
     }, safeSeconds * 1000);
   }
