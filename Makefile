@@ -1,4 +1,4 @@
-.PHONY: help docker docker-load inspect
+.PHONY: help docker docker-load inspect dev dev-logs dev-down
 
 IMAGE = wattimize
 TAG = amd64-latest
@@ -14,6 +14,9 @@ help:
 	@echo "  make docker      Build linux/amd64 image and export a timestamped TAR to $(OUTPUT_DIR)"
 	@echo "  make docker-load Load the newest TAR from $(OUTPUT_DIR) into local Docker"
 	@echo "  make inspect     Inspect image architecture/os"
+	@echo "  make dev         Start local docker compose in hot-reload mode"
+	@echo "  make dev-logs    Follow logs for wattimize-api"
+	@echo "  make dev-down    Stop local docker compose services"
 
 docker:
 	@mkdir -p $(OUTPUT_DIR)
@@ -41,3 +44,12 @@ docker-load:
 
 inspect:
 	docker image inspect $(IMAGE):$(TAG) --format '{{.Architecture}}/{{.Os}}'
+
+dev:
+	docker compose up -d --build
+
+dev-logs:
+	docker logs -f wattimize-api
+
+dev-down:
+	docker compose down

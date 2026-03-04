@@ -17,11 +17,15 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 
 from app.config import (
+    ALLOWED_SAMPLE_INTERVAL_SECONDS,
+    CONST_SAJ_SAMPLE_INTERVAL_SECONDS,
+    CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS,
     Settings,
     config_file_exists,
     get_config_path,
     get_missing_required_fields_from_payload,
     load_settings,
+    normalize_sample_interval_seconds,
     read_config_file,
     save_settings,
     settings_to_dict,
@@ -29,7 +33,6 @@ from app.config import (
 from app.home_assistant import HomeAssistantClient
 from app.persistence import (
     DEFAULT_DB_PATH,
-    DEFAULT_SAMPLE_INTERVAL_SECONDS,
     EnergySample,
     compute_daily_usage,
     compute_usage_between,
@@ -72,24 +75,16 @@ runtime_lock = asyncio.Lock()
 collector_task: asyncio.Task[None] | None = None
 collector_stop_event = asyncio.Event()
 storage_db_path = Path(os.getenv("WATTIMIZE_DB_PATH", "").strip() or DEFAULT_DB_PATH)
-
-
-def _read_sample_interval_seconds() -> float:
-    raw = os.getenv("WATTIMIZE_SAMPLE_INTERVAL_SECONDS", "").strip()
-    try:
-        value = float(raw) if raw else DEFAULT_SAMPLE_INTERVAL_SECONDS
-    except ValueError:
-        value = DEFAULT_SAMPLE_INTERVAL_SECONDS
-    return max(1.0, value)
-
-
-sample_interval_seconds = _read_sample_interval_seconds()
+sample_interval_seconds = float(settings.saj_sample_interval_seconds)
+solplanet_sample_interval_seconds = float(settings.solplanet_sample_interval_seconds)
 
 
 class ConfigPayload(BaseModel):
     ha_url: str = Field(default="")
     ha_token: str = Field(default="")
     solplanet_dongle_host: str = Field(default="")
+    saj_sample_interval_seconds: int = Field(default=CONST_SAJ_SAMPLE_INTERVAL_SECONDS)
+    solplanet_sample_interval_seconds: int = Field(default=CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS)
 
 
 SAJ_SLOT_MIN = 1
@@ -172,6 +167,16 @@ def _normalize_system_name(system: str) -> str:
             detail={"message": "Unsupported system", "supported": list(SUPPORTED_SYSTEMS)},
         )
     return normalized
+
+
+def _sample_interval_for_system(system: str) -> float:
+    return solplanet_sample_interval_seconds if system == "solplanet" else sample_interval_seconds
+
+
+def _validate_interval_choice(field_name: str, value: int) -> None:
+    if value not in ALLOWED_SAMPLE_INTERVAL_SECONDS:
+        allowed_text = ", ".join(str(item) for item in ALLOWED_SAMPLE_INTERVAL_SECONDS)
+        raise HTTPException(status_code=400, detail=f"{field_name} must be one of: {allowed_text}")
 
 
 def _ensure_saj_mode_code_allowed(mode_code: int) -> None:
@@ -429,6 +434,12 @@ def _map_solplanet_status(status_code: object) -> str | None:
     return str(code)
 
 
+def _is_solplanet_meter_data_valid(meter_data: dict[str, object]) -> bool:
+    flg = _to_number(meter_data.get("flg"))
+    tim = str(meter_data.get("tim") or "").strip()
+    return flg == 1 and bool(tim)
+
+
 async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
     if not solplanet_client.configured:
         raise HTTPException(
@@ -454,6 +465,7 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
         raise HTTPException(status_code=502, detail="Solplanet CGI inverter serial number is missing")
 
     meter_data: dict[str, object] = {}
+    meter_info: dict[str, object] = {}
     battery_data: dict[str, object] = {}
 
     battery_topo = inverter_item.get("battery_topo")
@@ -474,6 +486,7 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
     tasks = [
         _safe_fetch(solplanet_client.get_inverter_data(inverter_sn)),
         _safe_fetch(solplanet_client.get_meter_data()),
+        _safe_fetch(solplanet_client.get_meter_info()),
     ]
     if battery_sn:
         tasks.append(_safe_fetch(solplanet_client.get_battery_data(battery_sn)))
@@ -481,7 +494,8 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
 
     inverter_data = results[0] if len(results) >= 1 else {}
     meter_data = results[1] if len(results) >= 2 else {}
-    battery_data = results[2] if len(results) >= 3 else {}
+    meter_info = results[2] if len(results) >= 3 else {}
+    battery_data = results[3] if len(results) >= 4 else {}
 
     updated_at = datetime.now(UTC).isoformat()
     inverter_status = _map_solplanet_status(inverter_data.get("stu"))
@@ -492,10 +506,33 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
     if pv_w is None:
         pv_w = _to_number(battery_data.get("ppv"))
 
-    grid_w = _to_number(meter_data.get("pac"))
+    meter_data_valid = _is_solplanet_meter_data_valid(meter_data)
+    if meter_data_valid:
+        grid_w = _to_number(meter_data.get("pac"))
+        grid_source = "meter_data_pac"
+    else:
+        # Some firmwares return an invalid meter data payload (flg=0/tim="") for getdevdata.cgi device=3.
+        meter_pac = _to_number(meter_info.get("meter_pac"))
+        grid_w = meter_pac if meter_pac is not None and abs(meter_pac) > 0 else None
+        grid_source = "meter_info_meter_pac" if grid_w is not None else "unavailable"
     battery_w = _to_number(battery_data.get("pb"))
     load_w = _to_number(inverter_data.get("pac"))
     soc = _to_number(battery_data.get("soc"))
+
+    pv_inputs_zero = (
+        _to_number(inverter_data.get("ppv")) in (None, 0.0)
+        and _to_number(battery_data.get("ppv")) in (None, 0.0)
+        and _sum_array_product(inverter_data.get("vpv"), inverter_data.get("ipv")) in (None, 0.0)
+    )
+    if (
+        pv_w == 0.0
+        and not meter_data_valid
+        and pv_inputs_zero
+        and inverter_status == "running"
+        and load_w is not None
+        and abs(load_w) > 50
+    ):
+        pv_w = None
 
     # Solplanet battery power sign assumption: positive means discharging.
     balance_w: float | None = None
@@ -581,6 +618,7 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
             "inverter_info": inverter_item,
             "inverter_data": inverter_data,
             "meter_data": meter_data,
+            "meter_info": meter_info,
             "battery_data": battery_data,
         },
         "metrics": {
@@ -602,7 +640,9 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
             "notes": [
                 "solplanet_pv_w_prefer_ppv",
                 "solplanet_load_w_uses_inverter_pac",
-                "solplanet_grid_w_uses_meter_pac",
+                "solplanet_grid_w_prefers_meter_data_pac",
+                f"solplanet_grid_w_source:{grid_source}",
+                f"solplanet_meter_data_valid:{str(meter_data_valid).lower()}",
                 "solplanet_battery_w_uses_battery_pb",
             ],
             "fetch_ms": round((monotonic() - started_at) * 1000, 1),
@@ -682,6 +722,7 @@ async def _get_solplanet_cgi_dump() -> dict[str, object]:
         _safe_task("getdevdata_device_2", solplanet_client.get_inverter_data(inverter_sn))
         if inverter_sn
         else _safe_task("getdevdata_device_2", asyncio.sleep(0, result={})),
+        _safe_task("getdev_device_3", solplanet_client.get_meter_info()),
         _safe_task("getdevdata_device_3", solplanet_client.get_meter_data()),
         _safe_task("getdefine", solplanet_client.get_schedule()),
     ]
@@ -700,6 +741,7 @@ async def _get_solplanet_cgi_dump() -> dict[str, object]:
     for name, payload, error in task_results:
         endpoint_path = {
             "getdevdata_device_2": f"getdevdata.cgi?device=2&sn={inverter_sn}" if inverter_sn else "getdevdata.cgi?device=2",
+            "getdev_device_3": "getdev.cgi?device=3",
             "getdevdata_device_3": "getdevdata.cgi?device=3",
             "getdevdata_device_4": f"getdevdata.cgi?device=4&sn={battery_sn}" if battery_sn else "getdevdata.cgi?device=4",
             "getdefine": "getdefine.cgi",
@@ -1151,10 +1193,12 @@ async def _saj_apply_slot(
 
 
 async def _replace_runtime(new_settings: Settings) -> None:
-    global settings, ha_client, solplanet_client  # noqa: PLW0603
+    global settings, ha_client, sample_interval_seconds, solplanet_client, solplanet_sample_interval_seconds  # noqa: PLW0603
     async with runtime_lock:
         old_solplanet = solplanet_client
         settings = new_settings
+        sample_interval_seconds = float(new_settings.saj_sample_interval_seconds)
+        solplanet_sample_interval_seconds = float(new_settings.solplanet_sample_interval_seconds)
         ha_client = HomeAssistantClient(base_url=settings.ha_url, token=settings.ha_token)
         solplanet_client = SolplanetCgiClient(
             host=settings.solplanet_dongle_host,
@@ -1211,17 +1255,24 @@ async def _collect_for_system(system: str) -> None:
 
 
 async def _collector_loop() -> None:
+    last_collected_at: dict[str, float] = {system: 0.0 for system in SUPPORTED_SYSTEMS}
     while not collector_stop_event.is_set():
         loop_started = monotonic()
         for system in SUPPORTED_SYSTEMS:
+            interval = _sample_interval_for_system(system)
+            previous = last_collected_at.get(system, 0.0)
+            if previous > 0.0 and (loop_started - previous) < interval:
+                continue
             try:
                 await _collect_for_system(system)
+                last_collected_at[system] = monotonic()
             except Exception:  # noqa: BLE001
                 # Keep collector alive even if one round fails.
                 continue
 
         elapsed = monotonic() - loop_started
-        sleep_seconds = max(0.1, sample_interval_seconds - elapsed)
+        loop_interval = min(sample_interval_seconds, solplanet_sample_interval_seconds)
+        sleep_seconds = max(0.1, loop_interval - elapsed)
         try:
             await asyncio.wait_for(collector_stop_event.wait(), timeout=sleep_seconds)
         except asyncio.TimeoutError:
@@ -1254,7 +1305,10 @@ async def health() -> dict[str, str]:
 
 @app.get("/api/storage/status")
 async def storage_status() -> dict[str, object]:
-    return await asyncio.to_thread(get_storage_status, storage_db_path, sample_interval_seconds)
+    status = await asyncio.to_thread(get_storage_status, storage_db_path, sample_interval_seconds)
+    status["saj_sample_interval_seconds"] = sample_interval_seconds
+    status["solplanet_sample_interval_seconds"] = solplanet_sample_interval_seconds
+    return status
 
 
 @app.get("/api/storage/daily-usage")
@@ -1274,7 +1328,7 @@ async def storage_daily_usage(
         storage_db_path,
         system=normalized,
         target_day_utc=target_day,
-        sample_interval_seconds=sample_interval_seconds,
+        sample_interval_seconds=_sample_interval_for_system(normalized),
     )
 
 
@@ -1369,7 +1423,7 @@ async def storage_usage_range(
         system=normalized,
         start_at_utc=start_at,
         end_at_utc=end_at,
-        sample_interval_seconds=sample_interval_seconds,
+        sample_interval_seconds=_sample_interval_for_system(normalized),
     )
 
 
@@ -1398,6 +1452,8 @@ async def storage_import_csv(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     status = await asyncio.to_thread(get_storage_status, storage_db_path, sample_interval_seconds)
+    status["saj_sample_interval_seconds"] = sample_interval_seconds
+    status["solplanet_sample_interval_seconds"] = solplanet_sample_interval_seconds
     return {"ok": True, **result, "storage_status": status}
 
 
@@ -1408,6 +1464,9 @@ async def config_status() -> dict[str, object]:
         "configured": len(missing) == 0,
         "missing_required": missing,
         "config_path": str(get_config_path()),
+        "allowed_sample_interval_seconds": list(ALLOWED_SAMPLE_INTERVAL_SECONDS),
+        "saj_sample_interval_seconds": sample_interval_seconds,
+        "solplanet_sample_interval_seconds": solplanet_sample_interval_seconds,
     }
 
 
@@ -1421,7 +1480,23 @@ async def get_config() -> dict[str, object]:
 
 @app.put("/api/config")
 async def put_config(payload: ConfigPayload) -> dict[str, object]:
-    persisted = save_settings(payload.model_dump())
+    saj_interval = normalize_sample_interval_seconds(
+        payload.saj_sample_interval_seconds,
+        CONST_SAJ_SAMPLE_INTERVAL_SECONDS,
+    )
+    solplanet_interval = normalize_sample_interval_seconds(
+        payload.solplanet_sample_interval_seconds,
+        CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS,
+    )
+    _validate_interval_choice("saj_sample_interval_seconds", saj_interval)
+    _validate_interval_choice("solplanet_sample_interval_seconds", solplanet_interval)
+    persisted = save_settings(
+        {
+            **payload.model_dump(),
+            "saj_sample_interval_seconds": saj_interval,
+            "solplanet_sample_interval_seconds": solplanet_interval,
+        }
+    )
     await _replace_runtime(persisted)
     response = settings_to_dict(settings)
     response["configured"] = len(_missing_required_config()) == 0
@@ -1868,6 +1943,32 @@ async def get_solplanet_getdev_device_2() -> dict[str, object]:
         return _build_solplanet_single_endpoint_response(
             name="getdev_device_2",
             path="getdev.cgi?device=2",
+            payload=None,
+            error=f"{type(exc).__name__}: {exc}",
+            started_at=started_at,
+        )
+
+
+@app.get("/api/soulplanet/cgi/getdev-device-3")
+@app.get("/api/solplanet/cgi/getdev-device-3")
+async def get_solplanet_getdev_device_3() -> dict[str, object]:
+    started_at = monotonic()
+    try:
+        payload = await asyncio.wait_for(
+            solplanet_client.get_meter_info(),
+            timeout=settings.solplanet_request_timeout_seconds,
+        )
+        return _build_solplanet_single_endpoint_response(
+            name="getdev_device_3",
+            path="getdev.cgi?device=3",
+            payload=payload,
+            error=None,
+            started_at=started_at,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _build_solplanet_single_endpoint_response(
+            name="getdev_device_3",
+            path="getdev.cgi?device=3",
             payload=None,
             error=f"{type(exc).__name__}: {exc}",
             started_at=started_at,

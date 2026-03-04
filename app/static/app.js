@@ -44,9 +44,16 @@ const I18N = {
     configHaUrlLabel: "HA URL",
     configHaTokenLabel: "HA Token",
     configDongleHostLabel: "Solplanet Dongle Host",
+    configSajSampleIntervalLabel: "SAJ Sampling Interval",
+    configSolplanetSampleIntervalLabel: "Solplanet Sampling Interval",
     configHaUrlPlaceholder: "http://<home-assistant-host>:8123",
     configHaTokenPlaceholder: "Long-lived access token",
     configDongleHostPlaceholder: "<solplanet-dongle-host>",
+    interval5s: "5 seconds",
+    interval10s: "10 seconds",
+    interval30s: "30 seconds",
+    interval1m: "1 minute",
+    interval5m: "5 minutes",
     configNeedSave: "Please fill and save configuration first",
     configStatusCheckFailed: "Config status check failed: {error}",
     configLoadFailed: "Failed to load config: {error}",
@@ -237,6 +244,7 @@ const I18N = {
     rawSummary: "Updated {updated} · OK {ok}/{total} · Failed {failed}",
     rawSummaryDash: "Updated - · OK -/- · Failed -",
     rawApiGetdev2: "Device 2 Info",
+    rawApiGetdev3: "Device 3 Info",
     rawApiGetdevdata2: "Device 2 Data",
     rawApiGetdevdata3: "Device 3 Data",
     rawApiGetdevdata4: "Device 4 Data",
@@ -270,9 +278,16 @@ const I18N = {
     configHaUrlLabel: "HA URL",
     configHaTokenLabel: "HA Token",
     configDongleHostLabel: "Solplanet Dongle Host",
+    configSajSampleIntervalLabel: "SAJ 采样频率",
+    configSolplanetSampleIntervalLabel: "Solplanet 采样频率",
     configHaUrlPlaceholder: "http://<home-assistant-host>:8123",
     configHaTokenPlaceholder: "Long-lived access token",
     configDongleHostPlaceholder: "<solplanet-dongle-host>",
+    interval5s: "5 秒",
+    interval10s: "10 秒",
+    interval30s: "30 秒",
+    interval1m: "1 分钟",
+    interval5m: "5 分钟",
     configNeedSave: "请先填写配置并保存",
     configStatusCheckFailed: "配置状态检查失败: {error}",
     configLoadFailed: "读取配置失败: {error}",
@@ -463,6 +478,7 @@ const I18N = {
     rawSummary: "更新时间 {updated} · 成功 {ok}/{total} · 失败 {failed}",
     rawSummaryDash: "更新时间 - · 成功 -/- · 失败 -",
     rawApiGetdev2: "设备2信息",
+    rawApiGetdev3: "设备3信息",
     rawApiGetdevdata2: "设备2实时",
     rawApiGetdevdata3: "设备3实时",
     rawApiGetdevdata4: "设备4实时",
@@ -497,8 +513,10 @@ const PAGE_SIZE = 80;
 const SAMPLING_PAGE_SIZE = 100;
 const AUTO_REFRESH_KEY = "autoRefreshSeconds";
 const AUTO_REFRESH_OPTIONS = [0, 5, 10];
+const CONFIG_SAMPLE_INTERVAL_OPTIONS = [5, 10, 30, 60, 300];
 const SOLPLANET_RAW_APIS = [
   { key: "getdev_device_2", titleKey: "rawApiGetdev2", url: "/api/solplanet/cgi/getdev-device-2" },
+  { key: "getdev_device_3", titleKey: "rawApiGetdev3", url: "/api/solplanet/cgi/getdev-device-3" },
   { key: "getdevdata_device_2", titleKey: "rawApiGetdevdata2", url: "/api/solplanet/cgi/getdevdata-device-2" },
   { key: "getdevdata_device_3", titleKey: "rawApiGetdevdata3", url: "/api/solplanet/cgi/getdevdata-device-3" },
   { key: "getdevdata_device_4", titleKey: "rawApiGetdevdata4", url: "/api/solplanet/cgi/getdevdata-device-4" },
@@ -539,6 +557,19 @@ const SOLPLANET_RAW_FIELD_HELP = {
     host: { zh: "主从拓扑角色编码", en: "Topology host role code" },
     "battery_topo.0.bat_sn": { zh: "电池序列号", en: "Battery serial number" },
     "battery_topo.0.bat_id": { zh: "电池编号", en: "Battery id" },
+  },
+  getdev_device_3: {
+    mod: { zh: "电表模式编码", en: "Meter mode code" },
+    enb: { zh: "电表使能状态", en: "Meter enable state" },
+    exp_m: { zh: "并网/导出模式编码", en: "Export mode code" },
+    regulate: { zh: "调节模式编码", en: "Regulation mode code" },
+    enb_PF: { zh: "功率因数控制使能", en: "Power factor control enabled" },
+    target_PF: { zh: "目标功率因数", en: "Target power factor" },
+    abs: { zh: "绝对控制参数", en: "Absolute control parameter" },
+    abs_offset: { zh: "绝对控制偏移量", en: "Absolute control offset" },
+    total_pac: { zh: "总有功功率（W）", en: "Total active power (W)" },
+    total_fac: { zh: "总频率（常见 0.01Hz 缩放）", en: "Total frequency (often 0.01Hz scaled)" },
+    meter_pac: { zh: "电表有功功率（W）", en: "Meter active power (W)" },
   },
   getdevdata_device_2: {
     flg: { zh: "数据有效标记（1=有效）", en: "Data valid flag (1=valid)" },
@@ -674,6 +705,10 @@ const SOLPLANET_RAW_FIELD_HELP = {
   },
 };
 const SOLPLANET_DASHBOARD_FIELD_MAP = {
+  getdev_device_3: {
+    meter_pac: [{ metric: "grid_w", kind: "backup", noteZh: "当 device=3 实时包无效时可作为电网功率参考", noteEn: "Fallback grid reference when device-3 realtime payload is invalid" }],
+    total_pac: [{ metric: "load_w", kind: "backup", noteZh: "可作为家庭负载功率的参考值", noteEn: "Reference value for home load power" }],
+  },
   getdevdata_device_2: {
     ppv: [{ metric: "pv_w", kind: "primary", noteZh: "对应 Dashboard 的太阳能卡片数值", noteEn: "Feeds the Solar value shown on Dashboard" }],
     vpv: [{ metric: "pv_w", kind: "backup", noteZh: "与 ipv 组合后作为太阳能卡片备用来源", noteEn: "With ipv, acts as backup source for Solar value" }],
@@ -919,13 +954,27 @@ function fillConfigForm(payload = {}) {
   document.getElementById("cfgHaUrl").value = payload.ha_url || "";
   document.getElementById("cfgHaToken").value = payload.ha_token || "";
   document.getElementById("cfgDongleHost").value = payload.solplanet_dongle_host || "";
+  const sajInterval = Number(payload.saj_sample_interval_seconds);
+  const solplanetInterval = Number(payload.solplanet_sample_interval_seconds);
+  document.getElementById("cfgSajSampleIntervalSeconds").value = String(
+    CONFIG_SAMPLE_INTERVAL_OPTIONS.includes(sajInterval) ? sajInterval : 5
+  );
+  document.getElementById("cfgSolplanetSampleIntervalSeconds").value = String(
+    CONFIG_SAMPLE_INTERVAL_OPTIONS.includes(solplanetInterval) ? solplanetInterval : 60
+  );
 }
 
 function buildConfigPayloadFromForm() {
+  const sajInterval = Number(document.getElementById("cfgSajSampleIntervalSeconds").value);
+  const solplanetInterval = Number(document.getElementById("cfgSolplanetSampleIntervalSeconds").value);
   return {
     ha_url: document.getElementById("cfgHaUrl").value.trim(),
     ha_token: document.getElementById("cfgHaToken").value.trim(),
     solplanet_dongle_host: document.getElementById("cfgDongleHost").value.trim(),
+    saj_sample_interval_seconds: CONFIG_SAMPLE_INTERVAL_OPTIONS.includes(sajInterval) ? sajInterval : 5,
+    solplanet_sample_interval_seconds: CONFIG_SAMPLE_INTERVAL_OPTIONS.includes(solplanetInterval)
+      ? solplanetInterval
+      : 60,
   };
 }
 
@@ -1563,12 +1612,20 @@ function renderSamplingPage(payload) {
 function renderSamplingStatus(status) {
   const sizeMb = status?.db_size_bytes ? (Number(status.db_size_bytes) / (1024 * 1024)).toFixed(2) : "0.00";
   const estMb = status?.estimated_mb_per_day_total ?? 0;
+  const selectedSystem = document.getElementById("samplingSystemSelect")?.value || "saj";
+  let interval = status?.sample_interval_seconds;
+  if (selectedSystem === "saj" && status?.saj_sample_interval_seconds !== undefined) {
+    interval = status.saj_sample_interval_seconds;
+  }
+  if (selectedSystem === "solplanet" && status?.solplanet_sample_interval_seconds !== undefined) {
+    interval = status.solplanet_sample_interval_seconds;
+  }
   setText(
     "samplingStorageMeta",
     t("samplingStorageMeta", {
       sizeMb,
       rows: status?.rows ?? 0,
-      interval: status?.sample_interval_seconds ?? "-",
+      interval: interval ?? "-",
       estMb: Number(estMb).toFixed(2),
     }),
   );
@@ -1852,8 +1909,21 @@ function setRawCardMode(key, mode) {
 
 function formatRawFieldValue(value) {
   if (value === null || value === undefined) return "-";
-  if (Array.isArray(value)) return `[${value.length} items]`;
-  if (typeof value === "object") return "{...}";
+  if (Array.isArray(value)) {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return `[${value.length} items]`;
+    }
+  }
+  if (typeof value === "object") {
+    try {
+      const text = JSON.stringify(value);
+      return text.length > 200 ? `${text.slice(0, 197)}...` : text;
+    } catch {
+      return "{...}";
+    }
+  }
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
   try {
     return JSON.stringify(value);
@@ -2652,7 +2722,7 @@ async function loadSummary() {
   renderSummary(summary);
 
   // Solplanet loads independently so it cannot block SAJ rendering.
-  void fetchJson("/api/energy-flow/solplanet", { timeoutMs: 7000 })
+  void fetchJson("/api/energy-flow/solplanet", { timeoutMs: 30000 })
     .then((solplanetFlow) => {
       if (requestId !== summaryRequestId) return;
       summary.solplanetFlow = { ...solplanetFlow, __load_error: false };
@@ -2703,7 +2773,7 @@ async function loadRawPanel(apis, stateMap, bodyId, metaId, updatedId) {
 
   const tasks = apis.map(async (api) => {
     try {
-      const response = await fetchJson(api.url, { timeoutMs: 20000 });
+      const response = await fetchJson(api.url, { timeoutMs: 30000 });
       stateMap[api.key] = {
         phase: response?.ok ? "done" : "failed",
         path: response?.path || api.url,

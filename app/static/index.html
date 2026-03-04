@@ -421,6 +421,26 @@
             Solplanet Dongle Host
             <input id="cfgDongleHost" type="text" placeholder="<solplanet-dongle-host>" data-i18n-placeholder="configDongleHostPlaceholder" />
           </label>
+          <label data-i18n="configSajSampleIntervalLabel">
+            SAJ 采样频率
+            <select id="cfgSajSampleIntervalSeconds">
+              <option value="5" data-i18n="interval5s">5s</option>
+              <option value="10" data-i18n="interval10s">10s</option>
+              <option value="30" data-i18n="interval30s">30s</option>
+              <option value="60" data-i18n="interval1m">1m</option>
+              <option value="300" data-i18n="interval5m">5m</option>
+            </select>
+          </label>
+          <label data-i18n="configSolplanetSampleIntervalLabel">
+            Solplanet 采样频率
+            <select id="cfgSolplanetSampleIntervalSeconds">
+              <option value="5" data-i18n="interval5s">5s</option>
+              <option value="10" data-i18n="interval10s">10s</option>
+              <option value="30" data-i18n="interval30s">30s</option>
+              <option value="60" data-i18n="interval1m">1m</option>
+              <option value="300" data-i18n="interval5m">5m</option>
+            </select>
+          </label>
           <div class="config-actions">
             <button id="configCloseBtn" type="button" class="btn secondary" data-i18n="configCloseBtn">关闭</button>
             <button id="configSaveBtn" type="submit" class="btn" data-i18n="configSaveBtn">保存配置</button>

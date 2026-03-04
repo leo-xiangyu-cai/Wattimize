@@ -30,7 +30,10 @@ CONST_SOLPLANET_DONGLE_PORT = 443
 CONST_SOLPLANET_DONGLE_SCHEME = "https"
 CONST_SOLPLANET_VERIFY_SSL = False
 CONST_SOLPLANET_CACHE_SECONDS = 3.0
-CONST_SOLPLANET_REQUEST_TIMEOUT_SECONDS = 12.0
+CONST_SOLPLANET_REQUEST_TIMEOUT_SECONDS = 30.0
+ALLOWED_SAMPLE_INTERVAL_SECONDS: tuple[int, ...] = (5, 10, 30, 60, 300)
+CONST_SAJ_SAMPLE_INTERVAL_SECONDS = 5
+CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -45,6 +48,18 @@ class Settings:
     solplanet_verify_ssl: bool
     solplanet_cache_seconds: float
     solplanet_request_timeout_seconds: float
+    saj_sample_interval_seconds: int
+    solplanet_sample_interval_seconds: int
+
+
+def normalize_sample_interval_seconds(value: object, default: int) -> int:
+    try:
+        parsed = int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return default
+    if parsed in ALLOWED_SAMPLE_INTERVAL_SECONDS:
+        return parsed
+    return default
 
 
 def get_config_path() -> Path:
@@ -78,6 +93,8 @@ def _env_values() -> dict[str, object]:
         "ha_url": os.getenv("HA_URL", "").strip(),
         "ha_token": os.getenv("HA_TOKEN", "").strip(),
         "solplanet_dongle_host": os.getenv("SOLPLANET_DONGLE_HOST", "").strip(),
+        "saj_sample_interval_seconds": os.getenv("WATTIMIZE_SAMPLE_INTERVAL_SECONDS", "").strip(),
+        "solplanet_sample_interval_seconds": os.getenv("WATTIMIZE_SOLPLANET_SAMPLE_INTERVAL_SECONDS", "").strip(),
     }
 
 
@@ -93,6 +110,14 @@ def _build_settings(raw: dict[str, object]) -> Settings:
         solplanet_verify_ssl=CONST_SOLPLANET_VERIFY_SSL,
         solplanet_cache_seconds=CONST_SOLPLANET_CACHE_SECONDS,
         solplanet_request_timeout_seconds=CONST_SOLPLANET_REQUEST_TIMEOUT_SECONDS,
+        saj_sample_interval_seconds=normalize_sample_interval_seconds(
+            raw.get("saj_sample_interval_seconds"),
+            CONST_SAJ_SAMPLE_INTERVAL_SECONDS,
+        ),
+        solplanet_sample_interval_seconds=normalize_sample_interval_seconds(
+            raw.get("solplanet_sample_interval_seconds"),
+            CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS,
+        ),
     )
 
 
@@ -106,6 +131,8 @@ def settings_to_dict(settings: Settings) -> dict[str, object]:
         "ha_url": settings.ha_url,
         "ha_token": settings.ha_token,
         "solplanet_dongle_host": settings.solplanet_dongle_host,
+        "saj_sample_interval_seconds": settings.saj_sample_interval_seconds,
+        "solplanet_sample_interval_seconds": settings.solplanet_sample_interval_seconds,
     }
 
 
