@@ -204,7 +204,27 @@
             <span id="solplanetRawUpdatedAt" class="muted">-</span>
           </div>
           <p id="solplanetRawMeta" class="muted">-</p>
+          <div class="raw-switch">
+            <button id="solplanetRawModeCardsBtn" type="button" class="raw-tab-btn active" data-i18n="solplanetRawModeCards">
+              API Cards
+            </button>
+            <button id="solplanetRawModeTableBtn" type="button" class="raw-tab-btn" data-i18n="solplanetRawModeTable">
+              DB Table
+            </button>
+          </div>
           <div id="solplanetRawBody" class="raw-grid"></div>
+          <div id="solplanetRawTableWrap" class="table-wrap hidden">
+            <table>
+              <thead>
+                <tr>
+                  <th data-i18n="rawKvAttr">Attribute</th>
+                  <th data-i18n="rawKvValue">Value</th>
+                  <th data-i18n="rawKvSource">Source</th>
+                </tr>
+              </thead>
+              <tbody id="solplanetRawTableBody"></tbody>
+            </table>
+          </div>
         </section>
       </section>
 

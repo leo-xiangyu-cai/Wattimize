@@ -870,6 +870,44 @@ td {
   color: var(--danger);
 }
 
+.raw-meta-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.raw-meta-label {
+  color: #5c6f61;
+  font-weight: 600;
+}
+
+.raw-status-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.raw-status-badge.success {
+  background: #e2f6ea;
+  color: #187a47;
+  border: 1px solid #9cd8b3;
+}
+
+.raw-status-badge.failed {
+  background: #fde7e9;
+  color: #b42a3a;
+  border: 1px solid #efb5bc;
+}
+
+.raw-time-ago {
+  color: #6c7b70;
+}
+
 .raw-explain {
   margin-top: 8px;
 }
@@ -972,6 +1010,16 @@ td {
 .raw-help-table tr.raw-row-dashboard-backup td:first-child {
   box-shadow: inset 3px 0 0 #2f79c5;
   font-weight: 700;
+}
+
+#solplanetRawTableBody td:nth-child(1),
+#solplanetRawTableBody td:nth-child(3) {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 12px;
+}
+
+#solplanetRawTableBody td:nth-child(2) {
+  word-break: break-word;
 }
 
 .raw-help-empty {

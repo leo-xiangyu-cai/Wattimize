@@ -25,6 +25,14 @@ CSV_HEADERS: tuple[str, ...] = (
     "balance_w",
     "payload_json",
 )
+SOLPLANET_ENDPOINT_TABLES: dict[str, str] = {
+    "getdev_device_2": "solplanet_getdev_device_2",
+    "getdev_device_3": "solplanet_getdev_device_3",
+    "getdevdata_device_2": "solplanet_getdevdata_device_2",
+    "getdevdata_device_3": "solplanet_getdevdata_device_3",
+    "getdevdata_device_4": "solplanet_getdevdata_device_4",
+    "getdefine": "solplanet_getdefine",
+}
 
 
 @dataclass(frozen=True)
@@ -71,6 +79,31 @@ def init_db(db_path: Path) -> None:
             ON energy_samples(system, sampled_at_epoch);
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS realtime_kv (
+                attribute TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                source TEXT NOT NULL
+            );
+            """
+        )
+        for table_name in SOLPLANET_ENDPOINT_TABLES.values():
+            conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    id INTEGER PRIMARY KEY CHECK(id = 1),
+                    path TEXT NOT NULL,
+                    requested_at_utc TEXT NOT NULL,
+                    requested_at_epoch REAL NOT NULL,
+                    ok INTEGER NOT NULL,
+                    error TEXT,
+                    payload_json TEXT,
+                    fetch_ms REAL,
+                    last_success_at_utc TEXT
+                );
+                """
+            )
         conn.commit()
 
 
@@ -516,6 +549,265 @@ def list_samples(
         "has_next": end < total,
         "has_prev": page > 1,
         "items": items,
+    }
+
+
+def get_latest_sample(db_path: Path, *, system: str) -> dict[str, object] | None:
+    if not db_path.exists():
+        return None
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    sampled_at_utc,
+                    source,
+                    pv_w,
+                    grid_w,
+                    battery_w,
+                    load_w,
+                    battery_soc_percent,
+                    inverter_status,
+                    balance_w,
+                    payload_json
+                FROM energy_samples
+                WHERE system = ?
+                ORDER BY sampled_at_epoch DESC
+                LIMIT 1;
+                """,
+                (system,),
+            ).fetchone()
+    except sqlite3.OperationalError:
+        return None
+
+    if not row:
+        return None
+
+    payload_json = row[9]
+    payload: dict[str, object] = {}
+    if isinstance(payload_json, str) and payload_json.strip():
+        try:
+            parsed = json.loads(payload_json)
+            if isinstance(parsed, dict):
+                payload = parsed
+        except json.JSONDecodeError:
+            payload = {}
+
+    return {
+        "system": system,
+        "sampled_at_utc": row[0],
+        "source": row[1],
+        "pv_w": row[2],
+        "grid_w": row[3],
+        "battery_w": row[4],
+        "load_w": row[5],
+        "battery_soc_percent": row[6],
+        "inverter_status": row[7],
+        "balance_w": row[8],
+        "payload": payload,
+    }
+
+
+def upsert_realtime_kv(db_path: Path, rows: list[tuple[str, str, str]]) -> None:
+    if not rows:
+        return
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO realtime_kv(attribute, value, source)
+            VALUES (?, ?, ?)
+            ON CONFLICT(attribute) DO UPDATE SET
+                value = excluded.value,
+                source = excluded.source;
+            """,
+            rows,
+        )
+        conn.commit()
+
+
+def get_realtime_kv_by_prefix(db_path: Path, *, prefix: str) -> dict[str, dict[str, object]]:
+    if not db_path.exists():
+        return {}
+    try:
+        with sqlite3.connect(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT attribute, value, source
+                FROM realtime_kv
+                WHERE attribute LIKE ?;
+                """,
+                (f"{prefix}%",),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+
+    data: dict[str, dict[str, object]] = {}
+    for attribute, value_text, source in rows:
+        parsed_value: object = value_text
+        if isinstance(value_text, str):
+            try:
+                parsed_value = json.loads(value_text)
+            except json.JSONDecodeError:
+                parsed_value = value_text
+        data[str(attribute)] = {
+            "value": parsed_value,
+            "source": str(source or ""),
+        }
+    return data
+
+
+def list_realtime_kv_rows(db_path: Path, *, prefix: str | None = None) -> list[dict[str, object]]:
+    if not db_path.exists():
+        return []
+    where_sql = ""
+    params: tuple[object, ...] = ()
+    if prefix:
+        where_sql = "WHERE attribute LIKE ?"
+        params = (f"{prefix}%",)
+    try:
+        with sqlite3.connect(db_path) as conn:
+            rows = conn.execute(
+                f"""
+                SELECT attribute, value, source
+                FROM realtime_kv
+                {where_sql}
+                ORDER BY attribute ASC;
+                """,
+                params,
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+
+    items: list[dict[str, object]] = []
+    for attribute, value_text, source in rows:
+        parsed_value: object = value_text
+        if isinstance(value_text, str):
+            try:
+                parsed_value = json.loads(value_text)
+            except json.JSONDecodeError:
+                parsed_value = value_text
+        items.append(
+            {
+                "attribute": str(attribute),
+                "value": parsed_value,
+                "source": str(source or ""),
+            }
+        )
+    return items
+
+
+def upsert_solplanet_endpoint_snapshot(
+    db_path: Path,
+    *,
+    endpoint: str,
+    path: str,
+    requested_at_utc: str,
+    ok: bool,
+    error: str | None,
+    payload: dict[str, object] | None,
+    fetch_ms: float | None,
+) -> None:
+    table_name = SOLPLANET_ENDPOINT_TABLES.get(endpoint)
+    if not table_name:
+        raise ValueError(f"Unsupported endpoint: {endpoint}")
+
+    parsed_requested = datetime.fromisoformat(requested_at_utc.replace("Z", "+00:00"))
+    if parsed_requested.tzinfo is None:
+        parsed_requested = parsed_requested.replace(tzinfo=UTC)
+    requested_norm = parsed_requested.astimezone(UTC).isoformat()
+    requested_epoch = parsed_requested.astimezone(UTC).timestamp()
+
+    payload_json = None if payload is None else json.dumps(payload, ensure_ascii=False)
+
+    with sqlite3.connect(db_path) as conn:
+        existing = conn.execute(
+            f"SELECT last_success_at_utc FROM {table_name} WHERE id = 1;"
+        ).fetchone()
+        previous_success = existing[0] if existing else None
+        last_success = requested_norm if ok else previous_success
+        conn.execute(
+            f"""
+            INSERT INTO {table_name} (
+                id,
+                path,
+                requested_at_utc,
+                requested_at_epoch,
+                ok,
+                error,
+                payload_json,
+                fetch_ms,
+                last_success_at_utc
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                path = excluded.path,
+                requested_at_utc = excluded.requested_at_utc,
+                requested_at_epoch = excluded.requested_at_epoch,
+                ok = excluded.ok,
+                error = excluded.error,
+                payload_json = excluded.payload_json,
+                fetch_ms = excluded.fetch_ms,
+                last_success_at_utc = excluded.last_success_at_utc;
+            """,
+            (
+                path,
+                requested_norm,
+                requested_epoch,
+                1 if ok else 0,
+                error,
+                payload_json,
+                fetch_ms,
+                last_success,
+            ),
+        )
+        conn.commit()
+
+
+def get_solplanet_endpoint_snapshot(db_path: Path, *, endpoint: str) -> dict[str, object] | None:
+    table_name = SOLPLANET_ENDPOINT_TABLES.get(endpoint)
+    if not table_name or not db_path.exists():
+        return None
+    try:
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                f"""
+                SELECT
+                    path,
+                    requested_at_utc,
+                    ok,
+                    error,
+                    payload_json,
+                    fetch_ms,
+                    last_success_at_utc
+                FROM {table_name}
+                WHERE id = 1;
+                """
+            ).fetchone()
+    except sqlite3.OperationalError:
+        return None
+
+    if not row:
+        return None
+
+    payload_json = row[4]
+    payload: dict[str, object] | None = None
+    if isinstance(payload_json, str) and payload_json.strip():
+        try:
+            parsed = json.loads(payload_json)
+            if isinstance(parsed, dict):
+                payload = parsed
+        except json.JSONDecodeError:
+            payload = None
+
+    return {
+        "endpoint": endpoint,
+        "path": row[0],
+        "requested_at_utc": row[1],
+        "ok": bool(row[2]),
+        "error": row[3],
+        "payload": payload,
+        "fetch_ms": row[5],
+        "last_success_at_utc": row[6],
     }
 
 

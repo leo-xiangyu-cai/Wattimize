@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 from collections import Counter
@@ -37,12 +38,18 @@ from app.persistence import (
     compute_daily_usage,
     compute_usage_between,
     export_samples_csv,
+    get_realtime_kv_by_prefix,
+    get_solplanet_endpoint_snapshot,
+    get_latest_sample,
     get_series_samples,
     get_storage_status,
     import_samples_csv,
     init_db,
     insert_sample,
+    list_realtime_kv_rows,
     list_samples,
+    upsert_solplanet_endpoint_snapshot,
+    upsert_realtime_kv,
 )
 from app.solplanet_cgi import SolplanetCgiClient
 
@@ -61,6 +68,7 @@ SYSTEM_PREFIXES: dict[str, tuple[str, ...]] = {
     "saj": ("saj",),
     "solplanet": ("solplanet", "soulplanet"),
 }
+BALANCE_TOLERANCE_W = 120.0
 
 app = FastAPI(title="Wattimize API", version="0.1.0")
 static_dir = Path(__file__).parent / "static"
@@ -77,6 +85,34 @@ collector_stop_event = asyncio.Event()
 storage_db_path = Path(os.getenv("WATTIMIZE_DB_PATH", "").strip() or DEFAULT_DB_PATH)
 sample_interval_seconds = float(settings.saj_sample_interval_seconds)
 solplanet_sample_interval_seconds = float(settings.solplanet_sample_interval_seconds)
+collector_status: dict[str, dict[str, object]] = {
+    "saj": {
+        "in_progress": False,
+        "continuous": False,
+        "interval_seconds": sample_interval_seconds,
+        "last_started_at": None,
+        "last_finished_at": None,
+        "last_success_at": None,
+        "last_error_at": None,
+        "last_error": None,
+        "last_duration_ms": None,
+        "success_count": 0,
+        "failure_count": 0,
+    },
+    "solplanet": {
+        "in_progress": False,
+        "continuous": True,
+        "interval_seconds": None,
+        "last_started_at": None,
+        "last_finished_at": None,
+        "last_success_at": None,
+        "last_error_at": None,
+        "last_error": None,
+        "last_duration_ms": None,
+        "success_count": 0,
+        "failure_count": 0,
+    },
+}
 
 
 class ConfigPayload(BaseModel):
@@ -344,7 +380,7 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
         grid_import_w = max(grid_w, 0)
         grid_export_w = max(-grid_w, 0)
         balance_w = pv_w + battery_discharge_w + grid_import_w - load_w - battery_charge_w - grid_export_w
-        balanced = round(balance_w) == 0
+        balanced = abs(balance_w) <= BALANCE_TOLERANCE_W
 
     matched_entities = [item for item in (pv, grid, battery, load, soc, inverter) if item]
     inverter_status = inverter.get("state") if inverter else None
@@ -450,11 +486,53 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
             },
         )
 
+    async def _save_endpoint_snapshot(
+        *,
+        endpoint: str,
+        path: str,
+        ok: bool,
+        error: str | None,
+        payload: dict[str, object] | None,
+        fetch_ms: float | None,
+    ) -> None:
+        await asyncio.to_thread(
+            upsert_solplanet_endpoint_snapshot,
+            storage_db_path,
+            endpoint=endpoint,
+            path=path,
+            requested_at_utc=datetime.now(UTC).isoformat(),
+            ok=ok,
+            error=error,
+            payload=payload,
+            fetch_ms=fetch_ms,
+        )
+
     started_at = monotonic()
-    inverter_info = await asyncio.wait_for(
-        solplanet_client.get_inverter_info(),
-        timeout=settings.solplanet_request_timeout_seconds,
-    )
+    getdev2_started = monotonic()
+    try:
+        inverter_info = await asyncio.wait_for(
+            solplanet_client.get_inverter_info(),
+            timeout=settings.solplanet_request_timeout_seconds,
+        )
+        await _save_endpoint_snapshot(
+            endpoint="getdev_device_2",
+            path="getdev.cgi?device=2",
+            ok=True,
+            error=None,
+            payload=inverter_info if isinstance(inverter_info, dict) else {},
+            fetch_ms=round((monotonic() - getdev2_started) * 1000, 1),
+        )
+    except Exception as exc:  # noqa: BLE001
+        await _save_endpoint_snapshot(
+            endpoint="getdev_device_2",
+            path="getdev.cgi?device=2",
+            ok=False,
+            error=f"{type(exc).__name__}: {exc}",
+            payload=None,
+            fetch_ms=round((monotonic() - getdev2_started) * 1000, 1),
+        )
+        raise
+
     inv_list = inverter_info.get("inv")
     if not isinstance(inv_list, list) or not inv_list:
         raise HTTPException(status_code=502, detail="Solplanet CGI returned empty inverter list")
@@ -467,6 +545,7 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
     meter_data: dict[str, object] = {}
     meter_info: dict[str, object] = {}
     battery_data: dict[str, object] = {}
+    schedule_data: dict[str, object] = {}
 
     battery_topo = inverter_item.get("battery_topo")
     battery_sn: str | None = None
@@ -476,26 +555,83 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
             sn = maybe_first.get("bat_sn")
             if sn:
                 battery_sn = str(sn)
-    async def _safe_fetch(coro: object) -> dict[str, object]:
+    async def _safe_fetch(
+        *,
+        endpoint: str,
+        path: str,
+        coro: object,
+    ) -> tuple[str, str, dict[str, object] | None, str | None, float]:
+        fetch_started = monotonic()
         try:
             result = await asyncio.wait_for(coro, timeout=settings.solplanet_request_timeout_seconds)
-            return result if isinstance(result, dict) else {}
-        except (httpx.HTTPError, TimeoutError, asyncio.TimeoutError):
-            return {}
+            payload = result if isinstance(result, dict) else {}
+            return endpoint, path, payload, None, round((monotonic() - fetch_started) * 1000, 1)
+        except Exception as exc:  # noqa: BLE001
+            return endpoint, path, None, f"{type(exc).__name__}: {exc}", round((monotonic() - fetch_started) * 1000, 1)
 
     tasks = [
-        _safe_fetch(solplanet_client.get_inverter_data(inverter_sn)),
-        _safe_fetch(solplanet_client.get_meter_data()),
-        _safe_fetch(solplanet_client.get_meter_info()),
+        _safe_fetch(
+            endpoint="getdevdata_device_2",
+            path=f"getdevdata.cgi?device=2&sn={inverter_sn}",
+            coro=solplanet_client.get_inverter_data(inverter_sn),
+        ),
+        _safe_fetch(
+            endpoint="getdevdata_device_3",
+            path="getdevdata.cgi?device=3",
+            coro=solplanet_client.get_meter_data(),
+        ),
+        _safe_fetch(
+            endpoint="getdev_device_3",
+            path="getdev.cgi?device=3",
+            coro=solplanet_client.get_meter_info(),
+        ),
+        _safe_fetch(
+            endpoint="getdefine",
+            path="getdefine.cgi",
+            coro=solplanet_client.get_schedule(),
+        ),
     ]
     if battery_sn:
-        tasks.append(_safe_fetch(solplanet_client.get_battery_data(battery_sn)))
-    results = await asyncio.gather(*tasks)
+        tasks.append(
+            _safe_fetch(
+                endpoint="getdevdata_device_4",
+                path=f"getdevdata.cgi?device=4&sn={battery_sn}",
+                coro=solplanet_client.get_battery_data(battery_sn),
+            )
+        )
+    else:
+        tasks.append(
+            _safe_fetch(
+                endpoint="getdevdata_device_4",
+                path="getdevdata.cgi?device=4",
+                coro=asyncio.sleep(0, result={}),
+            )
+        )
 
-    inverter_data = results[0] if len(results) >= 1 else {}
-    meter_data = results[1] if len(results) >= 2 else {}
-    meter_info = results[2] if len(results) >= 3 else {}
-    battery_data = results[3] if len(results) >= 4 else {}
+    raw_results = await asyncio.gather(*tasks)
+    endpoint_map: dict[str, tuple[dict[str, object] | None, str | None, str, float]] = {}
+    for endpoint, path, payload, error, fetch_ms in raw_results:
+        is_ok = error is None and not (endpoint == "getdevdata_device_4" and not battery_sn)
+        error_text = error
+        if endpoint == "getdevdata_device_4" and not battery_sn:
+            is_ok = False
+            error_text = "ValueError: Missing battery_sn"
+            payload = None
+        await _save_endpoint_snapshot(
+            endpoint=endpoint,
+            path=path,
+            ok=is_ok,
+            error=error_text,
+            payload=payload,
+            fetch_ms=fetch_ms,
+        )
+        endpoint_map[endpoint] = (payload, error_text, path, fetch_ms)
+
+    inverter_data = endpoint_map.get("getdevdata_device_2", ({}, None, "", 0.0))[0] or {}
+    meter_data = endpoint_map.get("getdevdata_device_3", ({}, None, "", 0.0))[0] or {}
+    meter_info = endpoint_map.get("getdev_device_3", ({}, None, "", 0.0))[0] or {}
+    schedule_data = endpoint_map.get("getdefine", ({}, None, "", 0.0))[0] or {}
+    battery_data = endpoint_map.get("getdevdata_device_4", ({}, None, "", 0.0))[0] or {}
 
     updated_at = datetime.now(UTC).isoformat()
     inverter_status = _map_solplanet_status(inverter_data.get("stu"))
@@ -506,6 +642,10 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
     if pv_w is None:
         pv_w = _to_number(battery_data.get("ppv"))
 
+    battery_w = _to_number(battery_data.get("pb"))
+    load_w = _to_number(inverter_data.get("pac"))
+    soc = _to_number(battery_data.get("soc"))
+
     meter_data_valid = _is_solplanet_meter_data_valid(meter_data)
     if meter_data_valid:
         grid_w = _to_number(meter_data.get("pac"))
@@ -513,26 +653,8 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
     else:
         # Some firmwares return an invalid meter data payload (flg=0/tim="") for getdevdata.cgi device=3.
         meter_pac = _to_number(meter_info.get("meter_pac"))
-        grid_w = meter_pac if meter_pac is not None and abs(meter_pac) > 0 else None
+        grid_w = meter_pac if meter_pac is not None else None
         grid_source = "meter_info_meter_pac" if grid_w is not None else "unavailable"
-    battery_w = _to_number(battery_data.get("pb"))
-    load_w = _to_number(inverter_data.get("pac"))
-    soc = _to_number(battery_data.get("soc"))
-
-    pv_inputs_zero = (
-        _to_number(inverter_data.get("ppv")) in (None, 0.0)
-        and _to_number(battery_data.get("ppv")) in (None, 0.0)
-        and _sum_array_product(inverter_data.get("vpv"), inverter_data.get("ipv")) in (None, 0.0)
-    )
-    if (
-        pv_w == 0.0
-        and not meter_data_valid
-        and pv_inputs_zero
-        and inverter_status == "running"
-        and load_w is not None
-        and abs(load_w) > 50
-    ):
-        pv_w = None
 
     # Solplanet battery power sign assumption: positive means discharging.
     balance_w: float | None = None
@@ -543,7 +665,7 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
         grid_import_w = max(grid_w, 0)
         grid_export_w = max(-grid_w, 0)
         balance_w = pv_w + battery_discharge_w + grid_import_w - load_w - battery_charge_w - grid_export_w
-        balanced = round(balance_w) == 0
+        balanced = abs(balance_w) <= BALANCE_TOLERANCE_W
 
     entities: dict[str, dict[str, object] | None] = {
         "pv": _solplanet_pseudo_entity(
@@ -619,6 +741,7 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
             "inverter_data": inverter_data,
             "meter_data": meter_data,
             "meter_info": meter_info,
+            "schedule": schedule_data,
             "battery_data": battery_data,
         },
         "metrics": {
@@ -841,6 +964,56 @@ def _build_solplanet_single_endpoint_response(
             "scheme": settings.solplanet_dongle_scheme,
         },
     }
+
+
+async def _solplanet_endpoint_response_from_snapshot(
+    *,
+    name: str,
+    path: str,
+    started_at: float,
+) -> dict[str, object]:
+    snapshot = await asyncio.to_thread(get_solplanet_endpoint_snapshot, storage_db_path, endpoint=name)
+    if not snapshot:
+        response = _build_solplanet_single_endpoint_response(
+            name=name,
+            path=path,
+            payload=None,
+            error="No snapshot stored yet",
+            started_at=started_at,
+        )
+        response["status"] = "missing"
+        response["last_requested_at"] = None
+        response["last_success_at"] = None
+        response["source"] = {"type": "solplanet_endpoint_snapshot_table"}
+        return response
+
+    snap_ok = bool(snapshot.get("ok"))
+    snap_error = str(snapshot.get("error") or "Last request failed") if not snap_ok else None
+    snap_payload = snapshot.get("payload") if isinstance(snapshot.get("payload"), dict) else None
+    snap_path = str(snapshot.get("path") or path)
+    response = _build_solplanet_single_endpoint_response(
+        name=name,
+        path=snap_path,
+        payload=snap_payload,
+        error=snap_error,
+        started_at=started_at,
+    )
+    requested_at = snapshot.get("requested_at_utc")
+    if isinstance(requested_at, str) and requested_at:
+        response["updated_at"] = requested_at
+        response["last_requested_at"] = requested_at
+    else:
+        response["last_requested_at"] = None
+    response["last_success_at"] = snapshot.get("last_success_at_utc")
+    response["status"] = "success" if snap_ok else "failed"
+    response["ok"] = snap_ok
+    response["error"] = snap_error
+    if snapshot.get("fetch_ms") is not None:
+        response["fetch_ms"] = snapshot.get("fetch_ms")
+    response["source"] = {
+        "type": "solplanet_endpoint_snapshot_table",
+    }
+    return response
 
 
 def _build_saj_single_endpoint_response(
@@ -1207,6 +1380,10 @@ async def _replace_runtime(new_settings: Settings) -> None:
             verify_ssl=settings.solplanet_verify_ssl,
             timeout_seconds=settings.solplanet_request_timeout_seconds,
         )
+        collector_status.setdefault("saj", {})["interval_seconds"] = sample_interval_seconds
+        collector_status.setdefault("saj", {})["continuous"] = False
+        collector_status.setdefault("solplanet", {})["interval_seconds"] = None
+        collector_status.setdefault("solplanet", {})["continuous"] = True
         _reset_solplanet_caches()
         await old_solplanet.aclose()
 
@@ -1232,9 +1409,211 @@ def _sample_from_flow(system: str, flow: dict[str, object]) -> EnergySample:
     )
 
 
+def _safe_parse_utc(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _kv_source_for_path(system: str, path: str) -> str:
+    def _cgi_url(endpoint: str) -> str:
+        return (
+            f"{settings.solplanet_dongle_scheme}://"
+            f"{settings.solplanet_dongle_host}:{settings.solplanet_dongle_port}/{endpoint}"
+        )
+
+    if system != "solplanet":
+        return "home_assistant_derived"
+    if path.startswith("raw.inverter_info"):
+        return _cgi_url("getdev.cgi?device=2")
+    if path.startswith("raw.inverter_data"):
+        return _cgi_url("getdevdata.cgi?device=2")
+    if path.startswith("raw.meter_data"):
+        return _cgi_url("getdevdata.cgi?device=3")
+    if path.startswith("raw.meter_info"):
+        return _cgi_url("getdev.cgi?device=3")
+    if path.startswith("raw.battery_data"):
+        return _cgi_url("getdevdata.cgi?device=4")
+    if path.startswith("raw.schedule"):
+        return _cgi_url("getdefine.cgi")
+    if path.startswith("metrics.pv_w") or path.startswith("metrics.load_w") or path.startswith("metrics.inverter_status"):
+        return _cgi_url("getdevdata.cgi?device=2")
+    if path.startswith("metrics.grid_w"):
+        return _cgi_url("getdevdata.cgi?device=3")
+    if path.startswith("metrics.battery_w") or path.startswith("metrics.battery_soc_percent"):
+        return _cgi_url("getdevdata.cgi?device=4")
+    if path.startswith("metrics"):
+        return _cgi_url("getdevdata.cgi?device=2")
+    return _cgi_url("getdev.cgi?device=2")
+
+
+def _flatten_payload_to_kv(
+    *,
+    system: str,
+    path: str,
+    value: object,
+    out_rows: list[tuple[str, str, str]],
+) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key)
+            next_path = f"{path}.{key_text}" if path else key_text
+            _flatten_payload_to_kv(system=system, path=next_path, value=item, out_rows=out_rows)
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            next_path = f"{path}.{index}" if path else str(index)
+            _flatten_payload_to_kv(system=system, path=next_path, value=item, out_rows=out_rows)
+        return
+    if not path:
+        return
+
+    attribute = f"{system}.{path}"
+    source = _kv_source_for_path(system, path)
+    out_rows.append((attribute, json.dumps(value, ensure_ascii=False), source))
+
+
+async def _store_realtime_kv_snapshot(system: str, flow: dict[str, object]) -> None:
+    rows: list[tuple[str, str, str]] = []
+    _flatten_payload_to_kv(system=system, path="", value=flow, out_rows=rows)
+
+    updated_at = str(flow.get("updated_at") or datetime.now(UTC).isoformat())
+    rows.append((f"{system}.update_time", json.dumps(updated_at, ensure_ascii=False), "collector"))
+    await asyncio.to_thread(upsert_realtime_kv, storage_db_path, rows)
+
+
+def _kv_value(
+    kv_map: dict[str, dict[str, object]],
+    *,
+    system: str,
+    key: str,
+) -> object:
+    item = kv_map.get(f"{system}.{key}")
+    if not isinstance(item, dict):
+        return None
+    return item.get("value")
+
+
+def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> dict[str, object]:
+    updated_at_raw = _kv_value(kv_map, system=system, key="update_time")
+    updated_at = str(updated_at_raw or datetime.now(UTC).isoformat())
+    sampled_at = _safe_parse_utc(updated_at)
+    age_seconds = (datetime.now(UTC) - sampled_at).total_seconds() if sampled_at else None
+    interval = _sample_interval_for_system(system)
+    stale_after_seconds = max(15.0, interval * 2.5)
+
+    metrics = {
+        "pv_w": _to_number(_kv_value(kv_map, system=system, key="metrics.pv_w")),
+        "grid_w": _to_number(_kv_value(kv_map, system=system, key="metrics.grid_w")),
+        "battery_w": _to_number(_kv_value(kv_map, system=system, key="metrics.battery_w")),
+        "load_w": _to_number(_kv_value(kv_map, system=system, key="metrics.load_w")),
+        "battery_soc_percent": _to_number(_kv_value(kv_map, system=system, key="metrics.battery_soc_percent")),
+        "inverter_status": _kv_value(kv_map, system=system, key="metrics.inverter_status"),
+        "solar_active": bool(_kv_value(kv_map, system=system, key="metrics.solar_active")),
+        "grid_active": bool(_kv_value(kv_map, system=system, key="metrics.grid_active")),
+        "grid_import": bool(_kv_value(kv_map, system=system, key="metrics.grid_import")),
+        "battery_active": bool(_kv_value(kv_map, system=system, key="metrics.battery_active")),
+        "battery_discharging": bool(_kv_value(kv_map, system=system, key="metrics.battery_discharging")),
+        "load_active": bool(_kv_value(kv_map, system=system, key="metrics.load_active")),
+        "balance_w": _to_number(_kv_value(kv_map, system=system, key="metrics.balance_w")),
+        "balanced": _kv_value(kv_map, system=system, key="metrics.balanced"),
+        "matched_entities": _to_number(_kv_value(kv_map, system=system, key="metrics.matched_entities")),
+    }
+
+    flow: dict[str, object] = {
+        "system": system,
+        "updated_at": updated_at,
+        "metrics": metrics,
+        "source": {"type": "realtime_kv"},
+        "storage_backed": True,
+        "kv_item_count": len(kv_map),
+    }
+    if age_seconds is not None:
+        flow["sample_age_seconds"] = round(age_seconds, 1)
+        if age_seconds > stale_after_seconds:
+            flow["stale"] = True
+            flow["stale_reason"] = "realtime_kv_too_old"
+    return flow
+
+
+def _build_storage_backed_flow(system: str, sample: dict[str, object]) -> dict[str, object]:
+    payload_obj = sample.get("payload")
+    payload = dict(payload_obj) if isinstance(payload_obj, dict) else {}
+    metrics_obj = payload.get("metrics")
+    metrics = dict(metrics_obj) if isinstance(metrics_obj, dict) else {}
+
+    sampled_at_utc = str(sample.get("sampled_at_utc") or datetime.now(UTC).isoformat())
+    metrics.setdefault("pv_w", _to_number(sample.get("pv_w")))
+    metrics.setdefault("grid_w", _to_number(sample.get("grid_w")))
+    metrics.setdefault("battery_w", _to_number(sample.get("battery_w")))
+    metrics.setdefault("load_w", _to_number(sample.get("load_w")))
+    metrics.setdefault("battery_soc_percent", _to_number(sample.get("battery_soc_percent")))
+    metrics.setdefault(
+        "inverter_status",
+        str(sample.get("inverter_status")) if sample.get("inverter_status") is not None else None,
+    )
+    metrics.setdefault("balance_w", _to_number(sample.get("balance_w")))
+
+    if metrics.get("matched_entities") is None:
+        keys = ("pv_w", "grid_w", "battery_w", "load_w", "battery_soc_percent", "inverter_status")
+        metrics["matched_entities"] = sum(1 for key in keys if metrics.get(key) is not None)
+
+    flow: dict[str, object] = dict(payload)
+    flow["system"] = system
+    flow["updated_at"] = sampled_at_utc
+    flow["metrics"] = metrics
+    flow["source"] = {
+        "type": "storage_latest_sample",
+        "sample_source": str(sample.get("source") or ""),
+    }
+    flow["storage_backed"] = True
+
+    sampled_at = _safe_parse_utc(sampled_at_utc)
+    now = datetime.now(UTC)
+    age_seconds = (now - sampled_at).total_seconds() if sampled_at else None
+    interval = _sample_interval_for_system(system)
+    stale_after_seconds = max(15.0, interval * 2.5)
+    if age_seconds is not None:
+        flow["sample_age_seconds"] = round(age_seconds, 1)
+        if age_seconds > stale_after_seconds:
+            flow["stale"] = True
+            flow["stale_reason"] = "storage_sample_too_old"
+
+    return flow
+
+
+async def _get_energy_flow_from_storage(system: str) -> dict[str, object]:
+    sample = await asyncio.to_thread(get_latest_sample, storage_db_path, system=system)
+    if not isinstance(sample, dict):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "No stored sample available yet",
+                "system": system,
+            },
+        )
+    return _build_storage_backed_flow(system, sample)
+
+
+async def _get_energy_flow_from_realtime_kv(system: str) -> dict[str, object]:
+    prefix = f"{system}."
+    kv_map = await asyncio.to_thread(get_realtime_kv_by_prefix, storage_db_path, prefix=prefix)
+    if not kv_map:
+        return await _get_energy_flow_from_storage(system)
+    return _build_flow_from_kv(system, kv_map)
+
+
 async def _store_flow_sample(system: str, flow: dict[str, object]) -> None:
     sample = _sample_from_flow(system, flow)
     await asyncio.to_thread(insert_sample, storage_db_path, sample)
+    await _store_realtime_kv_snapshot(system, flow)
 
 
 async def _collect_for_system(system: str) -> None:
@@ -1249,30 +1628,59 @@ async def _collect_for_system(system: str) -> None:
     if system == "solplanet":
         if not solplanet_client.configured:
             return
-        flow = await _get_solplanet_flow_cached()
+        flow = await _build_solplanet_energy_flow_payload_from_cgi()
         await _store_flow_sample("solplanet", flow)
         return
+
+
+def _collector_mark_start(system: str) -> float:
+    now_iso = datetime.now(UTC).isoformat()
+    status = collector_status.setdefault(system, {})
+    status["in_progress"] = True
+    status["last_started_at"] = now_iso
+    return monotonic()
+
+
+def _collector_mark_finish(system: str, started_monotonic: float, *, error: Exception | None = None) -> None:
+    now_iso = datetime.now(UTC).isoformat()
+    status = collector_status.setdefault(system, {})
+    status["in_progress"] = False
+    status["last_finished_at"] = now_iso
+    status["last_duration_ms"] = round((monotonic() - started_monotonic) * 1000, 1)
+    if error is None:
+        status["last_success_at"] = now_iso
+        status["last_error"] = None
+        status["success_count"] = int(status.get("success_count") or 0) + 1
+        return
+    status["last_error_at"] = now_iso
+    status["last_error"] = f"{type(error).__name__}: {error}"
+    status["failure_count"] = int(status.get("failure_count") or 0) + 1
 
 
 async def _collector_loop() -> None:
     last_collected_at: dict[str, float] = {system: 0.0 for system in SUPPORTED_SYSTEMS}
     while not collector_stop_event.is_set():
-        loop_started = monotonic()
         for system in SUPPORTED_SYSTEMS:
-            interval = _sample_interval_for_system(system)
             previous = last_collected_at.get(system, 0.0)
-            if previous > 0.0 and (loop_started - previous) < interval:
-                continue
+            # Solplanet polling runs continuously: start the next round immediately
+            # after one round finishes, without waiting for a fixed interval.
+            if system != "solplanet":
+                interval = _sample_interval_for_system(system)
+                if previous > 0.0 and (monotonic() - previous) < interval:
+                    continue
+            started_monotonic = _collector_mark_start(system)
             try:
                 await _collect_for_system(system)
                 last_collected_at[system] = monotonic()
-            except Exception:  # noqa: BLE001
+                _collector_mark_finish(system, started_monotonic)
+            except Exception as exc:  # noqa: BLE001
                 # Keep collector alive even if one round fails.
+                _collector_mark_finish(system, started_monotonic, error=exc)
                 continue
 
-        elapsed = monotonic() - loop_started
-        loop_interval = min(sample_interval_seconds, solplanet_sample_interval_seconds)
-        sleep_seconds = max(0.1, loop_interval - elapsed)
+        # Keep loop responsive so Solplanet can run back-to-back rounds.
+        # SAJ still respects its own interval guard above.
+        sleep_seconds = 0.1
         try:
             await asyncio.wait_for(collector_stop_event.wait(), timeout=sleep_seconds)
         except asyncio.TimeoutError:
@@ -1301,6 +1709,23 @@ async def _stop_collector() -> None:
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/collector/status")
+async def collector_runtime_status() -> dict[str, object]:
+    saj_state = dict(collector_status.get("saj") or {})
+    solplanet_state = dict(collector_status.get("solplanet") or {})
+    saj_state["interval_seconds"] = sample_interval_seconds
+    saj_state["continuous"] = False
+    solplanet_state["interval_seconds"] = None
+    solplanet_state["continuous"] = True
+    return {
+        "updated_at": datetime.now(UTC).isoformat(),
+        "systems": {
+            "saj": saj_state,
+            "solplanet": solplanet_state,
+        },
+    }
 
 
 @app.get("/api/storage/status")
@@ -1576,34 +2001,7 @@ async def get_core_entities_by_system(system: str) -> dict[str, object]:
 @app.get("/api/energy-flow/{system}")
 async def get_energy_flow(system: str) -> dict[str, object]:
     normalized = _normalize_system_name(system)
-    if normalized == "solplanet" and solplanet_client.configured:
-        try:
-            return await _get_solplanet_flow_cached()
-        except httpx.HTTPStatusError as exc:
-            detail = {
-                "message": "Solplanet CGI returned an error",
-                "status_code": exc.response.status_code,
-                "response": exc.response.text,
-            }
-            raise HTTPException(status_code=502, detail=detail) from exc
-        except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail=f"Failed to reach Solplanet CGI: {exc}") from exc
-        except (TimeoutError, asyncio.TimeoutError) as exc:
-            raise HTTPException(status_code=504, detail=f"Solplanet CGI timed out: {exc}") from exc
-
-    _ensure_ha_configured()
-    try:
-        states = await ha_client.all_states()
-        return _build_energy_flow_payload(normalized, states)
-    except httpx.HTTPStatusError as exc:
-        detail = {
-            "message": "Home Assistant API returned an error",
-            "status_code": exc.response.status_code,
-            "response": exc.response.text,
-        }
-        raise HTTPException(status_code=502, detail=detail) from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+    return await _get_energy_flow_from_realtime_kv(normalized)
 
 
 @app.get("/api/saj/energy-flow")
@@ -1908,6 +2306,23 @@ async def get_energy_flow_soulplanet() -> dict[str, object]:
     return await get_energy_flow("solplanet")
 
 
+@app.get("/api/soulplanet/realtime-kv")
+@app.get("/api/solplanet/realtime-kv")
+async def get_solplanet_realtime_kv() -> dict[str, object]:
+    items = await asyncio.to_thread(list_realtime_kv_rows, storage_db_path, prefix="solplanet.")
+    update_map = await asyncio.to_thread(get_realtime_kv_by_prefix, storage_db_path, prefix="solplanet.update_time")
+    update_item = update_map.get("solplanet.update_time")
+    update_value = update_item.get("value") if isinstance(update_item, dict) else None
+    updated_at = str(update_value) if update_value is not None else None
+    return {
+        "system": "solplanet",
+        "updated_at": updated_at,
+        "count": len(items),
+        "items": items,
+        "source": {"type": "realtime_kv"},
+    }
+
+
 @app.get("/api/soulplanet/cgi-dump")
 @app.get("/api/solplanet/cgi-dump")
 async def get_solplanet_cgi_dump() -> dict[str, object]:
@@ -1930,161 +2345,66 @@ async def get_solplanet_cgi_dump() -> dict[str, object]:
 @app.get("/api/solplanet/cgi/getdev-device-2")
 async def get_solplanet_getdev_device_2() -> dict[str, object]:
     started_at = monotonic()
-    try:
-        context = await _get_solplanet_context_cached()
-        return _build_solplanet_single_endpoint_response(
-            name="getdev_device_2",
-            path="getdev.cgi?device=2",
-            payload=context.get("inverter_info") if isinstance(context.get("inverter_info"), dict) else {},
-            error=None,
-            started_at=started_at,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return _build_solplanet_single_endpoint_response(
-            name="getdev_device_2",
-            path="getdev.cgi?device=2",
-            payload=None,
-            error=f"{type(exc).__name__}: {exc}",
-            started_at=started_at,
-        )
+    return await _solplanet_endpoint_response_from_snapshot(
+        name="getdev_device_2",
+        path="getdev.cgi?device=2",
+        started_at=started_at,
+    )
 
 
 @app.get("/api/soulplanet/cgi/getdev-device-3")
 @app.get("/api/solplanet/cgi/getdev-device-3")
 async def get_solplanet_getdev_device_3() -> dict[str, object]:
     started_at = monotonic()
-    try:
-        payload = await asyncio.wait_for(
-            solplanet_client.get_meter_info(),
-            timeout=settings.solplanet_request_timeout_seconds,
-        )
-        return _build_solplanet_single_endpoint_response(
-            name="getdev_device_3",
-            path="getdev.cgi?device=3",
-            payload=payload,
-            error=None,
-            started_at=started_at,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return _build_solplanet_single_endpoint_response(
-            name="getdev_device_3",
-            path="getdev.cgi?device=3",
-            payload=None,
-            error=f"{type(exc).__name__}: {exc}",
-            started_at=started_at,
-        )
+    return await _solplanet_endpoint_response_from_snapshot(
+        name="getdev_device_3",
+        path="getdev.cgi?device=3",
+        started_at=started_at,
+    )
 
 
 @app.get("/api/soulplanet/cgi/getdevdata-device-2")
 @app.get("/api/solplanet/cgi/getdevdata-device-2")
 async def get_solplanet_getdevdata_device_2() -> dict[str, object]:
     started_at = monotonic()
-    try:
-        context = await _get_solplanet_context_cached()
-        inverter_sn = context.get("inverter_sn")
-        if not inverter_sn:
-            raise ValueError("Missing inverter_sn")
-        payload = await asyncio.wait_for(
-            solplanet_client.get_inverter_data(str(inverter_sn)),
-            timeout=settings.solplanet_request_timeout_seconds,
-        )
-        return _build_solplanet_single_endpoint_response(
-            name="getdevdata_device_2",
-            path=f"getdevdata.cgi?device=2&sn={inverter_sn}",
-            payload=payload,
-            error=None,
-            started_at=started_at,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return _build_solplanet_single_endpoint_response(
-            name="getdevdata_device_2",
-            path="getdevdata.cgi?device=2",
-            payload=None,
-            error=f"{type(exc).__name__}: {exc}",
-            started_at=started_at,
-        )
+    return await _solplanet_endpoint_response_from_snapshot(
+        name="getdevdata_device_2",
+        path="getdevdata.cgi?device=2",
+        started_at=started_at,
+    )
 
 
 @app.get("/api/soulplanet/cgi/getdevdata-device-3")
 @app.get("/api/solplanet/cgi/getdevdata-device-3")
 async def get_solplanet_getdevdata_device_3() -> dict[str, object]:
     started_at = monotonic()
-    try:
-        payload = await asyncio.wait_for(
-            solplanet_client.get_meter_data(),
-            timeout=settings.solplanet_request_timeout_seconds,
-        )
-        return _build_solplanet_single_endpoint_response(
-            name="getdevdata_device_3",
-            path="getdevdata.cgi?device=3",
-            payload=payload,
-            error=None,
-            started_at=started_at,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return _build_solplanet_single_endpoint_response(
-            name="getdevdata_device_3",
-            path="getdevdata.cgi?device=3",
-            payload=None,
-            error=f"{type(exc).__name__}: {exc}",
-            started_at=started_at,
-        )
+    return await _solplanet_endpoint_response_from_snapshot(
+        name="getdevdata_device_3",
+        path="getdevdata.cgi?device=3",
+        started_at=started_at,
+    )
 
 
 @app.get("/api/soulplanet/cgi/getdevdata-device-4")
 @app.get("/api/solplanet/cgi/getdevdata-device-4")
 async def get_solplanet_getdevdata_device_4() -> dict[str, object]:
     started_at = monotonic()
-    try:
-        context = await _get_solplanet_context_cached()
-        battery_sn = context.get("battery_sn")
-        if not battery_sn:
-            raise ValueError("Missing battery_sn")
-        payload = await asyncio.wait_for(
-            solplanet_client.get_battery_data(str(battery_sn)),
-            timeout=settings.solplanet_request_timeout_seconds,
-        )
-        return _build_solplanet_single_endpoint_response(
-            name="getdevdata_device_4",
-            path=f"getdevdata.cgi?device=4&sn={battery_sn}",
-            payload=payload,
-            error=None,
-            started_at=started_at,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return _build_solplanet_single_endpoint_response(
-            name="getdevdata_device_4",
-            path="getdevdata.cgi?device=4",
-            payload=None,
-            error=f"{type(exc).__name__}: {exc}",
-            started_at=started_at,
-        )
+    return await _solplanet_endpoint_response_from_snapshot(
+        name="getdevdata_device_4",
+        path="getdevdata.cgi?device=4",
+        started_at=started_at,
+    )
 
 
 @app.get("/api/soulplanet/cgi/getdefine")
 @app.get("/api/solplanet/cgi/getdefine")
 async def get_solplanet_getdefine() -> dict[str, object]:
     started_at = monotonic()
-    try:
-        payload = await asyncio.wait_for(
-            solplanet_client.get_schedule(),
-            timeout=settings.solplanet_request_timeout_seconds,
-        )
-        return _build_solplanet_single_endpoint_response(
-            name="getdefine",
-            path="getdefine.cgi",
-            payload=payload,
-            error=None,
-            started_at=started_at,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return _build_solplanet_single_endpoint_response(
-            name="getdefine",
-            path="getdefine.cgi",
-            payload=None,
-            error=f"{type(exc).__name__}: {exc}",
-            started_at=started_at,
-        )
+    return await _solplanet_endpoint_response_from_snapshot(
+        name="getdefine",
+        path="getdefine.cgi",
+        started_at=started_at,
+    )
 
 
 @app.on_event("shutdown")

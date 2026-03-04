@@ -232,12 +232,25 @@ const I18N = {
     flowMetaDoneStale: "Cached ({count}/6) · {updated}",
     flowMetaFailed: "Load failed · {updated}",
     solplanetRawTitle: "Solplanet Raw API Dump",
+    solplanetRawModeCards: "API Cards",
+    solplanetRawModeTable: "DB Table",
     sajRawTitle: "SAJ Raw (Dynamic + Static)",
     solplanetRawMeta: "Fetch {ms} ms · inverter {inverter} · battery {battery}",
     solplanetRawMetaDash: "Fetch - ms · inverter - · battery -",
     endpointOk: "OK",
     endpointError: "Error",
     endpointPath: "Path",
+    rawStatusLabel: "Status",
+    rawStatusSuccess: "Success",
+    rawStatusFailed: "Failed",
+    rawLastRequest: "Last request",
+    rawLastSuccess: "Last success",
+    rawLatency: "Latency",
+    rawAgoJustNow: "just now",
+    rawAgoSeconds: "{n}s ago",
+    rawAgoMinutes: "{n}m ago",
+    rawAgoHours: "{n}h ago",
+    rawAgoDays: "{n}d ago",
     rawLoadFailed: "Raw load failed: {error}",
     rawLoading: "Loading",
     rawDone: "Loaded",
@@ -253,6 +266,12 @@ const I18N = {
     rawApiSajCoreEntities: "Configured Entity List (Static)",
     rawViewExplain: "Notes",
     rawViewJson: "JSON",
+    rawKvAttr: "Attribute",
+    rawKvValue: "Value",
+    rawKvSource: "Source",
+    rawKvMeta: "Rows {count}",
+    rawKvMetaDash: "Rows -",
+    rawKvEmpty: "No data yet",
     rawExplainTitle: "Field Notes",
     rawExplainField: "Field",
     rawExplainValue: "Current",
@@ -466,12 +485,25 @@ const I18N = {
     flowMetaDoneStale: "缓存数据（{count}/6）· {updated}",
     flowMetaFailed: "加载失败 · {updated}",
     solplanetRawTitle: "Solplanet 原始接口数据",
+    solplanetRawModeCards: "接口卡片",
+    solplanetRawModeTable: "数据库表",
     sajRawTitle: "SAJ 原始数据（动态 + 静态）",
     solplanetRawMeta: "耗时 {ms} ms · 逆变器 {inverter} · 电池 {battery}",
     solplanetRawMetaDash: "耗时 - ms · 逆变器 - · 电池 -",
     endpointOk: "成功",
     endpointError: "错误",
     endpointPath: "路径",
+    rawStatusLabel: "状态",
+    rawStatusSuccess: "成功",
+    rawStatusFailed: "失败",
+    rawLastRequest: "上次请求",
+    rawLastSuccess: "最后成功",
+    rawLatency: "耗时",
+    rawAgoJustNow: "刚刚",
+    rawAgoSeconds: "{n}秒前",
+    rawAgoMinutes: "{n}分钟前",
+    rawAgoHours: "{n}小时前",
+    rawAgoDays: "{n}天前",
     rawLoadFailed: "原始数据加载失败：{error}",
     rawLoading: "加载中",
     rawDone: "已加载",
@@ -487,6 +519,12 @@ const I18N = {
     rawApiSajCoreEntities: "配置实体清单（静态）",
     rawViewExplain: "说明",
     rawViewJson: "JSON",
+    rawKvAttr: "属性",
+    rawKvValue: "值",
+    rawKvSource: "来源",
+    rawKvMeta: "共 {count} 行",
+    rawKvMetaDash: "共 - 行",
+    rawKvEmpty: "暂无数据",
     rawExplainTitle: "字段说明",
     rawExplainField: "字段",
     rawExplainValue: "当前值",
@@ -512,8 +550,11 @@ const samplingPager = {
 const PAGE_SIZE = 80;
 const SAMPLING_PAGE_SIZE = 100;
 const AUTO_REFRESH_KEY = "autoRefreshSeconds";
+const SOLPLANET_RAW_MODE_KEY = "solplanetRawMode";
 const AUTO_REFRESH_OPTIONS = [0, 5, 10];
 const CONFIG_SAMPLE_INTERVAL_OPTIONS = [5, 10, 30, 60, 300];
+const BALANCE_TOLERANCE_W = 120;
+const SOLPLANET_REALTIME_KV_URL = "/api/solplanet/realtime-kv";
 const SOLPLANET_RAW_APIS = [
   { key: "getdev_device_2", titleKey: "rawApiGetdev2", url: "/api/solplanet/cgi/getdev-device-2" },
   { key: "getdev_device_3", titleKey: "rawApiGetdev3", url: "/api/solplanet/cgi/getdev-device-3" },
@@ -737,6 +778,7 @@ const stateCache = {
   lastSummary: null,
   lastEntities: null,
   lastSolplanetRaw: {},
+  lastSolplanetKv: { phase: "idle", items: [], updated_at: null, error: null },
   lastSajRaw: {},
   lastSajControl: null,
   lastSamplingStatus: null,
@@ -761,6 +803,7 @@ let currentLang = getLang();
 let currentTab = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sajControl", "sampling"].includes(localStorage.getItem("activeTab"))
   ? localStorage.getItem("activeTab")
   : "dashboard";
+let solplanetRawMode = localStorage.getItem(SOLPLANET_RAW_MODE_KEY) === "table" ? "table" : "cards";
 let autoRefreshTimerId = null;
 let isLoadingCurrentTab = false;
 let autoRefreshSeconds = getAutoRefreshSeconds();
@@ -871,6 +914,37 @@ function formatUpdatedAt(isoText) {
   return `${t("updatedAt")}: ${dt.toLocaleString()}`;
 }
 
+function formatLocalDateTime(isoText) {
+  if (!isoText) return "-";
+  const dt = new Date(isoText);
+  if (Number.isNaN(dt.getTime())) return "-";
+  return dt.toLocaleString();
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatRelativeAgo(isoText) {
+  if (!isoText) return "-";
+  const dt = new Date(isoText);
+  if (Number.isNaN(dt.getTime())) return "-";
+  const seconds = Math.max(0, Math.floor((Date.now() - dt.getTime()) / 1000));
+  if (seconds < 3) return t("rawAgoJustNow");
+  if (seconds < 60) return t("rawAgoSeconds", { n: seconds });
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return t("rawAgoMinutes", { n: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return t("rawAgoHours", { n: hours });
+  const days = Math.floor(hours / 24);
+  return t("rawAgoDays", { n: days });
+}
+
 function setSystemLoadMeta(system, patch = {}) {
   const prev = stateCache.systemLoadMeta[system] || { phase: "idle", updatedAt: null, quality: "ok", count: 0 };
   stateCache.systemLoadMeta[system] = {
@@ -938,7 +1012,9 @@ function applyTranslations() {
   if (stateCache.lastSummary) renderSummary(stateCache.lastSummary);
   renderSystemLoadMeta("saj");
   renderSystemLoadMeta("solplanet");
+  setSolplanetRawMode(solplanetRawMode, false);
   renderSolplanetRawFromCache();
+  renderSolplanetKvFromCache();
   renderSajRawFromCache();
   renderSajControlFromCache();
   if (stateCache.lastEntities) renderEntitiesPage(stateCache.lastEntities);
@@ -1070,7 +1146,7 @@ function setBalanceStatus(system, balanceW) {
     return;
   }
 
-  const balanced = Math.round(balanceW) === 0;
+  const balanced = Math.abs(Number(balanceW) || 0) <= BALANCE_TOLERANCE_W;
   setText(statusId, balanced ? t("balanceStatusBalanced") : t("balanceStatusUnbalanced"));
   statusEl.classList.add(balanced ? "status-balanced" : "status-unbalanced");
   setText(residualId, t("balanceResidualLabel", { value: formatPowerKwFromWatts(balanceW) }));
@@ -2119,12 +2195,29 @@ function renderRawCard(api, state, bodyId) {
   }
   if (meta) {
     meta.className = `raw-meta${state.phase === "failed" ? " error" : ""}`;
+    const statusText = state.status || (state.phase === "done" ? "success" : state.phase === "failed" ? "failed" : "-");
+    const requestText = formatLocalDateTime(state.last_requested_at || state.updated_at);
+    const successText = formatLocalDateTime(state.last_success_at);
+    const requestAgo = formatRelativeAgo(state.last_requested_at || state.updated_at);
+    const successAgo = formatRelativeAgo(state.last_success_at);
+    const statusOk = String(statusText).toLowerCase() === "success" || state.phase === "done";
+    const statusBadgeText = statusOk ? t("rawStatusSuccess") : t("rawStatusFailed");
+    const statusBadgeClass = statusOk ? "raw-status-badge success" : "raw-status-badge failed";
     if (state.phase === "loading") {
       meta.textContent = `${t("rawLoading")} · ${t("endpointPath")}: ${state.path || "-"}`;
     } else if (state.phase === "failed") {
-      meta.textContent = `${t("endpointError")} · ${state.error || "-"}`;
+      meta.innerHTML =
+        `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawStatusLabel"))}</span><span class="${statusBadgeClass}">${escapeHtml(statusBadgeText)}</span></div>` +
+        `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawLastRequest"))}</span><span>${escapeHtml(requestText)} <span class="raw-time-ago">(${escapeHtml(requestAgo)})</span></span></div>` +
+        `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawLastSuccess"))}</span><span>${escapeHtml(successText)} <span class="raw-time-ago">(${escapeHtml(successAgo)})</span></span></div>` +
+        `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("endpointError"))}</span><span>${escapeHtml(state.error || "-")}</span></div>`;
     } else if (state.phase === "done") {
-      meta.textContent = `${t("endpointPath")}: ${state.path || "-"} · ${t("endpointOk")} · ${state.fetch_ms ?? "-"} ms`;
+      meta.innerHTML =
+        `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("endpointPath"))}</span><span>${escapeHtml(state.path || "-")}</span></div>` +
+        `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawStatusLabel"))}</span><span class="${statusBadgeClass}">${escapeHtml(statusBadgeText)}</span></div>` +
+        `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawLastRequest"))}</span><span>${escapeHtml(requestText)} <span class="raw-time-ago">(${escapeHtml(requestAgo)})</span></span></div>` +
+        `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawLastSuccess"))}</span><span>${escapeHtml(successText)} <span class="raw-time-ago">(${escapeHtml(successAgo)})</span></span></div>` +
+        `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawLatency"))}</span><span>${escapeHtml(String(state.fetch_ms ?? "-"))} ms</span></div>`;
     } else {
       meta.textContent = "-";
     }
@@ -2152,7 +2245,24 @@ function renderRawSummary(rawStateMap, metaId, updatedId) {
   setText(updatedId, `${t("updatedAt")}: ${updatedText}`);
 }
 
+function setSolplanetRawMode(mode, load = true) {
+  solplanetRawMode = mode === "table" ? "table" : "cards";
+  localStorage.setItem(SOLPLANET_RAW_MODE_KEY, solplanetRawMode);
+  const cardsBtn = document.getElementById("solplanetRawModeCardsBtn");
+  const tableBtn = document.getElementById("solplanetRawModeTableBtn");
+  const cardBody = document.getElementById("solplanetRawBody");
+  const tableWrap = document.getElementById("solplanetRawTableWrap");
+  if (cardsBtn) cardsBtn.classList.toggle("active", solplanetRawMode === "cards");
+  if (tableBtn) tableBtn.classList.toggle("active", solplanetRawMode === "table");
+  if (cardBody) cardBody.classList.toggle("hidden", solplanetRawMode !== "cards");
+  if (tableWrap) tableWrap.classList.toggle("hidden", solplanetRawMode !== "table");
+  if (solplanetRawMode === "cards") renderSolplanetRawFromCache();
+  else renderSolplanetKvFromCache();
+  if (load && currentTab === "solplanetRaw") void loadCurrentTab();
+}
+
 function renderSolplanetRawFromCache() {
+  if (solplanetRawMode !== "cards") return;
   for (const api of SOLPLANET_RAW_APIS) {
     const state = stateCache.lastSolplanetRaw[api.key] || {
       phase: "idle",
@@ -2161,10 +2271,97 @@ function renderSolplanetRawFromCache() {
       error: null,
       fetch_ms: null,
       updated_at: null,
+      status: null,
+      last_requested_at: null,
+      last_success_at: null,
     };
     renderRawCard(api, state, "solplanetRawBody");
   }
   renderRawSummary(stateCache.lastSolplanetRaw, "solplanetRawMeta", "solplanetRawUpdatedAt");
+}
+
+function renderSolplanetKvFromCache() {
+  if (solplanetRawMode !== "table") return;
+  const state = stateCache.lastSolplanetKv || { phase: "idle", items: [], updated_at: null, error: null };
+  const tbody = document.getElementById("solplanetRawTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  if (state.phase === "loading") {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 3;
+    td.textContent = t("rawLoading");
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    setText("solplanetRawMeta", t("rawKvMetaDash"));
+    setText("solplanetRawUpdatedAt", `${t("updatedAt")}: -`);
+    return;
+  }
+  if (state.phase === "failed") {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 3;
+    td.textContent = t("rawLoadFailed", { error: state.error || "-" });
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    setText("solplanetRawMeta", t("rawKvMetaDash"));
+    setText("solplanetRawUpdatedAt", `${t("updatedAt")}: -`);
+    return;
+  }
+
+  const items = Array.isArray(state.items) ? state.items : [];
+  if (!items.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 3;
+    td.textContent = t("rawKvEmpty");
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  } else {
+    for (const item of items) {
+      const tr = document.createElement("tr");
+      const attr = document.createElement("td");
+      const value = document.createElement("td");
+      const source = document.createElement("td");
+      attr.textContent = String(item?.attribute || "-");
+      value.textContent = formatRawFieldValue(item?.value);
+      source.textContent = String(item?.source || "-");
+      tr.appendChild(attr);
+      tr.appendChild(value);
+      tr.appendChild(source);
+      tbody.appendChild(tr);
+    }
+  }
+  const updatedText = state.updated_at ? new Date(state.updated_at).toLocaleString() : "-";
+  setText("solplanetRawMeta", t("rawKvMeta", { count: items.length }));
+  setText("solplanetRawUpdatedAt", `${t("updatedAt")}: ${updatedText}`);
+}
+
+async function loadSolplanetKvTable() {
+  stateCache.lastSolplanetKv = {
+    phase: "loading",
+    items: [],
+    updated_at: null,
+    error: null,
+  };
+  renderSolplanetKvFromCache();
+  try {
+    const payload = await fetchJson(SOLPLANET_REALTIME_KV_URL, { timeoutMs: 12000 });
+    stateCache.lastSolplanetKv = {
+      phase: "done",
+      items: Array.isArray(payload?.items) ? payload.items : [],
+      updated_at: payload?.updated_at || new Date().toISOString(),
+      error: null,
+    };
+  } catch (err) {
+    stateCache.lastSolplanetKv = {
+      phase: "failed",
+      items: [],
+      updated_at: null,
+      error: String(err),
+    };
+  }
+  renderSolplanetKvFromCache();
 }
 
 function renderSajRawFromCache() {
@@ -2766,6 +2963,9 @@ async function loadRawPanel(apis, stateMap, bodyId, metaId, updatedId) {
       error: null,
       fetch_ms: null,
       updated_at: null,
+      status: null,
+      last_requested_at: null,
+      last_success_at: null,
     };
     renderRawCard(api, stateMap[api.key], bodyId);
   }
@@ -2781,6 +2981,9 @@ async function loadRawPanel(apis, stateMap, bodyId, metaId, updatedId) {
         error: response?.error || null,
         fetch_ms: response?.fetch_ms ?? null,
         updated_at: response?.updated_at || new Date().toISOString(),
+        status: response?.status || (response?.ok ? "success" : "failed"),
+        last_requested_at: response?.last_requested_at || response?.updated_at || null,
+        last_success_at: response?.last_success_at || null,
       };
     } catch (err) {
       stateMap[api.key] = {
@@ -2790,6 +2993,9 @@ async function loadRawPanel(apis, stateMap, bodyId, metaId, updatedId) {
         error: String(err),
         fetch_ms: null,
         updated_at: new Date().toISOString(),
+        status: "failed",
+        last_requested_at: null,
+        last_success_at: null,
       };
     }
     renderRawCard(api, stateMap[api.key], bodyId);
@@ -2800,6 +3006,10 @@ async function loadRawPanel(apis, stateMap, bodyId, metaId, updatedId) {
 }
 
 async function loadSolplanetRaw() {
+  if (solplanetRawMode === "table") {
+    await loadSolplanetKvTable();
+    return;
+  }
   await loadRawPanel(SOLPLANET_RAW_APIS, stateCache.lastSolplanetRaw, "solplanetRawBody", "solplanetRawMeta", "solplanetRawUpdatedAt");
 }
 
@@ -3059,6 +3269,12 @@ document.getElementById("tabDashboard").addEventListener("click", () => {
 document.getElementById("tabSolplanetRaw").addEventListener("click", () => {
   setActiveTab("solplanetRaw");
 });
+document.getElementById("solplanetRawModeCardsBtn").addEventListener("click", () => {
+  setSolplanetRawMode("cards");
+});
+document.getElementById("solplanetRawModeTableBtn").addEventListener("click", () => {
+  setSolplanetRawMode("table");
+});
 document.getElementById("tabSajRaw").addEventListener("click", () => {
   setActiveTab("sajRaw");
 });
@@ -3317,5 +3533,7 @@ renderSamplingRangeInputContainer();
 setActiveTab(currentTab, false);
 setAutoRefresh(autoRefreshSeconds);
 void ensureConfigReady().then((ready) => {
-  if (ready) void loadCurrentTab();
+  if (ready) {
+    void loadCurrentTab();
+  }
 });
