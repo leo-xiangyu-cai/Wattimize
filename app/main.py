@@ -128,8 +128,7 @@ SAJ_SLOT_MAX = 7
 SAJ_DAY_MASK_MIN = 0
 SAJ_DAY_MASK_MAX = 127
 SAJ_MODE_MIN = 0
-SAJ_MODE_MAX = 2
-SAJ_MODE_BLOCKED_VALUES = frozenset({3})
+SAJ_MODE_MAX = 6
 SAJ_RATED_POWER_W = 5000
 SAJ_TIME_REGEX = re.compile(r"^(0[0-9]|1[0-9]|2[0-3]):([0-5][0-9])$")
 
@@ -213,17 +212,6 @@ def _validate_interval_choice(field_name: str, value: int) -> None:
     if value not in ALLOWED_SAMPLE_INTERVAL_SECONDS:
         allowed_text = ", ".join(str(item) for item in ALLOWED_SAMPLE_INTERVAL_SECONDS)
         raise HTTPException(status_code=400, detail=f"{field_name} must be one of: {allowed_text}")
-
-
-def _ensure_saj_mode_code_allowed(mode_code: int) -> None:
-    if mode_code in SAJ_MODE_BLOCKED_VALUES:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": f"SAJ mode_code {mode_code} is blocked by server policy",
-                "allowed_range": [SAJ_MODE_MIN, SAJ_MODE_MAX],
-            },
-        )
 
 
 def _matches_prefix(entity_id: str, prefixes: tuple[str, ...]) -> bool:
@@ -1272,7 +1260,7 @@ def _build_saj_control_capabilities(
         "working_mode": {
             "entity": _entity_metadata(states_by_id, "number.saj_app_mode_input"),
             "range": {"min": SAJ_MODE_MIN, "max": SAJ_MODE_MAX, "step": 1},
-            "accepted_values_note": "Mode labels can differ by SAJ firmware; this API allows mode_code 0..2 only (3 is blocked).",
+            "accepted_values_note": "Mode labels can differ by SAJ firmware; this API allows mode_code 0..6 for testing.",
         },
         "slot": {
             "slot_range": {"min": SAJ_SLOT_MIN, "max": SAJ_SLOT_MAX},
@@ -2140,7 +2128,6 @@ async def get_saj_control_capabilities() -> dict[str, object]:
 @app.put("/api/saj/control/working-mode")
 async def put_saj_working_mode(payload: SajWorkingModePayload) -> dict[str, object]:
     _ensure_ha_configured()
-    _ensure_saj_mode_code_allowed(payload.mode_code)
     try:
         await _saj_set_number("number.saj_app_mode_input", payload.mode_code)
         _, states_by_id = await _saj_control_states()

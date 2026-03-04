@@ -58,15 +58,42 @@
       <section id="dashboardView" class="view">
         <section class="status-grid">
           <article class="card">
-            <h2 data-i18n="systemTitle">System</h2>
+            <h2 class="title-with-icon">
+              <span class="inline-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M4 5h16v10H4z"></path>
+                  <path d="M8 19h8"></path>
+                </svg>
+              </span>
+              <span data-i18n="systemTitle">System</span>
+            </h2>
             <p id="healthValue" class="value">-</p>
           </article>
           <article class="card">
-            <h2 data-i18n="haTitle">Home Assistant</h2>
+            <h2 class="title-with-icon">
+              <span class="inline-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"></path>
+                  <path d="M12 8v8"></path>
+                  <path d="M8 12h8"></path>
+                </svg>
+              </span>
+              <span data-i18n="haTitle">Home Assistant</span>
+            </h2>
             <p id="haValue" class="value">-</p>
           </article>
           <article class="card">
-            <h2 data-i18n="coreTitle">Core Entities</h2>
+            <h2 class="title-with-icon">
+              <span class="inline-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M5 5h6v6H5z"></path>
+                  <path d="M13 5h6v6h-6z"></path>
+                  <path d="M5 13h6v6H5z"></path>
+                  <path d="M13 13h6v6h-6z"></path>
+                </svg>
+              </span>
+              <span data-i18n="coreTitle">Core Entities</span>
+            </h2>
             <p id="coreCount" class="value">-</p>
           </article>
         </section>
@@ -89,31 +116,77 @@
                 <div id="saj-lineBattery" class="flow-line v-line line-battery"></div>
 
                 <article class="flow-node node-solar">
-                  <p class="node-title" data-i18n="solarTitle">Solar</p>
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <circle cx="12" cy="12" r="4"></circle>
+                        <path d="M12 2v3"></path>
+                        <path d="M12 19v3"></path>
+                        <path d="M2 12h3"></path>
+                        <path d="M19 12h3"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="solarTitle">Solar</span>
+                  </p>
                   <p id="saj-solarPowerValue" class="node-value">-</p>
                   <p id="saj-solarState" class="node-state muted">idle</p>
                 </article>
 
                 <article class="flow-node node-grid">
-                  <p class="node-title" data-i18n="gridTitle">Grid</p>
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <path d="M12 3l7 4v10l-7 4-7-4V7z"></path>
+                        <path d="M7 9h10"></path>
+                        <path d="M7 13h10"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="gridTitle">Grid</span>
+                  </p>
                   <p id="saj-gridPowerValue" class="node-value">-</p>
                   <p id="saj-gridState" class="node-state muted">idle</p>
                 </article>
 
                 <article class="flow-node node-center">
-                  <p class="node-title" data-i18n="inverterTitle">Inverter</p>
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <rect x="5" y="6" width="14" height="12" rx="2" ry="2"></rect>
+                        <circle cx="9" cy="12" r="1.5"></circle>
+                        <path d="M13 10h4"></path>
+                        <path d="M13 14h4"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="inverterTitle">Inverter</span>
+                  </p>
                   <p id="saj-inverterStatusValue" class="node-value">-</p>
                   <p id="saj-systemBalance" class="node-state muted">balance -</p>
                 </article>
 
                 <article class="flow-node node-load">
-                  <p class="node-title" data-i18n="loadTitle">Home Load</p>
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <path d="M4 11l8-7 8 7v9H4z"></path>
+                        <path d="M10 20v-5h4v5"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="loadTitle">Home Load</span>
+                  </p>
                   <p id="saj-loadPowerValue" class="node-value">-</p>
                   <p id="saj-loadState" class="node-state muted">idle</p>
                 </article>
 
                 <article class="flow-node node-battery">
-                  <p class="node-title" data-i18n="batteryTitle">Battery</p>
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <rect x="6" y="6" width="10" height="12" rx="2" ry="2"></rect>
+                        <rect x="16" y="10" width="2" height="4"></rect>
+                      </svg>
+                    </span>
+                    <span data-i18n="batteryTitle">Battery</span>
+                  </p>
                   <p id="saj-batteryPowerValue" class="node-value">-</p>
                   <p id="saj-batteryState" class="node-state muted">idle</p>
                   <div class="soc-wrap">
@@ -148,31 +221,77 @@
                 <div id="solplanet-lineBattery" class="flow-line v-line line-battery"></div>
 
                 <article class="flow-node node-solar">
-                  <p class="node-title" data-i18n="solarTitle">Solar</p>
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <circle cx="12" cy="12" r="4"></circle>
+                        <path d="M12 2v3"></path>
+                        <path d="M12 19v3"></path>
+                        <path d="M2 12h3"></path>
+                        <path d="M19 12h3"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="solarTitle">Solar</span>
+                  </p>
                   <p id="solplanet-solarPowerValue" class="node-value">-</p>
                   <p id="solplanet-solarState" class="node-state muted">idle</p>
                 </article>
 
                 <article class="flow-node node-grid">
-                  <p class="node-title" data-i18n="gridTitle">Grid</p>
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <path d="M12 3l7 4v10l-7 4-7-4V7z"></path>
+                        <path d="M7 9h10"></path>
+                        <path d="M7 13h10"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="gridTitle">Grid</span>
+                  </p>
                   <p id="solplanet-gridPowerValue" class="node-value">-</p>
                   <p id="solplanet-gridState" class="node-state muted">idle</p>
                 </article>
 
                 <article class="flow-node node-center">
-                  <p class="node-title" data-i18n="inverterTitle">Inverter</p>
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <rect x="5" y="6" width="14" height="12" rx="2" ry="2"></rect>
+                        <circle cx="9" cy="12" r="1.5"></circle>
+                        <path d="M13 10h4"></path>
+                        <path d="M13 14h4"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="inverterTitle">Inverter</span>
+                  </p>
                   <p id="solplanet-inverterStatusValue" class="node-value">-</p>
                   <p id="solplanet-systemBalance" class="node-state muted">balance -</p>
                 </article>
 
                 <article class="flow-node node-load">
-                  <p class="node-title" data-i18n="loadTitle">Home Load</p>
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <path d="M4 11l8-7 8 7v9H4z"></path>
+                        <path d="M10 20v-5h4v5"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="loadTitle">Home Load</span>
+                  </p>
                   <p id="solplanet-loadPowerValue" class="node-value">-</p>
                   <p id="solplanet-loadState" class="node-state muted">idle</p>
                 </article>
 
                 <article class="flow-node node-battery">
-                  <p class="node-title" data-i18n="batteryTitle">Battery</p>
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <rect x="6" y="6" width="10" height="12" rx="2" ry="2"></rect>
+                        <rect x="16" y="10" width="2" height="4"></rect>
+                      </svg>
+                    </span>
+                    <span data-i18n="batteryTitle">Battery</span>
+                  </p>
                   <p id="solplanet-batteryPowerValue" class="node-value">-</p>
                   <p id="solplanet-batteryState" class="node-state muted">idle</p>
                   <div class="soc-wrap">
@@ -245,14 +364,16 @@
             <h2 data-i18n="sajControlTitle">SAJ Control</h2>
             <span id="sajControlUpdatedAt" class="muted">-</span>
           </div>
+          <p id="sajPassiveModeAlert" class="saj-passive-alert hidden">-</p>
           <p id="sajControlMeta" class="muted">-</p>
 
           <div class="saj-control-grid">
             <article class="saj-control-panel">
               <h3 data-i18n="sajControlModeTitle">Working Mode</h3>
               <p id="sajModeExplain" class="muted" data-i18n="sajControlModeExplain">
-                Mode code mapping may differ by firmware. Test 0~2 against app labels.
+                Mode code mapping may differ by firmware. Test 0~6 against app labels.
               </p>
+              <p id="sajModeReadbackText" class="muted">mode_input=-, mode_sensor=-, inverter_mode=-</p>
               <div class="saj-control-row">
                 <label data-i18n="sajControlModeCodeLabel">
                   Mode Code
@@ -260,10 +381,18 @@
                     <option value="0" data-i18n="sajModeOption0">0 - Self-Consumption Mode</option>
                     <option value="1" data-i18n="sajModeOption1">1 - Time of Use Mode</option>
                     <option value="2" data-i18n="sajModeOption2">2 - Backup Mode</option>
+                    <option value="3" data-i18n="sajModeOption3">3 - Passive Mode</option>
+                    <option value="4" data-i18n="sajModeOption4">4 - Reserved/Unknown</option>
+                    <option value="5" data-i18n="sajModeOption5">5 - Reserved/Unknown</option>
+                    <option value="6" data-i18n="sajModeOption6">6 - Reserved/Unknown</option>
                   </select>
                 </label>
                 <button id="sajModeApplyBtn" class="btn" type="button" data-i18n="sajControlApplyBtn">Apply</button>
               </div>
+              <label class="saj-debug-toggle">
+                <input id="sajActionDebugModeInput" type="checkbox" />
+                <span data-i18n="sajControlDebugModeLabel">Debug Mode</span>
+              </label>
             </article>
 
             <article class="saj-control-panel">
@@ -488,6 +617,20 @@
         <div class="config-actions">
           <button id="sajDayMaskCancelBtn" type="button" class="btn secondary" data-i18n="sajDayMaskCancelBtn">Cancel</button>
           <button id="sajDayMaskConfirmBtn" type="button" class="btn" data-i18n="sajDayMaskConfirmBtn">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="sajActionModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="sajActionModalTitle">
+      <div class="modal-card">
+        <h2 id="sajActionModalTitle" data-i18n="sajControlPopupSuccessTitle">Success</h2>
+        <p id="sajActionModalSummary" class="muted">-</p>
+        <div id="sajActionDebugBlock" class="saj-debug-block hidden">
+          <div class="saj-debug-title" data-i18n="sajControlDebugApiTitle">API Calls</div>
+          <ul id="sajActionModalApiList" class="saj-debug-list"></ul>
+        </div>
+        <div class="config-actions">
+          <button id="sajActionModalCloseBtn" type="button" class="btn" data-i18n="sajControlPopupCloseBtn">Close</button>
         </div>
       </div>
     </div>

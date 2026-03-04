@@ -70,11 +70,16 @@ const I18N = {
     samplingTab: "Sampling",
     sajControlTitle: "SAJ Control",
     sajControlModeTitle: "Working Mode",
-    sajControlModeExplain: "Mode code mapping may differ by firmware. Test 0~2 against app labels.",
+    sajControlModeExplain: "Mode code mapping may differ by firmware. Test 0~6 against app labels.",
+    sajControlModeReadback: "mode_input={modeInput}, mode_sensor={modeSensor}, inverter_mode={inverterMode}",
     sajControlModeCodeLabel: "Mode Code",
     sajModeOption0: "0 - Self-Consumption Mode",
     sajModeOption1: "1 - Time of Use Mode",
     sajModeOption2: "2 - Backup Mode",
+    sajModeOption3: "3 - Passive Mode",
+    sajModeOption4: "4 - Reserved/Unknown",
+    sajModeOption5: "5 - Reserved/Unknown",
+    sajModeOption6: "6 - Reserved/Unknown",
     sajControlEnableTitle: "Enable & Switches",
     sajControlChargeEnableMaskLabel: "Charge Enable Mask",
     sajControlDischargeEnableMaskLabel: "Discharge Enable Mask",
@@ -98,6 +103,17 @@ const I18N = {
     sajControlLoadFailed: "Control state load failed: {error}",
     sajControlApplyFailed: "Control apply failed: {error}",
     sajControlApplyDone: "Applied",
+    sajControlPassiveAlert: "Warning: SAJ is in Passive Mode (sensor app_mode={modeSensor}). Slot schedules may be ignored and battery may charge/discharge unexpectedly.",
+    sajControlDebugModeLabel: "Debug Mode",
+    sajControlPopupSuccessTitle: "Success",
+    sajControlPopupCloseBtn: "Close",
+    sajControlPopupWorkingModeSummary: "Working mode has been applied (mode_code={modeCode}).",
+    sajControlPopupSaveSummary: "Save completed for enable masks and slot edits.",
+    sajControlDebugApiTitle: "API Calls",
+    sajControlDebugNoApi: "No API calls recorded.",
+    sajDebugPurposeSetMode: "Update SAJ app mode input with selected mode code.",
+    sajDebugPurposeSetTogglesMask: "Update charge/discharge enable masks.",
+    sajDebugPurposeSetSlot: "Update {kind} slot {slot} fields that changed.",
     sajControlCurrentStateTitle: "Current Slot State",
     sajControlEnableCol: "Enable",
     sajControlTypeCol: "Type",
@@ -323,11 +339,16 @@ const I18N = {
     samplingTab: "采样",
     sajControlTitle: "SAJ 管理",
     sajControlModeTitle: "工作模式",
-    sajControlModeExplain: "mode code 与名称可能因固件不同，请按 APP 对照测试 0~2。",
+    sajControlModeExplain: "mode code 与名称可能因固件不同，请按 APP 对照测试 0~6。",
+    sajControlModeReadback: "mode_input={modeInput}, mode_sensor={modeSensor}, inverter_mode={inverterMode}",
     sajControlModeCodeLabel: "模式编码",
     sajModeOption0: "0 - 自发自用模式",
     sajModeOption1: "1 - 分时电价模式",
     sajModeOption2: "2 - 备电模式",
+    sajModeOption3: "3 - 被动模式",
+    sajModeOption4: "4 - 预留/未知",
+    sajModeOption5: "5 - 预留/未知",
+    sajModeOption6: "6 - 预留/未知",
     sajControlEnableTitle: "启用与开关",
     sajControlChargeEnableMaskLabel: "充电启用掩码",
     sajControlDischargeEnableMaskLabel: "放电启用掩码",
@@ -351,6 +372,17 @@ const I18N = {
     sajControlLoadFailed: "管理状态加载失败：{error}",
     sajControlApplyFailed: "应用失败：{error}",
     sajControlApplyDone: "已应用",
+    sajControlPassiveAlert: "警告：当前 SAJ 处于 Passive Mode（sensor app_mode={modeSensor}）。时段配置可能被忽略，电池可能出现非预期充/放电。",
+    sajControlDebugModeLabel: "Debug 模式",
+    sajControlPopupSuccessTitle: "操作成功",
+    sajControlPopupCloseBtn: "关闭",
+    sajControlPopupWorkingModeSummary: "工作模式已应用（mode_code={modeCode}）。",
+    sajControlPopupSaveSummary: "已保存启用掩码和时段修改。",
+    sajControlDebugApiTitle: "API 调用明细",
+    sajControlDebugNoApi: "本次没有记录到 API 调用。",
+    sajDebugPurposeSetMode: "将所选 mode code 写入 SAJ App 模式输入值。",
+    sajDebugPurposeSetTogglesMask: "更新充/放电启用掩码。",
+    sajDebugPurposeSetSlot: "更新 {kind} 第 {slot} 段发生变化的字段。",
     sajControlCurrentStateTitle: "当前时段状态",
     sajControlEnableCol: "启用",
     sajControlTypeCol: "类型",
@@ -551,6 +583,7 @@ const PAGE_SIZE = 80;
 const SAMPLING_PAGE_SIZE = 100;
 const AUTO_REFRESH_KEY = "autoRefreshSeconds";
 const SOLPLANET_RAW_MODE_KEY = "solplanetRawMode";
+const SAJ_ACTION_DEBUG_MODE_KEY = "sajActionDebugMode";
 const AUTO_REFRESH_OPTIONS = [0, 5, 10];
 const CONFIG_SAMPLE_INTERVAL_OPTIONS = [5, 10, 30, 60, 300];
 const BALANCE_TOLERANCE_W = 120;
@@ -804,6 +837,7 @@ let currentTab = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sajControl
   ? localStorage.getItem("activeTab")
   : "dashboard";
 let solplanetRawMode = localStorage.getItem(SOLPLANET_RAW_MODE_KEY) === "table" ? "table" : "cards";
+let sajActionDebugMode = localStorage.getItem(SAJ_ACTION_DEBUG_MODE_KEY) === "1";
 let autoRefreshTimerId = null;
 let isLoadingCurrentTab = false;
 let autoRefreshSeconds = getAutoRefreshSeconds();
@@ -1008,6 +1042,8 @@ function applyTranslations() {
 
   const autoRefreshSelect = document.getElementById("autoRefreshSelect");
   if (autoRefreshSelect) autoRefreshSelect.value = String(autoRefreshSeconds);
+  const sajDebugInput = document.getElementById("sajActionDebugModeInput");
+  if (sajDebugInput) sajDebugInput.checked = sajActionDebugMode;
 
   if (stateCache.lastSummary) renderSummary(stateCache.lastSummary);
   renderSystemLoadMeta("saj");
@@ -1253,12 +1289,12 @@ function renderEnergyFlow(system, flowPayload) {
   if (batterySoc === null || batterySoc === undefined) {
     setText(flowId(system, "batterySocValue"), "-");
     const socFill = document.getElementById(flowId(system, "batterySocFill"));
-    if (socFill) socFill.style.width = "0%";
+    if (socFill) socFill.style.height = "0%";
   } else {
     const clampedSoc = Math.max(0, Math.min(100, Number(batterySoc)));
     setText(flowId(system, "batterySocValue"), `${clampedSoc.toFixed(0)}%`);
     const socFill = document.getElementById(flowId(system, "batterySocFill"));
-    if (socFill) socFill.style.width = `${clampedSoc}%`;
+    if (socFill) socFill.style.height = `${clampedSoc}%`;
   }
 
   if (balanceW === null || balanceW === undefined) {
@@ -2441,6 +2477,45 @@ function setSajDayMaskModalVisible(visible) {
   modal.classList.toggle("hidden", !visible);
 }
 
+function setSajActionModalVisible(visible) {
+  const modal = document.getElementById("sajActionModal");
+  if (!modal) return;
+  modal.classList.toggle("hidden", !visible);
+}
+
+function setSajActionDebugMode(enabled) {
+  sajActionDebugMode = Boolean(enabled);
+  localStorage.setItem(SAJ_ACTION_DEBUG_MODE_KEY, sajActionDebugMode ? "1" : "0");
+  const input = document.getElementById("sajActionDebugModeInput");
+  if (input) input.checked = sajActionDebugMode;
+}
+
+function _apiCallDebugLine(call) {
+  const method = String(call?.method || "GET").toUpperCase();
+  const path = String(call?.path || "-");
+  const purposeKey = String(call?.purposeKey || "");
+  const params = typeof call?.purposeParams === "object" && call.purposeParams ? call.purposeParams : {};
+  const purpose = purposeKey ? t(purposeKey, params) : String(call?.purpose || "-");
+  return `${method} ${path}: ${purpose}`;
+}
+
+function showSajActionSuccess(summaryText, apiCalls = []) {
+  setText("sajActionModalSummary", summaryText || t("sajControlApplyDone"));
+  const debugBlock = document.getElementById("sajActionDebugBlock");
+  if (debugBlock) debugBlock.classList.toggle("hidden", !sajActionDebugMode);
+  const list = document.getElementById("sajActionModalApiList");
+  if (list) {
+    list.innerHTML = "";
+    const lines = Array.isArray(apiCalls) && apiCalls.length ? apiCalls.map(_apiCallDebugLine) : [t("sajControlDebugNoApi")];
+    for (const line of lines) {
+      const li = document.createElement("li");
+      li.textContent = line;
+      list.appendChild(li);
+    }
+  }
+  setSajActionModalVisible(true);
+}
+
 function _getSajDayMaskPopupMask() {
   let mask = 0;
   WEEKDAY_ORDER.forEach((key, idx) => {
@@ -2514,7 +2589,7 @@ function syncDayInputFromCheckboxes(kind) {
 function setSajControlInputsFromState(controlState) {
   if (!controlState || typeof controlState !== "object") return;
   const modeInputValue = controlState?.working_mode?.mode_input;
-  if (modeInputValue !== null && modeInputValue !== undefined && Number(modeInputValue) >= 0 && Number(modeInputValue) <= 2) {
+  if (modeInputValue !== null && modeInputValue !== undefined && Number(modeInputValue) >= 0 && Number(modeInputValue) <= 6) {
     const el = document.getElementById("sajModeCodeInput");
     if (el) el.value = String(modeInputValue);
   }
@@ -2668,10 +2743,16 @@ function renderSajControlSlotsTable(controlState) {
 
 function renderSajControlFromCache() {
   const payload = stateCache.lastSajControl;
+  const passiveAlertEl = document.getElementById("sajPassiveModeAlert");
   if (!payload) {
     setText("sajControlMeta", "-");
     setText("sajControlUpdatedAt", `${t("updatedAt")}: -`);
     setText("sajControlStateJson", "-");
+    setText("sajModeReadbackText", t("sajControlModeReadback", { modeInput: "-", modeSensor: "-", inverterMode: "-" }));
+    if (passiveAlertEl) {
+      passiveAlertEl.classList.add("hidden");
+      passiveAlertEl.textContent = "-";
+    }
     const body = document.getElementById("sajControlSlotsBody");
     if (body) body.innerHTML = "";
     return;
@@ -2686,6 +2767,9 @@ function renderSajControlFromCache() {
   const batterySoc = state?.battery?.soc_percent;
   const batteryPowerW = state?.battery?.power_w;
   const ratedPowerW = state?.inverter?.rated_power_w;
+  const modeInput = state?.working_mode?.mode_input ?? "-";
+  const modeSensorValue = state?.working_mode?.mode_sensor ?? "-";
+  const inverterMode = state?.working_mode?.inverter_working_mode_sensor ?? "-";
   setText(
     "sajControlMeta",
     `charge_enable=${chargeEnableMask}, discharge_enable=${dischargeEnableMask}, ` +
@@ -2693,6 +2777,13 @@ function renderSajControlFromCache() {
       `battery_soc=${batterySoc ?? "-"}%, battery_power=${batteryPowerW ?? "-"}W, ` +
       `rated_power=${ratedPowerW ?? "-"}W`,
   );
+  setText("sajModeReadbackText", t("sajControlModeReadback", { modeInput, modeSensor: modeSensorValue, inverterMode }));
+  const modeSensor = Number(modeSensorValue);
+  const isPassiveMode = Number.isFinite(modeSensor) && modeSensor === 3;
+  if (passiveAlertEl) {
+    passiveAlertEl.classList.toggle("hidden", !isPassiveMode);
+    passiveAlertEl.textContent = isPassiveMode ? t("sajControlPassiveAlert", { modeSensor }) : "-";
+  }
   const pre = document.getElementById("sajControlStateJson");
   if (pre) pre.textContent = JSON.stringify(state || payload, null, 2);
   renderSajControlSlotsTable(state);
@@ -2720,6 +2811,13 @@ async function applySajWorkingMode() {
     });
     stateCache.lastSajControl = payload;
     renderSajControlFromCache();
+    showSajActionSuccess(t("sajControlPopupWorkingModeSummary", { modeCode }), [
+      {
+        method: "PUT",
+        path: "/api/saj/control/working-mode",
+        purposeKey: "sajDebugPurposeSetMode",
+      },
+    ]);
   } catch (err) {
     setText("sajControlMeta", t("sajControlApplyFailed", { error: String(err) }));
   }
@@ -2786,6 +2884,13 @@ async function applySajEnableMasksOnly() {
   mirrorQuickEnableMaskInputsToMain();
 
   const edits = [];
+  const debugCalls = [
+    {
+      method: "PUT",
+      path: "/api/saj/control/toggles",
+      purposeKey: "sajDebugPurposeSetTogglesMask",
+    },
+  ];
   for (const kind of ["charge", "discharge"]) {
     const source = Array.isArray(state?.[kind]?.slots) ? state[kind].slots : [];
     for (let slot = 1; slot <= 7; slot += 1) {
@@ -2812,10 +2917,17 @@ async function applySajEnableMasksOnly() {
         const dayMaskValue = clampMask7(dayMaskRaw);
         if (dayMaskValue !== clampMask7(original.day_mask)) payload.day_mask = dayMaskValue;
       }
-      if (Object.keys(payload).length) edits.push({ kind, slot, payload });
+      if (Object.keys(payload).length) {
+        edits.push({ kind, slot, payload });
+        debugCalls.push({
+          method: "PUT",
+          path: `/api/saj/control/${kind}-slots/${slot}`,
+          purposeKey: "sajDebugPurposeSetSlot",
+          purposeParams: { kind, slot },
+        });
+      }
     }
   }
-
   try {
     let payload = await fetchJson("/api/saj/control/toggles", {
       method: "PUT",
@@ -2834,12 +2946,9 @@ async function applySajEnableMasksOnly() {
         timeoutMs: 12000,
       });
     }
-    payload = await fetchJson("/api/saj/control/refresh-touch", {
-      method: "POST",
-      timeoutMs: 12000,
-    });
     stateCache.lastSajControl = payload;
     renderSajControlFromCache();
+    showSajActionSuccess(t("sajControlPopupSaveSummary"), debugCalls);
   } catch (err) {
     setText("sajControlMeta", t("sajControlApplyFailed", { error: String(err) }));
   }
@@ -3446,6 +3555,13 @@ bindClickIfPresent("sajDayMaskConfirmBtn", () => {
 bindChangeIfPresent("sajDayMaskAllDays", () => {
   const allDays = document.getElementById("sajDayMaskAllDays");
   _setSajDayMaskPopupFromMask(allDays?.checked ? 127 : 0);
+});
+bindClickIfPresent("sajActionModalCloseBtn", () => {
+  setSajActionModalVisible(false);
+});
+bindChangeIfPresent("sajActionDebugModeInput", (event) => {
+  const next = event?.target?.checked;
+  setSajActionDebugMode(next);
 });
 for (const key of WEEKDAY_ORDER) {
   bindChangeIfPresent(`sajDayMask${key}`, () => {
