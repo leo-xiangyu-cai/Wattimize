@@ -552,13 +552,14 @@ td {
 
 .combined-flow-board {
   grid-template-columns: repeat(5, 1fr);
-  grid-template-rows: 1fr 1fr 1fr;
-  min-height: 560px;
+  grid-template-rows: 0.78fr 0.92fr 1.3fr;
+  min-height: 620px;
 }
 
 .combined-flow-board .combined-node-grid {
   grid-column: 3 / 4;
   grid-row: 1 / 2;
+  align-self: end;
 }
 
 .combined-flow-board .combined-node-solar {
@@ -569,7 +570,14 @@ td {
 .combined-flow-board .combined-node-switchboard {
   grid-column: 3 / 4;
   grid-row: 2 / 3;
-  width: 280px;
+  width: 300px;
+  min-height: 208px;
+  padding: 12px 14px 14px;
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 50% 12%, rgba(255, 255, 255, 0.95) 0, rgba(255, 255, 255, 0.18) 38%, transparent 60%),
+    linear-gradient(180deg, #fbf7ef 0%, #eef5ea 100%);
+  box-shadow: 0 16px 28px rgba(86, 105, 81, 0.12);
 }
 
 .combined-flow-board .combined-node-load {
@@ -582,35 +590,39 @@ td {
 .combined-flow-board .combined-node-battery1 {
   grid-column: 1 / 2;
   grid-row: 3 / 4;
+  align-self: start;
 }
 
 .combined-flow-board .combined-node-inverter1 {
   grid-column: 2 / 3;
   grid-row: 3 / 4;
   width: 196px;
+  align-self: start;
 }
 
 .combined-flow-board .combined-node-inverter2 {
   grid-column: 4 / 5;
   grid-row: 3 / 4;
   width: 196px;
+  align-self: start;
 }
 
 .combined-flow-board .combined-node-battery2 {
   grid-column: 5 / 6;
   grid-row: 3 / 4;
+  align-self: start;
 }
 
 .combined-flow-board .line-grid-switchboard {
   left: calc(50% - 5px);
-  top: 24%;
-  height: 26%;
+  top: 18%;
+  height: 32%;
 }
 
 .combined-flow-board .line-solar-battery1 {
   left: 10%;
   top: 50%;
-  height: 33%;
+  height: 36%;
 }
 
 .combined-flow-board .line-solar-inverter1-a {
@@ -622,7 +634,7 @@ td {
 .combined-flow-board .line-solar-inverter1-b {
   left: calc(30% - 5px);
   top: 50%;
-  height: 33%;
+  height: 36%;
 }
 
 .combined-flow-board .line-switchboard-load {
@@ -632,13 +644,13 @@ td {
 }
 
 .combined-flow-board .line-battery1-inverter1 {
-  top: calc(83% - 5px);
+  top: calc(86% - 5px);
   left: 10%;
   width: 20%;
 }
 
 .combined-flow-board .line-battery2-inverter2 {
-  top: calc(83% - 5px);
+  top: calc(86% - 5px);
   left: 70%;
   width: 20%;
 }
@@ -646,11 +658,11 @@ td {
 .combined-flow-board .line-switchboard-inverter1-a {
   left: calc(44% - 5px);
   top: 50%;
-  height: 33%;
+  height: 36%;
 }
 
 .combined-flow-board .line-switchboard-inverter1-b {
-  top: calc(83% - 5px);
+  top: calc(86% - 5px);
   left: 30%;
   width: 14%;
 }
@@ -658,11 +670,11 @@ td {
 .combined-flow-board .line-switchboard-inverter2-a {
   left: calc(56% - 5px);
   top: 50%;
-  height: 33%;
+  height: 36%;
 }
 
 .combined-flow-board .line-switchboard-inverter2-b {
-  top: calc(83% - 5px);
+  top: calc(86% - 5px);
   left: 56%;
   width: 14%;
 }
@@ -689,14 +701,14 @@ td {
   border-color: #7ea790;
 }
 
-.combined-flow-board .line-label-grid-switchboard { left: 50%; top: 37%; }
-.combined-flow-board .line-label-solar-battery1 { left: 10%; top: 67%; }
+.combined-flow-board .line-label-grid-switchboard { left: 50%; top: 33%; }
+.combined-flow-board .line-label-solar-battery1 { left: 10%; top: 69%; }
 .combined-flow-board .line-label-solar-inverter1 { left: 24%; top: 56%; }
 .combined-flow-board .line-label-switchboard-load { left: 70%; top: 50%; }
-.combined-flow-board .line-label-battery1-inverter1 { left: 20%; top: 83%; }
-.combined-flow-board .line-label-battery2-inverter2 { left: 80%; top: 83%; }
-.combined-flow-board .line-label-switchboard-inverter1 { left: 37%; top: 83%; }
-.combined-flow-board .line-label-switchboard-inverter2 { left: 63%; top: 83%; }
+.combined-flow-board .line-label-battery1-inverter1 { left: 20%; top: 86%; }
+.combined-flow-board .line-label-battery2-inverter2 { left: 80%; top: 86%; }
+.combined-flow-board .line-label-switchboard-inverter1 { left: 37%; top: 86%; }
+.combined-flow-board .line-label-switchboard-inverter2 { left: 63%; top: 86%; }
 
 .alert-high {
   color: #c43f4e !important;
@@ -796,6 +808,12 @@ td {
   font-size: 11px;
 }
 
+.battery-runtime {
+  margin-top: 8px;
+  text-align: center;
+  line-height: 1.35;
+}
+
 .node-state {
   margin-top: 4px;
   font-size: 12px;
@@ -873,26 +891,26 @@ td {
 
 .h-line.active {
   background-color: #d6f3e8;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='10' viewBox='0 0 34 10'%3E%3Crect x='1' y='1' width='8' height='8' fill='%232fa27d'/%3E%3Cpolygon points='9,1 16.5,5 9,9' fill='%232fa27d'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='10' viewBox='0 0 34 10'%3E%3Cpolygon points='1,1 13,1 18,5 13,9 1,9 5,5' fill='%232fa27d' stroke='%232d5d6d' stroke-width='0.9' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-size: var(--flow-run-span) 100%;
   background-repeat: repeat-x;
   animation: flowLineRunX 0.9s linear infinite;
 }
 
 .h-line.active.reverse {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='10' viewBox='0 0 34 10'%3E%3Cpolygon points='8.5,5 16,1 16,9' fill='%232fa27d'/%3E%3Crect x='16' y='1' width='8' height='8' fill='%232fa27d'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='10' viewBox='0 0 34 10'%3E%3Cpolygon points='17,1 5,1 1,5 5,9 17,9 13,5' fill='%232fa27d' stroke='%232d5d6d' stroke-width='0.9' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .v-line.active {
   background-color: #d6f3e8;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='34' viewBox='0 0 10 34'%3E%3Crect x='1' y='1' width='8' height='8' fill='%232fa27d'/%3E%3Cpolygon points='1,9 5,16.5 9,9' fill='%232fa27d'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='34' viewBox='0 0 10 34'%3E%3Cpolygon points='1,1 1,13 5,18 9,13 9,1 5,5' fill='%232fa27d' stroke='%232d5d6d' stroke-width='0.9' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-size: 100% var(--flow-run-span);
   background-repeat: repeat-y;
   animation: flowLineRunY 0.8s linear infinite;
 }
 
 .v-line.active.reverse {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='34' viewBox='0 0 10 34'%3E%3Cpolygon points='1,16 5,8.5 9,16' fill='%232fa27d'/%3E%3Crect x='1' y='16' width='8' height='8' fill='%232fa27d'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='34' viewBox='0 0 10 34'%3E%3Cpolygon points='1,17 5,13 9,17 9,5 5,1 1,5' fill='%232fa27d' stroke='%232d5d6d' stroke-width='0.9' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .flow-line.reverse::before,
@@ -1130,6 +1148,8 @@ td {
     rgb(56, 138, 74) 75%,
     rgb(56, 138, 74) 100%
   );
+  background-repeat: no-repeat;
+  background-position: center bottom;
   transition: height 0.4s ease;
   z-index: 1;
   box-shadow: inset 0 -8px 14px rgba(28, 64, 41, 0.16);
@@ -1146,8 +1166,8 @@ td {
   z-index: 2;
   font-size: 16px;
   font-weight: 800;
-  color: var(--soc-text-color, #1e3f30);
-  text-shadow: 0 1px 1px var(--soc-text-shadow, rgba(255, 255, 255, 0.7));
+  color: var(--soc-text-color, #66736c);
+  text-shadow: 0 1px 2px var(--soc-text-shadow, rgba(255, 255, 255, 0.42));
   pointer-events: none;
 }
 
@@ -1230,6 +1250,17 @@ td {
   .flow-node {
     width: 132px;
     padding: 8px;
+  }
+
+  .combined-flow-board {
+    min-height: 600px;
+    grid-template-rows: 0.82fr 0.92fr 1.26fr;
+  }
+
+  .combined-flow-board .combined-node-switchboard {
+    width: 248px;
+    min-height: 184px;
+    padding: 10px 12px 12px;
   }
 
   .inline-icon {

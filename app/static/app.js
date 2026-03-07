@@ -295,6 +295,10 @@ const I18N = {
     stateCharging: "Charging",
     stateDischarging: "Discharging",
     stateBatteryIdle: "Idle",
+    batteryRuntimeDischarging: "Est. empty {time}",
+    batteryRuntimeCharging: "Charging now",
+    batteryRuntimeIdle: "No discharge at the moment",
+    batteryRuntimeNoData: "Runtime unavailable",
     balanceLabel: "Balance",
     balanceStatusTitle: "Dynamic Balance Status",
     balanceStatusBalanced: "Cleared",
@@ -647,6 +651,10 @@ const I18N = {
     stateCharging: "正在充电",
     stateDischarging: "正在放电",
     stateBatteryIdle: "空闲",
+    batteryRuntimeDischarging: "预计 {time} 耗空",
+    batteryRuntimeCharging: "当前正在充电",
+    batteryRuntimeIdle: "当前未在放电",
+    batteryRuntimeNoData: "暂时无法估算",
     balanceLabel: "功率平衡",
     balanceStatusTitle: "动态平衡状态",
     balanceStatusBalanced: "已清零",
@@ -1406,6 +1414,11 @@ const BATTERY_CAPACITY_KWH = {
   solplanet: 40,
 };
 
+const BATTERY_MIN_DISCHARGE_SOC = {
+  saj: 20,
+  solplanet: 10,
+};
+
 function formatTrimmedDecimal(value, digits = 1) {
   const fixed = Number(value).toFixed(digits);
   return fixed.replace(/\.0$/, "");
@@ -1418,6 +1431,41 @@ function formatBatteryEnergyKwh(system, batterySoc) {
   const clampedSoc = Math.max(0, Math.min(100, Number(batterySoc)));
   const currentKwh = (capacityKwh * clampedSoc) / 100;
   return `${formatTrimmedDecimal(currentKwh, 1)} / ${formatTrimmedDecimal(capacityKwh, 1)} kWh`;
+}
+
+function formatBatteryRuntimeText(system, batterySoc, batteryW) {
+  const capacityKwh = BATTERY_CAPACITY_KWH[system];
+  const minDischargeSoc = BATTERY_MIN_DISCHARGE_SOC[system] ?? 0;
+  if (!Number.isFinite(capacityKwh) || batterySoc === null || batterySoc === undefined || batteryW === null || batteryW === undefined) {
+    return t("batteryRuntimeNoData");
+  }
+
+  const powerW = Number(batteryW);
+  if (!Number.isFinite(powerW)) return t("batteryRuntimeNoData");
+  if (powerW < -5) return t("batteryRuntimeCharging");
+  if (Math.abs(powerW) <= 5) return t("batteryRuntimeIdle");
+
+  const clampedSoc = Math.max(0, Math.min(100, Number(batterySoc)));
+  const usableSoc = Math.max(0, clampedSoc - minDischargeSoc);
+  if (usableSoc <= 0) return t("batteryRuntimeNoData");
+
+  const usableKwh = (capacityKwh * usableSoc) / 100;
+  const runtimeHours = usableKwh / (powerW / 1000);
+  if (!Number.isFinite(runtimeHours) || runtimeHours < 0) return t("batteryRuntimeNoData");
+
+  const depletionAt = new Date(Date.now() + runtimeHours * 3600 * 1000);
+  if (Number.isNaN(depletionAt.getTime())) return t("batteryRuntimeNoData");
+
+  const now = new Date();
+  const sameDay =
+    depletionAt.getFullYear() === now.getFullYear() &&
+    depletionAt.getMonth() === now.getMonth() &&
+    depletionAt.getDate() === now.getDate();
+  const time = sameDay
+    ? depletionAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : `tomorrow ${depletionAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+
+  return t("batteryRuntimeDischarging", { time });
 }
 
 function setFlowLine(id, active, reverse = false) {
@@ -1443,25 +1491,35 @@ function setModeClass(id, mode) {
 }
 
 function setSocTextContrastBySocValueId(socValueId, socPercent) {
-  const p = Math.max(0, Math.min(100, Number(socPercent) || 0));
   const textLayer = document.getElementById(socValueId)?.parentElement;
   if (!textLayer) return;
-  // Text is centered vertically. When fill exceeds ~55%, the center area is mostly on filled color.
-  if (p >= 55) {
-    textLayer.style.setProperty("--soc-text-color", "#f5fcf7");
-    textLayer.style.setProperty("--soc-text-shadow", "rgba(17, 40, 28, 0.55)");
-  } else {
-    textLayer.style.setProperty("--soc-text-color", "#213f31");
-    textLayer.style.setProperty("--soc-text-shadow", "rgba(255, 255, 255, 0.80)");
+  textLayer.style.setProperty("--soc-text-color", "#66736c");
+  textLayer.style.setProperty("--soc-text-shadow", "rgba(255, 255, 255, 0.42)");
+}
+
+function setSocFillLevel(socFillId, socPercent) {
+  const socFill = document.getElementById(socFillId);
+  if (!socFill) return;
+
+  const clampedSoc = Math.max(0, Math.min(100, Number(socPercent) || 0));
+  socFill.style.height = `${clampedSoc}%`;
+
+  if (clampedSoc <= 0) {
+    socFill.style.backgroundSize = "";
+    socFill.style.backgroundPosition = "";
+    return;
   }
+
+  // Keep the rainbow mapped to the full battery height, then reveal only the filled portion.
+  socFill.style.backgroundSize = `100% ${10000 / clampedSoc}%`;
+  socFill.style.backgroundPosition = "center bottom";
 }
 
 function renderBatterySocDisplay({ system, soc, socValueId, socFillId, energyValueId }) {
   if (soc === null || soc === undefined) {
     setText(socValueId, "-");
     if (energyValueId) setText(energyValueId, formatBatteryEnergyKwh(system, null));
-    const socFill = document.getElementById(socFillId);
-    if (socFill) socFill.style.height = "0%";
+    setSocFillLevel(socFillId, 0);
     setSocTextContrastBySocValueId(socValueId, 0);
     return;
   }
@@ -1469,9 +1527,13 @@ function renderBatterySocDisplay({ system, soc, socValueId, socFillId, energyVal
   const clampedSoc = Math.max(0, Math.min(100, Number(soc)));
   setText(socValueId, `${clampedSoc.toFixed(0)}%`);
   if (energyValueId) setText(energyValueId, formatBatteryEnergyKwh(system, clampedSoc));
-  const socFill = document.getElementById(socFillId);
-  if (socFill) socFill.style.height = `${clampedSoc}%`;
+  setSocFillLevel(socFillId, clampedSoc);
   setSocTextContrastBySocValueId(socValueId, clampedSoc);
+}
+
+function renderBatteryRuntime({ system, soc, batteryW, runtimeValueId }) {
+  if (!runtimeValueId) return;
+  setText(runtimeValueId, formatBatteryRuntimeText(system, soc, batteryW));
 }
 
 function inverterStateText(raw) {
@@ -1655,6 +1717,12 @@ function renderEnergyFlow(system, flowPayload) {
     socValueId: flowId(system, "batterySocValue"),
     socFillId: flowId(system, "batterySocFill"),
     energyValueId: flowId(system, "batteryEnergyValue"),
+  });
+  renderBatteryRuntime({
+    system,
+    soc: batterySoc,
+    batteryW,
+    runtimeValueId: flowId(system, "batteryRuntimeValue"),
   });
 
   if (balanceW === null || balanceW === undefined) {
@@ -1963,12 +2031,24 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
     socFillId: "combined-battery1SocFill",
     energyValueId: "combined-battery1EnergyValue",
   });
+  renderBatteryRuntime({
+    system: "saj",
+    soc: battery1Soc,
+    batteryW: battery1W,
+    runtimeValueId: "combined-battery1RuntimeValue",
+  });
   renderBatterySocDisplay({
     system: "solplanet",
     soc: battery2Soc,
     socValueId: "combined-battery2SocValue",
     socFillId: "combined-battery2SocFill",
     energyValueId: "combined-battery2EnergyValue",
+  });
+  renderBatteryRuntime({
+    system: "solplanet",
+    soc: battery2Soc,
+    batteryW: battery2W,
+    runtimeValueId: "combined-battery2RuntimeValue",
   });
 
   const gridHigh = gridW !== null && Math.abs(gridW) > 15000;
