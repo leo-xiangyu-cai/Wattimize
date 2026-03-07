@@ -36,6 +36,7 @@ SOLPLANET_ENDPOINT_TABLES: dict[str, str] = {
     "getdevdata_device_5": "solplanet_getdevdata_device_5",
     "getdefine": "solplanet_getdefine",
 }
+WORKER_API_LOG_RESULT_MAX_CHARS = 20000
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,31 @@ def init_db(db_path: Path) -> None:
             );
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS worker_api_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                worker TEXT NOT NULL,
+                system TEXT,
+                service TEXT NOT NULL,
+                method TEXT NOT NULL,
+                api_link TEXT NOT NULL,
+                requested_at_utc TEXT NOT NULL,
+                requested_at_epoch REAL NOT NULL,
+                ok INTEGER NOT NULL,
+                status_code INTEGER,
+                duration_ms REAL,
+                result_text TEXT,
+                error_text TEXT
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_worker_api_logs_time
+            ON worker_api_logs(requested_at_epoch DESC);
+            """
+        )
         for table_name in SOLPLANET_ENDPOINT_TABLES.values():
             conn.execute(
                 f"""
@@ -108,6 +134,172 @@ def init_db(db_path: Path) -> None:
                 """
             )
         conn.commit()
+
+
+def _truncate_result_text(text: str | None) -> str:
+    raw = str(text or "")
+    if len(raw) <= WORKER_API_LOG_RESULT_MAX_CHARS:
+        return raw
+    tail = f"\n...[truncated {len(raw) - WORKER_API_LOG_RESULT_MAX_CHARS} chars]"
+    keep = max(0, WORKER_API_LOG_RESULT_MAX_CHARS - len(tail))
+    return f"{raw[:keep]}{tail}"
+
+
+def insert_worker_api_log(
+    db_path: Path,
+    *,
+    worker: str,
+    system: str | None,
+    service: str,
+    method: str,
+    api_link: str,
+    requested_at_utc: str,
+    ok: bool,
+    status_code: int | None,
+    duration_ms: float | None,
+    result_text: str | None,
+    error_text: str | None,
+) -> None:
+    parsed_requested = datetime.fromisoformat(requested_at_utc.replace("Z", "+00:00"))
+    if parsed_requested.tzinfo is None:
+        parsed_requested = parsed_requested.replace(tzinfo=UTC)
+    requested_norm = parsed_requested.astimezone(UTC).isoformat()
+    requested_epoch = parsed_requested.astimezone(UTC).timestamp()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO worker_api_logs (
+                worker,
+                system,
+                service,
+                method,
+                api_link,
+                requested_at_utc,
+                requested_at_epoch,
+                ok,
+                status_code,
+                duration_ms,
+                result_text,
+                error_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            (
+                str(worker or "worker"),
+                str(system or "") or None,
+                str(service or "unknown"),
+                str(method or "GET").upper(),
+                str(api_link or ""),
+                requested_norm,
+                requested_epoch,
+                1 if ok else 0,
+                status_code,
+                duration_ms,
+                _truncate_result_text(result_text),
+                str(error_text or "") or None,
+            ),
+        )
+        conn.commit()
+
+
+def list_worker_api_logs(
+    db_path: Path,
+    *,
+    page: int,
+    page_size: int,
+    worker: str | None = None,
+    system: str | None = None,
+) -> dict[str, object]:
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 1
+    if page_size > 500:
+        page_size = 500
+
+    where_conditions: list[str] = []
+    params: list[object] = []
+    if worker:
+        where_conditions.append("worker = ?")
+        params.append(worker)
+    if system:
+        where_conditions.append("system = ?")
+        params.append(system)
+    where_sql = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
+
+    if not db_path.exists():
+        return {
+            "count": 0,
+            "total": 0,
+            "page": page,
+            "page_size": page_size,
+            "has_next": False,
+            "has_prev": False,
+            "items": [],
+        }
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            total = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM worker_api_logs {where_sql};",
+                    params,
+                ).fetchone()[0]
+            )
+            start = (page - 1) * page_size
+            query_params = [*params, page_size, start]
+            rows = conn.execute(
+                f"""
+                SELECT
+                    id,
+                    worker,
+                    system,
+                    service,
+                    method,
+                    api_link,
+                    requested_at_utc,
+                    ok,
+                    status_code,
+                    duration_ms,
+                    result_text,
+                    error_text
+                FROM worker_api_logs
+                {where_sql}
+                ORDER BY requested_at_epoch DESC
+                LIMIT ? OFFSET ?;
+                """,
+                query_params,
+            ).fetchall()
+    except sqlite3.OperationalError:
+        total = 0
+        rows = []
+
+    items = [
+        {
+            "id": int(row[0]),
+            "worker": str(row[1]),
+            "system": str(row[2] or ""),
+            "service": str(row[3]),
+            "method": str(row[4]),
+            "api_link": str(row[5]),
+            "requested_at_utc": row[6],
+            "ok": bool(row[7]),
+            "status_code": row[8],
+            "duration_ms": row[9],
+            "result_text": str(row[10] or ""),
+            "error_text": str(row[11] or ""),
+        }
+        for row in rows
+    ]
+    end = page * page_size
+    return {
+        "count": len(items),
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "has_next": end < total,
+        "has_prev": page > 1,
+        "items": items,
+    }
 
 
 def insert_sample(db_path: Path, sample: EnergySample) -> None:

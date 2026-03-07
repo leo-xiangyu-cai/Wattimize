@@ -5,6 +5,7 @@ import json
 import os
 import re
 from collections import Counter
+from contextvars import ContextVar
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from time import monotonic
@@ -43,11 +44,13 @@ from app.persistence import (
     get_latest_sample,
     get_series_samples,
     get_storage_status,
+    insert_worker_api_log,
     import_samples_csv,
     init_db,
     insert_sample,
     list_realtime_kv_rows,
     list_samples,
+    list_worker_api_logs,
     upsert_solplanet_endpoint_snapshot,
     upsert_realtime_kv,
 )
@@ -55,14 +58,6 @@ from app.solplanet_cgi import SolplanetCgiClient
 
 
 settings = load_settings()
-ha_client = HomeAssistantClient(base_url=settings.ha_url, token=settings.ha_token)
-solplanet_client = SolplanetCgiClient(
-    host=settings.solplanet_dongle_host,
-    port=settings.solplanet_dongle_port,
-    scheme=settings.solplanet_dongle_scheme,
-    verify_ssl=settings.solplanet_verify_ssl,
-    timeout_seconds=settings.solplanet_request_timeout_seconds,
-)
 SUPPORTED_SYSTEMS = ("saj", "solplanet")
 SYSTEM_PREFIXES: dict[str, tuple[str, ...]] = {
     "saj": ("saj",),
@@ -83,6 +78,8 @@ runtime_lock = asyncio.Lock()
 collector_task: asyncio.Task[None] | None = None
 collector_stop_event = asyncio.Event()
 storage_db_path = Path(os.getenv("WATTIMIZE_DB_PATH", "").strip() or DEFAULT_DB_PATH)
+request_actor_ctx: ContextVar[str] = ContextVar("request_actor_ctx", default="api")
+request_system_ctx: ContextVar[str | None] = ContextVar("request_system_ctx", default=None)
 sample_interval_seconds = float(settings.saj_sample_interval_seconds)
 solplanet_sample_interval_seconds = float(settings.solplanet_sample_interval_seconds)
 collector_status: dict[str, dict[str, object]] = {
@@ -115,6 +112,64 @@ collector_status: dict[str, dict[str, object]] = {
         "failure_count": 0,
     },
 }
+
+
+def _handle_outbound_request_log(event: dict[str, object]) -> None:
+    if request_actor_ctx.get() != "worker":
+        return
+    requested_at = str(event.get("requested_at_utc") or datetime.now(UTC).isoformat())
+    worker = request_actor_ctx.get() or "worker"
+    system = request_system_ctx.get()
+    service = str(event.get("service") or "unknown")
+    method = str(event.get("method") or "GET").upper()
+    api_link = str(event.get("url") or "")
+    ok = bool(event.get("ok"))
+    status_code_value = event.get("status_code")
+    status_code = int(status_code_value) if isinstance(status_code_value, (int, float)) else None
+    duration_raw = event.get("duration_ms")
+    duration_ms = round(float(duration_raw), 1) if isinstance(duration_raw, (int, float)) else None
+    result_text = str(event.get("result_text") or "")
+    error_text = str(event.get("error_text") or "")
+
+    async def _write() -> None:
+        try:
+            await asyncio.to_thread(
+                insert_worker_api_log,
+                storage_db_path,
+                worker=worker,
+                system=system,
+                service=service,
+                method=method,
+                api_link=api_link,
+                requested_at_utc=requested_at,
+                ok=ok,
+                status_code=status_code,
+                duration_ms=duration_ms,
+                result_text=result_text,
+                error_text=error_text,
+            )
+        except Exception:
+            return
+
+    try:
+        asyncio.get_running_loop().create_task(_write())
+    except RuntimeError:
+        return
+
+
+ha_client = HomeAssistantClient(
+    base_url=settings.ha_url,
+    token=settings.ha_token,
+    request_logger=_handle_outbound_request_log,
+)
+solplanet_client = SolplanetCgiClient(
+    host=settings.solplanet_dongle_host,
+    port=settings.solplanet_dongle_port,
+    scheme=settings.solplanet_dongle_scheme,
+    verify_ssl=settings.solplanet_verify_ssl,
+    timeout_seconds=settings.solplanet_request_timeout_seconds,
+    request_logger=_handle_outbound_request_log,
+)
 
 
 class ConfigPayload(BaseModel):
@@ -336,6 +391,14 @@ def _find_state_by_keywords(
     return None
 
 
+def _is_saj_offnet_mode(*, mode_sensor: object, inverter_status: object) -> bool:
+    mode_value = _to_number(mode_sensor)
+    if mode_value is not None and int(mode_value) == 8:
+        return True
+    status_text = str(inverter_status or "").strip().lower()
+    return "offnet" in status_text or "off-grid" in status_text or "microgrid" in status_text
+
+
 def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> dict[str, object]:
     prefixes = SYSTEM_PREFIXES[system]
     configured_core_entity_ids = _get_system_entity_ids(system)
@@ -409,6 +472,28 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
         states_by_entity_id,
         (*_from_config_ids("inverter", "status"), f"sensor.{prefixes[0]}_inverter_status"),
     ) or _find_state_by_keywords(states, prefixes, (("inverter", "status"),))
+    app_mode = _find_state_by_entity_ids(
+        states_by_entity_id,
+        (f"sensor.{prefixes[0]}_app_mode",),
+    ) or _find_state_by_keywords(states, prefixes, (("app", "mode"),))
+    pv1 = _find_state_by_entity_ids(
+        states_by_entity_id,
+        (f"sensor.{prefixes[0]}_pv1_power",),
+    ) or _find_state_by_keywords(states, prefixes, (("pv1", "power"),))
+    pv2 = _find_state_by_entity_ids(
+        states_by_entity_id,
+        (f"sensor.{prefixes[0]}_pv2_power",),
+    ) or _find_state_by_keywords(states, prefixes, (("pv2", "power"),))
+    inverter_power = _find_state_by_entity_ids(
+        states_by_entity_id,
+        (
+            *_from_config_ids("inverter", "power"),
+            f"sensor.{prefixes[0]}_inverter_power",
+            f"sensor.{prefixes[0]}_total_inverter_power",
+            f"sensor.{prefixes[0]}_inverter_output_power",
+            f"sensor.{prefixes[0]}_inverter_active_power",
+        ),
+    ) or _find_state_by_keywords(states, prefixes, (("inverter", "power"),))
 
     pv_v = _to_number(pv.get("state")) if pv else None
     grid_v = _to_number(grid.get("state")) if grid else None
@@ -416,6 +501,10 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
     load_v = _to_number(load.get("state")) if load else None
     soc_v = _to_number(soc.get("state")) if soc else None
     battery_energy_v = _to_number(battery_energy.get("state")) if battery_energy else None
+    inverter_power_v = _to_number(inverter_power.get("state")) if inverter_power else None
+    app_mode_v = _to_number(app_mode.get("state")) if app_mode else None
+    pv1_v = _to_number(pv1.get("state")) if pv1 else None
+    pv2_v = _to_number(pv2.get("state")) if pv2 else None
     pv_w = _power_to_watts(pv_v, pv.get("attributes", {}).get("unit_of_measurement") if pv else None)  # type: ignore[union-attr]
     grid_w = _power_to_watts(grid_v, grid.get("attributes", {}).get("unit_of_measurement") if grid else None)  # type: ignore[union-attr]
     battery_w = _power_to_watts(
@@ -423,14 +512,42 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
         battery.get("attributes", {}).get("unit_of_measurement") if battery else None,  # type: ignore[union-attr]
     )
     load_w = _power_to_watts(load_v, load.get("attributes", {}).get("unit_of_measurement") if load else None)  # type: ignore[union-attr]
+    inverter_power_w = _power_to_watts(
+        inverter_power_v,
+        inverter_power.get("attributes", {}).get("unit_of_measurement") if inverter_power else None,  # type: ignore[union-attr]
+    )
+    pv1_w = _power_to_watts(pv1_v, pv1.get("attributes", {}).get("unit_of_measurement") if pv1 else None)  # type: ignore[union-attr]
+    pv2_w = _power_to_watts(pv2_v, pv2.get("attributes", {}).get("unit_of_measurement") if pv2 else None)  # type: ignore[union-attr]
     battery_energy_kwh = _energy_to_kwh(
         battery_energy_v,
         battery_energy.get("attributes", {}).get("unit_of_measurement") if battery_energy else None,  # type: ignore[union-attr]
     )
+    inverter_status = inverter.get("state") if inverter else None
+    notes: list[str] = []
+    if system == "saj" and _is_saj_offnet_mode(mode_sensor=app_mode_v, inverter_status=inverter_status):
+        corrected_pv_terms = [value for value in (pv1_w, pv2_w) if value is not None]
+        if corrected_pv_terms:
+            raw_pv_w = pv_w
+            pv_w = sum(corrected_pv_terms)
+            pv_source = "calc:saj_pv1_power + saj_pv2_power"
+            notes.append("saj_offnet_detected")
+            notes.append(f"saj_corrected_pv_w_source:{pv_source}")
+            if raw_pv_w is not None:
+                notes.append(f"saj_raw_pv_power_w:{round(raw_pv_w, 1)}")
+        else:
+            pv_source = str(pv.get("entity_id")) if pv else "unavailable"
+            notes.append("saj_offnet_detected_but_pv1_pv2_unavailable")
+    else:
+        pv_source = str(pv.get("entity_id")) if pv else "unavailable"
 
     balance_w: float | None = None
     balanced: bool | None = None
-    if pv_w is not None and grid_w is not None and battery_w is not None and load_w is not None:
+    if notes and "saj_offnet_detected" in notes:
+        # In offnet/microgrid mode the raw SAJ power flow no longer closes locally because
+        # external power from the other inverter is folded into SAJ's aggregate PV channel.
+        balance_w = None
+        balanced = None
+    elif pv_w is not None and grid_w is not None and battery_w is not None and load_w is not None:
         battery_discharge_w = max(battery_w, 0)
         battery_charge_w = max(-battery_w, 0)
         grid_import_w = max(grid_w, 0)
@@ -438,8 +555,7 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
         balance_w = pv_w + battery_discharge_w + grid_import_w - load_w - battery_charge_w - grid_export_w
         balanced = abs(balance_w) <= BALANCE_TOLERANCE_W
 
-    matched_entities = [item for item in (pv, grid, battery, load, soc, battery_energy, inverter) if item]
-    inverter_status = inverter.get("state") if inverter else None
+    matched_entities = [item for item in (pv, pv1, pv2, grid, battery, load, soc, battery_energy, inverter, inverter_power, app_mode) if item]
 
     return {
         "system": system,
@@ -447,25 +563,31 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
         "updated_at": datetime.now(UTC).isoformat(),
         "entities": {
             "pv": _compact_entity_item(pv) if pv else None,
+            "pv1": _compact_entity_item(pv1) if pv1 else None,
+            "pv2": _compact_entity_item(pv2) if pv2 else None,
+            "app_mode": _compact_entity_item(app_mode) if app_mode else None,
             "grid": _compact_entity_item(grid) if grid else None,
             "battery": _compact_entity_item(battery) if battery else None,
             "load": _compact_entity_item(load) if load else None,
             "soc": _compact_entity_item(soc) if soc else None,
             "battery_energy": _compact_entity_item(battery_energy) if battery_energy else None,
             "inverter": _compact_entity_item(inverter) if inverter else None,
+            "inverter_power": _compact_entity_item(inverter_power) if inverter_power else None,
         },
         "metrics": {
             "pv_w": pv_w,
             "grid_w": grid_w,
             "battery_w": battery_w,
             "load_w": load_w,
-            "pv_source": str(pv.get("entity_id")) if pv else "unavailable",
+            "pv_source": pv_source,
             "grid_source": str(grid.get("entity_id")) if grid else "unavailable",
             "battery_source": str(battery.get("entity_id")) if battery else "unavailable",
             "load_source": str(load.get("entity_id")) if load else "unavailable",
             "battery_soc_percent": soc_v,
             "battery_energy_kwh": battery_energy_kwh,
             "inverter_status": inverter_status,
+            "inverter_power_w": inverter_power_w,
+            "inverter_power_source": str(inverter_power.get("entity_id")) if inverter_power else "unavailable",
             "solar_active": bool(pv_w is not None and pv_w > 5),
             "grid_active": bool(grid_w is not None and abs(grid_w) > 5),
             "grid_import": bool(grid_w is not None and grid_w > 0),
@@ -475,6 +597,7 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
             "balance_w": balance_w,
             "balanced": balanced,
             "matched_entities": len(matched_entities),
+            "notes": notes,
         },
     }
 
@@ -861,6 +984,8 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
             "load_source": load_source,
             "battery_soc_percent": soc,
             "inverter_status": inverter_status,
+            "inverter_power_w": inverter_pac_w,
+            "inverter_power_source": "getdevdata_device_2.pac" if inverter_pac_w is not None else "unavailable",
             "solar_active": bool(pv_w is not None and pv_w > 5),
             "grid_active": bool(grid_w is not None and abs(grid_w) > 5),
             "grid_import": bool(grid_w is not None and grid_w > 0),
@@ -1634,13 +1759,18 @@ async def _replace_runtime(new_settings: Settings) -> None:
         settings = new_settings
         sample_interval_seconds = float(new_settings.saj_sample_interval_seconds)
         solplanet_sample_interval_seconds = float(new_settings.solplanet_sample_interval_seconds)
-        ha_client = HomeAssistantClient(base_url=settings.ha_url, token=settings.ha_token)
+        ha_client = HomeAssistantClient(
+            base_url=settings.ha_url,
+            token=settings.ha_token,
+            request_logger=_handle_outbound_request_log,
+        )
         solplanet_client = SolplanetCgiClient(
             host=settings.solplanet_dongle_host,
             port=settings.solplanet_dongle_port,
             scheme=settings.solplanet_dongle_scheme,
             verify_ssl=settings.solplanet_verify_ssl,
             timeout_seconds=settings.solplanet_request_timeout_seconds,
+            request_logger=_handle_outbound_request_log,
         )
         collector_status.setdefault("saj", {})["interval_seconds"] = sample_interval_seconds
         collector_status.setdefault("saj", {})["continuous"] = False
@@ -1705,7 +1835,12 @@ def _kv_source_for_path(system: str, path: str) -> str:
         return _cgi_url("getdevdata.cgi?device=4")
     if path.startswith("raw.schedule"):
         return _cgi_url("getdefine.cgi")
-    if path.startswith("metrics.pv_w") or path.startswith("metrics.load_w") or path.startswith("metrics.inverter_status"):
+    if (
+        path.startswith("metrics.pv_w")
+        or path.startswith("metrics.load_w")
+        or path.startswith("metrics.inverter_status")
+        or path.startswith("metrics.inverter_power_w")
+    ):
         return _cgi_url("getdevdata.cgi?device=2")
     if path.startswith("metrics.grid_w"):
         return _cgi_url("getdevdata.cgi?device=3")
@@ -1798,6 +1933,8 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
         "load_source": _kv_value(kv_map, system=system, key="metrics.load_source"),
         "battery_soc_percent": _to_number(_kv_value(kv_map, system=system, key="metrics.battery_soc_percent")),
         "inverter_status": _kv_value(kv_map, system=system, key="metrics.inverter_status"),
+        "inverter_power_w": _to_number(_kv_value(kv_map, system=system, key="metrics.inverter_power_w")),
+        "inverter_power_source": _kv_value(kv_map, system=system, key="metrics.inverter_power_source"),
         "solar_active": bool(_kv_value(kv_map, system=system, key="metrics.solar_active")),
         "grid_active": bool(_kv_value(kv_map, system=system, key="metrics.grid_active")),
         "grid_import": bool(_kv_value(kv_map, system=system, key="metrics.grid_import")),
@@ -1846,10 +1983,12 @@ def _build_storage_backed_flow(system: str, sample: dict[str, object]) -> dict[s
         "inverter_status",
         str(sample.get("inverter_status")) if sample.get("inverter_status") is not None else None,
     )
+    metrics.setdefault("inverter_power_w", _to_number(metrics.get("inverter_power_w")))
+    metrics.setdefault("inverter_power_source", "unavailable")
     metrics.setdefault("balance_w", _to_number(sample.get("balance_w")))
 
     if metrics.get("matched_entities") is None:
-        keys = ("pv_w", "grid_w", "battery_w", "load_w", "battery_soc_percent", "inverter_status")
+        keys = ("pv_w", "grid_w", "battery_w", "load_w", "battery_soc_percent", "inverter_status", "inverter_power_w")
         metrics["matched_entities"] = sum(1 for key in keys if metrics.get(key) is not None)
 
     flow: dict[str, object] = dict(payload)
@@ -1904,20 +2043,26 @@ async def _store_flow_sample(system: str, flow: dict[str, object]) -> None:
 
 
 async def _collect_for_system(system: str) -> None:
-    if system == "saj":
-        if _missing_required_config():
+    actor_token = request_actor_ctx.set("worker")
+    system_token = request_system_ctx.set(system)
+    try:
+        if system == "saj":
+            if _missing_required_config():
+                return
+            states = await ha_client.all_states()
+            flow = _build_energy_flow_payload("saj", states)
+            await _store_flow_sample("saj", flow)
             return
-        states = await ha_client.all_states()
-        flow = _build_energy_flow_payload("saj", states)
-        await _store_flow_sample("saj", flow)
-        return
 
-    if system == "solplanet":
-        if not solplanet_client.configured:
+        if system == "solplanet":
+            if not solplanet_client.configured:
+                return
+            flow = await _build_solplanet_energy_flow_payload_from_cgi()
+            await _store_flow_sample("solplanet", flow)
             return
-        flow = await _build_solplanet_energy_flow_payload_from_cgi()
-        await _store_flow_sample("solplanet", flow)
-        return
+    finally:
+        request_system_ctx.reset(system_token)
+        request_actor_ctx.reset(actor_token)
 
 
 def _collector_mark_start(system: str) -> float:
@@ -1996,6 +2141,8 @@ async def _collector_loop() -> None:
 async def _start_collector() -> None:
     global collector_task  # noqa: PLW0603
     await asyncio.to_thread(init_db, storage_db_path)
+    if collector_task and not collector_task.done():
+        return
     collector_stop_event.clear()
     collector_task = asyncio.create_task(_collector_loop())
 
@@ -2010,6 +2157,24 @@ async def _stop_collector() -> None:
         except asyncio.CancelledError:
             pass
         collector_task = None
+    for system in SUPPORTED_SYSTEMS:
+        status = collector_status.setdefault(system, {})
+        status["in_progress"] = False
+
+
+async def _restart_collector() -> dict[str, object]:
+    async with runtime_lock:
+        was_running = bool(collector_task and not collector_task.done())
+        await _stop_collector()
+        await _start_collector()
+    restarted_at = datetime.now(UTC).isoformat()
+    return {
+        "ok": True,
+        "action": "collector_restart",
+        "was_running": was_running,
+        "running": bool(collector_task and not collector_task.done()),
+        "restarted_at": restarted_at,
+    }
 
 
 @app.get("/api/health")
@@ -2032,6 +2197,13 @@ async def collector_runtime_status() -> dict[str, object]:
             "solplanet": solplanet_state,
         },
     }
+
+
+@app.post("/api/collector/restart")
+@app.post("/api/solplanet/control/restart-api")
+@app.post("/api/soulplanet/control/restart-api")
+async def post_restart_backend_api() -> dict[str, object]:
+    return await _restart_collector()
 
 
 @app.get("/api/storage/status")
@@ -2099,6 +2271,27 @@ async def storage_samples(
         page=page,
         page_size=page_size,
     )
+
+
+@app.get("/api/worker/logs")
+async def worker_logs(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+    system: str | None = Query(default=None, description="saj or solplanet"),
+) -> dict[str, object]:
+    normalized_system: str | None = None
+    if system:
+        normalized_system = _normalize_system_name(system)
+    payload = await asyncio.to_thread(
+        list_worker_api_logs,
+        storage_db_path,
+        page=page,
+        page_size=page_size,
+        worker="worker",
+        system=normalized_system,
+    )
+    payload["updated_at"] = datetime.now(UTC).isoformat()
+    return payload
 
 
 @app.get("/api/storage/series")
