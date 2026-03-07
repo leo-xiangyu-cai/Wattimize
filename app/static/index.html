@@ -53,6 +53,9 @@
         <button id="tabSampling" class="tab-btn" type="button" data-tab="sampling" data-i18n="samplingTab">
           Sampling
         </button>
+        <button id="tabWorkerLogs" class="tab-btn" type="button" data-tab="workerLogs" data-i18n="workerLogsTab">
+          Worker Logs
+        </button>
       </nav>
 
       <section id="dashboardView" class="view">
@@ -103,6 +106,191 @@
             <h2 data-i18n="flowTitle">Real-time Energy Flow Comparison</h2>
           </div>
           <div class="flow-compare-grid">
+            <section class="flow-system-card flow-system-card-combined">
+              <h3 class="flow-system-title" data-i18n="integratedFlowTitle">Integrated Dashboard</h3>
+              <p class="muted flow-system-subtitle" data-i18n="integratedFlowSubtitle">
+                SAJ solar/grid + SAJ/Solplanet batteries, dual inverters in parallel
+              </p>
+              <div class="flow-meta">
+                <span id="combined-loadingSpinner" class="loading-spinner is-hidden" aria-hidden="true"></span>
+                <span id="combined-updatedAt" class="muted">-</span>
+              </div>
+              <div id="energyFlowCombined" class="flow-board combined-flow-board">
+                <div id="combined-lineGridToSwitchboard" class="flow-line v-line line-grid-switchboard"></div>
+                <div id="combined-lineSolarToBattery1" class="flow-line v-line line-solar-battery1"></div>
+                <div id="combined-lineSolarToInverter1A" class="flow-line h-line line-solar-inverter1-a"></div>
+                <div id="combined-lineSolarToInverter1B" class="flow-line v-line line-solar-inverter1-b"></div>
+                <div id="combined-lineSwitchboardToLoad" class="flow-line h-line line-switchboard-load"></div>
+                <div id="combined-lineBattery1ToInverter1" class="flow-line h-line line-battery1-inverter1"></div>
+                <div id="combined-lineBattery2ToInverter2" class="flow-line h-line line-battery2-inverter2"></div>
+                <div id="combined-lineSwitchboardToInverter1A" class="flow-line v-line line-switchboard-inverter1-a"></div>
+                <div id="combined-lineSwitchboardToInverter1B" class="flow-line h-line line-switchboard-inverter1-b"></div>
+                <div id="combined-lineSwitchboardToInverter2A" class="flow-line v-line line-switchboard-inverter2-a"></div>
+                <div id="combined-lineSwitchboardToInverter2B" class="flow-line h-line line-switchboard-inverter2-b"></div>
+
+                <div id="combined-flowLabelGridToSwitchboard" class="flow-line-value line-label-grid-switchboard">-</div>
+                <div id="combined-flowLabelSolarToBattery1" class="flow-line-value line-label-solar-battery1">-</div>
+                <div id="combined-flowLabelSolarToInverter1" class="flow-line-value line-label-solar-inverter1">-</div>
+                <div id="combined-flowLabelSwitchboardToLoad" class="flow-line-value line-label-switchboard-load">-</div>
+                <div id="combined-flowLabelBattery1ToInverter1" class="flow-line-value line-label-battery1-inverter1">-</div>
+                <div id="combined-flowLabelBattery2ToInverter2" class="flow-line-value line-label-battery2-inverter2">-</div>
+                <div id="combined-flowLabelSwitchboardToInverter1" class="flow-line-value line-label-switchboard-inverter1">-</div>
+                <div id="combined-flowLabelSwitchboardToInverter2" class="flow-line-value line-label-switchboard-inverter2">-</div>
+
+                <article class="flow-node node-solar combined-node-solar">
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <circle cx="12" cy="12" r="4"></circle>
+                        <path d="M12 2v3"></path>
+                        <path d="M12 19v3"></path>
+                        <path d="M2 12h3"></path>
+                        <path d="M19 12h3"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="solarTitle">Solar</span>
+                  </p>
+                  <p id="combined-solarPowerValue" class="node-value">-</p>
+                  <p id="combined-solarState" class="node-state muted">idle</p>
+                </article>
+
+                <article class="flow-node node-grid combined-node-grid">
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <path d="M12 3l7 4v10l-7 4-7-4V7z"></path>
+                        <path d="M7 9h10"></path>
+                        <path d="M7 13h10"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="gridTitle">Grid</span>
+                  </p>
+                  <p id="combined-gridPowerValue" class="node-value">-</p>
+                  <p id="combined-gridState" class="node-state muted">idle</p>
+                </article>
+
+                <article class="flow-node node-center combined-node-switchboard">
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <path d="M12 3l9 5v8l-9 5-9-5V8z"></path>
+                        <path d="M12 8v8"></path>
+                        <path d="M8 12h8"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="switchboardTitle">Switchboard</span>
+                  </p>
+                  <p id="combined-switchboardValue" class="node-value">-</p>
+                  <p id="combined-switchboardState" class="node-state muted">-</p>
+                </article>
+
+                <article class="flow-node node-load combined-node-load">
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <path d="M4 11l8-7 8 7v9H4z"></path>
+                        <path d="M10 20v-5h4v5"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="loadTitle">Home Load</span>
+                  </p>
+                  <p id="combined-loadPowerValue" class="node-value">-</p>
+                  <p id="combined-loadState" class="node-state muted">idle</p>
+                  <div class="load-breakdown">
+                    <p class="load-breakdown-label" data-i18n="teslaChargingLabel">Tesla Charging</p>
+                    <p id="combined-teslaChargingValue" class="node-sub-value">-</p>
+                    <p id="combined-teslaChargingState" class="node-state muted">idle</p>
+                    <p id="combined-teslaChargingCurrentValue" class="node-mini-value muted">Current: -</p>
+                    <p id="combined-teslaChargingVoltageValue" class="node-mini-value muted">Voltage: -</p>
+                    <p class="load-breakdown-hint muted" data-i18n="teslaChargingIncludedHint">Total Load = Home Load + Tesla</p>
+                  </div>
+                </article>
+
+                <article class="flow-node node-battery combined-node-battery1">
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <rect x="6" y="6" width="10" height="12" rx="2" ry="2"></rect>
+                        <rect x="16" y="10" width="2" height="4"></rect>
+                      </svg>
+                    </span>
+                    <span data-i18n="battery1Title">Battery 1</span>
+                  </p>
+                  <p id="combined-battery1PowerValue" class="node-value">-</p>
+                  <p id="combined-battery1State" class="node-state muted">idle</p>
+                  <div class="soc-wrap">
+                    <div class="soc-label"><span data-i18n="socLabel">SOC</span></div>
+                    <div class="soc-track">
+                      <div id="combined-battery1SocFill" class="soc-fill"></div>
+                      <div class="soc-value-inside">
+                        <span id="combined-battery1SocValue">-</span>
+                        <span id="combined-battery1EnergyValue" class="soc-energy-inside">-</span>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+
+                <article class="flow-node node-center combined-node-inverter1">
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <rect x="5" y="6" width="14" height="12" rx="2" ry="2"></rect>
+                        <circle cx="9" cy="12" r="1.5"></circle>
+                        <path d="M13 10h4"></path>
+                        <path d="M13 14h4"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="inverter1Title">Inverter 1</span>
+                  </p>
+                  <p id="combined-inverter1PowerValue" class="node-value">-</p>
+                  <p id="combined-inverter1State" class="node-state muted">-</p>
+                  <p class="node-state muted">SAJ</p>
+                </article>
+
+                <article class="flow-node node-center combined-node-inverter2">
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <rect x="5" y="6" width="14" height="12" rx="2" ry="2"></rect>
+                        <circle cx="9" cy="12" r="1.5"></circle>
+                        <path d="M13 10h4"></path>
+                        <path d="M13 14h4"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="inverter2Title">Inverter 2</span>
+                  </p>
+                  <p id="combined-inverter2PowerValue" class="node-value">-</p>
+                  <p id="combined-inverter2State" class="node-state muted">-</p>
+                  <p class="node-state muted">Solplanet</p>
+                </article>
+
+                <article class="flow-node node-battery combined-node-battery2">
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <rect x="6" y="6" width="10" height="12" rx="2" ry="2"></rect>
+                        <rect x="16" y="10" width="2" height="4"></rect>
+                      </svg>
+                    </span>
+                    <span data-i18n="battery2Title">Battery 2</span>
+                  </p>
+                  <p id="combined-battery2PowerValue" class="node-value">-</p>
+                  <p id="combined-battery2State" class="node-state muted">idle</p>
+                  <div class="soc-wrap">
+                    <div class="soc-label"><span data-i18n="socLabel">SOC</span></div>
+                    <div class="soc-track">
+                      <div id="combined-battery2SocFill" class="soc-fill"></div>
+                      <div class="soc-value-inside">
+                        <span id="combined-battery2SocValue">-</span>
+                        <span id="combined-battery2EnergyValue" class="soc-energy-inside">-</span>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+              <p id="combined-loadFormulaText" class="balance-formula muted">-</p>
+            </section>
+
             <section class="flow-system-card">
               <h3 class="flow-system-title">SAJ</h3>
               <div class="flow-meta">
@@ -192,10 +380,13 @@
                   <div class="soc-wrap">
                     <div class="soc-label">
                       <span data-i18n="socLabel">SOC</span>
-                      <span id="saj-batterySocValue">-</span>
                     </div>
                     <div class="soc-track">
                       <div id="saj-batterySocFill" class="soc-fill"></div>
+                      <div class="soc-value-inside">
+                        <span id="saj-batterySocValue">-</span>
+                        <span id="saj-batteryEnergyValue" class="soc-energy-inside">-</span>
+                      </div>
                     </div>
                   </div>
                 </article>
@@ -297,10 +488,13 @@
                   <div class="soc-wrap">
                     <div class="soc-label">
                       <span data-i18n="socLabel">SOC</span>
-                      <span id="solplanet-batterySocValue">-</span>
                     </div>
                     <div class="soc-track">
                       <div id="solplanet-batterySocFill" class="soc-fill"></div>
+                      <div class="soc-value-inside">
+                        <span id="solplanet-batterySocValue">-</span>
+                        <span id="solplanet-batteryEnergyValue" class="soc-energy-inside">-</span>
+                      </div>
                     </div>
                   </div>
                 </article>
@@ -323,6 +517,11 @@
             <span id="solplanetRawUpdatedAt" class="muted">-</span>
           </div>
           <p id="solplanetRawMeta" class="muted">-</p>
+          <div class="saj-control-row">
+            <button id="solplanetRestartApiBtn" class="btn secondary" type="button" data-i18n="solplanetControlRestartApiBtn">
+              Force Restart Backend API
+            </button>
+          </div>
           <div class="raw-switch">
             <button id="solplanetRawModeCardsBtn" type="button" class="raw-tab-btn active" data-i18n="solplanetRawModeCards">
               API Cards
@@ -547,6 +746,48 @@
                 </tr>
               </thead>
               <tbody id="samplingBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="workerLogsView" class="view hidden">
+        <section class="card">
+          <div class="section-header">
+            <h2 data-i18n="workerLogsTitle">Worker API Logs</h2>
+            <span id="workerLogsUpdatedAt" class="muted">-</span>
+          </div>
+          <div class="sampling-top-filters">
+            <label data-i18n="workerLogsSystemLabel">
+              System
+              <select id="workerLogsSystemSelect">
+                <option value="" data-i18n="workerLogsSystemAll">All</option>
+                <option value="saj">SAJ</option>
+                <option value="solplanet">Solplanet</option>
+              </select>
+            </label>
+          </div>
+          <p id="workerLogsCount" class="muted">-</p>
+          <div class="pager">
+            <button id="workerLogsPrevPageBtn" class="btn secondary" type="button" data-i18n="prevBtn">Prev</button>
+            <span id="workerLogsPageInfo" class="muted">Page -</span>
+            <button id="workerLogsNextPageBtn" class="btn secondary" type="button" data-i18n="nextBtn">Next</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th data-i18n="workerLogsTableTime">Time (UTC)</th>
+                  <th data-i18n="workerLogsTableSystem">System</th>
+                  <th data-i18n="workerLogsTableService">Service</th>
+                  <th data-i18n="workerLogsTableMethod">Method</th>
+                  <th data-i18n="workerLogsTableLink">API Link</th>
+                  <th data-i18n="workerLogsTableStatus">Status</th>
+                  <th data-i18n="workerLogsTableDuration">Duration(ms)</th>
+                  <th data-i18n="workerLogsTableResult">Result</th>
+                </tr>
+              </thead>
+              <tbody id="workerLogsBody"></tbody>
             </table>
           </div>
         </section>
