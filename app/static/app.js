@@ -1996,7 +1996,9 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   setText("combined-teslaChargingState", teslaChargingActive ? t("stateCharging") : t("stateIdle"));
   setModeClass("combined-teslaChargingValue", teslaChargingActive ? "positive" : "");
   setModeClass("combined-teslaChargingState", teslaChargingActive ? "positive" : "");
-  setFlowLine("combined-lineSwitchboardToLoad", totalLoadActive, false);
+  setFlowLine("combined-lineSwitchboardToHomeLoad", loadActive, false);
+  setFlowLine("combined-lineSwitchboardToTeslaA", teslaChargingActive, false);
+  setFlowLine("combined-lineSwitchboardToTeslaB", teslaChargingActive, false);
 
   const battery1Active = battery1W !== null && Math.abs(battery1W) > 5;
   const battery1Discharging = battery1W !== null && battery1W > 0;
@@ -2012,10 +2014,10 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   const inverter1Exporting = inverter1W !== null && inverter1W > 0;
   const inverter2Active = inverter2W !== null && Math.abs(inverter2W) > 5;
   const inverter2Exporting = inverter2W !== null && inverter2W > 0;
-  setFlowLine("combined-lineSwitchboardToInverter1A", inverter1Active, inverter1Exporting);
-  setFlowLine("combined-lineSwitchboardToInverter1B", inverter1Active, !inverter1Exporting);
-  setFlowLine("combined-lineSwitchboardToInverter2A", inverter2Active, inverter2Exporting);
-  setFlowLine("combined-lineSwitchboardToInverter2B", inverter2Active, inverter2Exporting);
+  setFlowLine("combined-lineInverter1ToSwitchboardA", inverter1Active, inverter1Exporting);
+  setFlowLine("combined-lineInverter1ToSwitchboardB", inverter1Active, !inverter1Exporting);
+  setFlowLine("combined-lineInverter2ToSwitchboardA", inverter2Active, inverter2Exporting);
+  setFlowLine("combined-lineInverter2ToSwitchboardB", inverter2Active, inverter2Exporting);
 
   const solarToBattery1Active = solarToBattery1W > 5;
   const solarToInverter1Active = solarToInverter1W > 5;
@@ -2060,11 +2062,12 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   setFlowValueLabel("combined-flowLabelGridToSwitchboard", gridW, gridActive);
   setFlowValueLabel("combined-flowLabelSolarToBattery1", solarToBattery1W, solarToBattery1Active);
   setFlowValueLabel("combined-flowLabelSolarToInverter1", solarToInverter1W, solarToInverter1Active);
-  setFlowValueLabel("combined-flowLabelSwitchboardToLoad", totalLoadW, totalLoadActive);
+  setFlowValueLabel("combined-flowLabelSwitchboardToHomeLoad", homeLoadW, loadActive);
+  setFlowValueLabel("combined-flowLabelSwitchboardToTesla", teslaChargingW, teslaChargingActive);
   setFlowValueLabel("combined-flowLabelBattery1ToInverter1", battery1W, battery1Active);
   setFlowValueLabel("combined-flowLabelBattery2ToInverter2", battery2W, battery2Active);
-  setFlowValueLabel("combined-flowLabelSwitchboardToInverter1", inverter1W, inverter1Active);
-  setFlowValueLabel("combined-flowLabelSwitchboardToInverter2", inverter2W, inverter2Active);
+  setFlowValueLabel("combined-flowLabelInverter1ToSwitchboard", inverter1W, inverter1Active);
+  setFlowValueLabel("combined-flowLabelInverter2ToSwitchboard", inverter2W, inverter2Active);
 
   const battery1SocText = battery1Soc === null ? "-" : `${Math.max(0, Math.min(100, battery1Soc)).toFixed(0)}%`;
   const battery2SocText = battery2Soc === null ? "-" : `${Math.max(0, Math.min(100, battery2Soc)).toFixed(0)}%`;

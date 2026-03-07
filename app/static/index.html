@@ -120,22 +120,25 @@
                 <div id="combined-lineSolarToBattery1" class="flow-line v-line line-solar-battery1"></div>
                 <div id="combined-lineSolarToInverter1A" class="flow-line h-line line-solar-inverter1-a"></div>
                 <div id="combined-lineSolarToInverter1B" class="flow-line v-line line-solar-inverter1-b"></div>
-                <div id="combined-lineSwitchboardToLoad" class="flow-line h-line line-switchboard-load"></div>
+                <div id="combined-lineSwitchboardToHomeLoad" class="flow-line h-line line-switchboard-home-load"></div>
+                <div id="combined-lineSwitchboardToTeslaA" class="flow-line v-line line-switchboard-tesla-a"></div>
+                <div id="combined-lineSwitchboardToTeslaB" class="flow-line h-line line-switchboard-tesla-b"></div>
                 <div id="combined-lineBattery1ToInverter1" class="flow-line h-line line-battery1-inverter1"></div>
                 <div id="combined-lineBattery2ToInverter2" class="flow-line h-line line-battery2-inverter2"></div>
-                <div id="combined-lineSwitchboardToInverter1A" class="flow-line v-line line-switchboard-inverter1-a"></div>
-                <div id="combined-lineSwitchboardToInverter1B" class="flow-line h-line line-switchboard-inverter1-b"></div>
-                <div id="combined-lineSwitchboardToInverter2A" class="flow-line v-line line-switchboard-inverter2-a"></div>
-                <div id="combined-lineSwitchboardToInverter2B" class="flow-line h-line line-switchboard-inverter2-b"></div>
+                <div id="combined-lineInverter1ToSwitchboardA" class="flow-line v-line line-inverter1-switchboard-a"></div>
+                <div id="combined-lineInverter1ToSwitchboardB" class="flow-line h-line line-inverter1-switchboard-b"></div>
+                <div id="combined-lineInverter2ToSwitchboardA" class="flow-line v-line line-inverter2-switchboard-a"></div>
+                <div id="combined-lineInverter2ToSwitchboardB" class="flow-line h-line line-inverter2-switchboard-b"></div>
 
                 <div id="combined-flowLabelGridToSwitchboard" class="flow-line-value line-label-grid-switchboard">-</div>
                 <div id="combined-flowLabelSolarToBattery1" class="flow-line-value line-label-solar-battery1">-</div>
                 <div id="combined-flowLabelSolarToInverter1" class="flow-line-value line-label-solar-inverter1">-</div>
-                <div id="combined-flowLabelSwitchboardToLoad" class="flow-line-value line-label-switchboard-load">-</div>
+                <div id="combined-flowLabelSwitchboardToHomeLoad" class="flow-line-value line-label-switchboard-home-load">-</div>
+                <div id="combined-flowLabelSwitchboardToTesla" class="flow-line-value line-label-switchboard-tesla">-</div>
                 <div id="combined-flowLabelBattery1ToInverter1" class="flow-line-value line-label-battery1-inverter1">-</div>
                 <div id="combined-flowLabelBattery2ToInverter2" class="flow-line-value line-label-battery2-inverter2">-</div>
-                <div id="combined-flowLabelSwitchboardToInverter1" class="flow-line-value line-label-switchboard-inverter1">-</div>
-                <div id="combined-flowLabelSwitchboardToInverter2" class="flow-line-value line-label-switchboard-inverter2">-</div>
+                <div id="combined-flowLabelInverter1ToSwitchboard" class="flow-line-value line-label-inverter1-switchboard">-</div>
+                <div id="combined-flowLabelInverter2ToSwitchboard" class="flow-line-value line-label-inverter2-switchboard">-</div>
 
                 <article class="flow-node node-solar combined-node-solar">
                   <p class="node-title">
@@ -184,7 +187,7 @@
                   <p id="combined-switchboardState" class="node-state muted">-</p>
                 </article>
 
-                <article class="flow-node node-load combined-node-load">
+                <article class="flow-node node-load combined-node-home-load">
                   <p class="node-title">
                     <span class="inline-icon" aria-hidden="true">
                       <svg viewBox="0 0 24 24" focusable="false">
@@ -196,14 +199,22 @@
                   </p>
                   <p id="combined-loadPowerValue" class="node-value">-</p>
                   <p id="combined-loadState" class="node-state muted">idle</p>
-                  <div class="load-breakdown">
-                    <p class="load-breakdown-label" data-i18n="teslaChargingLabel">Tesla Charging</p>
-                    <p id="combined-teslaChargingValue" class="node-sub-value">-</p>
-                    <p id="combined-teslaChargingState" class="node-state muted">idle</p>
-                    <p id="combined-teslaChargingCurrentValue" class="node-mini-value muted">Current: -</p>
-                    <p id="combined-teslaChargingVoltageValue" class="node-mini-value muted">Voltage: -</p>
-                    <p class="load-breakdown-hint muted" data-i18n="teslaChargingIncludedHint">Total Load = Home Load + Tesla</p>
-                  </div>
+                </article>
+
+                <article class="flow-node combined-node-tesla">
+                  <p class="node-title">
+                    <span class="inline-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <path d="M7 4h10l2 4v8l-2 4H7l-2-4V8z"></path>
+                        <path d="M10 9l4-2-2 5h3l-5 5 2-5H9z"></path>
+                      </svg>
+                    </span>
+                    <span data-i18n="teslaChargingLabel">Tesla Charging</span>
+                  </p>
+                  <p id="combined-teslaChargingValue" class="node-value">-</p>
+                  <p id="combined-teslaChargingState" class="node-state muted">idle</p>
+                  <p id="combined-teslaChargingCurrentValue" class="node-mini-value muted">Current: -</p>
+                  <p id="combined-teslaChargingVoltageValue" class="node-mini-value muted">Voltage: -</p>
                 </article>
 
                 <article class="flow-node node-battery combined-node-battery1">
