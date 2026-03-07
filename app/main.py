@@ -5,10 +5,10 @@ import json
 import os
 import re
 from collections import Counter
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from time import monotonic
-from typing import Literal
+from typing import Callable, Literal
 
 import httpx
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
@@ -103,6 +103,8 @@ collector_status: dict[str, dict[str, object]] = {
         "in_progress": False,
         "continuous": True,
         "interval_seconds": None,
+        "backoff_seconds": 0.0,
+        "next_retry_at": None,
         "last_started_at": None,
         "last_finished_at": None,
         "last_success_at": None,
@@ -128,9 +130,27 @@ SAJ_SLOT_MAX = 7
 SAJ_DAY_MASK_MIN = 0
 SAJ_DAY_MASK_MAX = 127
 SAJ_MODE_MIN = 0
-SAJ_MODE_MAX = 6
+SAJ_MODE_MAX = 8
 SAJ_RATED_POWER_W = 5000
 SAJ_TIME_REGEX = re.compile(r"^(0[0-9]|1[0-9]|2[0-3]):([0-5][0-9])$")
+SOLPLANET_SLOT_MIN = 1
+SOLPLANET_SLOT_MAX = 6
+SOLPLANET_LIMIT_MIN = 0
+SOLPLANET_LIMIT_MAX = 20000
+SOLPLANET_BACKOFF_INITIAL_SECONDS = 5.0
+SOLPLANET_BACKOFF_MAX_SECONDS = 300.0
+SOLPLANET_DAY_KEYS = ("Sun", "Mon", "Tus", "Wen", "Thu", "Fri", "Sat")
+SOLPLANET_DAY_ALIAS = {
+    "sun": "Sun",
+    "mon": "Mon",
+    "tue": "Tus",
+    "tus": "Tus",
+    "wed": "Wen",
+    "wen": "Wen",
+    "thu": "Thu",
+    "fri": "Fri",
+    "sat": "Sat",
+}
 
 
 class SajWorkingModePayload(BaseModel):
@@ -156,6 +176,27 @@ class SajLimitsPayload(BaseModel):
     battery_discharge_power_limit: int | None = Field(default=None, ge=0, le=1100)
     grid_max_charge_power: int | None = Field(default=None, ge=0, le=1100)
     grid_max_discharge_power: int | None = Field(default=None, ge=0, le=1100)
+
+
+class SolplanetLimitsPayload(BaseModel):
+    pin: int | None = Field(default=None, ge=SOLPLANET_LIMIT_MIN, le=SOLPLANET_LIMIT_MAX)
+    pout: int | None = Field(default=None, ge=SOLPLANET_LIMIT_MIN, le=SOLPLANET_LIMIT_MAX)
+
+
+class SolplanetSlotPayload(BaseModel):
+    enabled: bool | None = Field(default=None)
+    hour: int | None = Field(default=None, ge=0, le=23)
+    minute: int | None = Field(default=None, ge=0, le=59)
+    power: int | None = Field(default=None, ge=0, le=255)
+    mode: int | None = Field(default=None, ge=0, le=255)
+
+
+class SolplanetDaySchedulePayload(BaseModel):
+    slots: list[int] = Field(default_factory=list)
+
+
+class SolplanetRawSettingPayload(BaseModel):
+    payload: dict[str, object] = Field(default_factory=dict)
 
 
 def _split_entity_id(entity_id: str) -> tuple[str, str]:
@@ -254,6 +295,19 @@ def _power_to_watts(value: float | None, unit: str | None) -> float | None:
     return value
 
 
+def _energy_to_kwh(value: float | None, unit: str | None) -> float | None:
+    if value is None:
+        return None
+    normalized = (unit or "kWh").strip().lower()
+    if normalized in ("kwh", "kw·h", "kw h"):
+        return value
+    if normalized in ("wh", "w·h", "w h"):
+        return value / 1000.0
+    if normalized in ("mwh", "mw·h", "mw h"):
+        return value * 1000.0
+    return None
+
+
 def _find_state_by_entity_ids(
     states_by_entity_id: dict[str, dict[str, object]],
     entity_ids: tuple[str, ...],
@@ -342,6 +396,15 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
         ),
     ) or _find_state_by_keywords(states, prefixes, (("battery", "percent"), ("battery", "soc")))
 
+    battery_energy = _find_state_by_entity_ids(
+        states_by_entity_id,
+        tuple(
+            entity_id
+            for entity_id in _from_config_ids("battery", "energy")
+            if "percent" not in entity_id.lower() and "soc" not in entity_id.lower()
+        ),
+    ) or _find_state_by_keywords(states, prefixes, (("battery", "energy"), ("battery", "remaining", "energy")))
+
     inverter = _find_state_by_entity_ids(
         states_by_entity_id,
         (*_from_config_ids("inverter", "status"), f"sensor.{prefixes[0]}_inverter_status"),
@@ -352,6 +415,7 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
     battery_v = _to_number(battery.get("state")) if battery else None
     load_v = _to_number(load.get("state")) if load else None
     soc_v = _to_number(soc.get("state")) if soc else None
+    battery_energy_v = _to_number(battery_energy.get("state")) if battery_energy else None
     pv_w = _power_to_watts(pv_v, pv.get("attributes", {}).get("unit_of_measurement") if pv else None)  # type: ignore[union-attr]
     grid_w = _power_to_watts(grid_v, grid.get("attributes", {}).get("unit_of_measurement") if grid else None)  # type: ignore[union-attr]
     battery_w = _power_to_watts(
@@ -359,6 +423,10 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
         battery.get("attributes", {}).get("unit_of_measurement") if battery else None,  # type: ignore[union-attr]
     )
     load_w = _power_to_watts(load_v, load.get("attributes", {}).get("unit_of_measurement") if load else None)  # type: ignore[union-attr]
+    battery_energy_kwh = _energy_to_kwh(
+        battery_energy_v,
+        battery_energy.get("attributes", {}).get("unit_of_measurement") if battery_energy else None,  # type: ignore[union-attr]
+    )
 
     balance_w: float | None = None
     balanced: bool | None = None
@@ -370,7 +438,7 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
         balance_w = pv_w + battery_discharge_w + grid_import_w - load_w - battery_charge_w - grid_export_w
         balanced = abs(balance_w) <= BALANCE_TOLERANCE_W
 
-    matched_entities = [item for item in (pv, grid, battery, load, soc, inverter) if item]
+    matched_entities = [item for item in (pv, grid, battery, load, soc, battery_energy, inverter) if item]
     inverter_status = inverter.get("state") if inverter else None
 
     return {
@@ -383,6 +451,7 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
             "battery": _compact_entity_item(battery) if battery else None,
             "load": _compact_entity_item(load) if load else None,
             "soc": _compact_entity_item(soc) if soc else None,
+            "battery_energy": _compact_entity_item(battery_energy) if battery_energy else None,
             "inverter": _compact_entity_item(inverter) if inverter else None,
         },
         "metrics": {
@@ -390,7 +459,12 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
             "grid_w": grid_w,
             "battery_w": battery_w,
             "load_w": load_w,
+            "pv_source": str(pv.get("entity_id")) if pv else "unavailable",
+            "grid_source": str(grid.get("entity_id")) if grid else "unavailable",
+            "battery_source": str(battery.get("entity_id")) if battery else "unavailable",
+            "load_source": str(load.get("entity_id")) if load else "unavailable",
             "battery_soc_percent": soc_v,
+            "battery_energy_kwh": battery_energy_kwh,
             "inverter_status": inverter_status,
             "solar_active": bool(pv_w is not None and pv_w > 5),
             "grid_active": bool(grid_w is not None and abs(grid_w) > 5),
@@ -543,108 +617,152 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
             sn = maybe_first.get("bat_sn")
             if sn:
                 battery_sn = str(sn)
-    async def _safe_fetch(
-        *,
-        endpoint: str,
-        path: str,
-        coro: object,
-    ) -> tuple[str, str, dict[str, object] | None, str | None, float]:
-        fetch_started = monotonic()
-        try:
-            result = await asyncio.wait_for(coro, timeout=settings.solplanet_request_timeout_seconds)
-            payload = result if isinstance(result, dict) else {}
-            return endpoint, path, payload, None, round((monotonic() - fetch_started) * 1000, 1)
-        except Exception as exc:  # noqa: BLE001
-            return endpoint, path, None, f"{type(exc).__name__}: {exc}", round((monotonic() - fetch_started) * 1000, 1)
-
-    tasks = [
-        _safe_fetch(
-            endpoint="getdevdata_device_2",
-            path=f"getdevdata.cgi?device=2&sn={inverter_sn}",
-            coro=solplanet_client.get_inverter_data(inverter_sn),
+    steps: list[tuple[str, str, Callable[[], object]]] = [
+        ("getdev_device_0", "getdev.cgi?device=0", lambda: solplanet_client.get_dongle_info()),
+        (
+            "getdevdata_device_2",
+            f"getdevdata.cgi?device=2&sn={inverter_sn}",
+            lambda: solplanet_client.get_inverter_data(inverter_sn),
         ),
-        _safe_fetch(
-            endpoint="getdevdata_device_3",
-            path="getdevdata.cgi?device=3",
-            coro=solplanet_client.get_meter_data(),
+        ("getdevdata_device_3", "getdevdata.cgi?device=3", lambda: solplanet_client.get_meter_data()),
+        ("getdev_device_3", "getdev.cgi?device=3", lambda: solplanet_client.get_meter_info()),
+        (
+            "getdev_device_4",
+            f"getdev.cgi?device=4&sn={inverter_sn}",
+            lambda: solplanet_client.get_battery_info(inverter_sn),
         ),
-        _safe_fetch(
-            endpoint="getdev_device_3",
-            path="getdev.cgi?device=3",
-            coro=solplanet_client.get_meter_info(),
-        ),
-        _safe_fetch(
-            endpoint="getdefine",
-            path="getdefine.cgi",
-            coro=solplanet_client.get_schedule(),
-        ),
+        ("getdefine", "getdefine.cgi", lambda: solplanet_client.get_schedule()),
+        ("getdevdata_device_5", "getdevdata.cgi?device=5", lambda: solplanet_client.get_device_data(5)),
     ]
     if battery_sn:
-        tasks.append(
-            _safe_fetch(
-                endpoint="getdevdata_device_4",
-                path=f"getdevdata.cgi?device=4&sn={battery_sn}",
-                coro=solplanet_client.get_battery_data(battery_sn),
+        steps.append(
+            (
+                "getdevdata_device_4",
+                f"getdevdata.cgi?device=4&sn={battery_sn}",
+                lambda bat_sn=battery_sn: solplanet_client.get_battery_data(bat_sn),
             )
         )
     else:
-        tasks.append(
-            _safe_fetch(
-                endpoint="getdevdata_device_4",
-                path="getdevdata.cgi?device=4",
-                coro=asyncio.sleep(0, result={}),
-            )
+        await _save_endpoint_snapshot(
+            endpoint="getdevdata_device_4",
+            path="getdevdata.cgi?device=4",
+            ok=False,
+            error="ValueError: Missing battery_sn",
+            payload=None,
+            fetch_ms=0.0,
         )
 
-    raw_results = await asyncio.gather(*tasks)
     endpoint_map: dict[str, tuple[dict[str, object] | None, str | None, str, float]] = {}
-    for endpoint, path, payload, error, fetch_ms in raw_results:
-        is_ok = error is None and not (endpoint == "getdevdata_device_4" and not battery_sn)
-        error_text = error
-        if endpoint == "getdevdata_device_4" and not battery_sn:
-            is_ok = False
-            error_text = "ValueError: Missing battery_sn"
-            payload = None
-        await _save_endpoint_snapshot(
-            endpoint=endpoint,
-            path=path,
-            ok=is_ok,
-            error=error_text,
-            payload=payload,
-            fetch_ms=fetch_ms,
-        )
-        endpoint_map[endpoint] = (payload, error_text, path, fetch_ms)
+    # getdevdata_device_2 is mandatory for energy-flow (inverter live data).
+    # Other endpoints can degrade gracefully if they timeout/fail.
+    mandatory_endpoints = {"getdevdata_device_2"}
+    for endpoint, path, build_coro in steps:
+        fetch_started = monotonic()
+        try:
+            result = await asyncio.wait_for(build_coro(), timeout=settings.solplanet_request_timeout_seconds)
+            payload = result if isinstance(result, dict) else {}
+            fetch_ms = round((monotonic() - fetch_started) * 1000, 1)
+            await _save_endpoint_snapshot(
+                endpoint=endpoint,
+                path=path,
+                ok=True,
+                error=None,
+                payload=payload,
+                fetch_ms=fetch_ms,
+            )
+            endpoint_map[endpoint] = (payload, None, path, fetch_ms)
+        except Exception as exc:  # noqa: BLE001
+            fetch_ms = round((monotonic() - fetch_started) * 1000, 1)
+            error_text = f"{type(exc).__name__}: {exc}"
+            await _save_endpoint_snapshot(
+                endpoint=endpoint,
+                path=path,
+                ok=False,
+                error=error_text,
+                payload=None,
+                fetch_ms=fetch_ms,
+            )
+            endpoint_map[endpoint] = ({}, error_text, path, fetch_ms)
+            if endpoint in mandatory_endpoints:
+                raise
 
     inverter_data = endpoint_map.get("getdevdata_device_2", ({}, None, "", 0.0))[0] or {}
     meter_data = endpoint_map.get("getdevdata_device_3", ({}, None, "", 0.0))[0] or {}
     meter_info = endpoint_map.get("getdev_device_3", ({}, None, "", 0.0))[0] or {}
     schedule_data = endpoint_map.get("getdefine", ({}, None, "", 0.0))[0] or {}
     battery_data = endpoint_map.get("getdevdata_device_4", ({}, None, "", 0.0))[0] or {}
+    endpoint_errors = [
+        f"solplanet_endpoint_error:{name}:{error}"
+        for name, (_, error, _, _) in endpoint_map.items()
+        if isinstance(error, str) and error
+    ]
 
     updated_at = datetime.now(UTC).isoformat()
     inverter_status = _map_solplanet_status(inverter_data.get("stu"))
 
     pv_w = _to_number(inverter_data.get("ppv"))
+    pv_source = "getdevdata_device_2.ppv"
     if pv_w is None:
         pv_w = _sum_array_product(inverter_data.get("vpv"), inverter_data.get("ipv"))
+        pv_source = "calc:getdevdata_device_2.vpv * getdevdata_device_2.ipv"
     if pv_w is None:
         pv_w = _to_number(battery_data.get("ppv"))
+        pv_source = "getdevdata_device_4.ppv"
+    if pv_w is None:
+        pv_source = "unavailable"
 
     battery_w = _to_number(battery_data.get("pb"))
-    load_w = _to_number(inverter_data.get("pac"))
+    inverter_pac_w = _to_number(inverter_data.get("pac"))
     soc = _to_number(battery_data.get("soc"))
 
     meter_data_valid = _is_solplanet_meter_data_valid(meter_data)
+    grid_w: float | None = None
+    grid_source = "unavailable"
     if meter_data_valid:
         grid_w = _to_number(meter_data.get("pac"))
-        grid_source = "meter_data_pac"
+        grid_source = "getdevdata_device_3.pac" if grid_w is not None else "unavailable"
     else:
-        # Some firmwares return an invalid meter data payload (flg=0/tim="") for getdevdata.cgi device=3.
+        # getdevdata.cgi?device=3 returned flg=0 (meter offline/disconnected).
+        # meter_pac from getdev.cgi?device=3 is used if it is non-zero.
+        # NOTE: total_pac from getdev.cgi?device=3 is NOT used here because it mirrors
+        # inverter.pac (AC output), not actual net grid power, giving severely wrong readings.
         meter_pac = _to_number(meter_info.get("meter_pac"))
-        grid_w = meter_pac if meter_pac is not None else None
-        grid_source = "meter_info_meter_pac" if grid_w is not None else "unavailable"
+        if meter_pac is not None and abs(meter_pac) > 5:
+            grid_w = meter_pac
+            grid_source = "getdev_device_3.meter_pac"
 
     # Solplanet battery power sign assumption: positive means discharging.
+    load_w: float | None = None
+    load_source = "unavailable"
+    if pv_w is not None and grid_w is not None and battery_w is not None:
+        battery_discharge_w = max(battery_w, 0)
+        battery_charge_w = max(-battery_w, 0)
+        grid_import_w = max(grid_w, 0)
+        grid_export_w = max(-grid_w, 0)
+        derived_load_w = pv_w + battery_discharge_w + grid_import_w - battery_charge_w - grid_export_w
+        # Clamp tiny negative residuals caused by firmware timing skew/noise.
+        if derived_load_w < 0 and abs(derived_load_w) <= BALANCE_TOLERANCE_W:
+            derived_load_w = 0.0
+        load_w = max(derived_load_w, 0.0)
+        load_source = "calc:pv + battery_discharge + grid_import - battery_charge - grid_export"
+    elif inverter_pac_w is not None and battery_w is not None and inverter_pac_w < -5 and battery_w < -5:
+        # Grid-charging scene: inverter AC draw = battery charge + home load.
+        load_w = max(abs(inverter_pac_w) - abs(battery_w), 0.0)
+        load_source = "calc:abs(getdevdata_device_2.pac) - abs(getdevdata_device_4.pb[charge])"
+    elif inverter_pac_w is not None:
+        # Meter offline fallback: treat inverter AC output as an upper-bound estimate for load.
+        # This overestimates load when the inverter is also exporting to the grid, but is
+        # more accurate than using battery DC values which include AC conversion losses.
+        load_w = abs(inverter_pac_w)
+        load_source = "calc:abs(getdevdata_device_2.pac)[meter_offline_estimate]"
+
+    if grid_w is None and load_w is not None and pv_w is not None and battery_w is not None:
+        # When meter is unavailable, infer grid net power from split load and known PV/battery.
+        battery_discharge_w = max(battery_w, 0)
+        battery_charge_w = max(-battery_w, 0)
+        grid_w = load_w + battery_charge_w - pv_w - battery_discharge_w
+        grid_source = "calc:load + battery_charge - pv - battery_discharge"
+
     balance_w: float | None = None
     balanced: bool | None = None
     if pv_w is not None and grid_w is not None and battery_w is not None and load_w is not None:
@@ -687,7 +805,7 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
             "cgi.solplanet_load_power",
             load_w,
             "W",
-            "Solplanet Inverter AC Power (CGI)",
+            "Solplanet Home Load Power (CGI, Derived)",
             updated_at,
         )
         if load_w is not None
@@ -737,6 +855,10 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
             "grid_w": grid_w,
             "battery_w": battery_w,
             "load_w": load_w,
+            "pv_source": pv_source,
+            "grid_source": grid_source,
+            "battery_source": "getdevdata_device_4.pb" if battery_w is not None else "unavailable",
+            "load_source": load_source,
             "battery_soc_percent": soc,
             "inverter_status": inverter_status,
             "solar_active": bool(pv_w is not None and pv_w > 5),
@@ -750,11 +872,13 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
             "matched_entities": matched_entities,
             "notes": [
                 "solplanet_pv_w_prefer_ppv",
-                "solplanet_load_w_uses_inverter_pac",
-                "solplanet_grid_w_prefers_meter_data_pac",
+                f"solplanet_load_w_source:{load_source}",
+                "solplanet_grid_w_prefers_meter_data_pac_then_meter_pac",
                 f"solplanet_grid_w_source:{grid_source}",
                 f"solplanet_meter_data_valid:{str(meter_data_valid).lower()}",
                 "solplanet_battery_w_uses_battery_pb",
+                "solplanet_total_pac_not_used:mirrors_inverter_pac_not_grid",
+                *endpoint_errors,
             ],
             "fetch_ms": round((monotonic() - started_at) * 1000, 1),
         },
@@ -1071,6 +1195,17 @@ def _ensure_ha_configured() -> None:
         )
 
 
+def _ensure_solplanet_configured() -> None:
+    if not solplanet_client.configured:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Solplanet CGI client is not configured",
+                "required_env": "SOLPLANET_DONGLE_HOST",
+            },
+        )
+
+
 def _validate_saj_slot(slot: int) -> int:
     if slot < SAJ_SLOT_MIN or slot > SAJ_SLOT_MAX:
         raise HTTPException(
@@ -1078,6 +1213,28 @@ def _validate_saj_slot(slot: int) -> int:
             detail=f"slot must be between {SAJ_SLOT_MIN} and {SAJ_SLOT_MAX}",
         )
     return slot
+
+
+def _validate_solplanet_slot(slot: int) -> int:
+    if slot < SOLPLANET_SLOT_MIN or slot > SOLPLANET_SLOT_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"slot must be between {SOLPLANET_SLOT_MIN} and {SOLPLANET_SLOT_MAX}",
+        )
+    return slot
+
+
+def _normalize_solplanet_day_key(raw_day: str) -> str:
+    day = SOLPLANET_DAY_ALIAS.get(raw_day.strip().lower(), "")
+    if not day:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "day must be one of sun,mon,tue,wed,thu,fri,sat",
+                "accepted": list(SOLPLANET_DAY_KEYS),
+            },
+        )
+    return day
 
 
 def _validate_hhmm(value: str, field_name: str) -> str:
@@ -1260,7 +1417,7 @@ def _build_saj_control_capabilities(
         "working_mode": {
             "entity": _entity_metadata(states_by_id, "number.saj_app_mode_input"),
             "range": {"min": SAJ_MODE_MIN, "max": SAJ_MODE_MAX, "step": 1},
-            "accepted_values_note": "Mode labels can differ by SAJ firmware; this API allows mode_code 0..6 for testing.",
+            "accepted_values_note": "Mode labels can differ by SAJ firmware; this API allows mode_code 0..8 for testing.",
         },
         "slot": {
             "slot_range": {"min": SAJ_SLOT_MIN, "max": SAJ_SLOT_MAX},
@@ -1351,6 +1508,123 @@ async def _saj_apply_slot(
         "changed": changed,
         "state": _build_saj_control_state(states_by_id),
     }
+
+
+def _solplanet_encode_slot(*, hour: int, minute: int, power: int, mode: int) -> int:
+    return ((hour & 0xFF) << 24) | ((minute & 0xFF) << 16) | ((power & 0xFF) << 8) | (mode & 0xFF)
+
+
+def _solplanet_decode_slot(raw: object) -> dict[str, object]:
+    value = int(_to_number(raw) or 0)
+    if value <= 0:
+        return {
+            "encoded": 0,
+            "enabled": False,
+            "hour": 0,
+            "minute": 0,
+            "power": 0,
+            "mode": 0,
+            "time_text": "00:00",
+        }
+    hour = (value >> 24) & 0xFF
+    minute = (value >> 16) & 0xFF
+    power = (value >> 8) & 0xFF
+    mode = value & 0xFF
+    return {
+        "encoded": value,
+        "enabled": True,
+        "hour": hour,
+        "minute": minute,
+        "power": power,
+        "mode": mode,
+        "time_text": f"{hour:02d}:{minute:02d}",
+    }
+
+
+def _solplanet_day_slots(raw_day_values: object) -> list[int]:
+    values = raw_day_values if isinstance(raw_day_values, list) else []
+    out: list[int] = []
+    for idx in range(SOLPLANET_SLOT_MAX):
+        raw = values[idx] if idx < len(values) else 0
+        out.append(int(_to_number(raw) or 0))
+    return out
+
+
+def _build_solplanet_control_state(schedule: dict[str, object]) -> dict[str, object]:
+    days: dict[str, dict[str, object]] = {}
+    for day in SOLPLANET_DAY_KEYS:
+        encoded_slots = _solplanet_day_slots(schedule.get(day))
+        decoded_slots: list[dict[str, object]] = []
+        for idx, encoded in enumerate(encoded_slots, start=1):
+            decoded = _solplanet_decode_slot(encoded)
+            decoded["slot"] = idx
+            decoded_slots.append(decoded)
+        days[day] = {
+            "encoded_slots": encoded_slots,
+            "decoded_slots": decoded_slots,
+        }
+    return {
+        "updated_at": datetime.now(UTC).isoformat(),
+        "limits": {
+            "pin": int(_to_number(schedule.get("Pin")) or 0),
+            "pout": int(_to_number(schedule.get("Pout")) or 0),
+        },
+        "days": days,
+        "raw_schedule": schedule,
+        "encoding_note": "slot encoding uses byte layout [hour, minute, power, mode]; inferred from local schedule data.",
+    }
+
+
+async def _solplanet_get_schedule_live() -> dict[str, object]:
+    _ensure_solplanet_configured()
+    schedule = await asyncio.wait_for(
+        solplanet_client.get_schedule(),
+        timeout=settings.solplanet_request_timeout_seconds,
+    )
+    payload = schedule if isinstance(schedule, dict) else {}
+    normalized: dict[str, object] = {"Pin": int(_to_number(payload.get("Pin")) or 0), "Pout": int(_to_number(payload.get("Pout")) or 0)}
+    for day in SOLPLANET_DAY_KEYS:
+        normalized[day] = _solplanet_day_slots(payload.get(day))
+    return normalized
+
+
+async def _solplanet_get_schedule_with_fallback() -> dict[str, object]:
+    try:
+        return await _solplanet_get_schedule_live()
+    except Exception:  # noqa: BLE001
+        snapshot = await asyncio.to_thread(get_solplanet_endpoint_snapshot, storage_db_path, endpoint="getdefine")
+        payload = snapshot.get("payload") if isinstance(snapshot, dict) else None
+        if not isinstance(payload, dict):
+            raise
+        normalized: dict[str, object] = {
+            "Pin": int(_to_number(payload.get("Pin")) or 0),
+            "Pout": int(_to_number(payload.get("Pout")) or 0),
+        }
+        for day in SOLPLANET_DAY_KEYS:
+            normalized[day] = _solplanet_day_slots(payload.get(day))
+        return normalized
+
+
+async def _solplanet_set_schedule_payload(payload: dict[str, object]) -> dict[str, object]:
+    _ensure_solplanet_configured()
+    response = await asyncio.wait_for(
+        solplanet_client.set_value(payload),
+        timeout=settings.solplanet_request_timeout_seconds,
+    )
+    _reset_solplanet_caches()
+    return response if isinstance(response, dict) else {}
+
+
+def _validate_solplanet_day_slots(slots: list[int]) -> list[int]:
+    if len(slots) != SOLPLANET_SLOT_MAX:
+        raise HTTPException(status_code=400, detail=f"slots must contain exactly {SOLPLANET_SLOT_MAX} integers")
+    out: list[int] = []
+    for item in slots:
+        value = int(_to_number(item) or 0)
+        if value < 0 or value > 0xFFFFFFFF:
+            raise HTTPException(status_code=400, detail="each slot value must be within 0..4294967295")
+        out.append(value)
+    return out
 
 
 async def _replace_runtime(new_settings: Settings) -> None:
@@ -1489,6 +1763,22 @@ def _kv_value(
     return item.get("value")
 
 
+def _rebuild_notes_from_kv(kv_map: dict[str, dict[str, object]], *, system: str) -> list[str]:
+    prefix = f"{system}.metrics.notes."
+    indexed: list[tuple[int, str]] = []
+    for attr, item in kv_map.items():
+        if attr.startswith(prefix):
+            idx_str = attr[len(prefix):]
+            try:
+                idx = int(idx_str)
+            except ValueError:
+                continue
+            val = item.get("value") if isinstance(item, dict) else None
+            if isinstance(val, str):
+                indexed.append((idx, val))
+    return [v for _, v in sorted(indexed)]
+
+
 def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> dict[str, object]:
     updated_at_raw = _kv_value(kv_map, system=system, key="update_time")
     updated_at = str(updated_at_raw or datetime.now(UTC).isoformat())
@@ -1502,6 +1792,10 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
         "grid_w": _to_number(_kv_value(kv_map, system=system, key="metrics.grid_w")),
         "battery_w": _to_number(_kv_value(kv_map, system=system, key="metrics.battery_w")),
         "load_w": _to_number(_kv_value(kv_map, system=system, key="metrics.load_w")),
+        "pv_source": _kv_value(kv_map, system=system, key="metrics.pv_source"),
+        "grid_source": _kv_value(kv_map, system=system, key="metrics.grid_source"),
+        "battery_source": _kv_value(kv_map, system=system, key="metrics.battery_source"),
+        "load_source": _kv_value(kv_map, system=system, key="metrics.load_source"),
         "battery_soc_percent": _to_number(_kv_value(kv_map, system=system, key="metrics.battery_soc_percent")),
         "inverter_status": _kv_value(kv_map, system=system, key="metrics.inverter_status"),
         "solar_active": bool(_kv_value(kv_map, system=system, key="metrics.solar_active")),
@@ -1513,6 +1807,7 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
         "balance_w": _to_number(_kv_value(kv_map, system=system, key="metrics.balance_w")),
         "balanced": _kv_value(kv_map, system=system, key="metrics.balanced"),
         "matched_entities": _to_number(_kv_value(kv_map, system=system, key="metrics.matched_entities")),
+        "notes": _rebuild_notes_from_kv(kv_map, system=system),
     }
 
     flow: dict[str, object] = {
@@ -1543,6 +1838,10 @@ def _build_storage_backed_flow(system: str, sample: dict[str, object]) -> dict[s
     metrics.setdefault("battery_w", _to_number(sample.get("battery_w")))
     metrics.setdefault("load_w", _to_number(sample.get("load_w")))
     metrics.setdefault("battery_soc_percent", _to_number(sample.get("battery_soc_percent")))
+    metrics.setdefault("pv_source", "unavailable")
+    metrics.setdefault("grid_source", "unavailable")
+    metrics.setdefault("battery_source", "unavailable")
+    metrics.setdefault("load_source", "unavailable")
     metrics.setdefault(
         "inverter_status",
         str(sample.get("inverter_status")) if sample.get("inverter_status") is not None else None,
@@ -1647,12 +1946,17 @@ def _collector_mark_finish(system: str, started_monotonic: float, *, error: Exce
 
 async def _collector_loop() -> None:
     last_collected_at: dict[str, float] = {system: 0.0 for system in SUPPORTED_SYSTEMS}
+    solplanet_backoff_seconds = SOLPLANET_BACKOFF_INITIAL_SECONDS
+    solplanet_next_retry_monotonic = 0.0
     while not collector_stop_event.is_set():
         for system in SUPPORTED_SYSTEMS:
             previous = last_collected_at.get(system, 0.0)
             # Solplanet polling runs continuously: start the next round immediately
             # after one round finishes, without waiting for a fixed interval.
-            if system != "solplanet":
+            if system == "solplanet":
+                if monotonic() < solplanet_next_retry_monotonic:
+                    continue
+            else:
                 interval = _sample_interval_for_system(system)
                 if previous > 0.0 and (monotonic() - previous) < interval:
                     continue
@@ -1661,9 +1965,23 @@ async def _collector_loop() -> None:
                 await _collect_for_system(system)
                 last_collected_at[system] = monotonic()
                 _collector_mark_finish(system, started_monotonic)
+                if system == "solplanet":
+                    solplanet_backoff_seconds = SOLPLANET_BACKOFF_INITIAL_SECONDS
+                    solplanet_next_retry_monotonic = 0.0
+                    status = collector_status.setdefault("solplanet", {})
+                    status["backoff_seconds"] = 0.0
+                    status["next_retry_at"] = None
             except Exception as exc:  # noqa: BLE001
                 # Keep collector alive even if one round fails.
                 _collector_mark_finish(system, started_monotonic, error=exc)
+                if system == "solplanet":
+                    now_mono = monotonic()
+                    retry_after = max(SOLPLANET_BACKOFF_INITIAL_SECONDS, solplanet_backoff_seconds)
+                    solplanet_next_retry_monotonic = now_mono + retry_after
+                    status = collector_status.setdefault("solplanet", {})
+                    status["backoff_seconds"] = round(retry_after, 1)
+                    status["next_retry_at"] = (datetime.now(UTC) + timedelta(seconds=retry_after)).isoformat()
+                    solplanet_backoff_seconds = min(retry_after * 2.0, SOLPLANET_BACKOFF_MAX_SECONDS)
                 continue
 
         # Keep loop responsive so Solplanet can run back-to-back rounds.
@@ -2287,6 +2605,168 @@ async def post_saj_control_refresh_touch() -> dict[str, object]:
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
+@app.get("/api/soulplanet/control/state")
+@app.get("/api/solplanet/control/state")
+async def get_solplanet_control_state() -> dict[str, object]:
+    try:
+        schedule = await _solplanet_get_schedule_with_fallback()
+        return {"system": "solplanet", "control_state": _build_solplanet_control_state(schedule)}
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Solplanet CGI returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Solplanet CGI: {exc}") from exc
+    except (TimeoutError, asyncio.TimeoutError) as exc:
+        raise HTTPException(status_code=504, detail=f"Solplanet CGI timed out: {exc}") from exc
+
+
+@app.put("/api/soulplanet/control/limits")
+@app.put("/api/solplanet/control/limits")
+async def put_solplanet_control_limits(payload: SolplanetLimitsPayload) -> dict[str, object]:
+    changed: list[dict[str, object]] = []
+    update_payload: dict[str, object] = {}
+    if payload.pin is not None:
+        update_payload["Pin"] = payload.pin
+        changed.append({"key": "Pin", "value": payload.pin})
+    if payload.pout is not None:
+        update_payload["Pout"] = payload.pout
+        changed.append({"key": "Pout", "value": payload.pout})
+    if not update_payload:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    try:
+        cgi_write = await _solplanet_set_schedule_payload(update_payload)
+        schedule = await _solplanet_get_schedule_with_fallback()
+        return {
+            "ok": True,
+            "changed": changed,
+            "request_payload": update_payload,
+            "cgi_write": cgi_write,
+            "state": _build_solplanet_control_state(schedule),
+        }
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Solplanet CGI returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Solplanet CGI: {exc}") from exc
+    except (TimeoutError, asyncio.TimeoutError) as exc:
+        raise HTTPException(status_code=504, detail=f"Solplanet CGI timed out: {exc}") from exc
+
+
+@app.put("/api/soulplanet/control/day-schedule/{day}")
+@app.put("/api/solplanet/control/day-schedule/{day}")
+async def put_solplanet_day_schedule(day: str, payload: SolplanetDaySchedulePayload) -> dict[str, object]:
+    day_key = _normalize_solplanet_day_key(day)
+    slots = _validate_solplanet_day_slots(payload.slots)
+    try:
+        request_payload = {day_key: slots}
+        cgi_write = await _solplanet_set_schedule_payload(request_payload)
+        schedule = await _solplanet_get_schedule_with_fallback()
+        return {
+            "ok": True,
+            "changed": [{"key": day_key, "value": slots}],
+            "request_payload": request_payload,
+            "cgi_write": cgi_write,
+            "state": _build_solplanet_control_state(schedule),
+        }
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Solplanet CGI returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Solplanet CGI: {exc}") from exc
+    except (TimeoutError, asyncio.TimeoutError) as exc:
+        raise HTTPException(status_code=504, detail=f"Solplanet CGI timed out: {exc}") from exc
+
+
+@app.put("/api/soulplanet/control/day-schedule/{day}/slots/{slot}")
+@app.put("/api/solplanet/control/day-schedule/{day}/slots/{slot}")
+async def put_solplanet_day_schedule_slot(day: str, slot: int, payload: SolplanetSlotPayload) -> dict[str, object]:
+    day_key = _normalize_solplanet_day_key(day)
+    safe_slot = _validate_solplanet_slot(slot)
+    if (
+        payload.enabled is None
+        and payload.hour is None
+        and payload.minute is None
+        and payload.power is None
+        and payload.mode is None
+    ):
+        raise HTTPException(status_code=400, detail="No fields to update")
+    try:
+        schedule = await _solplanet_get_schedule_live()
+        day_slots = _solplanet_day_slots(schedule.get(day_key))
+        index = safe_slot - 1
+        current_decoded = _solplanet_decode_slot(day_slots[index])
+        enabled = current_decoded["enabled"] if payload.enabled is None else payload.enabled
+        if enabled:
+            hour = int(current_decoded["hour"]) if payload.hour is None else payload.hour
+            minute = int(current_decoded["minute"]) if payload.minute is None else payload.minute
+            power = int(current_decoded["power"]) if payload.power is None else payload.power
+            mode = int(current_decoded["mode"]) if payload.mode is None else payload.mode
+            day_slots[index] = _solplanet_encode_slot(hour=hour, minute=minute, power=power, mode=mode)
+        else:
+            day_slots[index] = 0
+        request_payload = {day_key: day_slots}
+        cgi_write = await _solplanet_set_schedule_payload(request_payload)
+        latest = await _solplanet_get_schedule_with_fallback()
+        return {
+            "ok": True,
+            "changed": [{"key": day_key, "slot": safe_slot, "value": day_slots[index]}],
+            "request_payload": request_payload,
+            "cgi_write": cgi_write,
+            "state": _build_solplanet_control_state(latest),
+        }
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Solplanet CGI returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Solplanet CGI: {exc}") from exc
+    except (TimeoutError, asyncio.TimeoutError) as exc:
+        raise HTTPException(status_code=504, detail=f"Solplanet CGI timed out: {exc}") from exc
+
+
+@app.put("/api/soulplanet/control/raw-setting")
+@app.put("/api/solplanet/control/raw-setting")
+async def put_solplanet_raw_setting(payload: SolplanetRawSettingPayload) -> dict[str, object]:
+    if not payload.payload:
+        raise HTTPException(status_code=400, detail="payload cannot be empty")
+    try:
+        cgi_write = await _solplanet_set_schedule_payload(payload.payload)
+        schedule = await _solplanet_get_schedule_with_fallback()
+        return {
+            "ok": True,
+            "changed": [{"key": "raw_payload", "value": payload.payload}],
+            "request_payload": payload.payload,
+            "cgi_write": cgi_write,
+            "state": _build_solplanet_control_state(schedule),
+        }
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Solplanet CGI returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Solplanet CGI: {exc}") from exc
+    except (TimeoutError, asyncio.TimeoutError) as exc:
+        raise HTTPException(status_code=504, detail=f"Solplanet CGI timed out: {exc}") from exc
+
+
 @app.get("/api/soulplanet/energy-flow")
 @app.get("/api/solplanet/energy-flow")
 async def get_energy_flow_soulplanet() -> dict[str, object]:
@@ -2339,6 +2819,17 @@ async def get_solplanet_getdev_device_2() -> dict[str, object]:
     )
 
 
+@app.get("/api/soulplanet/cgi/getdev-device-0")
+@app.get("/api/solplanet/cgi/getdev-device-0")
+async def get_solplanet_getdev_device_0() -> dict[str, object]:
+    started_at = monotonic()
+    return await _solplanet_endpoint_response_from_snapshot(
+        name="getdev_device_0",
+        path="getdev.cgi?device=0",
+        started_at=started_at,
+    )
+
+
 @app.get("/api/soulplanet/cgi/getdev-device-3")
 @app.get("/api/solplanet/cgi/getdev-device-3")
 async def get_solplanet_getdev_device_3() -> dict[str, object]:
@@ -2346,6 +2837,17 @@ async def get_solplanet_getdev_device_3() -> dict[str, object]:
     return await _solplanet_endpoint_response_from_snapshot(
         name="getdev_device_3",
         path="getdev.cgi?device=3",
+        started_at=started_at,
+    )
+
+
+@app.get("/api/soulplanet/cgi/getdev-device-4")
+@app.get("/api/solplanet/cgi/getdev-device-4")
+async def get_solplanet_getdev_device_4() -> dict[str, object]:
+    started_at = monotonic()
+    return await _solplanet_endpoint_response_from_snapshot(
+        name="getdev_device_4",
+        path="getdev.cgi?device=4",
         started_at=started_at,
     )
 
@@ -2383,6 +2885,17 @@ async def get_solplanet_getdevdata_device_4() -> dict[str, object]:
     )
 
 
+@app.get("/api/soulplanet/cgi/getdevdata-device-5")
+@app.get("/api/solplanet/cgi/getdevdata-device-5")
+async def get_solplanet_getdevdata_device_5() -> dict[str, object]:
+    started_at = monotonic()
+    return await _solplanet_endpoint_response_from_snapshot(
+        name="getdevdata_device_5",
+        path="getdevdata.cgi?device=5",
+        started_at=started_at,
+    )
+
+
 @app.get("/api/soulplanet/cgi/getdefine")
 @app.get("/api/solplanet/cgi/getdefine")
 async def get_solplanet_getdefine() -> dict[str, object]:
@@ -2392,6 +2905,56 @@ async def get_solplanet_getdefine() -> dict[str, object]:
         path="getdefine.cgi",
         started_at=started_at,
     )
+
+
+@app.get("/api/solplanet/cgi/explore")
+async def get_solplanet_cgi_explore() -> dict[str, object]:
+    """Probe all getdev.cgi?device=N and getdevdata.cgi?device=N for N=1..7.
+
+    Used to discover additional meters or devices not queried in the normal energy-flow path.
+    Device IDs 2, 3, 4 are already known (inverter, meter, battery); devices 1, 5, 6, 7 may
+    reveal a second smart meter or other components.
+    """
+    _ensure_solplanet_configured()
+    started_at = monotonic()
+
+    async def _probe(label: str, coro: object) -> tuple[str, dict[str, object] | None, str | None]:
+        try:
+            result = await asyncio.wait_for(coro, timeout=settings.solplanet_request_timeout_seconds)
+            return label, result if isinstance(result, dict) else {}, None
+        except Exception as exc:  # noqa: BLE001
+            return label, None, f"{type(exc).__name__}: {exc}"
+
+    probe_tasks: list[object] = []
+    for dev_id in range(1, 8):
+        probe_tasks.append(_probe(f"getdev_{dev_id}", solplanet_client.get_device_info(dev_id)))
+        probe_tasks.append(_probe(f"getdevdata_{dev_id}", solplanet_client.get_device_data(dev_id)))
+
+    results = await asyncio.gather(*probe_tasks)
+    endpoints: dict[str, object] = {}
+    for label, payload, error in results:
+        dev_id_str = label.split("_")[-1]
+        endpoint_type = "getdev" if label.startswith("getdev_") and not label.startswith("getdevdata_") else "getdevdata"
+        endpoints[label] = {
+            "path": f"{endpoint_type}.cgi?device={dev_id_str}",
+            "ok": error is None,
+            "error": error,
+            "payload": payload,
+        }
+
+    return {
+        "system": "solplanet",
+        "source": {
+            "type": "solplanet_cgi",
+            "host": settings.solplanet_dongle_host,
+            "port": settings.solplanet_dongle_port,
+            "scheme": settings.solplanet_dongle_scheme,
+        },
+        "updated_at": datetime.now(UTC).isoformat(),
+        "fetch_ms": round((monotonic() - started_at) * 1000, 1),
+        "note": "Probes all device IDs 1-7. Known: device=2 inverter, device=3 meter, device=4 battery.",
+        "endpoints": endpoints,
+    }
 
 
 @app.on_event("shutdown")

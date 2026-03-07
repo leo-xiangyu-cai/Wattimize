@@ -26,11 +26,14 @@ CSV_HEADERS: tuple[str, ...] = (
     "payload_json",
 )
 SOLPLANET_ENDPOINT_TABLES: dict[str, str] = {
+    "getdev_device_0": "solplanet_getdev_device_0",
     "getdev_device_2": "solplanet_getdev_device_2",
     "getdev_device_3": "solplanet_getdev_device_3",
+    "getdev_device_4": "solplanet_getdev_device_4",
     "getdevdata_device_2": "solplanet_getdevdata_device_2",
     "getdevdata_device_3": "solplanet_getdevdata_device_3",
     "getdevdata_device_4": "solplanet_getdevdata_device_4",
+    "getdevdata_device_5": "solplanet_getdevdata_device_5",
     "getdefine": "solplanet_getdefine",
 }
 

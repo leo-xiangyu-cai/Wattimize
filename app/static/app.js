@@ -66,13 +66,48 @@ const I18N = {
     solplanetRawTab: "Solplanet Raw",
     sajRawTab: "SAJ Raw",
     sajControlTab: "SAJ Control",
+    solplanetControlTab: "Solplanet Control",
     entitiesTab: "Entities",
     samplingTab: "Sampling",
     sajControlTitle: "SAJ Control",
+    solplanetControlTitle: "Solplanet Control",
+    solplanetControlLimitsTitle: "Power Limits",
+    solplanetControlScheduleTitle: "Day Schedule (6 slots)",
+    solplanetControlDayLabel: "Day",
+    solplanetControlPinLabel: "Charge Limit Pin (W)",
+    solplanetControlPoutLabel: "Discharge Limit Pout (W)",
+    solplanetControlHourLabel: "Hour",
+    solplanetControlMinuteLabel: "Minute",
+    solplanetControlPowerByteLabel: "Power Byte",
+    solplanetControlModeByteLabel: "Mode Byte",
+    solplanetControlEncodedLabel: "Encoded",
+    solplanetControlLoadFailed: "Control state load failed: {error}",
+    solplanetControlApplyFailed: "Control apply failed: {error}",
+    solplanetControlSaveDone: "Schedule saved.",
+    solplanetControlSignalsTitle: "Mode/State Signals (Live)",
+    solplanetControlSignalSourceCol: "Source",
+    solplanetControlSignalKeyCol: "Key",
+    solplanetControlSignalValueCol: "Value",
+    solplanetControlModeMeta: "stu={stu}, meter.mod={meterMod}, meter.enb={meterEnb}, battery.cst={batteryCst}, battery.bst={batteryBst}",
+    meterOfflineBannerText: "Smart meter offline (flg=0) — grid & load values are estimates only",
+    solplanetControlRawSettingTitle: "Raw setting.cgi payload",
+    solplanetControlRawSettingExplain: "Use this for advanced keys not yet exposed in the UI.",
+    solplanetControlRawSettingApplyBtn: "Apply Raw Payload",
+    solplanetControlRawSettingInvalidJson: "Invalid JSON payload: {error}",
+    solplanetControlPopupSuccessTitle: "Success",
+    solplanetControlPopupLimitsSummary: "Power limits have been applied.",
+    solplanetControlPopupScheduleSummary: "Day schedule has been saved for {day}.",
+    solplanetControlPopupRawSummary: "Raw payload has been sent.",
+    solplanetControlPopupResultTitle: "Result JSON",
+    solplanetControlFetchMeta: "Last fetch: {time} · state API {stateMs} ms · live API {liveMs} ms · total {totalMs} ms",
     sajControlModeTitle: "Working Mode",
-    sajControlModeExplain: "Mode code mapping may differ by firmware. Test 0~6 against app labels.",
+    sajControlModeExplain: "Mode code mapping may differ by firmware. Test 0~8 against app labels.",
     sajControlModeReadback: "mode_input={modeInput}, mode_sensor={modeSensor}, inverter_mode={inverterMode}",
+    sajControlModeSignals: "app_mode(input/actual): {modeInput} / {modeSensor}, inverter_working_mode(actual): {inverterMode}",
+    sajControlModeInputHint: "(input={modeInput})",
     sajControlModeCodeLabel: "Mode Code",
+    sajControlInverterModeCodeLabel: "Inverter Working Mode (Target Code)",
+    sajControlInverterModeHint: "Inverter working mode is readback-only in HA entities. This control writes app_mode_input and then verifies inverter_working_mode sensor.",
     sajModeOption0: "0 - Self-Consumption Mode",
     sajModeOption1: "1 - Time of Use Mode",
     sajModeOption2: "2 - Backup Mode",
@@ -80,6 +115,8 @@ const I18N = {
     sajModeOption4: "4 - Reserved/Unknown",
     sajModeOption5: "5 - Reserved/Unknown",
     sajModeOption6: "6 - Reserved/Unknown",
+    sajModeOption7: "7 - Reserved/Unknown",
+    sajModeOption8: "8 - Micro Grid Mode",
     sajControlEnableTitle: "Enable & Switches",
     sajControlChargeEnableMaskLabel: "Charge Enable Mask",
     sajControlDischargeEnableMaskLabel: "Discharge Enable Mask",
@@ -99,6 +136,15 @@ const I18N = {
     sajControlEndLabel: "End",
     sajControlPowerLabel: "Power (%)",
     sajControlDayMaskLabel: "Day Mask",
+    sajControlInputLabel: "Input",
+    sajControlActualLabel: "Actual",
+    sajControlEditStartPrompt: "Edit start time (HH:MM)",
+    sajControlEditEndPrompt: "Edit end time (HH:MM)",
+    sajControlEditPowerPrompt: "Edit power percent (0-100)",
+    sajControlEditMaskPrompt: "Edit day mask (0-127)",
+    sajControlEditInvalidTime: "Invalid time, expected HH:MM.",
+    sajControlEditInvalidPower: "Invalid power, expected number 0-100.",
+    sajControlEditInvalidMask: "Invalid mask, expected integer 0-127.",
     sajControlApplyBtn: "Apply",
     sajControlLoadFailed: "Control state load failed: {error}",
     sajControlApplyFailed: "Control apply failed: {error}",
@@ -108,10 +154,12 @@ const I18N = {
     sajControlPopupSuccessTitle: "Success",
     sajControlPopupCloseBtn: "Close",
     sajControlPopupWorkingModeSummary: "Working mode has been applied (mode_code={modeCode}).",
+    sajControlPopupInverterModeSummary: "Inverter target mode apply sent (mode_code={modeCode}, via app_mode_input).",
     sajControlPopupSaveSummary: "Save completed for enable masks and slot edits.",
     sajControlDebugApiTitle: "API Calls",
     sajControlDebugNoApi: "No API calls recorded.",
     sajDebugPurposeSetMode: "Update SAJ app mode input with selected mode code.",
+    sajDebugPurposeSetInverterModeTarget: "Apply target inverter mode by writing SAJ app mode input.",
     sajDebugPurposeSetTogglesMask: "Update charge/discharge enable masks.",
     sajDebugPurposeSetSlot: "Update {kind} slot {slot} fields that changed.",
     sajControlCurrentStateTitle: "Current Slot State",
@@ -272,11 +320,14 @@ const I18N = {
     rawDone: "Loaded",
     rawSummary: "Updated {updated} · OK {ok}/{total} · Failed {failed}",
     rawSummaryDash: "Updated - · OK -/- · Failed -",
+    rawApiGetdev0: "Dongle Info",
     rawApiGetdev2: "Device 2 Info",
     rawApiGetdev3: "Device 3 Info",
+    rawApiGetdev4: "Device 4 Info",
     rawApiGetdevdata2: "Device 2 Data",
     rawApiGetdevdata3: "Device 3 Data",
     rawApiGetdevdata4: "Device 4 Data",
+    rawApiGetdevdata5: "Device 5 Data",
     rawApiGetdefine: "Schedule",
     rawApiSajDashboardSources: "Live Dashboard Sources (Dynamic)",
     rawApiSajCoreEntities: "Configured Entity List (Static)",
@@ -335,13 +386,48 @@ const I18N = {
     solplanetRawTab: "Solplanet 原始",
     sajRawTab: "SAJ 原始",
     sajControlTab: "SAJ 管理",
+    solplanetControlTab: "Solplanet 管理",
     entitiesTab: "实体",
     samplingTab: "采样",
     sajControlTitle: "SAJ 管理",
+    solplanetControlTitle: "Solplanet 管理",
+    solplanetControlLimitsTitle: "功率限制",
+    solplanetControlScheduleTitle: "日程配置（6 槽位）",
+    solplanetControlDayLabel: "星期",
+    solplanetControlPinLabel: "充电上限 Pin (W)",
+    solplanetControlPoutLabel: "放电上限 Pout (W)",
+    solplanetControlHourLabel: "小时",
+    solplanetControlMinuteLabel: "分钟",
+    solplanetControlPowerByteLabel: "功率字节",
+    solplanetControlModeByteLabel: "模式字节",
+    solplanetControlEncodedLabel: "编码值",
+    solplanetControlLoadFailed: "控制状态加载失败: {error}",
+    solplanetControlApplyFailed: "控制下发失败: {error}",
+    solplanetControlSaveDone: "日程保存成功。",
+    solplanetControlSignalsTitle: "Mode/状态信号（实时）",
+    solplanetControlSignalSourceCol: "来源",
+    solplanetControlSignalKeyCol: "字段",
+    solplanetControlSignalValueCol: "值",
+    solplanetControlModeMeta: "stu={stu}, meter.mod={meterMod}, meter.enb={meterEnb}, battery.cst={batteryCst}, battery.bst={batteryBst}",
+    meterOfflineBannerText: "智能电表离线（flg=0）— 电网与负载数值为估算值",
+    solplanetControlRawSettingTitle: "Raw setting.cgi 负载",
+    solplanetControlRawSettingExplain: "用于发送当前界面未覆盖的高级字段。",
+    solplanetControlRawSettingApplyBtn: "应用 Raw 负载",
+    solplanetControlRawSettingInvalidJson: "JSON 格式错误: {error}",
+    solplanetControlPopupSuccessTitle: "操作成功",
+    solplanetControlPopupLimitsSummary: "功率限制已应用。",
+    solplanetControlPopupScheduleSummary: "已保存 {day} 的日程配置。",
+    solplanetControlPopupRawSummary: "Raw 负载已发送。",
+    solplanetControlPopupResultTitle: "返回结果 JSON",
+    solplanetControlFetchMeta: "最近拉取: {time} · 状态接口 {stateMs} ms · 实时接口 {liveMs} ms · 总耗时 {totalMs} ms",
     sajControlModeTitle: "工作模式",
-    sajControlModeExplain: "mode code 与名称可能因固件不同，请按 APP 对照测试 0~6。",
+    sajControlModeExplain: "mode code 与名称可能因固件不同，请按 APP 对照测试 0~8。",
     sajControlModeReadback: "mode_input={modeInput}, mode_sensor={modeSensor}, inverter_mode={inverterMode}",
+    sajControlModeSignals: "app_mode(输入/实际): {modeInput} / {modeSensor}, inverter_working_mode(实际): {inverterMode}",
+    sajControlModeInputHint: "（input={modeInput}）",
     sajControlModeCodeLabel: "模式编码",
+    sajControlInverterModeCodeLabel: "逆变器工作模式（目标编码）",
+    sajControlInverterModeHint: "HA 实体里 inverter working mode 是只读回传。这里会写入 app_mode_input，再观察 inverter_working_mode 传感器。",
     sajModeOption0: "0 - 自发自用模式",
     sajModeOption1: "1 - 分时电价模式",
     sajModeOption2: "2 - 备电模式",
@@ -349,6 +435,8 @@ const I18N = {
     sajModeOption4: "4 - 预留/未知",
     sajModeOption5: "5 - 预留/未知",
     sajModeOption6: "6 - 预留/未知",
+    sajModeOption7: "7 - 预留/未知",
+    sajModeOption8: "8 - 微电网模式",
     sajControlEnableTitle: "启用与开关",
     sajControlChargeEnableMaskLabel: "充电启用掩码",
     sajControlDischargeEnableMaskLabel: "放电启用掩码",
@@ -368,6 +456,15 @@ const I18N = {
     sajControlEndLabel: "结束",
     sajControlPowerLabel: "功率 (%)",
     sajControlDayMaskLabel: "星期掩码",
+    sajControlInputLabel: "Input",
+    sajControlActualLabel: "Actual",
+    sajControlEditStartPrompt: "编辑开始时间（HH:MM）",
+    sajControlEditEndPrompt: "编辑结束时间（HH:MM）",
+    sajControlEditPowerPrompt: "编辑功率百分比（0-100）",
+    sajControlEditMaskPrompt: "编辑星期掩码（0-127）",
+    sajControlEditInvalidTime: "时间格式错误，应为 HH:MM。",
+    sajControlEditInvalidPower: "功率输入错误，应为 0-100。",
+    sajControlEditInvalidMask: "掩码输入错误，应为 0-127 的整数。",
     sajControlApplyBtn: "应用",
     sajControlLoadFailed: "管理状态加载失败：{error}",
     sajControlApplyFailed: "应用失败：{error}",
@@ -377,10 +474,12 @@ const I18N = {
     sajControlPopupSuccessTitle: "操作成功",
     sajControlPopupCloseBtn: "关闭",
     sajControlPopupWorkingModeSummary: "工作模式已应用（mode_code={modeCode}）。",
+    sajControlPopupInverterModeSummary: "已发送逆变器目标模式下发（mode_code={modeCode}，通过 app_mode_input）。",
     sajControlPopupSaveSummary: "已保存启用掩码和时段修改。",
     sajControlDebugApiTitle: "API 调用明细",
     sajControlDebugNoApi: "本次没有记录到 API 调用。",
     sajDebugPurposeSetMode: "将所选 mode code 写入 SAJ App 模式输入值。",
+    sajDebugPurposeSetInverterModeTarget: "通过写入 SAJ App 模式输入值来触发逆变器目标模式。",
     sajDebugPurposeSetTogglesMask: "更新充/放电启用掩码。",
     sajDebugPurposeSetSlot: "更新 {kind} 第 {slot} 段发生变化的字段。",
     sajControlCurrentStateTitle: "当前时段状态",
@@ -541,11 +640,14 @@ const I18N = {
     rawDone: "已加载",
     rawSummary: "更新时间 {updated} · 成功 {ok}/{total} · 失败 {failed}",
     rawSummaryDash: "更新时间 - · 成功 -/- · 失败 -",
+    rawApiGetdev0: "Dongle 信息",
     rawApiGetdev2: "设备2信息",
     rawApiGetdev3: "设备3信息",
+    rawApiGetdev4: "设备4信息",
     rawApiGetdevdata2: "设备2实时",
     rawApiGetdevdata3: "设备3实时",
     rawApiGetdevdata4: "设备4实时",
+    rawApiGetdevdata5: "设备5实时",
     rawApiGetdefine: "调度配置",
     rawApiSajDashboardSources: "实时展示来源（动态）",
     rawApiSajCoreEntities: "配置实体清单（静态）",
@@ -585,15 +687,19 @@ const AUTO_REFRESH_KEY = "autoRefreshSeconds";
 const SOLPLANET_RAW_MODE_KEY = "solplanetRawMode";
 const SAJ_ACTION_DEBUG_MODE_KEY = "sajActionDebugMode";
 const AUTO_REFRESH_OPTIONS = [0, 5, 10];
+const SAJ_CONTROL_EDIT_GRACE_MS = 15000;
 const CONFIG_SAMPLE_INTERVAL_OPTIONS = [5, 10, 30, 60, 300];
 const BALANCE_TOLERANCE_W = 120;
 const SOLPLANET_REALTIME_KV_URL = "/api/solplanet/realtime-kv";
 const SOLPLANET_RAW_APIS = [
+  { key: "getdev_device_0", titleKey: "rawApiGetdev0", url: "/api/solplanet/cgi/getdev-device-0" },
   { key: "getdev_device_2", titleKey: "rawApiGetdev2", url: "/api/solplanet/cgi/getdev-device-2" },
   { key: "getdev_device_3", titleKey: "rawApiGetdev3", url: "/api/solplanet/cgi/getdev-device-3" },
+  { key: "getdev_device_4", titleKey: "rawApiGetdev4", url: "/api/solplanet/cgi/getdev-device-4" },
   { key: "getdevdata_device_2", titleKey: "rawApiGetdevdata2", url: "/api/solplanet/cgi/getdevdata-device-2" },
   { key: "getdevdata_device_3", titleKey: "rawApiGetdevdata3", url: "/api/solplanet/cgi/getdevdata-device-3" },
   { key: "getdevdata_device_4", titleKey: "rawApiGetdevdata4", url: "/api/solplanet/cgi/getdevdata-device-4" },
+  { key: "getdevdata_device_5", titleKey: "rawApiGetdevdata5", url: "/api/solplanet/cgi/getdevdata-device-5" },
   { key: "getdefine", titleKey: "rawApiGetdefine", url: "/api/solplanet/cgi/getdefine" },
 ];
 const SAJ_RAW_APIS = [
@@ -607,6 +713,16 @@ const SAMPLING_SERIES = [
   { key: "load_w", labelKey: "samplingSeriesLoad", color: "#ef4444" },
 ];
 const SOLPLANET_RAW_FIELD_HELP = {
+  getdev_device_0: {
+    psn: { zh: "Dongle 序列号", en: "Dongle serial number" },
+    nam: { zh: "设备名称", en: "Device name" },
+    mod: { zh: "设备型号", en: "Model name" },
+    sw: { zh: "固件版本", en: "Firmware version" },
+    tim: { zh: "设备当前时间", en: "Device timestamp" },
+    ali_ip: { zh: "云服务区域", en: "Cloud region" },
+    ali_port: { zh: "云服务端口", en: "Cloud service port" },
+    status: { zh: "云连接状态", en: "Cloud connection status" },
+  },
   getdev_device_2: {
     isn: { zh: "逆变器序列号", en: "Inverter serial number" },
     add: { zh: "设备地址/编号", en: "Device address/index" },
@@ -742,6 +858,20 @@ const SOLPLANET_RAW_FIELD_HELP = {
     vbinv: { zh: "逆变器侧电池电压", en: "Inverter-side battery voltage" },
     cbinv: { zh: "逆变器侧电池电流", en: "Inverter-side battery current" },
   },
+  getdev_device_4: {
+    isn: { zh: "逆变器序列号", en: "Inverter serial number" },
+    type: { zh: "电池类型编码", en: "Battery type code" },
+    muf: { zh: "电池厂商编码", en: "Battery vendor code" },
+    mod: { zh: "电池型号编码", en: "Battery model code" },
+    num: { zh: "电池模块数量", en: "Battery module count" },
+    discharge_max: { zh: "最大放电值", en: "Max discharge value" },
+    charge_max: { zh: "最大充电值", en: "Max charge value" },
+    battery: { zh: "电池详细信息对象", en: "Battery detail object" },
+  },
+  getdevdata_device_5: {
+    flg: { zh: "数据有效标记", en: "Data valid flag" },
+    tim: { zh: "设备时间", en: "Device timestamp" },
+  },
   getdefine: {
     Pin: { zh: "充电功率上限（W）", en: "Charge power limit (W)" },
     Pout: { zh: "放电功率上限（W）", en: "Discharge power limit (W)" },
@@ -781,13 +911,13 @@ const SOLPLANET_RAW_FIELD_HELP = {
 const SOLPLANET_DASHBOARD_FIELD_MAP = {
   getdev_device_3: {
     meter_pac: [{ metric: "grid_w", kind: "backup", noteZh: "当 device=3 实时包无效时可作为电网功率参考", noteEn: "Fallback grid reference when device-3 realtime payload is invalid" }],
-    total_pac: [{ metric: "load_w", kind: "backup", noteZh: "可作为家庭负载功率的参考值", noteEn: "Reference value for home load power" }],
+    total_pac: [{ metric: "grid_w", kind: "unused", noteZh: "⚠ 不再用于电网功率计算：该值等同于逆变器 pac（AC 输出），并非真实电网净功率", noteEn: "⚠ No longer used for grid power: mirrors inverter pac (AC output), not real grid net power" }],
   },
   getdevdata_device_2: {
     ppv: [{ metric: "pv_w", kind: "primary", noteZh: "对应 Dashboard 的太阳能卡片数值", noteEn: "Feeds the Solar value shown on Dashboard" }],
     vpv: [{ metric: "pv_w", kind: "backup", noteZh: "与 ipv 组合后作为太阳能卡片备用来源", noteEn: "With ipv, acts as backup source for Solar value" }],
     ipv: [{ metric: "pv_w", kind: "backup", noteZh: "与 vpv 组合后作为太阳能卡片备用来源", noteEn: "With vpv, acts as backup source for Solar value" }],
-    pac: [{ metric: "load_w", kind: "primary", noteZh: "对应 Dashboard 的家庭负载卡片数值", noteEn: "Feeds the Home Load value shown on Dashboard" }],
+    pac: [{ metric: "load_w", kind: "backup", noteZh: "仅在无法推导家庭负载时作为兜底估算（取绝对值/扣除电池充电）", noteEn: "Fallback estimate only when derived home-load is unavailable (abs / minus battery charge)" }],
     stu: [{ metric: "inverter_status", kind: "primary", noteZh: "对应 Dashboard 的逆变器状态", noteEn: "Feeds the Inverter status shown on Dashboard" }],
   },
   getdevdata_device_3: {
@@ -797,6 +927,14 @@ const SOLPLANET_DASHBOARD_FIELD_MAP = {
     pb: [{ metric: "battery_w", kind: "primary", noteZh: "对应 Dashboard 的电池卡片功率", noteEn: "Feeds the Battery power shown on Dashboard" }],
     soc: [{ metric: "battery_soc_percent", kind: "primary", noteZh: "对应 Dashboard 的电池 SOC 百分比", noteEn: "Feeds the Battery SOC shown on Dashboard" }],
     ppv: [{ metric: "pv_w", kind: "backup", noteZh: "太阳能卡片数值备用来源", noteEn: "Backup source for Solar value on Dashboard" }],
+  },
+  solplanet_metrics: {
+    "notes.solplanet_load_w_source:power_balance_derived": [{ metric: "load_w", kind: "primary", noteZh: "家庭负载由功率平衡推导：PV + 电池放电 + 电网购电 - 电池充电 - 电网上网", noteEn: "Primary home-load source derived from power balance: PV + battery discharge + grid import - battery charge - grid export" }],
+    "notes.solplanet_load_w_source:inverter_pac_minus_battery_charge_abs": [{ metric: "load_w", kind: "fallback", noteZh: "兜底：|inverter.pac| - |battery.pb(充电)|", noteEn: "Fallback: |inverter.pac| - |battery.pb(charging)|" }],
+    "notes.solplanet_load_w_source:inverter_pac_minus_battery_discharge_abs": [{ metric: "load_w", kind: "fallback", noteZh: "兜底：|inverter.pac| - |battery.pb(放电)|", noteEn: "Fallback: |inverter.pac| - |battery.pb(discharging)|" }],
+    "notes.solplanet_load_w_source:abs_inverter_pac": [{ metric: "load_w", kind: "fallback", noteZh: "兜底：|inverter.pac|", noteEn: "Fallback: |inverter.pac|" }],
+    "notes.solplanet_grid_w_source:meter_info_total_pac_sign_flipped": [{ metric: "grid_w", kind: "backup", noteZh: "电网功率来自 meter_info.total_pac（符号反转）", noteEn: "Grid source from meter_info.total_pac with sign flip" }],
+    "notes.solplanet_grid_w_source:inferred_from_balance_assume_no_export": [{ metric: "grid_w", kind: "fallback", noteZh: "电网功率由功率平衡反推（假设无并网回馈）", noteEn: "Grid inferred from power balance (assumes no export)" }],
   },
   saj_dashboard_sources: {
     "dashboard_values.solar_power_w": [{ metric: "solar_power_w", kind: "primary", noteZh: "Dashboard 太阳能卡片显示值", noteEn: "Dashboard Solar card value" }],
@@ -814,6 +952,9 @@ const stateCache = {
   lastSolplanetKv: { phase: "idle", items: [], updated_at: null, error: null },
   lastSajRaw: {},
   lastSajControl: null,
+  lastSolplanetControl: null,
+  lastSolplanetControlLive: null,
+  lastSolplanetControlFetch: null,
   lastSamplingStatus: null,
   lastSamplingDaily: null,
   lastSamplingPage: null,
@@ -833,14 +974,16 @@ function getLang() {
 }
 
 let currentLang = getLang();
-let currentTab = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sajControl", "sampling"].includes(localStorage.getItem("activeTab"))
+let currentTab = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling"].includes(localStorage.getItem("activeTab"))
   ? localStorage.getItem("activeTab")
   : "dashboard";
+const ALL_TABS = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling"];
 let solplanetRawMode = localStorage.getItem(SOLPLANET_RAW_MODE_KEY) === "table" ? "table" : "cards";
 let sajActionDebugMode = localStorage.getItem(SAJ_ACTION_DEBUG_MODE_KEY) === "1";
 let autoRefreshTimerId = null;
-let isLoadingCurrentTab = false;
 let autoRefreshSeconds = getAutoRefreshSeconds();
+let sajControlLastEditAt = 0;
+let solplanetControlBusy = false;
 let summaryRequestId = 0;
 let configReady = false;
 let samplingChart = null;
@@ -849,6 +992,15 @@ let samplingChartLastPayload = null;
 let samplingChartHandlersBound = false;
 let samplingRangeApplyingFromBrush = false;
 let samplingLegendSyncing = false;
+const tabLoadState = {
+  dashboard: { inFlight: false },
+  entities: { inFlight: false },
+  solplanetRaw: { inFlight: false },
+  sajRaw: { inFlight: false },
+  sajControl: { inFlight: false },
+  solplanetControl: { inFlight: false },
+  sampling: { inFlight: false },
+};
 const samplingRangeState = {
   day: "",
   week: "",
@@ -937,6 +1089,31 @@ function setText(id, text) {
   if (el) el.textContent = text;
 }
 
+function setNodeSourceTip(id, tipText) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const normalized = String(tipText || "-");
+  el.classList.add("has-source-tip");
+  el.setAttribute("data-source-tip", normalized);
+  el.setAttribute("title", normalized);
+}
+
+function formatMetricSourceText(system, metricKey, sourceValue) {
+  const sourceText = typeof sourceValue === "string" && sourceValue.trim() ? sourceValue.trim() : "unavailable";
+  const sourceLabel = currentLang === "zh" ? "来源" : "Source";
+  const calcLabel = currentLang === "zh" ? "计算" : "Calculated";
+  const fieldLabel = currentLang === "zh" ? "字段" : "Field";
+  const batteryNote = currentLang === "zh"
+    ? "说明: battery 功率正=放电, 负=充电"
+    : "Note: battery power positive=discharge, negative=charge";
+  const kind = sourceText.startsWith("calc:") ? calcLabel : fieldLabel;
+  const detail = sourceText.startsWith("calc:") ? sourceText.slice(5) : sourceText;
+  if (metricKey === "battery") {
+    return `${sourceLabel}: ${kind} ${detail}\n${batteryNote}`;
+  }
+  return `${sourceLabel}: ${kind} ${detail}`;
+}
+
 function flowId(system, key) {
   return `${system}-${key}`;
 }
@@ -977,6 +1154,18 @@ function formatRelativeAgo(isoText) {
   if (hours < 24) return t("rawAgoHours", { n: hours });
   const days = Math.floor(hours / 24);
   return t("rawAgoDays", { n: days });
+}
+
+function markSajControlLocalEdit() {
+  sajControlLastEditAt = Date.now();
+}
+
+function isSajControlLocalEditing() {
+  const body = document.getElementById("sajControlSlotsBody");
+  const active = document.activeElement;
+  if (body && active instanceof HTMLElement && body.contains(active)) return true;
+  if (sajControlLastEditAt <= 0) return false;
+  return Date.now() - sajControlLastEditAt < SAJ_CONTROL_EDIT_GRACE_MS;
 }
 
 function setSystemLoadMeta(system, patch = {}) {
@@ -1053,6 +1242,7 @@ function applyTranslations() {
   renderSolplanetKvFromCache();
   renderSajRawFromCache();
   renderSajControlFromCache();
+  renderSolplanetControlFromCache();
   if (stateCache.lastEntities) renderEntitiesPage(stateCache.lastEntities);
 }
 
@@ -1138,6 +1328,25 @@ function formatSignedKwFromWatts(watts) {
   return `${sign}${Math.abs(value / 1000).toFixed(3)} kW`;
 }
 
+const BATTERY_CAPACITY_KWH = {
+  saj: 15,
+  solplanet: 40,
+};
+
+function formatTrimmedDecimal(value, digits = 1) {
+  const fixed = Number(value).toFixed(digits);
+  return fixed.replace(/\.0$/, "");
+}
+
+function formatBatteryEnergyKwh(system, batterySoc) {
+  const capacityKwh = BATTERY_CAPACITY_KWH[system];
+  if (!Number.isFinite(capacityKwh)) return "-";
+  if (batterySoc === null || batterySoc === undefined) return `- / ${formatTrimmedDecimal(capacityKwh, 1)} kWh`;
+  const clampedSoc = Math.max(0, Math.min(100, Number(batterySoc)));
+  const currentKwh = (capacityKwh * clampedSoc) / 100;
+  return `${formatTrimmedDecimal(currentKwh, 1)} / ${formatTrimmedDecimal(capacityKwh, 1)} kWh`;
+}
+
 function setFlowLine(id, active, reverse = false) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -1160,6 +1369,44 @@ function setModeClass(id, mode) {
   if (mode === "negative") el.classList.add("mode-negative");
 }
 
+function interpolateSocColor(percent) {
+  const p = Math.max(0, Math.min(100, Number(percent)));
+  const stops = [
+    { p: 0, c: [120, 45, 54] },   // muted deep red
+    { p: 20, c: [170, 66, 63] },  // muted red
+    { p: 40, c: [204, 112, 66] }, // muted orange
+    { p: 60, c: [214, 156, 86] }, // warm amber
+    { p: 80, c: [187, 179, 95] }, // olive-yellow
+    { p: 100, c: [106, 159, 116] }, // soft green
+  ];
+  for (let i = 0; i < stops.length - 1; i += 1) {
+    const a = stops[i];
+    const b = stops[i + 1];
+    if (p <= b.p) {
+      const t = (p - a.p) / (b.p - a.p);
+      const r = Math.round(a.c[0] + (b.c[0] - a.c[0]) * t);
+      const g = Math.round(a.c[1] + (b.c[1] - a.c[1]) * t);
+      const bch = Math.round(a.c[2] + (b.c[2] - a.c[2]) * t);
+      return `rgb(${r}, ${g}, ${bch})`;
+    }
+  }
+  return "rgb(106, 159, 116)";
+}
+
+function setSocTextContrast(system, socPercent) {
+  const p = Math.max(0, Math.min(100, Number(socPercent) || 0));
+  const textLayer = document.getElementById(flowId(system, "batterySocValue"))?.parentElement;
+  if (!textLayer) return;
+  // Text is centered vertically. When fill exceeds ~55%, the center area is mostly on filled color.
+  if (p >= 55) {
+    textLayer.style.setProperty("--soc-text-color", "#f5fcf7");
+    textLayer.style.setProperty("--soc-text-shadow", "rgba(17, 40, 28, 0.55)");
+  } else {
+    textLayer.style.setProperty("--soc-text-color", "#213f31");
+    textLayer.style.setProperty("--soc-text-shadow", "rgba(255, 255, 255, 0.80)");
+  }
+}
+
 function inverterStateText(raw) {
   const inverterStateRaw = String(raw || "").toLowerCase();
   if (inverterStateRaw === "running") return t("inverterRunning");
@@ -1167,6 +1414,46 @@ function inverterStateText(raw) {
   if (inverterStateRaw === "standby") return t("inverterStandby");
   if (!inverterStateRaw) return t("inverterUnknown");
   return String(raw || "-");
+}
+
+function _stripModeCodePrefix(label) {
+  return String(label || "").replace(/^\s*\d+\s*-\s*/, "").trim();
+}
+
+function _sajModeTextByCode(modeCode) {
+  const n = Number(modeCode);
+  if (!Number.isFinite(n)) return "";
+  const code = Math.trunc(n);
+  if (code < 0 || code > 8) return "";
+  return _stripModeCodePrefix(t(`sajModeOption${code}`));
+}
+
+function getSajDashboardModeText() {
+  const state = stateCache.lastSajControl?.control_state || stateCache.lastSajControl?.state || null;
+  if (!state) return "";
+  const working = state?.working_mode || {};
+  const inverterModeRaw = working?.inverter_working_mode_sensor;
+  if (typeof inverterModeRaw === "string" && inverterModeRaw.trim()) {
+    const raw = inverterModeRaw.trim();
+    if (!Number.isFinite(Number(raw))) return raw;
+  }
+
+  const modeSensor = Number(working?.mode_sensor);
+  if (Number.isFinite(modeSensor)) {
+    const mapped = _sajModeTextByCode(modeSensor);
+    if (mapped) return mapped;
+  }
+  const modeInput = Number(working?.mode_input);
+  if (Number.isFinite(modeInput)) {
+    const mapped = _sajModeTextByCode(modeInput);
+    if (mapped) return mapped;
+  }
+  const inverterModeNum = Number(inverterModeRaw);
+  if (Number.isFinite(inverterModeNum)) {
+    const mapped = _sajModeTextByCode(inverterModeNum);
+    if (mapped) return mapped;
+  }
+  return "";
 }
 
 function setBalanceStatus(system, balanceW) {
@@ -1243,7 +1530,16 @@ function renderEnergyFlow(system, flowPayload) {
     formatPowerKwFromWatts(batteryW === null ? null : Math.abs(batteryW)),
   );
   setText(flowId(system, "loadPowerValue"), formatPowerKwFromWatts(loadW));
-  setText(flowId(system, "inverterStatusValue"), inverterStateText(inverterStatus));
+  setNodeSourceTip(flowId(system, "solarPowerValue"), formatMetricSourceText(system, "solar", metrics.pv_source));
+  setNodeSourceTip(flowId(system, "gridPowerValue"), formatMetricSourceText(system, "grid", metrics.grid_source));
+  setNodeSourceTip(flowId(system, "batteryPowerValue"), formatMetricSourceText(system, "battery", metrics.battery_source));
+  setNodeSourceTip(flowId(system, "loadPowerValue"), formatMetricSourceText(system, "load", metrics.load_source));
+  let inverterDisplayText = inverterStateText(inverterStatus);
+  if (system === "saj") {
+    const modeText = getSajDashboardModeText();
+    if (modeText) inverterDisplayText = modeText;
+  }
+  setText(flowId(system, "inverterStatusValue"), inverterDisplayText);
 
   const solarActive = Boolean(metrics.solar_active);
   setText(flowId(system, "solarState"), solarActive ? t("stateProducing") : t("stateIdle"));
@@ -1288,13 +1584,24 @@ function renderEnergyFlow(system, flowPayload) {
 
   if (batterySoc === null || batterySoc === undefined) {
     setText(flowId(system, "batterySocValue"), "-");
+    setText(flowId(system, "batteryEnergyValue"), formatBatteryEnergyKwh(system, null));
     const socFill = document.getElementById(flowId(system, "batterySocFill"));
-    if (socFill) socFill.style.height = "0%";
+    if (socFill) {
+      socFill.style.height = "0%";
+      socFill.style.backgroundColor = "rgb(106, 159, 116)";
+      setSocTextContrast(system, 0);
+    }
   } else {
     const clampedSoc = Math.max(0, Math.min(100, Number(batterySoc)));
     setText(flowId(system, "batterySocValue"), `${clampedSoc.toFixed(0)}%`);
+    setText(flowId(system, "batteryEnergyValue"), formatBatteryEnergyKwh(system, clampedSoc));
     const socFill = document.getElementById(flowId(system, "batterySocFill"));
-    if (socFill) socFill.style.height = `${clampedSoc}%`;
+    if (socFill) {
+      socFill.style.height = `${clampedSoc}%`;
+      const socColor = interpolateSocColor(clampedSoc);
+      socFill.style.backgroundColor = socColor;
+      setSocTextContrast(system, clampedSoc);
+    }
   }
 
   if (balanceW === null || balanceW === undefined) {
@@ -1305,6 +1612,15 @@ function renderEnergyFlow(system, flowPayload) {
     setText(flowId(system, "systemBalance"), `${t("balanceLabel")} ${formatPowerKwFromWatts(balanceW)}`);
     setBalanceStatus(system, balanceW);
     setBalanceFormula(system, pvW, gridW, batteryW, loadW, balanceW);
+  }
+
+  if (system === "solplanet") {
+    const notes = metrics.notes || [];
+    const meterOffline = notes.some((n) => n === "solplanet_meter_data_valid:false");
+    const banner = document.getElementById("solplanet-meterOfflineBanner");
+    if (banner) {
+      banner.classList.toggle("is-hidden", !meterOffline);
+    }
   }
 }
 
@@ -2322,7 +2638,8 @@ function renderSolplanetKvFromCache() {
   const tbody = document.getElementById("solplanetRawTableBody");
   if (!tbody) return;
   tbody.innerHTML = "";
-  if (state.phase === "loading") {
+  const items = Array.isArray(state.items) ? state.items : [];
+  if (state.phase === "loading" && !items.length) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
     td.colSpan = 3;
@@ -2333,7 +2650,7 @@ function renderSolplanetKvFromCache() {
     setText("solplanetRawUpdatedAt", `${t("updatedAt")}: -`);
     return;
   }
-  if (state.phase === "failed") {
+  if (state.phase === "failed" && !items.length) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
     td.colSpan = 3;
@@ -2345,7 +2662,6 @@ function renderSolplanetKvFromCache() {
     return;
   }
 
-  const items = Array.isArray(state.items) ? state.items : [];
   if (!items.length) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
@@ -2369,15 +2685,19 @@ function renderSolplanetKvFromCache() {
     }
   }
   const updatedText = state.updated_at ? new Date(state.updated_at).toLocaleString() : "-";
-  setText("solplanetRawMeta", t("rawKvMeta", { count: items.length }));
+  const meta = t("rawKvMeta", { count: items.length });
+  if (state.phase === "loading") setText("solplanetRawMeta", `${meta} · ${t("rawLoading")}`);
+  else if (state.phase === "failed") setText("solplanetRawMeta", `${meta} · ${t("rawStatusFailed")}`);
+  else setText("solplanetRawMeta", meta);
   setText("solplanetRawUpdatedAt", `${t("updatedAt")}: ${updatedText}`);
 }
 
 async function loadSolplanetKvTable() {
+  const prev = stateCache.lastSolplanetKv || { items: [], updated_at: null };
   stateCache.lastSolplanetKv = {
     phase: "loading",
-    items: [],
-    updated_at: null,
+    items: Array.isArray(prev.items) ? prev.items : [],
+    updated_at: prev.updated_at || null,
     error: null,
   };
   renderSolplanetKvFromCache();
@@ -2390,10 +2710,11 @@ async function loadSolplanetKvTable() {
       error: null,
     };
   } catch (err) {
+    const last = stateCache.lastSolplanetKv || { items: [], updated_at: null };
     stateCache.lastSolplanetKv = {
       phase: "failed",
-      items: [],
-      updated_at: null,
+      items: Array.isArray(last.items) ? last.items : [],
+      updated_at: last.updated_at || null,
       error: String(err),
     };
   }
@@ -2416,6 +2737,7 @@ function renderSajRawFromCache() {
 }
 
 const WEEKDAY_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const SAJ_TIME_RE = /^(0\d|1\d|2[0-3]):[0-5]\d$/;
 let sajDayMaskEditingTargetId = null;
 
 function clampMask7(raw) {
@@ -2555,6 +2877,7 @@ function confirmSajDayMaskModal() {
   }
   const input = document.getElementById(sajDayMaskEditingTargetId);
   if (input) input.value = String(_getSajDayMaskPopupMask());
+  markSajControlLocalEdit();
   sajDayMaskEditingTargetId = null;
   setSajDayMaskModalVisible(false);
 }
@@ -2562,6 +2885,108 @@ function confirmSajDayMaskModal() {
 function cancelSajDayMaskModal() {
   sajDayMaskEditingTargetId = null;
   setSajDayMaskModalVisible(false);
+}
+
+function _sajRatedPowerForUi() {
+  const rated = Number(
+    stateCache.lastSajControl?.control_state?.inverter?.rated_power_w
+      ?? stateCache.lastSajControl?.state?.inverter?.rated_power_w
+      ?? 5000,
+  );
+  return Number.isFinite(rated) && rated > 0 ? rated : 5000;
+}
+
+function _formatSajPowerDisplay(rawPercent) {
+  const percent = Number(rawPercent);
+  if (!Number.isFinite(percent)) return "-";
+  const watts = Math.round((_sajRatedPowerForUi() * percent) / 100);
+  return `${Math.trunc(percent)}% (${watts}W)`;
+}
+
+function _normalizeSajTableEditValue(field, rawValue) {
+  const trimmed = String(rawValue ?? "").trim();
+  if (field === "start_time" || field === "end_time") {
+    if (!SAJ_TIME_RE.test(trimmed)) return null;
+    return trimmed;
+  }
+  if (field === "power_percent") {
+    const n = Number(trimmed);
+    if (!Number.isFinite(n)) return null;
+    return String(Math.max(0, Math.min(100, Math.trunc(n))));
+  }
+  if (field === "day_mask") {
+    const n = Number(trimmed);
+    if (!Number.isFinite(n)) return null;
+    return String(clampMask7(Math.trunc(n)));
+  }
+  return null;
+}
+
+function _refreshSajTableInputDisplay(inputId, field) {
+  const inputEl = document.getElementById(inputId);
+  const displayEl = document.getElementById(`${inputId}Display`);
+  if (!(inputEl instanceof HTMLInputElement) || !displayEl) return;
+  if (field === "power_percent") {
+    displayEl.textContent = _formatSajPowerDisplay(inputEl.value);
+    return;
+  }
+  displayEl.textContent = inputEl.value || "-";
+}
+
+function _openSajTableCellEditor(buttonEl) {
+  const field = String(buttonEl.dataset.field || "");
+  const inputId = String(buttonEl.dataset.inputId || "");
+  const kind = String(buttonEl.dataset.kind || "");
+  const slot = Number(buttonEl.dataset.slot || "0");
+  const inputEl = document.getElementById(inputId);
+  if (!(inputEl instanceof HTMLInputElement) || !field) return;
+  const actualRaw = String(buttonEl.dataset.actualValue || "").trim();
+  const defaultValue = actualRaw || String(inputEl.value || "").trim();
+  const promptKey = field === "start_time"
+    ? "sajControlEditStartPrompt"
+    : field === "end_time"
+      ? "sajControlEditEndPrompt"
+      : field === "power_percent"
+        ? "sajControlEditPowerPrompt"
+        : "sajControlEditMaskPrompt";
+  const invalidKey = field === "start_time" || field === "end_time"
+    ? "sajControlEditInvalidTime"
+    : field === "power_percent"
+      ? "sajControlEditInvalidPower"
+      : "sajControlEditInvalidMask";
+
+  const nextRaw = window.prompt(t(promptKey), defaultValue);
+  if (nextRaw === null) return;
+  const normalized = _normalizeSajTableEditValue(field, nextRaw);
+  if (normalized === null) {
+    window.alert(t(invalidKey));
+    return;
+  }
+  inputEl.value = normalized;
+  _refreshSajTableInputDisplay(inputId, field);
+  _applySajLocalEditToCache(kind, slot, field, normalized);
+}
+
+function _applySajLocalEditToCache(kind, slot, field, normalizedValue) {
+  if ((kind !== "charge" && kind !== "discharge") || !Number.isInteger(slot) || slot < 1 || slot > 7) return;
+  const payload = stateCache.lastSajControl;
+  if (!payload || typeof payload !== "object") return;
+  const state = payload.control_state || payload.state;
+  if (!state || typeof state !== "object") return;
+  const slots = Array.isArray(state?.[kind]?.slots) ? state[kind].slots : null;
+  if (!slots) return;
+  const target = slots.find((item) => Number(item?.slot) === slot);
+  if (!target || typeof target !== "object") return;
+
+  if (field === "start_time" || field === "end_time") {
+    target[field] = normalizedValue;
+    return;
+  }
+  if (field === "power_percent" || field === "day_mask") {
+    const n = Number(normalizedValue);
+    if (!Number.isFinite(n)) return;
+    target[field] = Math.trunc(n);
+  }
 }
 
 function syncDayCheckboxesFromInput(kind) {
@@ -2589,9 +3014,20 @@ function syncDayInputFromCheckboxes(kind) {
 function setSajControlInputsFromState(controlState) {
   if (!controlState || typeof controlState !== "object") return;
   const modeInputValue = controlState?.working_mode?.mode_input;
-  if (modeInputValue !== null && modeInputValue !== undefined && Number(modeInputValue) >= 0 && Number(modeInputValue) <= 6) {
+  const modeSensorValue = controlState?.working_mode?.mode_sensor;
+  // Mode dropdown should reflect actual/readback mode first.
+  if (modeSensorValue !== null && modeSensorValue !== undefined && Number(modeSensorValue) >= 0 && Number(modeSensorValue) <= 8) {
+    const el = document.getElementById("sajModeCodeInput");
+    if (el) el.value = String(modeSensorValue);
+  } else if (modeInputValue !== null && modeInputValue !== undefined && Number(modeInputValue) >= 0 && Number(modeInputValue) <= 8) {
     const el = document.getElementById("sajModeCodeInput");
     if (el) el.value = String(modeInputValue);
+  }
+  setText("sajModeInputHint", t("sajControlModeInputHint", { modeInput: modeInputValue ?? "-" }));
+  const inverterModeValue = controlState?.working_mode?.inverter_working_mode_sensor;
+  if (inverterModeValue !== null && inverterModeValue !== undefined && Number(inverterModeValue) >= 0 && Number(inverterModeValue) <= 8) {
+    const el = document.getElementById("sajInverterModeCodeInput");
+    if (el) el.value = String(inverterModeValue);
   }
 
   const chargeSlot = Number(document.getElementById("sajChargeSlotInput")?.value || "1");
@@ -2700,6 +3136,16 @@ function renderSajControlSlotsTable(controlState) {
   const dischargeActual = Array.isArray(controlState?.discharge?.effective_slots) ? controlState.discharge.effective_slots : [];
   const chargeEnableMask = clampMask7(controlState?.charge?.time_enable_mask ?? 0);
   const dischargeEnableMask = clampMask7(controlState?.discharge?.time_enable_mask ?? 0);
+  const ratedPowerW = Number(controlState?.inverter?.rated_power_w);
+  const safeRatedPowerW = Number.isFinite(ratedPowerW) && ratedPowerW > 0 ? ratedPowerW : 5000;
+
+  const renderPowerFromPercent = (rawPercent) => {
+    if (rawPercent === null || rawPercent === undefined || rawPercent === "") return "-";
+    const percent = Number(rawPercent);
+    if (!Number.isFinite(percent)) return "-";
+    const watts = Math.round((safeRatedPowerW * percent) / 100);
+    return `${Math.trunc(percent)}% (${watts}W)`;
+  };
 
   const renderActualPower = (actual) => {
     const percent = actual?.power_percent;
@@ -2709,29 +3155,96 @@ function renderSajControlSlotsTable(controlState) {
     return `${percent}% (${watts}W)`;
   };
 
+  const renderDualValueCell = ({
+    kind,
+    slot,
+    field,
+    inputId,
+    inputValue,
+    inputText,
+    actualValue,
+    actualText,
+  }) => `
+    <td>
+      <button
+        type="button"
+        class="saj-cell-editor"
+        data-kind="${kind}"
+        data-slot="${slot}"
+        data-field="${field}"
+        data-input-id="${inputId}"
+        data-actual-value="${escapeHtml(String(actualValue ?? ""))}"
+      >
+        <span class="saj-cell-line is-input"><span class="saj-cell-tag">${t("sajControlInputLabel")}</span><span id="${inputId}Display" class="saj-cell-value">${escapeHtml(String(inputText ?? "-"))}</span></span>
+        <span class="saj-cell-line is-actual"><span class="saj-cell-tag">${t("sajControlActualLabel")}</span><span class="saj-cell-value">${escapeHtml(String(actualText ?? "-"))}</span></span>
+      </button>
+      <input id="${inputId}" type="hidden" value="${escapeHtml(String(inputValue ?? ""))}" />
+    </td>
+  `;
+
   const renderRows = (kind, typeLabel, inputRows, actualRows, enableMask) => {
     for (let slot = 1; slot <= 7; slot += 1) {
       const input = inputRows.find((item) => Number(item?.slot) === slot) || {};
       const actual = actualRows.find((item) => Number(item?.slot) === slot) || {};
       const checked = (enableMask & (1 << (slot - 1))) !== 0 ? "checked" : "";
       const checkboxId = kind === "charge" ? `sajTableChargeEnableSlot${slot}` : `sajTableDischargeEnableSlot${slot}`;
-      const startValue = _normalizeSajTimeForInput(input.start_time);
-      const endValue = _normalizeSajTimeForInput(input.end_time);
-      const powerValue = input.power_percent === null || input.power_percent === undefined ? "" : String(input.power_percent);
+      const startId = `sajTable${kind}Slot${slot}StartInput`;
+      const endId = `sajTable${kind}Slot${slot}EndInput`;
+      const powerId = `sajTable${kind}Slot${slot}PowerInput`;
+      const dayMaskId = `sajTable${kind}Slot${slot}DayMaskInput`;
+      const startValue = _normalizeSajTimeForInput(input.start_time) || "";
+      const endValue = _normalizeSajTimeForInput(input.end_time) || "";
+      const powerValue = input.power_percent === null || input.power_percent === undefined ? "" : String(Math.trunc(Number(input.power_percent)));
       const dayMaskValue = input.day_mask === null || input.day_mask === undefined ? "0" : String(clampMask7(input.day_mask));
+      const actualStart = _normalizeSajTimeForInput(actual.start_time) || "";
+      const actualEnd = _normalizeSajTimeForInput(actual.end_time) || "";
+      const actualPowerPercent = actual.power_percent === null || actual.power_percent === undefined ? "" : String(Math.trunc(Number(actual.power_percent)));
+      const actualDayMask = actual.day_mask === null || actual.day_mask === undefined ? "" : String(clampMask7(actual.day_mask));
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td><input id="${checkboxId}" type="checkbox" ${checked} /></td>
         <td>${typeLabel}</td>
         <td>${slot}</td>
-        <td><input id="sajTable${kind}Slot${slot}StartInput" type="time" value="${startValue}" /></td>
-        <td><input id="sajTable${kind}Slot${slot}EndInput" type="time" value="${endValue}" /></td>
-        <td><input id="sajTable${kind}Slot${slot}PowerInput" type="number" min="0" max="100" step="1" value="${powerValue}" /></td>
-        <td><input id="sajTable${kind}Slot${slot}DayMaskInput" class="saj-mask-input-trigger" type="text" value="${dayMaskValue}" readonly /></td>
-        <td>${actual.start_time ?? "-"}</td>
-        <td>${actual.end_time ?? "-"}</td>
-        <td>${renderActualPower(actual)}</td>
-        <td>${actual.day_mask ?? "-"}</td>
+        ${renderDualValueCell({
+    kind,
+    slot,
+    field: "start_time",
+    inputId: startId,
+    inputValue: startValue,
+    inputText: startValue || "-",
+    actualValue: actualStart,
+    actualText: actualStart || "-",
+  })}
+        ${renderDualValueCell({
+    kind,
+    slot,
+    field: "end_time",
+    inputId: endId,
+    inputValue: endValue,
+    inputText: endValue || "-",
+    actualValue: actualEnd,
+    actualText: actualEnd || "-",
+  })}
+        ${renderDualValueCell({
+    kind,
+    slot,
+    field: "power_percent",
+    inputId: powerId,
+    inputValue: powerValue,
+    inputText: renderPowerFromPercent(powerValue),
+    actualValue: actualPowerPercent,
+    actualText: renderActualPower(actual),
+  })}
+        ${renderDualValueCell({
+    kind,
+    slot,
+    field: "day_mask",
+    inputId: dayMaskId,
+    inputValue: dayMaskValue,
+    inputText: dayMaskValue,
+    actualValue: actualDayMask,
+    actualText: actualDayMask || "-",
+  })}
       `;
       body.appendChild(tr);
     }
@@ -2749,6 +3262,7 @@ function renderSajControlFromCache() {
     setText("sajControlUpdatedAt", `${t("updatedAt")}: -`);
     setText("sajControlStateJson", "-");
     setText("sajModeReadbackText", t("sajControlModeReadback", { modeInput: "-", modeSensor: "-", inverterMode: "-" }));
+    setText("sajModeSignalText", t("sajControlModeSignals", { modeInput: "-", modeSensor: "-", inverterMode: "-" }));
     if (passiveAlertEl) {
       passiveAlertEl.classList.add("hidden");
       passiveAlertEl.textContent = "-";
@@ -2778,6 +3292,7 @@ function renderSajControlFromCache() {
       `rated_power=${ratedPowerW ?? "-"}W`,
   );
   setText("sajModeReadbackText", t("sajControlModeReadback", { modeInput, modeSensor: modeSensorValue, inverterMode }));
+  setText("sajModeSignalText", t("sajControlModeSignals", { modeInput, modeSensor: modeSensorValue, inverterMode }));
   const modeSensor = Number(modeSensorValue);
   const isPassiveMode = Number.isFinite(modeSensor) && modeSensor === 3;
   if (passiveAlertEl) {
@@ -2800,8 +3315,9 @@ async function loadSajControl() {
   }
 }
 
-async function applySajWorkingMode() {
-  const modeCode = Number(document.getElementById("sajModeCodeInput")?.value || "0");
+async function applySajWorkingMode(modeCodeArg = null, summaryKey = "sajControlPopupWorkingModeSummary", purposeKey = "sajDebugPurposeSetMode") {
+  const fallbackModeCode = Number(document.getElementById("sajModeCodeInput")?.value || "0");
+  const modeCode = Number.isFinite(Number(modeCodeArg)) ? Number(modeCodeArg) : fallbackModeCode;
   try {
     const payload = await fetchJson("/api/saj/control/working-mode", {
       method: "PUT",
@@ -2811,16 +3327,21 @@ async function applySajWorkingMode() {
     });
     stateCache.lastSajControl = payload;
     renderSajControlFromCache();
-    showSajActionSuccess(t("sajControlPopupWorkingModeSummary", { modeCode }), [
+    showSajActionSuccess(t(summaryKey, { modeCode }), [
       {
         method: "PUT",
         path: "/api/saj/control/working-mode",
-        purposeKey: "sajDebugPurposeSetMode",
+        purposeKey,
       },
     ]);
   } catch (err) {
     setText("sajControlMeta", t("sajControlApplyFailed", { error: String(err) }));
   }
+}
+
+async function applySajInverterModeTarget() {
+  const modeCode = Number(document.getElementById("sajInverterModeCodeInput")?.value || "0");
+  await applySajWorkingMode(modeCode, "sajControlPopupInverterModeSummary", "sajDebugPurposeSetInverterModeTarget");
 }
 
 async function applySajSlot(kind) {
@@ -2978,6 +3499,335 @@ async function applySajLimits() {
   }
 }
 
+const SOLPLANET_SCHEDULE_DAYS = ["Mon", "Tus", "Wen", "Thu", "Fri", "Sat", "Sun"];
+
+function _solplanetControlStateFromCache() {
+  const payload = stateCache.lastSolplanetControl;
+  return payload?.control_state || payload?.state || null;
+}
+
+function setSolplanetControlLoading(loading) {
+  const spinner = document.getElementById("solplanetControlLoadingSpinner");
+  if (spinner) spinner.classList.toggle("is-hidden", !loading);
+}
+
+function setSolplanetControlActionBusy(busy) {
+  solplanetControlBusy = Boolean(busy);
+  const ids = ["solplanetLimitsApplyBtn", "solplanetScheduleSaveBtn", "solplanetRawSettingApplyBtn"];
+  for (const id of ids) {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = solplanetControlBusy;
+  }
+}
+
+function setSolplanetActionModalVisible(visible) {
+  const modal = document.getElementById("solplanetActionModal");
+  if (!modal) return;
+  modal.classList.toggle("hidden", !visible);
+}
+
+function showSolplanetActionSuccess(summaryText, apiCalls = [], resultPayload = null) {
+  setText("solplanetActionModalSummary", summaryText || t("sajControlApplyDone"));
+  const list = document.getElementById("solplanetActionModalApiList");
+  if (list) {
+    list.innerHTML = "";
+    const lines = Array.isArray(apiCalls) && apiCalls.length ? apiCalls.map(_apiCallDebugLine) : [t("sajControlDebugNoApi")];
+    for (const line of lines) {
+      const li = document.createElement("li");
+      li.textContent = line;
+      list.appendChild(li);
+    }
+  }
+  const pre = document.getElementById("solplanetActionModalResultJson");
+  if (pre) {
+    pre.textContent = resultPayload ? JSON.stringify(resultPayload, null, 2) : "-";
+  }
+  setSolplanetActionModalVisible(true);
+}
+
+function _solplanetSelectedDay() {
+  const day = String(document.getElementById("solplanetScheduleDayInput")?.value || "Mon");
+  return SOLPLANET_SCHEDULE_DAYS.includes(day) ? day : "Mon";
+}
+
+function _solplanetSetRawPayloadTemplateFromState(state) {
+  const input = document.getElementById("solplanetRawSettingInput");
+  if (!(input instanceof HTMLTextAreaElement)) return;
+  if (input.value.trim()) return;
+  const day = _solplanetSelectedDay();
+  const slots = Array.isArray(state?.days?.[day]?.encoded_slots) ? state.days[day].encoded_slots : [0, 0, 0, 0, 0, 0];
+  input.value = JSON.stringify(
+    {
+      Pin: Number(state?.limits?.pin || 0),
+      Pout: Number(state?.limits?.pout || 0),
+      [day]: slots,
+    },
+    null,
+    2,
+  );
+}
+
+function renderSolplanetControlSlotsTable() {
+  const body = document.getElementById("solplanetControlSlotsBody");
+  if (!body) return;
+  body.innerHTML = "";
+  const state = _solplanetControlStateFromCache();
+  const selectedDay = _solplanetSelectedDay();
+  const dayState = state?.days?.[selectedDay] || {};
+  const decodedSlots = Array.isArray(dayState?.decoded_slots) ? dayState.decoded_slots : [];
+
+  for (let slot = 1; slot <= 6; slot += 1) {
+    const item = decodedSlots.find((entry) => Number(entry?.slot) === slot) || {};
+    const enabled = Boolean(item?.enabled);
+    const hour = Number.isFinite(Number(item?.hour)) ? Math.max(0, Math.min(23, Math.trunc(Number(item.hour)))) : 0;
+    const minute = Number.isFinite(Number(item?.minute)) ? Math.max(0, Math.min(59, Math.trunc(Number(item.minute)))) : 0;
+    const power = Number.isFinite(Number(item?.power)) ? Math.max(0, Math.min(255, Math.trunc(Number(item.power)))) : 0;
+    const mode = Number.isFinite(Number(item?.mode)) ? Math.max(0, Math.min(255, Math.trunc(Number(item.mode)))) : 0;
+    const encoded = Number.isFinite(Number(item?.encoded)) ? Math.trunc(Number(item.encoded)) : 0;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><input id="solplanetSlotEnabled${slot}" type="checkbox" ${enabled ? "checked" : ""} /></td>
+      <td>${slot}</td>
+      <td><input id="solplanetSlotHour${slot}" type="number" min="0" max="23" step="1" value="${hour}" /></td>
+      <td><input id="solplanetSlotMinute${slot}" type="number" min="0" max="59" step="1" value="${minute}" /></td>
+      <td><input id="solplanetSlotPower${slot}" type="number" min="0" max="255" step="1" value="${power}" /></td>
+      <td><input id="solplanetSlotMode${slot}" type="number" min="0" max="255" step="1" value="${mode}" /></td>
+      <td><code id="solplanetSlotEncoded${slot}">${encoded}</code></td>
+    `;
+    body.appendChild(tr);
+  }
+}
+
+function renderSolplanetModeSignals() {
+  const body = document.getElementById("solplanetControlSignalsBody");
+  if (!body) return;
+  body.innerHTML = "";
+  const live = stateCache.lastSolplanetControlLive;
+  const endpoints = live?.endpoints || {};
+  const rows = [];
+
+  const add = (source, key, value) => {
+    rows.push({ source, key, value: value === undefined || value === null ? "-" : String(value) });
+  };
+
+  const inverterData = endpoints?.getdevdata_device_2?.payload || {};
+  const meterData = endpoints?.getdevdata_device_3?.payload || {};
+  const meterInfo = endpoints?.getdev_device_3?.payload || {};
+  const batteryData = endpoints?.getdevdata_device_4?.payload || {};
+
+  add("getdevdata_device_2", "stu", inverterData?.stu);
+  add("getdevdata_device_3", "mod", meterData?.mod);
+  add("getdevdata_device_3", "enb", meterData?.enb);
+  add("getdev_device_3", "mod", meterInfo?.mod);
+  add("getdev_device_3", "enb", meterInfo?.enb);
+  add("getdevdata_device_4", "cst", batteryData?.cst);
+  add("getdevdata_device_4", "bst", batteryData?.bst);
+
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${escapeHtml(row.source)}</td><td>${escapeHtml(row.key)}</td><td>${escapeHtml(row.value)}</td>`;
+    body.appendChild(tr);
+  }
+
+  setText(
+    "solplanetControlModeMeta",
+    t("solplanetControlModeMeta", {
+      stu: inverterData?.stu ?? "-",
+      meterMod: meterData?.mod ?? meterInfo?.mod ?? "-",
+      meterEnb: meterData?.enb ?? meterInfo?.enb ?? "-",
+      batteryCst: batteryData?.cst ?? "-",
+      batteryBst: batteryData?.bst ?? "-",
+    }),
+  );
+}
+
+function renderSolplanetControlFromCache() {
+  const payload = stateCache.lastSolplanetControl;
+  if (!payload) {
+    setText("solplanetControlMeta", "-");
+    setText("solplanetControlFetchMeta", "-");
+    setText("solplanetControlUpdatedAt", `${t("updatedAt")}: -`);
+    setText("solplanetControlStateJson", "-");
+    setText("solplanetControlModeMeta", "-");
+    const body = document.getElementById("solplanetControlSlotsBody");
+    if (body) body.innerHTML = "";
+    const modeBody = document.getElementById("solplanetControlSignalsBody");
+    if (modeBody) modeBody.innerHTML = "";
+    return;
+  }
+  const state = _solplanetControlStateFromCache();
+  const updatedAt = state?.updated_at ? new Date(state.updated_at).toLocaleString() : "-";
+  setText("solplanetControlUpdatedAt", `${t("updatedAt")}: ${updatedAt}`);
+  const pin = state?.limits?.pin ?? "-";
+  const pout = state?.limits?.pout ?? "-";
+  setText("solplanetControlMeta", `Pin=${pin}W, Pout=${pout}W`);
+  const fetchMeta = stateCache.lastSolplanetControlFetch || null;
+  if (fetchMeta) {
+    const timeText = fetchMeta.requested_at ? formatLocalDateTime(fetchMeta.requested_at) : "-";
+    setText(
+      "solplanetControlFetchMeta",
+      t("solplanetControlFetchMeta", {
+        time: timeText,
+        stateMs: fetchMeta.state_ms ?? "-",
+        liveMs: fetchMeta.live_ms ?? "-",
+        totalMs: fetchMeta.total_ms ?? "-",
+      }),
+    );
+  } else {
+    setText("solplanetControlFetchMeta", "-");
+  }
+  const pinInput = document.getElementById("solplanetPinInput");
+  const poutInput = document.getElementById("solplanetPoutInput");
+  if (pinInput && pin !== "-") pinInput.value = String(pin);
+  if (poutInput && pout !== "-") poutInput.value = String(pout);
+  const pre = document.getElementById("solplanetControlStateJson");
+  if (pre) pre.textContent = JSON.stringify(state || payload, null, 2);
+  _solplanetSetRawPayloadTemplateFromState(state);
+  renderSolplanetControlSlotsTable();
+  renderSolplanetModeSignals();
+}
+
+async function loadSolplanetControl() {
+  setSolplanetControlLoading(true);
+  const requestStartedAt = Date.now();
+  try {
+    const stateStarted = performance.now();
+    const statePromise = fetchJson("/api/solplanet/control/state", { timeoutMs: 15000 });
+    const liveStarted = performance.now();
+    const livePromise = fetchJson("/api/solplanet/cgi-dump", { timeoutMs: 20000 });
+
+    const [stateResult, liveResult] = await Promise.allSettled([statePromise, livePromise]);
+    const stateMs = Math.max(0, Math.round(performance.now() - stateStarted));
+    const liveMs = Math.max(0, Math.round(performance.now() - liveStarted));
+    const totalMs = Math.max(0, Date.now() - requestStartedAt);
+
+    if (stateResult.status === "fulfilled") {
+      stateCache.lastSolplanetControl = stateResult.value;
+    } else {
+      throw stateResult.reason;
+    }
+    stateCache.lastSolplanetControlLive = liveResult.status === "fulfilled" ? liveResult.value : null;
+    stateCache.lastSolplanetControlFetch = {
+      requested_at: new Date().toISOString(),
+      state_ms: stateMs,
+      live_ms: liveMs,
+      total_ms: totalMs,
+    };
+    renderSolplanetControlFromCache();
+  } catch (err) {
+    setText("solplanetControlMeta", t("solplanetControlLoadFailed", { error: String(err) }));
+  } finally {
+    setSolplanetControlLoading(false);
+  }
+}
+
+async function applySolplanetLimits() {
+  if (solplanetControlBusy) return;
+  const pin = Number(document.getElementById("solplanetPinInput")?.value || "0");
+  const pout = Number(document.getElementById("solplanetPoutInput")?.value || "0");
+  setSolplanetControlActionBusy(true);
+  setSolplanetControlLoading(true);
+  try {
+    const payload = await fetchJson("/api/solplanet/control/limits", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin, pout }),
+      timeoutMs: 12000,
+    });
+    stateCache.lastSolplanetControl = payload;
+    renderSolplanetControlFromCache();
+    showSolplanetActionSuccess(t("solplanetControlPopupLimitsSummary"), [
+      { method: "PUT", path: "/api/solplanet/control/limits", purpose: "Update Pin/Pout limits." },
+    ], payload);
+  } catch (err) {
+    const errorText = String(err);
+    setText("solplanetControlMeta", t("solplanetControlApplyFailed", { error: errorText }));
+    showSolplanetActionSuccess(t("solplanetControlApplyFailed", { error: errorText }), [
+      { method: "PUT", path: "/api/solplanet/control/limits", purpose: "Update Pin/Pout limits." },
+    ], { ok: false, error: errorText });
+  } finally {
+    setSolplanetControlLoading(false);
+    setSolplanetControlActionBusy(false);
+  }
+}
+
+async function applySolplanetDaySchedule() {
+  if (solplanetControlBusy) return;
+  const day = _solplanetSelectedDay();
+  const slots = [];
+  for (let slot = 1; slot <= 6; slot += 1) {
+    const enabled = Boolean(document.getElementById(`solplanetSlotEnabled${slot}`)?.checked);
+    const hour = Math.max(0, Math.min(23, Math.trunc(Number(document.getElementById(`solplanetSlotHour${slot}`)?.value || "0"))));
+    const minute = Math.max(0, Math.min(59, Math.trunc(Number(document.getElementById(`solplanetSlotMinute${slot}`)?.value || "0"))));
+    const power = Math.max(0, Math.min(255, Math.trunc(Number(document.getElementById(`solplanetSlotPower${slot}`)?.value || "0"))));
+    const mode = Math.max(0, Math.min(255, Math.trunc(Number(document.getElementById(`solplanetSlotMode${slot}`)?.value || "0"))));
+    const encoded = enabled ? ((((hour & 0xff) << 24) | ((minute & 0xff) << 16) | ((power & 0xff) << 8) | (mode & 0xff)) >>> 0) : 0;
+    slots.push(encoded);
+  }
+  setSolplanetControlActionBusy(true);
+  setSolplanetControlLoading(true);
+  try {
+    const payload = await fetchJson(`/api/solplanet/control/day-schedule/${day}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slots }),
+      timeoutMs: 15000,
+    });
+    stateCache.lastSolplanetControl = payload;
+    renderSolplanetControlFromCache();
+    showSolplanetActionSuccess(t("solplanetControlPopupScheduleSummary", { day }), [
+      { method: "PUT", path: `/api/solplanet/control/day-schedule/${day}`, purpose: "Save selected day schedule." },
+    ], payload);
+  } catch (err) {
+    const errorText = String(err);
+    setText("solplanetControlMeta", t("solplanetControlApplyFailed", { error: errorText }));
+    showSolplanetActionSuccess(t("solplanetControlApplyFailed", { error: errorText }), [
+      { method: "PUT", path: `/api/solplanet/control/day-schedule/${day}`, purpose: "Save selected day schedule." },
+    ], { ok: false, error: errorText });
+  } finally {
+    setSolplanetControlLoading(false);
+    setSolplanetControlActionBusy(false);
+  }
+}
+
+async function applySolplanetRawSetting() {
+  if (solplanetControlBusy) return;
+  const input = document.getElementById("solplanetRawSettingInput");
+  const rawText = String(input?.value || "").trim();
+  if (!rawText) return;
+  let payloadObj;
+  try {
+    payloadObj = JSON.parse(rawText);
+  } catch (err) {
+    window.alert(t("solplanetControlRawSettingInvalidJson", { error: String(err) }));
+    return;
+  }
+  setSolplanetControlActionBusy(true);
+  setSolplanetControlLoading(true);
+  try {
+    const payload = await fetchJson("/api/solplanet/control/raw-setting", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payload: payloadObj }),
+      timeoutMs: 20000,
+    });
+    stateCache.lastSolplanetControl = payload;
+    renderSolplanetControlFromCache();
+    showSolplanetActionSuccess(t("solplanetControlPopupRawSummary"), [
+      { method: "PUT", path: "/api/solplanet/control/raw-setting", purpose: "Send raw setting payload to setting.cgi." },
+    ], payload);
+  } catch (err) {
+    const errorText = String(err);
+    setText("solplanetControlMeta", t("solplanetControlApplyFailed", { error: errorText }));
+    showSolplanetActionSuccess(t("solplanetControlApplyFailed", { error: errorText }), [
+      { method: "PUT", path: "/api/solplanet/control/raw-setting", purpose: "Send raw setting payload to setting.cgi." },
+    ], { ok: false, error: errorText });
+  } finally {
+    setSolplanetControlLoading(false);
+    setSolplanetControlActionBusy(false);
+  }
+}
+
 function buildEntityUrl() {
   const params = new URLSearchParams();
   const domain = document.getElementById("domainInput").value.trim();
@@ -3010,6 +3860,7 @@ async function loadSummary() {
     fetchJson("/api/health", { timeoutMs: 4000 }),
     fetchJson("/api/ha/ping", { timeoutMs: 5000 }),
     fetchJson("/api/energy-flow/saj", { timeoutMs: 5000 }),
+    fetchJson("/api/saj/control/state", { timeoutMs: 6000 }),
   ]);
   if (requestId !== summaryRequestId) return;
 
@@ -3024,6 +3875,10 @@ async function loadSummary() {
   } else {
     summary.sajFlow = { metrics: {}, __load_error: true };
     setSystemLoadMeta("saj", { phase: "failed", updatedAt: null, quality: "failed", count: 0 });
+  }
+  if (baseResults[3].status === "fulfilled") {
+    stateCache.lastSajControl = baseResults[3].value;
+    if (currentTab === "sajControl") renderSajControlFromCache();
   }
   renderSummary(summary);
 
@@ -3062,19 +3917,18 @@ async function loadEntities() {
 }
 
 async function loadRawPanel(apis, stateMap, bodyId, metaId, updatedId) {
-  setText(metaId, t("rawSummaryDash"));
-  setText(updatedId, `${t("updatedAt")}: -`);
   for (const api of apis) {
+    const prev = stateMap[api.key] || {};
     stateMap[api.key] = {
       phase: "loading",
-      path: api.url,
-      payload: null,
+      path: prev.path || api.url,
+      payload: prev.payload ?? null,
       error: null,
-      fetch_ms: null,
-      updated_at: null,
-      status: null,
-      last_requested_at: null,
-      last_success_at: null,
+      fetch_ms: prev.fetch_ms ?? null,
+      updated_at: prev.updated_at || null,
+      status: prev.status || null,
+      last_requested_at: new Date().toISOString(),
+      last_success_at: prev.last_success_at || null,
     };
     renderRawCard(api, stateMap[api.key], bodyId);
   }
@@ -3095,16 +3949,17 @@ async function loadRawPanel(apis, stateMap, bodyId, metaId, updatedId) {
         last_success_at: response?.last_success_at || null,
       };
     } catch (err) {
+      const prev = stateMap[api.key] || {};
       stateMap[api.key] = {
         phase: "failed",
         path: api.url,
-        payload: null,
+        payload: prev.payload ?? null,
         error: String(err),
-        fetch_ms: null,
+        fetch_ms: prev.fetch_ms ?? null,
         updated_at: new Date().toISOString(),
         status: "failed",
-        last_requested_at: null,
-        last_success_at: null,
+        last_requested_at: prev.last_requested_at || null,
+        last_success_at: prev.last_success_at || null,
       };
     }
     renderRawCard(api, stateMap[api.key], bodyId);
@@ -3258,34 +4113,72 @@ async function loadSampling() {
   }
 }
 
-async function loadCurrentTab() {
-  if (!configReady) return;
-  if (isLoadingCurrentTab) return;
-  isLoadingCurrentTab = true;
+async function loadCurrentTab(fromAutoRefresh = false) {
+  return loadTabWithGuard(currentTab, fromAutoRefresh);
+}
+
+function tabHasCachedData(tab) {
+  if (tab === "dashboard") return Boolean(stateCache.lastSummary);
+  if (tab === "entities") return Boolean(stateCache.lastEntities);
+  if (tab === "solplanetRaw") {
+    if (solplanetRawMode === "table") return stateCache.lastSolplanetKv?.phase && stateCache.lastSolplanetKv.phase !== "idle";
+    return SOLPLANET_RAW_APIS.some((api) => stateCache.lastSolplanetRaw?.[api.key]?.payload !== undefined);
+  }
+  if (tab === "sajRaw") return SAJ_RAW_APIS.some((api) => stateCache.lastSajRaw?.[api.key]?.payload !== undefined);
+  if (tab === "sajControl") return Boolean(stateCache.lastSajControl);
+  if (tab === "solplanetControl") return Boolean(stateCache.lastSolplanetControl);
+  if (tab === "sampling") return Boolean(stateCache.lastSamplingPage || stateCache.lastSamplingStatus || stateCache.lastSamplingSeries);
+  return false;
+}
+
+async function loadTabWithGuard(tab, fromAutoRefresh = false) {
+  if (!configReady) return false;
+  const tabKey = ALL_TABS.includes(tab) ? tab : "dashboard";
+  const slot = tabLoadState[tabKey];
+  if (slot?.inFlight) return false;
+  if (slot) slot.inFlight = true;
   try {
-    if (currentTab === "entities") {
+    if (tabKey === "entities") {
       await loadEntities();
-      return;
+      return true;
     }
-    if (currentTab === "solplanetRaw") {
+    if (tabKey === "solplanetRaw") {
       await loadSolplanetRaw();
-      return;
+      return true;
     }
-    if (currentTab === "sajRaw") {
+    if (tabKey === "sajRaw") {
       await loadSajRaw();
-      return;
+      return true;
     }
-    if (currentTab === "sajControl") {
+    if (tabKey === "sajControl") {
+      if (fromAutoRefresh && stateCache.lastSajControl && isSajControlLocalEditing()) {
+        return false;
+      }
       await loadSajControl();
-      return;
+      return true;
     }
-    if (currentTab === "sampling") {
+    if (tabKey === "solplanetControl") {
+      if (fromAutoRefresh && solplanetControlBusy) {
+        return false;
+      }
+      await loadSolplanetControl();
+      return true;
+    }
+    if (tabKey === "sampling") {
       await loadSampling();
-      return;
+      return true;
     }
     await loadSummary();
+    return true;
   } finally {
-    isLoadingCurrentTab = false;
+    if (slot) slot.inFlight = false;
+  }
+}
+
+function runAutoRefreshRound() {
+  if (!configReady) return;
+  for (const tab of ALL_TABS) {
+    void loadTabWithGuard(tab, true);
   }
 }
 
@@ -3300,7 +4193,7 @@ function setAutoRefresh(seconds) {
   if (safeSeconds > 0) {
     autoRefreshTimerId = window.setInterval(() => {
       if (!configReady) return;
-      void loadCurrentTab();
+      runAutoRefreshRound();
     }, safeSeconds * 1000);
   }
 
@@ -3310,7 +4203,7 @@ function setAutoRefresh(seconds) {
 
 function setActiveTab(tab, load = true) {
   currentTab =
-    tab === "entities" || tab === "solplanetRaw" || tab === "sajRaw" || tab === "sajControl" || tab === "sampling"
+    tab === "entities" || tab === "solplanetRaw" || tab === "sajRaw" || tab === "sajControl" || tab === "solplanetControl" || tab === "sampling"
       ? tab
       : "dashboard";
   localStorage.setItem("activeTab", currentTab);
@@ -3319,12 +4212,14 @@ function setActiveTab(tab, load = true) {
   const solplanetRawView = document.getElementById("solplanetRawView");
   const sajRawView = document.getElementById("sajRawView");
   const sajControlView = document.getElementById("sajControlView");
+  const solplanetControlView = document.getElementById("solplanetControlView");
   const entitiesView = document.getElementById("entitiesView");
   const samplingView = document.getElementById("samplingView");
   const tabDashboard = document.getElementById("tabDashboard");
   const tabSolplanetRaw = document.getElementById("tabSolplanetRaw");
   const tabSajRaw = document.getElementById("tabSajRaw");
   const tabSajControl = document.getElementById("tabSajControl");
+  const tabSolplanetControl = document.getElementById("tabSolplanetControl");
   const tabEntities = document.getElementById("tabEntities");
   const tabSampling = document.getElementById("tabSampling");
 
@@ -3332,22 +4227,25 @@ function setActiveTab(tab, load = true) {
   const solplanetRawActive = currentTab === "solplanetRaw";
   const sajRawActive = currentTab === "sajRaw";
   const sajControlActive = currentTab === "sajControl";
+  const solplanetControlActive = currentTab === "solplanetControl";
   const samplingActive = currentTab === "sampling";
   const anyRawActive = solplanetRawActive || sajRawActive;
   dashboardView.classList.toggle("hidden", !dashboardActive);
   solplanetRawView.classList.toggle("hidden", !solplanetRawActive);
   sajRawView.classList.toggle("hidden", !sajRawActive);
   sajControlView.classList.toggle("hidden", !sajControlActive);
-  entitiesView.classList.toggle("hidden", dashboardActive || anyRawActive || samplingActive || sajControlActive);
+  solplanetControlView.classList.toggle("hidden", !solplanetControlActive);
+  entitiesView.classList.toggle("hidden", dashboardActive || anyRawActive || samplingActive || sajControlActive || solplanetControlActive);
   samplingView.classList.toggle("hidden", !samplingActive);
   tabDashboard.classList.toggle("active", dashboardActive);
   tabSolplanetRaw.classList.toggle("active", solplanetRawActive);
   tabSajRaw.classList.toggle("active", sajRawActive);
   tabSajControl.classList.toggle("active", sajControlActive);
+  tabSolplanetControl.classList.toggle("active", solplanetControlActive);
   tabEntities.classList.toggle("active", currentTab === "entities");
   tabSampling.classList.toggle("active", samplingActive);
 
-  if (load) {
+  if (load && !tabHasCachedData(currentTab)) {
     void loadCurrentTab();
   }
 }
@@ -3388,6 +4286,9 @@ document.getElementById("tabSajRaw").addEventListener("click", () => {
 });
 document.getElementById("tabSajControl").addEventListener("click", () => {
   setActiveTab("sajControl");
+});
+document.getElementById("tabSolplanetControl").addEventListener("click", () => {
+  setActiveTab("solplanetControl");
 });
 
 document.getElementById("tabEntities").addEventListener("click", () => {
@@ -3478,6 +4379,9 @@ function bindChangeIfPresent(id, handler) {
 bindClickIfPresent("sajModeApplyBtn", () => {
   void applySajWorkingMode();
 });
+bindClickIfPresent("sajInverterModeApplyBtn", () => {
+  void applySajInverterModeTarget();
+});
 const sajMaskSaveBtn = document.getElementById("sajMaskSaveBtn");
 if (sajMaskSaveBtn) {
   sajMaskSaveBtn.addEventListener("click", () => {
@@ -3495,6 +4399,18 @@ bindClickIfPresent("sajChargeApplyBtn", () => {
 });
 bindClickIfPresent("sajDischargeApplyBtn", () => {
   void applySajSlot("discharge");
+});
+bindClickIfPresent("solplanetLimitsApplyBtn", () => {
+  void applySolplanetLimits();
+});
+bindClickIfPresent("solplanetScheduleSaveBtn", () => {
+  void applySolplanetDaySchedule();
+});
+bindClickIfPresent("solplanetRawSettingApplyBtn", () => {
+  void applySolplanetRawSetting();
+});
+bindChangeIfPresent("solplanetScheduleDayInput", () => {
+  renderSolplanetControlSlotsTable();
 });
 bindChangeIfPresent("sajChargeSlotInput", () => {
   const state = stateCache.lastSajControl?.control_state || stateCache.lastSajControl?.state;
@@ -3528,12 +4444,16 @@ const sajControlSlotsBody = document.getElementById("sajControlSlotsBody");
 if (sajControlSlotsBody) {
   sajControlSlotsBody.addEventListener("click", (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLInputElement)) return;
-    if (target.id.includes("DayMaskInput")) openSajDayMaskModalForInput(target.id);
+    if (!(target instanceof Element)) return;
+    const editor = target.closest(".saj-cell-editor");
+    if (!(editor instanceof HTMLButtonElement)) return;
+    markSajControlLocalEdit();
+    _openSajTableCellEditor(editor);
   });
   sajControlSlotsBody.addEventListener("change", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
+    markSajControlLocalEdit();
     if (target.id.startsWith("sajTableChargeEnableSlot")) {
       syncEnableInputFromCheckboxes("charge", true);
       mirrorQuickEnableMaskInputsToMain();
@@ -3558,6 +4478,9 @@ bindChangeIfPresent("sajDayMaskAllDays", () => {
 });
 bindClickIfPresent("sajActionModalCloseBtn", () => {
   setSajActionModalVisible(false);
+});
+bindClickIfPresent("solplanetActionModalCloseBtn", () => {
+  setSolplanetActionModalVisible(false);
 });
 bindChangeIfPresent("sajActionDebugModeInput", (event) => {
   const next = event?.target?.checked;

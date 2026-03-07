@@ -54,11 +54,29 @@ class SolplanetCgiClient:
     async def get_meter_data(self) -> dict[str, Any]:
         return await self._get_json("getdevdata.cgi?device=3")
 
+    async def get_meter_info(self) -> dict[str, Any]:
+        return await self._get_json("getdev.cgi?device=3")
+
+    async def get_dongle_info(self) -> dict[str, Any]:
+        return await self._get_json("getdev.cgi?device=0")
+
+    async def get_battery_info(self, inverter_sn: str) -> dict[str, Any]:
+        return await self._get_json(f"getdev.cgi?device=4&sn={inverter_sn}")
+
     async def get_battery_data(self, battery_sn: str) -> dict[str, Any]:
         return await self._get_json(f"getdevdata.cgi?device=4&sn={battery_sn}")
 
     async def get_schedule(self) -> dict[str, Any]:
         return await self._get_json("getdefine.cgi")
+
+    async def get_device_info(self, device_id: int) -> dict[str, Any]:
+        return await self._get_json(f"getdev.cgi?device={device_id}")
+
+    async def get_device_data(self, device_id: int, sn: str | None = None) -> dict[str, Any]:
+        path = f"getdevdata.cgi?device={device_id}"
+        if sn:
+            path += f"&sn={sn}"
+        return await self._get_json(path)
 
     async def set_value(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._post_json("setting.cgi", payload)
