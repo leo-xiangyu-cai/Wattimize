@@ -13,10 +13,10 @@ Long-term goal is multi-brand support (SAJ, Soulplanet, Tesla, others) with unif
 - Backend: FastAPI
 - Data source: Home Assistant REST API using Long-Lived Access Token
 - Static frontend: served by FastAPI at `/`
-- Current focus: read SAJ entities and explore entities via filters + pagination
+- SAJ read APIs + SAJ control APIs (working mode, slot schedule, toggles, limits)
+- Frontend includes `SAJ Control` tab for configuration and state inspection
 
 Not implemented yet:
-- Write/control commands to HA services
 - Integration-level catalog (real HA config entries)
 
 ## 3) Directory Layout
@@ -64,6 +64,15 @@ Health and connectivity:
 Core SAJ metrics:
 - `GET /api/entities/core`
 
+SAJ control APIs:
+- `GET /api/saj/control/state`
+- `GET /api/saj/control/capabilities`
+- `PUT /api/saj/control/working-mode`
+- `PUT /api/saj/control/charge-slots/{slot}`
+- `PUT /api/saj/control/discharge-slots/{slot}`
+- `PUT /api/saj/control/toggles`
+- `PUT /api/saj/control/limits`
+
 Catalogs:
 - `GET /api/catalog/domains`
 - `GET /api/catalog/brands` (brand is guessed from `entity_id` prefix, not official HA classification)
@@ -82,6 +91,17 @@ Frontend:
 - HA `/api/states` is a unified entity pool across integrations.
 - "SAJ" filter currently relies on `entity_id` naming convention (e.g. `sensor.saj_*`).
 - This is practical but not authoritative integration metadata.
+
+SAJ control semantics (important):
+- `input_*` fields are writable targets (HA input entities).
+- `actual_*` fields are readback states from sensor entities (effective device state).
+- `day_mask` means weekdays for a slot (Mon..Sun bitmask).
+  - `127` = all week, `0` = disabled for all weekdays.
+- `charge_time_enable` / `discharge_time_enable` are slot-enable bitmasks (separate from weekday mask).
+- Whether schedule is truly active can depend on both:
+  - App mode
+  - enable bitmask
+  - charging/discharging switch state
 
 ## 7) Run Instructions
 
@@ -119,8 +139,31 @@ docker compose up -d --build
 - Persistence currently uses local SQLite (single-node design)
 - No auth on FastAPI endpoints yet (LAN-only assumption)
 - Error handling is basic but functional
+- SAJ mode labels can differ by firmware/app version; numeric mode code alone is stable.
+- Community docs and implementation notes can disagree on bit layout details across versions.
 
-## 10) Next Suggested Steps
+## 10) SAJ Mode & Doc References
+
+Primary external references (community integration):
+- Main repo: `https://github.com/stanus74/home-assistant-saj-h2-modbus`
+- Charging guide: `https://github.com/stanus74/home-assistant-saj-h2-modbus/blob/main/wiki-en/charging.md`
+- FAQ: `https://github.com/stanus74/home-assistant-saj-h2-modbus/blob/main/wiki-en/faq.md`
+- Troubleshooting: `https://github.com/stanus74/home-assistant-saj-h2-modbus/blob/main/wiki-en/troubleshooting.md`
+- Changelog (bitmask behavior changes): `https://github.com/stanus74/home-assistant-saj-h2-modbus/blob/main/CHANGELOG.md`
+
+Important mapping note:
+- In this Wattimize deployment, user-confirmed app labels are:
+  - `0 = Self-Consumption`
+  - `1 = Time of Use`
+  - `2 = Backup`
+  - `3 = Unknown/needs naming confirmation`
+- In upstream integration code, AppMode control logic also uses:
+  - `0 = self consumption`
+  - `1 = force charge/discharge (active schedule)`
+  - `3 = passive mode`
+- Treat `mode_code -> label` as deployment-specific; always verify against the target SAJ app UI.
+
+## 11) Next Suggested Steps
 
 1. Add write-control APIs with safety guardrails:
    - command whitelist
@@ -132,7 +175,7 @@ docker compose up -d --build
 4. Add Soulplanet adapter and unified metric mapping
 5. Add real HA integration catalog endpoint (via HA websocket/config entries)
 
-## 11) Agent Working Rules
+## 12) Agent Working Rules
 
 - Prefer local dev mode first; use Docker after APIs are stable.
 - Do not expose or log `HA_TOKEN`.

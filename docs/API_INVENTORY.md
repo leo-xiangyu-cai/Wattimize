@@ -1,6 +1,6 @@
 # API Inventory
 
-Last updated: 2026-03-03
+Last updated: 2026-03-07
 
 This file tracks all backend APIs and their current usage status.
 
@@ -26,12 +26,20 @@ Status values:
 - `GET /api/solplanet/cgi/getdevdata-device-3`
 - `GET /api/solplanet/cgi/getdevdata-device-4`
 - `GET /api/solplanet/cgi/getdefine`
+- `GET /api/solplanet/cgi/explore` (`debug` — probes getdev + getdevdata for device IDs 1-7)
 
 ## 2) Kept for brand-split and compatibility
 
 ### SAJ brand paths
 - `GET /api/saj/entities/core` (`candidate` for frontend migration)
 - `GET /api/saj/energy-flow` (`candidate` for frontend migration)
+- `GET /api/saj/control/state` (`used`)
+- `GET /api/saj/control/capabilities` (`used`)
+- `PUT /api/saj/control/working-mode` (`used`)
+- `PUT /api/saj/control/charge-slots/{slot}` (`used`)
+- `PUT /api/saj/control/discharge-slots/{slot}` (`used`)
+- `PUT /api/saj/control/toggles` (`used`)
+- `PUT /api/saj/control/limits` (`used`)
 
 ### Soulplanet brand paths
 - `GET /api/soulplanet/entities/core` (`candidate` for frontend migration)
@@ -46,6 +54,12 @@ Status values:
 ### Solplanet alias paths (legacy spelling compatibility)
 - `GET /api/solplanet/entities/core` (`candidate`)
 - `GET /api/solplanet/energy-flow` (`used`)
+- `GET /api/solplanet/control/state` (`used`)
+- `PUT /api/solplanet/control/limits` (`used`)
+- `PUT /api/solplanet/control/day-schedule/{day}` (`used`)
+- `PUT /api/solplanet/control/day-schedule/{day}/slots/{slot}` (`used`)
+- `PUT /api/solplanet/control/raw-setting` (`used`)
+- `POST /api/solplanet/control/restart-api` (`used`)
 - `GET /api/solplanet/cgi-dump` (`debug`)
 - `GET /api/solplanet/cgi/getdev-device-2` (`used`)
 - `GET /api/solplanet/cgi/getdevdata-device-2` (`used`)
@@ -53,11 +67,16 @@ Status values:
 - `GET /api/solplanet/cgi/getdevdata-device-4` (`used`)
 - `GET /api/solplanet/cgi/getdefine` (`used`)
 
+### Soulplanet alias paths
+- `POST /api/soulplanet/control/restart-api` (`debug`, compatibility alias)
+
 ## 3) Generic/system APIs
 
 - `GET /api/entities/core` (`candidate`, marked deprecated in response)
 - `GET /api/entities/core/{system}` (`candidate`)
 - `GET /api/energy-flow/{system}` (`used`)
+- `GET /api/collector/status` (`debug`)
+- `POST /api/collector/restart` (`debug`)
 - `GET /api/catalog/domains` (`debug`)
 - `GET /api/catalog/brands` (`debug`)
 

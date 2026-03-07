@@ -60,6 +60,11 @@ curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/toggles -H 'Content
 curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/limits -H 'Content-Type: application/json' -d '{"battery_charge_power_limit":1100,"battery_discharge_power_limit":1100,"grid_max_charge_power":1100,"grid_max_discharge_power":1100}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/charge-slots/1 -H 'Content-Type: application/json' -d '{"start_time":"01:00","end_time":"02:00","power_percent":25}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/discharge-slots/1 -H 'Content-Type: application/json' -d '{"start_time":"18:00","end_time":"20:00","power_percent":30}' | jq
+curl -s http://<wattimize-host>:18000/api/solplanet/control/state | jq
+curl -s -X POST http://<wattimize-host>:18000/api/solplanet/control/restart-api | jq
+curl -s -X PUT http://<wattimize-host>:18000/api/solplanet/control/limits -H 'Content-Type: application/json' -d '{"pin":10000,"pout":10000}' | jq
+curl -s -X PUT http://<wattimize-host>:18000/api/solplanet/control/day-schedule/Mon -H 'Content-Type: application/json' -d '{"slots":[184595458,302020611,0,0,0,0]}' | jq
+curl -s -X PUT http://<wattimize-host>:18000/api/solplanet/control/day-schedule/Mon/slots/1 -H 'Content-Type: application/json' -d '{"enabled":true,"hour":11,"minute":0,"power":180,"mode":2}' | jq
 curl -s http://<wattimize-host>:18000/api/solplanet/cgi/getdev-device-2 | jq
 curl -s http://<wattimize-host>:18000/api/solplanet/cgi/getdevdata-device-2 | jq
 curl -s http://<wattimize-host>:18000/api/solplanet/cgi/getdevdata-device-3 | jq
