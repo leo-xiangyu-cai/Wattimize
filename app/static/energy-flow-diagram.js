@@ -297,7 +297,10 @@
     const inverterRight = groups.inverterRight[0];
 
     const outerX = -10;
+    const solarX = -100;
+    const solarCenterX = solarX + (solar ? solar.width / 2 : 0);
     const columnGap = 72;
+    const leftInverterOffsetX = 100;
     const topY = 20;
     const switchboardY = Math.round(height * 0.33);
     const batteryY = height - Math.max(maxHeight(groups.batteryLeft), maxHeight(groups.batteryRight)) - 44;
@@ -322,7 +325,7 @@
 
     if (solar) {
       result[solar.id] = {
-        x: outerX,
+        x: solarX,
         y: Math.max(76, switchboardY - 148),
         width: solar.width,
         height: solar.height,
@@ -331,7 +334,7 @@
 
     if (batteryLeft) {
       result[batteryLeft.id] = {
-        x: -10,
+        x: solarCenterX - batteryLeft.width / 2,
         y: batteryY,
         width: batteryLeft.width,
         height: batteryLeft.height,
@@ -349,7 +352,7 @@
 
     if (inverterLeft && batteryLeft) {
       result[inverterLeft.id] = {
-        x: result[batteryLeft.id].x + batteryLeft.width + columnGap,
+        x: result[batteryLeft.id].x + batteryLeft.width + columnGap + leftInverterOffsetX,
         y: result[batteryLeft.id].y + (batteryLeft.height - inverterLeft.height) / 2,
         width: inverterLeft.width,
         height: inverterLeft.height,

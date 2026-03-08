@@ -615,7 +615,7 @@ td {
 }
 
 .combined-flow-board .combined-node-solar {
-  left: 4%;
+  left: 2.5%;
   top: 24%;
 }
 
@@ -647,12 +647,12 @@ td {
 }
 
 .combined-flow-board .combined-node-battery1 {
-  left: 2.5%;
+  left: calc(2.5% - 13px);
   top: 62%;
 }
 
 .combined-flow-board .combined-node-inverter1 {
-  left: 24%;
+  left: calc(24% + 28px);
   top: 62%;
   width: 144px;
 }
