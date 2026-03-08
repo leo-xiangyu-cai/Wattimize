@@ -1,10 +1,13 @@
 (function initEnergyFlowDiagram(global) {
   const EDGE_INACTIVE_COLOR = "#bfd0c7";
   const EDGE_ACTIVE_COLOR = "#2fa27d";
+  const EDGE_ACTIVE_STROKE = "#245d68";
   const EDGE_ACTIVE_GLOW = "rgba(214, 243, 232, 0.92)";
   const EDGE_INACTIVE_GLOW = "rgba(255, 255, 255, 0.7)";
   const EDGE_INACTIVE_DASH = [10, 8];
   const DEFAULT_PADDING = 28;
+  const FLOW_MARKER_SPACING = 84;
+  const FLOW_MARKER_SPEED = 46;
 
   function escapeHtml(value) {
     return String(value)
@@ -578,27 +581,81 @@
     ctx.restore();
   }
 
-  function drawArrowHead(ctx, from, to, fill) {
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-    const length = Math.hypot(dx, dy);
-    if (!length) return;
-    const ux = dx / length;
-    const uy = dy / length;
-    const size = 10;
-    const width = 5;
-    const baseX = to.x - (ux * size);
-    const baseY = to.y - (uy * size);
-    const px = -uy;
-    const py = ux;
+  function polylineLength(points) {
+    if (!Array.isArray(points) || points.length < 2) return 0;
+    let total = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      total += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+    }
+    return total;
+  }
 
+  function pointAndAngleAtDistance(points, distance) {
+    if (!Array.isArray(points) || points.length < 2) return null;
+    let walked = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1];
+      const b = points[i];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const seg = Math.hypot(dx, dy);
+      if (!seg) continue;
+      if (walked + seg >= distance) {
+        const ratio = (distance - walked) / seg;
+        return {
+          x: a.x + (dx * ratio),
+          y: a.y + (dy * ratio),
+          angle: Math.atan2(dy, dx),
+        };
+      }
+      walked += seg;
+    }
+    const last = points[points.length - 1];
+    const prev = points[points.length - 2];
+    return {
+      x: last.x,
+      y: last.y,
+      angle: Math.atan2(last.y - prev.y, last.x - prev.x),
+    };
+  }
+
+  function drawFlowMarker(ctx, x, y, angle, scale = 1) {
+    const halfLength = 9 * scale;
+    const halfHeight = 5.5 * scale;
+    const notchDepth = 4 * scale;
+    const tipInset = 7 * scale;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
     ctx.beginPath();
-    ctx.moveTo(to.x, to.y);
-    ctx.lineTo(baseX + (px * width), baseY + (py * width));
-    ctx.lineTo(baseX - (px * width), baseY - (py * width));
+    ctx.moveTo(-halfLength, -halfHeight);
+    ctx.lineTo(halfLength - tipInset, -halfHeight);
+    ctx.lineTo(halfLength, 0);
+    ctx.lineTo(halfLength - tipInset, halfHeight);
+    ctx.lineTo(-halfLength, halfHeight);
+    ctx.lineTo((-halfLength + notchDepth), 0);
     ctx.closePath();
-    ctx.fillStyle = fill;
+    ctx.fillStyle = EDGE_ACTIVE_COLOR;
+    ctx.strokeStyle = EDGE_ACTIVE_STROKE;
+    ctx.lineWidth = 1.2;
     ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawFlowMarkers(ctx, points, reverse, now) {
+    const length = polylineLength(points);
+    if (length <= 24) return;
+
+    const travel = ((now / 1000) * FLOW_MARKER_SPEED) % FLOW_MARKER_SPACING;
+    for (let offset = -FLOW_MARKER_SPACING; offset <= length + FLOW_MARKER_SPACING; offset += FLOW_MARKER_SPACING) {
+      const distance = reverse ? (length - offset - travel) : (offset + travel);
+      if (distance <= 14 || distance >= length - 14) continue;
+      const sample = pointAndAngleAtDistance(points, distance);
+      if (!sample) continue;
+      drawFlowMarker(ctx, sample.x, sample.y, reverse ? sample.angle + Math.PI : sample.angle, 1);
+    }
   }
 
   class EnergyFlowDiagram {
@@ -614,6 +671,8 @@
       this.scale = 1;
       this.translateX = 0;
       this.translateY = 0;
+      this.animationFrame = 0;
+      this.animate = this.animate.bind(this);
       this.buildShell();
       this.resizeObserver = new ResizeObserver(() => this.fit());
       this.resizeObserver.observe(this.container);
@@ -668,6 +727,7 @@
       this.buildEdges(positions, layoutInput.viewport);
       this.contentBounds = computeContentBounds(Object.values(positions), this.edgeMetaById);
       this.fit();
+      this.updateAnimationState();
     }
 
     renderNodes(nodes, positions) {
@@ -759,6 +819,9 @@
     redraw(dpr) {
       const ctx = this.ctx;
       if (!ctx) return;
+      const now = global.performance && typeof global.performance.now === "function"
+        ? global.performance.now()
+        : Date.now();
       const width = this.canvas.width / dpr;
       const height = this.canvas.height / dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -777,7 +840,7 @@
         }
 
         if (state.active) {
-          drawPolyline(ctx, meta.points, EDGE_ACTIVE_GLOW, 8, false);
+          drawPolyline(ctx, meta.points, EDGE_ACTIVE_GLOW, 24, false);
         } else {
           drawPolyline(ctx, meta.points, EDGE_INACTIVE_GLOW, 6, false);
         }
@@ -785,21 +848,17 @@
           ctx,
           meta.points,
           state.active ? EDGE_ACTIVE_COLOR : EDGE_INACTIVE_COLOR,
-          state.active ? 3 : 2,
+          state.active ? 14 : 2,
           state.active ? false : EDGE_INACTIVE_DASH,
         );
 
-        if (!state.active) {
-          drawInactiveMidMarker(ctx, meta.points);
+        if (state.active) {
+          drawPolyline(ctx, meta.points, "#dff4ea", 5, false);
+          drawFlowMarkers(ctx, meta.points, state.reverse, now);
         }
 
-        if (state.active && meta.points.length >= 2) {
-          if (state.reverse) {
-            drawArrowHead(ctx, meta.points[1], meta.points[0], EDGE_ACTIVE_COLOR);
-          } else {
-            const last = meta.points.length - 1;
-            drawArrowHead(ctx, meta.points[last - 1], meta.points[last], EDGE_ACTIVE_COLOR);
-          }
+        if (!state.active) {
+          drawInactiveMidMarker(ctx, meta.points);
         }
       });
     }
@@ -810,6 +869,7 @@
         active: Boolean(active),
         reverse: Boolean(reverse),
       });
+      this.updateAnimationState();
       this.redraw(global.devicePixelRatio || 1);
       return true;
     }
@@ -825,6 +885,26 @@
       meta.element.textContent = String(text);
       meta.element.classList.add("active");
       return true;
+    }
+
+    updateAnimationState() {
+      const shouldAnimate = Array.from(this.edgeStateById.values()).some((state) => state.active);
+      if (shouldAnimate && !this.animationFrame) {
+        this.animationFrame = global.requestAnimationFrame(this.animate);
+        return;
+      }
+      if (!shouldAnimate && this.animationFrame) {
+        global.cancelAnimationFrame(this.animationFrame);
+        this.animationFrame = 0;
+      }
+    }
+
+    animate() {
+      this.animationFrame = 0;
+      this.redraw(global.devicePixelRatio || 1);
+      if (Array.from(this.edgeStateById.values()).some((state) => state.active)) {
+        this.animationFrame = global.requestAnimationFrame(this.animate);
+      }
     }
 
     getNodeMetrics(nodeId) {
