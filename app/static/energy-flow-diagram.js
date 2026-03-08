@@ -121,14 +121,23 @@
   function renderLine(line) {
     if (!line) return "";
     if (line.type === "soc") {
+      const energyMarkup = line.energyId
+        ? `<span id='${escapeHtml(line.energyId)}' class='soc-energy-inside'>-</span>`
+        : "";
+      const usableMarkup = line.usableId
+        ? `<span id='${escapeHtml(line.usableId)}' class='soc-usable-inside'>-</span>`
+        : "";
+      const runtimeMarkup = line.runtimeId
+        ? `<span id='${escapeHtml(line.runtimeId)}' class='soc-runtime-inside'>-</span>`
+        : "";
       return (
         "<div class='soc-wrap'>" +
         `<div id='${escapeHtml(line.fillId)}' class='soc-fill'></div>` +
         "<div class='soc-value-inside'>" +
         `<span id='${escapeHtml(line.valueId)}'>-</span>` +
-        `<span id='${escapeHtml(line.energyId)}' class='soc-energy-inside'>-</span>` +
-        `<span id='${escapeHtml(line.usableId)}' class='soc-usable-inside'>-</span>` +
-        `<span id='${escapeHtml(line.runtimeId)}' class='soc-runtime-inside'>-</span>` +
+        energyMarkup +
+        usableMarkup +
+        runtimeMarkup +
         "</div></div>"
       );
     }

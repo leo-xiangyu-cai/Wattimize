@@ -735,7 +735,7 @@ td {
   left: calc(96% - 156px);
   top: 44%;
   width: 156px;
-  min-height: 122px;
+  min-height: 206px;
 }
 
 .combined-flow-board .combined-node-battery1 {
@@ -977,6 +977,67 @@ td {
   margin-top: 4px;
   font-size: 15px;
   text-align: center;
+}
+
+.efd-node.efd-node-tesla {
+  position: relative;
+  overflow: hidden;
+  border: none;
+  border-radius: 14px;
+  justify-content: flex-start;
+  padding: 8px 10px 10px;
+  background:
+    radial-gradient(circle at 50% -8%, rgba(255, 255, 255, 0.96) 0, rgba(255, 255, 255, 0.36) 32%, transparent 58%),
+    linear-gradient(180deg, rgba(249, 246, 241, 0.98) 0%, rgba(241, 237, 230, 0.96) 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(155, 151, 141, 0.42),
+    0 14px 24px rgba(121, 102, 78, 0.08);
+}
+
+.efd-node.efd-node-tesla .node-title {
+  position: relative;
+  z-index: 3;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: #352c25;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.efd-node.efd-node-tesla .node-mini-value {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 18px;
+  z-index: 3;
+  margin-top: 0;
+  padding: 0;
+  border-radius: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #4d5a51;
+  background: transparent;
+  box-shadow: none;
+}
+
+.efd-node.efd-node-tesla .soc-wrap {
+  position: absolute;
+  inset: 8px 8px 8px 8px;
+  min-height: 0;
+  margin-top: 0;
+  border-radius: 11px;
+  background: transparent;
+  box-shadow: none;
+  z-index: 1;
+}
+
+.efd-node.efd-node-tesla .soc-value-inside {
+  justify-content: center;
+  gap: 0;
+  padding: 24px 14px 34px;
+  font-size: 31px;
+  font-weight: 800;
+  z-index: 2;
 }
 
 .node-solar {

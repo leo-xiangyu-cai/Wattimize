@@ -204,7 +204,7 @@ const I18N = {
     inverter2Title: "Inverter 2",
     inverterBatteryRatioUnavailable: "-",
     loadTitle: "Home Load",
-    teslaChargingLabel: "Tesla Charging",
+    teslaChargingLabel: "Tesla",
     teslaChargingIncludedHint: "Total Load = Home Load + Tesla",
     teslaChargingCurrentLabel: "Current",
     teslaChargingVoltageLabel: "Voltage",
@@ -571,7 +571,7 @@ const I18N = {
     inverter2Title: "逆变器 2",
     inverterBatteryRatioUnavailable: "-",
     loadTitle: "家庭负载",
-    teslaChargingLabel: "特斯拉充电",
+    teslaChargingLabel: "特斯拉",
     teslaChargingIncludedHint: "总负载 = 家庭负载 + 特斯拉",
     teslaChargingCurrentLabel: "电流",
     teslaChargingVoltageLabel: "电压",
@@ -1202,6 +1202,12 @@ function setText(id, text) {
 function setNodeSourceTip(id, tipText) {
   const el = document.getElementById(id);
   if (!el) return;
+  if (tipText === null || tipText === undefined || tipText === "") {
+    el.classList.remove("has-source-tip");
+    el.removeAttribute("data-source-tip");
+    el.removeAttribute("title");
+    return;
+  }
   const normalized = String(tipText || "-");
   el.classList.add("has-source-tip");
   el.setAttribute("data-source-tip", normalized);
@@ -1753,15 +1759,17 @@ function buildCombinedDiagramSpec() {
         id: "combined-teslaNode",
         kind: "tesla",
         icon: "tesla",
-        title: "Tesla Charging",
+        title: "Tesla",
         titleKey: "teslaChargingLabel",
         width: 162,
-        height: 132,
+        height: 222,
         lines: [
-          { id: "combined-teslaChargingValue", className: "node-value", text: "-" },
-          { id: "combined-teslaChargingState", className: "node-state muted", text: "idle" },
-          { id: "combined-teslaChargingCurrentValue", className: "node-mini-value muted", text: "Current: -" },
-          { id: "combined-teslaChargingVoltageValue", className: "node-mini-value muted", text: "Voltage: -" },
+          {
+            type: "soc",
+            fillId: "combined-teslaSocFill",
+            valueId: "combined-teslaSocValue",
+          },
+          { id: "combined-teslaChargingCurrentValue", className: "node-mini-value muted", text: "-" },
         ],
       },
       {
@@ -2250,6 +2258,20 @@ function pickTeslaMetricEntity(items, metricKind) {
         if (friendly.includes("charger voltage")) score += 90;
         if (friendly.includes("charging voltage")) score += 80;
         if (unit === "v") score += 30;
+      } else if (target === "soc") {
+        if (entityId.includes("battery_level")) score += 140;
+        if (entityId.includes("usable_battery_level")) score += 130;
+        if (entityId.includes("charge_level")) score += 120;
+        if (entityId.includes("state_of_charge")) score += 120;
+        if (friendly.includes("battery level")) score += 110;
+        if (friendly.includes("charge level")) score += 100;
+        if (friendly.includes("state of charge")) score += 100;
+        if (friendly.includes("battery")) score += 20;
+        if (unit === "%") score += 35;
+        if (numeric !== null && numeric >= 0 && numeric <= 100) score += 20;
+        if (entityId.includes("charger_") || entityId.includes("charge_current") || entityId.includes("charge_voltage") || entityId.includes("charge_power")) {
+          score -= 80;
+        }
       }
       if (entityId.includes("tesla")) score += 20;
       if (numeric !== null) score += 10;
@@ -2260,19 +2282,14 @@ function pickTeslaMetricEntity(items, metricKind) {
   return scored[0]?.item || null;
 }
 
-function formatTeslaSourceTip(teslaInfo) {
-  const sourceLabel = currentLang === "zh" ? "来源" : "Source";
-  if (!teslaInfo || !teslaInfo.entityId) return `${sourceLabel}: -`;
-  return `${sourceLabel}: ${teslaInfo.entityId}`;
-}
-
-function formatTeslaMetricLine(labelKey, value, unit) {
-  const label = t(labelKey);
+function formatTeslaCurrentValue(value, unit) {
   const numeric = toFiniteNumber(value);
   const unitText = String(unit || "").trim();
-  if (numeric === null) return `${label}: -`;
-  if (unitText) return `${label}: ${numeric.toFixed(1)} ${unitText}`;
-  return `${label}: ${numeric.toFixed(1)}`;
+  if (numeric === null) return "-";
+  const normalizedUnit = currentLang === "zh" && unitText.toLowerCase() === "a"
+    ? "安"
+    : (unitText || (currentLang === "zh" ? "安" : "A"));
+  return `${numeric.toFixed(1)}${normalizedUnit}`;
 }
 
 function buildCombinedFlowMetrics(sajFlow, solplanetFlow) {
@@ -2343,7 +2360,7 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   } = combined;
   const teslaChargingW = toFiniteNumber(teslaInfo?.chargingW);
   const teslaCurrentA = toFiniteNumber(teslaInfo?.currentA);
-  const teslaVoltageV = toFiniteNumber(teslaInfo?.voltageV);
+  const teslaSoc = toFiniteNumber(teslaInfo?.socPercent);
   let homeLoadW = totalLoadW;
   if (homeLoadW !== null) {
     const teslaW = teslaChargingW === null ? 0 : teslaChargingW;
@@ -2366,15 +2383,17 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   setText("combined-inverter1RatioValue", formatInverterBatteryRatio(inverter1W, battery1W));
   setText("combined-inverter2RatioValue", formatInverterBatteryRatio(inverter2W, battery2W));
   setText("combined-loadPowerValue", formatPowerKwFromWatts(homeLoadW));
-  setText("combined-teslaChargingValue", formatPowerKwFromWatts(teslaChargingW));
   setText(
     "combined-teslaChargingCurrentValue",
-    formatTeslaMetricLine("teslaChargingCurrentLabel", teslaCurrentA, teslaInfo?.currentUnit || "A"),
+    formatTeslaCurrentValue(teslaCurrentA, teslaInfo?.currentUnit || "A"),
   );
-  setText(
-    "combined-teslaChargingVoltageValue",
-    formatTeslaMetricLine("teslaChargingVoltageLabel", teslaVoltageV, teslaInfo?.voltageUnit || "V"),
-  );
+  renderBatterySocDisplay({
+    system: null,
+    soc: teslaSoc,
+    batteryW: null,
+    socValueId: "combined-teslaSocValue",
+    socFillId: "combined-teslaSocFill",
+  });
   setText("combined-switchboardValue", "-");
   setText("combined-inverter1State", getSajDashboardModeText() || inverterStateText(inverter1Status));
   setText("combined-inverter2State", inverterStateText(inverter2Status));
@@ -2387,15 +2406,8 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
       ? `来源: 计算 ${sources.load}\n说明: 家庭负载(不含 Tesla) = 总负载 - 特斯拉充电`
       : `Source: Calculated ${sources.load}\nNote: Home load (excluding Tesla) = total load - Tesla charging`,
   );
-  setNodeSourceTip("combined-teslaChargingValue", formatTeslaSourceTip(teslaInfo));
-  setNodeSourceTip(
-    "combined-teslaChargingCurrentValue",
-    currentLang === "zh" ? `来源: ${teslaInfo?.currentEntityId || "-"}` : `Source: ${teslaInfo?.currentEntityId || "-"}`,
-  );
-  setNodeSourceTip(
-    "combined-teslaChargingVoltageValue",
-    currentLang === "zh" ? `来源: ${teslaInfo?.voltageEntityId || "-"}` : `Source: ${teslaInfo?.voltageEntityId || "-"}`,
-  );
+  setNodeSourceTip("combined-teslaChargingCurrentValue", null);
+  setNodeSourceTip("combined-teslaSocValue", null);
 
   const solarActive = solarW !== null && solarW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   setText("combined-solarState", solarActive ? t("stateProducing") : t("stateIdle"));
@@ -2405,12 +2417,8 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   const switchboardActive = solarActive || gridActive || (totalLoadW !== null && totalLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W);
   setText("combined-switchboardState", switchboardActive ? t("switchboardStateActive") : t("switchboardStateIdle"));
   const loadActive = homeLoadW !== null && homeLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
-  const totalLoadActive = totalLoadW !== null && totalLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const teslaChargingActive = teslaChargingW !== null && teslaChargingW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   setText("combined-loadState", loadActive ? t("stateConsuming") : t("stateIdle"));
-  setText("combined-teslaChargingState", teslaChargingActive ? t("stateCharging") : t("stateIdle"));
-  setModeClass("combined-teslaChargingValue", teslaChargingActive ? "positive" : "");
-  setModeClass("combined-teslaChargingState", teslaChargingActive ? "positive" : "");
   setFlowLine("combined-lineSwitchboardToHomeLoad", loadActive, false);
   setFlowLine("combined-lineSwitchboardToTeslaB", teslaChargingActive, false);
 
@@ -4840,8 +4848,8 @@ async function fetchTeslaChargingInfo() {
   const items = Array.isArray(payload?.items) ? payload.items : [];
   const powerEntity = pickTeslaChargingEntity(items);
   const currentEntity = pickTeslaMetricEntity(items, "current");
-  const voltageEntity = pickTeslaMetricEntity(items, "voltage");
-  if (!powerEntity && !currentEntity && !voltageEntity) {
+  const socEntity = pickTeslaMetricEntity(items, "soc");
+  if (!powerEntity && !currentEntity && !socEntity) {
     return {
       chargingW: null,
       entityId: null,
@@ -4850,9 +4858,8 @@ async function fetchTeslaChargingInfo() {
       currentA: null,
       currentEntityId: null,
       currentUnit: "A",
-      voltageV: null,
-      voltageEntityId: null,
-      voltageUnit: "V",
+      socPercent: null,
+      socEntityId: null,
     };
   }
   const chargingW = powerEntity ? wattsFromStateUnit(powerEntity.state, powerEntity.unit) : null;
@@ -4860,13 +4867,12 @@ async function fetchTeslaChargingInfo() {
     chargingW: chargingW === null ? null : Math.max(0, chargingW),
     entityId: powerEntity?.entity_id || null,
     friendlyName: powerEntity?.friendly_name || null,
-    updatedAt: latestIsoTime(powerEntity?.last_updated, currentEntity?.last_updated, voltageEntity?.last_updated),
+    updatedAt: latestIsoTime(powerEntity?.last_updated, currentEntity?.last_updated, socEntity?.last_updated),
     currentA: currentEntity ? toFiniteNumber(currentEntity.state) : null,
     currentEntityId: currentEntity?.entity_id || null,
     currentUnit: currentEntity?.unit || "A",
-    voltageV: voltageEntity ? toFiniteNumber(voltageEntity.state) : null,
-    voltageEntityId: voltageEntity?.entity_id || null,
-    voltageUnit: voltageEntity?.unit || "V",
+    socPercent: socEntity ? toFiniteNumber(socEntity.state) : null,
+    socEntityId: socEntity?.entity_id || null,
   };
 }
 
@@ -4880,7 +4886,7 @@ async function loadSummary() {
     tesla: {
       chargingW: null, entityId: null, friendlyName: null, updatedAt: null,
       currentA: null, currentEntityId: null, currentUnit: "A",
-      voltageV: null, voltageEntityId: null, voltageUnit: "V",
+      socPercent: null, socEntityId: null,
     },
   };
   stateCache.lastSummary = summary;
@@ -4921,7 +4927,7 @@ async function loadSummary() {
     summary.tesla = {
       chargingW: null, entityId: null, friendlyName: null, updatedAt: null,
       currentA: null, currentEntityId: null, currentUnit: "A",
-      voltageV: null, voltageEntityId: null, voltageUnit: "V",
+      socPercent: null, socEntityId: null,
     };
   }
   renderSummary(summary);
