@@ -415,7 +415,16 @@
                 <option value="solplanet">Solplanet</option>
               </select>
             </label>
+            <label data-i18n="workerLogsServiceLabel">
+              Service
+              <select id="workerLogsServiceSelect">
+                <option value="" data-i18n="workerLogsServiceAll">All</option>
+                <option value="solplanet_cgi">Solplanet CGI</option>
+                <option value="home_assistant">Home Assistant</option>
+              </select>
+            </label>
           </div>
+          <p id="workerLogsConfigMeta" class="muted">-</p>
           <p id="workerLogsCount" class="muted">-</p>
           <div class="pager">
             <button id="workerLogsPrevPageBtn" class="btn secondary" type="button" data-i18n="prevBtn">Prev</button>

@@ -11,6 +11,7 @@ from pathlib import Path
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "energy_samples.sqlite3"
 DEFAULT_SAMPLE_INTERVAL_SECONDS = 5.0
+SQLITE_BUSY_TIMEOUT_SECONDS = 10.0
 CSV_HEADERS: tuple[str, ...] = (
     "system",
     "sampled_at_utc",
@@ -165,7 +166,8 @@ def insert_worker_api_log(
         parsed_requested = parsed_requested.replace(tzinfo=UTC)
     requested_norm = parsed_requested.astimezone(UTC).isoformat()
     requested_epoch = parsed_requested.astimezone(UTC).timestamp()
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
+        conn.execute(f"PRAGMA busy_timeout={int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)};")
         conn.execute(
             """
             INSERT INTO worker_api_logs (
@@ -208,6 +210,7 @@ def list_worker_api_logs(
     page_size: int,
     worker: str | None = None,
     system: str | None = None,
+    service: str | None = None,
 ) -> dict[str, object]:
     if page < 1:
         page = 1
@@ -224,6 +227,9 @@ def list_worker_api_logs(
     if system:
         where_conditions.append("system = ?")
         params.append(system)
+    if service:
+        where_conditions.append("service = ?")
+        params.append(service)
     where_sql = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
 
     if not db_path.exists():
@@ -915,7 +921,8 @@ def upsert_solplanet_endpoint_snapshot(
 
     payload_json = None if payload is None else json.dumps(payload, ensure_ascii=False)
 
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
+        conn.execute(f"PRAGMA busy_timeout={int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)};")
         existing = conn.execute(
             f"SELECT last_success_at_utc FROM {table_name} WHERE id = 1;"
         ).fetchone()

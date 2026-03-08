@@ -265,6 +265,7 @@ const I18N = {
     workerLogsSystemAll: "All",
     workerLogsServiceLabel: "Service",
     workerLogsServiceAll: "All",
+    workerLogsConfigMeta: "Solplanet config: host {host}",
     workerLogsTableTime: "Time (UTC)",
     workerLogsTableSystem: "System",
     workerLogsTableService: "Service",
@@ -628,6 +629,7 @@ const I18N = {
     workerLogsSystemAll: "全部",
     workerLogsServiceLabel: "服务",
     workerLogsServiceAll: "全部",
+    workerLogsConfigMeta: "Solplanet 配置：host {host}",
     workerLogsTableTime: "时间 (UTC)",
     workerLogsTableSystem: "系统",
     workerLogsTableService: "服务",
@@ -2935,6 +2937,11 @@ function renderWorkerLogsPage(payload) {
   renderWorkerLogsRows(payload.items || []);
 }
 
+function renderWorkerLogsConfigMeta(configPayload) {
+  const host = String(configPayload?.solplanet_dongle_host || "").trim() || "-";
+  setText("workerLogsConfigMeta", t("workerLogsConfigMeta", { host }));
+}
+
 function renderSamplingStatus(status) {
   const sizeMb = status?.db_size_bytes ? (Number(status.db_size_bytes) / (1024 * 1024)).toFixed(2) : "0.00";
   const estMb = status?.estimated_mb_per_day_total ?? 0;
@@ -5144,15 +5151,20 @@ async function loadWorkerLogs() {
     workerLogsDefaultsApplied = true;
   }
   try {
-    const payload = await fetchJson(buildWorkerLogsUrl(), { timeoutMs: 10000 });
+    const [payload, configPayload] = await Promise.all([
+      fetchJson(buildWorkerLogsUrl(), { timeoutMs: 10000 }),
+      fetchJson("/api/config", { timeoutMs: 5000 }),
+    ]);
     workerLogsPager.hasNext = Boolean(payload.has_next);
     workerLogsPager.hasPrev = Boolean(payload.has_prev);
     stateCache.lastWorkerLogsPage = payload;
     renderWorkerLogsPage(payload);
+    renderWorkerLogsConfigMeta(configPayload);
   } catch (err) {
     setText("workerLogsCount", t("loadFailed", { error: String(err) }));
     setText("workerLogsPageInfo", t("pageDash"));
     setText("workerLogsUpdatedAt", formatUpdatedAt(null));
+    setText("workerLogsConfigMeta", t("workerLogsConfigMeta", { host: "-" }));
     renderWorkerLogsRows([]);
   }
 }

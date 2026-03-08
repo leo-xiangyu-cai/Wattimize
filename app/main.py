@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 from collections import Counter
@@ -55,6 +56,8 @@ from app.persistence import (
     upsert_realtime_kv,
 )
 from app.solplanet_cgi import SolplanetCgiClient
+
+logger = logging.getLogger(__name__)
 
 
 settings = load_settings()
@@ -133,30 +136,23 @@ def _handle_outbound_request_log(event: dict[str, object]) -> None:
     result_text = str(event.get("result_text") or "")
     error_text = str(event.get("error_text") or "")
 
-    async def _write() -> None:
-        try:
-            await asyncio.to_thread(
-                insert_worker_api_log,
-                storage_db_path,
-                worker=worker,
-                system=system,
-                service=service,
-                method=method,
-                api_link=api_link,
-                requested_at_utc=requested_at,
-                ok=ok,
-                status_code=status_code,
-                duration_ms=duration_ms,
-                result_text=result_text,
-                error_text=error_text,
-            )
-        except Exception:
-            return
-
     try:
-        asyncio.get_running_loop().create_task(_write())
-    except RuntimeError:
-        return
+        insert_worker_api_log(
+            storage_db_path,
+            worker=worker,
+            system=system,
+            service=service,
+            method=method,
+            api_link=api_link,
+            requested_at_utc=requested_at,
+            ok=ok,
+            status_code=status_code,
+            duration_ms=duration_ms,
+            result_text=result_text,
+            error_text=error_text,
+        )
+    except Exception as exc:
+        logger.warning("Failed to persist worker_api_log for %s %s: %s", service, api_link, exc)
 
 
 ha_client = HomeAssistantClient(
@@ -700,17 +696,20 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
         payload: dict[str, object] | None,
         fetch_ms: float | None,
     ) -> None:
-        await asyncio.to_thread(
-            upsert_solplanet_endpoint_snapshot,
-            storage_db_path,
-            endpoint=endpoint,
-            path=path,
-            requested_at_utc=datetime.now(UTC).isoformat(),
-            ok=ok,
-            error=error,
-            payload=payload,
-            fetch_ms=fetch_ms,
-        )
+        try:
+            await asyncio.to_thread(
+                upsert_solplanet_endpoint_snapshot,
+                storage_db_path,
+                endpoint=endpoint,
+                path=path,
+                requested_at_utc=datetime.now(UTC).isoformat(),
+                ok=ok,
+                error=error,
+                payload=payload,
+                fetch_ms=fetch_ms,
+            )
+        except Exception as exc:
+            logger.warning("Failed to persist Solplanet endpoint snapshot for %s (%s): %s", endpoint, path, exc)
 
     started_at = monotonic()
     getdev2_started = monotonic()
@@ -1824,20 +1823,22 @@ async def _replace_runtime(new_settings: Settings) -> None:
             token=settings.ha_token,
             request_logger=_handle_outbound_request_log,
         )
-        solplanet_client = SolplanetCgiClient(
-            host=settings.solplanet_dongle_host,
-            port=settings.solplanet_dongle_port,
-            scheme=settings.solplanet_dongle_scheme,
-            verify_ssl=settings.solplanet_verify_ssl,
-            timeout_seconds=settings.solplanet_request_timeout_seconds,
-            request_logger=_handle_outbound_request_log,
-        )
+        solplanet_client = _new_solplanet_client(settings)
         collector_status.setdefault("saj", {})["interval_seconds"] = sample_interval_seconds
         collector_status.setdefault("saj", {})["continuous"] = False
         collector_status.setdefault("solplanet", {})["interval_seconds"] = None
         collector_status.setdefault("solplanet", {})["continuous"] = True
         _reset_solplanet_caches()
         await old_solplanet.aclose()
+
+
+async def _recreate_solplanet_client() -> None:
+    global solplanet_client  # noqa: PLW0603
+    async with runtime_lock:
+        old_solplanet = solplanet_client
+        solplanet_client = _new_solplanet_client(settings)
+        _reset_solplanet_caches()
+    await old_solplanet.aclose()
 
 
 def _sample_from_flow(system: str, flow: dict[str, object]) -> EnergySample:
@@ -2116,8 +2117,11 @@ async def _collect_for_system(system: str) -> None:
 
         if system == "solplanet":
             if not solplanet_client.configured:
-                return
-            flow = await _build_solplanet_energy_flow_payload_from_cgi()
+                raise RuntimeError("Solplanet CGI client is not configured")
+            flow = await asyncio.wait_for(
+                _build_solplanet_energy_flow_payload_from_cgi(),
+                timeout=_solplanet_collection_round_timeout_seconds(settings),
+            )
             await _store_flow_sample("solplanet", flow)
             return
     finally:
@@ -2180,6 +2184,12 @@ async def _collector_loop() -> None:
                 # Keep collector alive even if one round fails.
                 _collector_mark_finish(system, started_monotonic, error=exc)
                 if system == "solplanet":
+                    try:
+                        await _recreate_solplanet_client()
+                    except Exception as recreate_exc:  # noqa: BLE001
+                        status = collector_status.setdefault("solplanet", {})
+                        status["client_recreate_error_at"] = datetime.now(UTC).isoformat()
+                        status["client_recreate_error"] = f"{type(recreate_exc).__name__}: {recreate_exc}"
                     now_mono = monotonic()
                     retry_after = max(SOLPLANET_BACKOFF_INITIAL_SECONDS, solplanet_backoff_seconds)
                     solplanet_next_retry_monotonic = now_mono + retry_after
