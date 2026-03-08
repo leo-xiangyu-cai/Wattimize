@@ -59,55 +59,12 @@
       </nav>
 
       <section id="dashboardView" class="view">
-        <section class="status-grid">
-          <article class="card">
-            <h2 class="title-with-icon">
-              <span class="inline-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false">
-                  <path d="M4 5h16v10H4z"></path>
-                  <path d="M8 19h8"></path>
-                </svg>
-              </span>
-              <span data-i18n="systemTitle">System</span>
-            </h2>
-            <p id="healthValue" class="value">-</p>
-          </article>
-          <article class="card">
-            <h2 class="title-with-icon">
-              <span class="inline-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false">
-                  <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"></path>
-                  <path d="M12 8v8"></path>
-                  <path d="M8 12h8"></path>
-                </svg>
-              </span>
-              <span data-i18n="haTitle">Home Assistant</span>
-            </h2>
-            <p id="haValue" class="value">-</p>
-          </article>
-          <article class="card">
-            <h2 class="title-with-icon">
-              <span class="inline-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false">
-                  <path d="M5 5h6v6H5z"></path>
-                  <path d="M13 5h6v6h-6z"></path>
-                  <path d="M5 13h6v6H5z"></path>
-                  <path d="M13 13h6v6h-6z"></path>
-                </svg>
-              </span>
-              <span data-i18n="coreTitle">Core Entities</span>
-            </h2>
-            <p id="coreCount" class="value">-</p>
-          </article>
-        </section>
-
         <section class="card">
           <div class="section-header">
-            <h2 data-i18n="flowTitle">Real-time Energy Flow Comparison</h2>
+            <h2 data-i18n="integratedFlowTitle">Integrated Dashboard</h2>
           </div>
           <div class="flow-compare-grid">
             <section class="flow-system-card flow-system-card-combined">
-              <h3 class="flow-system-title" data-i18n="integratedFlowTitle">Integrated Dashboard</h3>
               <p class="muted flow-system-subtitle" data-i18n="integratedFlowSubtitle">
                 SAJ solar/grid + SAJ/Solplanet batteries, dual inverters in parallel
               </p>
@@ -117,36 +74,6 @@
               </div>
               <div id="energyFlowCombined" class="flow-board combined-flow-board diagram-host" data-diagram="combined"></div>
               <p id="combined-loadFormulaText" class="balance-formula muted">-</p>
-            </section>
-
-            <section class="flow-system-card">
-              <h3 class="flow-system-title">SAJ</h3>
-              <div class="flow-meta">
-                <span id="saj-loadingSpinner" class="loading-spinner is-hidden" aria-hidden="true"></span>
-                <span id="saj-updatedAt" class="muted">-</span>
-              </div>
-              <div id="energyFlowSaj" class="flow-board diagram-host" data-diagram="saj"></div>
-              <p class="balance-status-inline">
-                <span class="muted" data-i18n="balanceStatusTitle">Dynamic Balance Status</span>
-                <span id="saj-balanceStatusText" class="balance-status-text">-</span>
-                <span id="saj-balanceResidualValue" class="muted">-</span>
-              </p>
-              <p id="saj-balanceFormulaText" class="balance-formula muted">-</p>
-            </section>
-
-            <section class="flow-system-card">
-              <h3 class="flow-system-title">Solplanet</h3>
-              <div class="flow-meta">
-                <span id="solplanet-loadingSpinner" class="loading-spinner is-hidden" aria-hidden="true"></span>
-                <span id="solplanet-updatedAt" class="muted">-</span>
-              </div>
-              <div id="energyFlowSolplanet" class="flow-board diagram-host" data-diagram="solplanet"></div>
-              <p class="balance-status-inline">
-                <span class="muted" data-i18n="balanceStatusTitle">Dynamic Balance Status</span>
-                <span id="solplanet-balanceStatusText" class="balance-status-text">-</span>
-                <span id="solplanet-balanceResidualValue" class="muted">-</span>
-              </p>
-              <p id="solplanet-balanceFormulaText" class="balance-formula muted">-</p>
             </section>
           </div>
         </section>
