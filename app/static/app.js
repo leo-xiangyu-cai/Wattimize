@@ -224,6 +224,7 @@ const I18N = {
     samplingRangeDay: "Day",
     samplingRangeWeek: "Week",
     samplingRangeMonth: "Month",
+    samplingRangeRelative: "Relative",
     samplingRangeCustomDate: "Custom Date",
     samplingRangeCustomDateTime: "Custom Date + Time",
     samplingWeekDisplay: "Week {week} ({start} ~ {end})",
@@ -231,6 +232,14 @@ const I18N = {
     samplingDayLabel: "Day",
     samplingWeekLabel: "Week",
     samplingMonthLabel: "Month",
+    samplingRelativeLabel: "Relative Range",
+    samplingRelativePlaceholder: "-3h",
+    samplingRelativeHelp: "Use values like -15m, -3h, -2d, -1mo. Range is from now backwards.",
+    samplingRelativePresetMinute: "-1m",
+    samplingRelativePresetHour: "-1h",
+    samplingRelativePresetDay: "-1d",
+    samplingRelativePresetMonth: "-1mo",
+    samplingRelativeInvalid: "Invalid relative range. Use values like -3h, -15m, -2d, or -1mo.",
     samplingStartLabel: "Start",
     samplingEndLabel: "End",
     samplingStorageMeta: "DB {sizeMb} MB · Rows {rows} · Interval {interval}s · Estimated/day {estMb} MB",
@@ -611,6 +620,7 @@ const I18N = {
     samplingRangeDay: "天",
     samplingRangeWeek: "周",
     samplingRangeMonth: "月",
+    samplingRangeRelative: "相对时间",
     samplingRangeCustomDate: "自定义日期",
     samplingRangeCustomDateTime: "自定义日期+时间",
     samplingWeekDisplay: "第{week}周（{start} ~ {end}）",
@@ -618,6 +628,14 @@ const I18N = {
     samplingDayLabel: "日期",
     samplingWeekLabel: "周",
     samplingMonthLabel: "月份",
+    samplingRelativeLabel: "相对范围",
+    samplingRelativePlaceholder: "-3h",
+    samplingRelativeHelp: "支持 -15m、-3h、-2d、-1mo 这种写法，表示从当前时间往前回溯。",
+    samplingRelativePresetMinute: "-1m",
+    samplingRelativePresetHour: "-1h",
+    samplingRelativePresetDay: "-1d",
+    samplingRelativePresetMonth: "-1mo",
+    samplingRelativeInvalid: "相对时间格式无效，请使用 -3h、-15m、-2d 或 -1mo。",
     samplingStartLabel: "开始时间",
     samplingEndLabel: "结束时间",
     samplingStorageMeta: "数据库 {sizeMb} MB · 记录 {rows} 条 · 采样间隔 {interval}s · 预计每天 {estMb} MB",
@@ -1159,6 +1177,7 @@ const samplingRangeState = {
   week: "",
   month: "",
   monthYear: 0,
+  relative: "",
   startDate: "",
   endDate: "",
   startDateTime: "",
@@ -2761,12 +2780,45 @@ function getWeekInfo(anchorDateText) {
   };
 }
 
+function parseSamplingRelativeInput(rawValue) {
+  const text = String(rawValue || "").trim().toLowerCase();
+  const match = /^(-)?(\d+)\s*(mo|m|h|d)$/.exec(text);
+  if (!match) return null;
+  const amount = Number(match[2]);
+  const unit = match[3];
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return { amount, unit, normalized: `-${amount}${unit}` };
+}
+
+function applyRelativeOffset(date, relative) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime()) || !relative) return null;
+  const next = new Date(date.getTime());
+  if (relative.unit === "m") {
+    next.setMinutes(next.getMinutes() - relative.amount);
+    return next;
+  }
+  if (relative.unit === "h") {
+    next.setHours(next.getHours() - relative.amount);
+    return next;
+  }
+  if (relative.unit === "d") {
+    next.setDate(next.getDate() - relative.amount);
+    return next;
+  }
+  if (relative.unit === "mo") {
+    next.setMonth(next.getMonth() - relative.amount);
+    return next;
+  }
+  return null;
+}
+
 function getSamplingRange() {
   const mode = document.getElementById("samplingRangeModeSelect")?.value || "day";
   const dayText = samplingRangeState.day || getLocalDateText();
   const weekText = samplingRangeState.week || dayText;
   const monthNumber = Number(samplingRangeState.month || `${new Date().getMonth() + 1}`);
   const monthYear = Number(samplingRangeState.monthYear || new Date().getFullYear());
+  const relativeText = samplingRangeState.relative || "";
   const startDate = samplingRangeState.startDate || "";
   const endDate = samplingRangeState.endDate || "";
   const startDateTime = samplingRangeState.startDateTime || "";
@@ -2790,6 +2842,19 @@ function getSamplingRange() {
       startUtc: start.toISOString(),
       endUtc: end.toISOString(),
       label: `${monthYear}-${String(safeMonth).padStart(2, "0")}`,
+    };
+  }
+  if (mode === "relative") {
+    const relative = parseSamplingRelativeInput(relativeText);
+    const end = new Date();
+    const start = relative ? applyRelativeOffset(end, relative) : null;
+    return {
+      mode,
+      startUtc: start ? start.toISOString() : null,
+      endUtc: end.toISOString(),
+      label: relative?.normalized || relativeText || "-",
+      invalid: !relative || !start || start >= end,
+      invalidReason: !relative ? t("samplingRelativeInvalid") : null,
     };
   }
   if (mode === "custom_date") {
@@ -2862,6 +2927,31 @@ function renderSamplingRangeInputContainer() {
           </div>
         </div>
       </label>
+    `;
+  } else if (mode === "relative") {
+    container.innerHTML = `
+      <div class="sampling-relative-grid">
+        <label>
+          ${t("samplingRelativeLabel")}
+          <div id="samplingRelativeField" class="sampling-field">
+            <input
+              id="samplingRelativeInput"
+              type="text"
+              inputmode="text"
+              spellcheck="false"
+              placeholder="${t("samplingRelativePlaceholder")}"
+              value="${escapeHtml(samplingRangeState.relative || "")}"
+            />
+          </div>
+        </label>
+        <div class="sampling-relative-presets">
+          <button id="samplingRelativePresetMinuteBtn" type="button" class="btn secondary">${t("samplingRelativePresetMinute")}</button>
+          <button id="samplingRelativePresetHourBtn" type="button" class="btn secondary">${t("samplingRelativePresetHour")}</button>
+          <button id="samplingRelativePresetDayBtn" type="button" class="btn secondary">${t("samplingRelativePresetDay")}</button>
+          <button id="samplingRelativePresetMonthBtn" type="button" class="btn secondary">${t("samplingRelativePresetMonth")}</button>
+        </div>
+        <p class="muted sampling-relative-help">${t("samplingRelativeHelp")}</p>
+      </div>
     `;
   } else if (mode === "custom_date" || mode === "custom_datetime") {
     const isDateTime = mode === "custom_datetime";
@@ -2936,6 +3026,37 @@ function bindSamplingRangeInputEvents() {
     bindPicker("samplingMonthField", "samplingMonthInput", (v) => {
       samplingRangeState.month = v;
     });
+    return;
+  }
+  if (mode === "relative") {
+    const input = document.getElementById("samplingRelativeInput");
+    const applyRelative = async (value) => {
+      samplingRangeState.relative = String(value || "").trim();
+      samplingPager.page = 1;
+      await loadSampling();
+    };
+    if (input) {
+      input.addEventListener("change", async () => {
+        await applyRelative(input.value);
+      });
+      input.addEventListener("keydown", async (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        await applyRelative(input.value);
+      });
+    }
+    const bindPreset = (id, value) => {
+      const button = document.getElementById(id);
+      if (!button) return;
+      button.addEventListener("click", async () => {
+        if (input) input.value = value;
+        await applyRelative(value);
+      });
+    };
+    bindPreset("samplingRelativePresetMinuteBtn", "-1m");
+    bindPreset("samplingRelativePresetHourBtn", "-1h");
+    bindPreset("samplingRelativePresetDayBtn", "-1d");
+    bindPreset("samplingRelativePresetMonthBtn", "-1mo");
     return;
   }
   if (mode === "custom_date" || mode === "custom_datetime") {
@@ -5474,15 +5595,16 @@ async function loadSampling() {
   const overallMode = system === "overall";
   const range = getSamplingRange();
   if (!range.startUtc || !range.endUtc || range.invalid) {
+    const invalidMessage = range.invalidReason || "Invalid time range";
     stateCache.lastSamplingDaily = null;
     stateCache.lastSamplingUsageBySystem = null;
     stateCache.lastSamplingPage = null;
     stateCache.lastSamplingSeries = null;
-    setText("samplingDailyMeta", t("loadFailed", { error: "Invalid time range" }));
-    setText("samplingChartMeta", t("loadFailed", { error: "Invalid time range" }));
+    setText("samplingDailyMeta", t("loadFailed", { error: invalidMessage }));
+    setText("samplingChartMeta", t("loadFailed", { error: invalidMessage }));
     renderSamplingRows([]);
     renderSamplingChart({ items: [] });
-    renderSamplingTotals(null, system, range.label, { metaText: t("loadFailed", { error: "Invalid time range" }) });
+    renderSamplingTotals(null, system, range.label, { metaText: t("loadFailed", { error: invalidMessage }) });
     return;
   }
   const sajUsageUrl =
@@ -6156,6 +6278,7 @@ samplingRangeState.day = getLocalDateText();
 samplingRangeState.week = samplingRangeState.day;
 samplingRangeState.monthYear = new Date().getFullYear();
 samplingRangeState.month = String(new Date().getMonth() + 1);
+samplingRangeState.relative = "-6h";
 samplingRangeState.endDate = samplingRangeState.day;
 samplingRangeState.startDate = getLocalDateText(-1);
 {
