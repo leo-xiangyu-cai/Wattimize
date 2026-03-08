@@ -2096,6 +2096,22 @@ function setFlowValueLabel(id, wattsValue, active) {
   el.classList.add("active");
 }
 
+function setFlowTextLabel(id, text, active = true) {
+  const diagram = flowDiagrams.byLabelId.get(id);
+  if (diagram) {
+    if (diagram.setEdgeLabel(id, text, active)) return;
+  }
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (!active || text === null || text === undefined || text === "-") {
+    el.textContent = "-";
+    el.classList.remove("active");
+    return;
+  }
+  el.textContent = String(text);
+  el.classList.add("active");
+}
+
 function toFiniteNumber(value) {
   if (value === null || value === undefined) return null;
   const n = Number(value);
@@ -2407,6 +2423,13 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   setFlowValueLabel("combined-flowLabelBattery2ToInverter2", battery2W, battery2Active);
   setFlowValueLabel("combined-flowLabelInverter1ToSwitchboard", inverter1W, inverter1Active);
   setFlowValueLabel("combined-flowLabelInverter2ToSwitchboard", inverter2W, inverter2Active);
+  const combinedDiagram = flowDiagrams.byBoard.get("energyFlowCombined");
+  const switchboardMetrics = combinedDiagram?.getNodeMetrics?.("combined-switchboardNode");
+  if (switchboardMetrics) {
+    const guideInset = 12;
+    const leftDistancePx = Math.round(switchboardMetrics.centerX - guideInset);
+    const rightDistancePx = Math.round((switchboardMetrics.viewportWidth - guideInset) - switchboardMetrics.centerX);
+  }
 
   const battery1SocText = battery1Soc === null ? "-" : `${Math.max(0, Math.min(100, battery1Soc)).toFixed(0)}%`;
   const battery2SocText = battery2Soc === null ? "-" : `${Math.max(0, Math.min(100, battery2Soc)).toFixed(0)}%`;

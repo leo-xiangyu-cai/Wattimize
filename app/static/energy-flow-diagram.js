@@ -1,24 +1,8 @@
 (function initEnergyFlowDiagram(global) {
-  const X6Lib = global.X6;
-  const dagreLib = global.dagre;
-  if (!X6Lib || !dagreLib) {
-    throw new Error("EnergyFlowDiagram requires X6 and dagre to be loaded first.");
-  }
-
-  const { Graph, Shape } = X6Lib;
-  const HTMLShape = Shape && Shape.HTML;
-  if (!HTMLShape) {
-    throw new Error("EnergyFlowDiagram requires X6 HTML shape support.");
-  }
-
   const EDGE_INACTIVE_COLOR = "#bfd0c7";
   const EDGE_ACTIVE_COLOR = "#2fa27d";
-  const EDGE_ACTIVE_GLOW = "#d6f3e8";
-  const EDGE_LABEL_BORDER = "#7ea790";
-  const EDGE_LABEL_BG = "rgba(248, 255, 251, 0.96)";
-  const DEFAULT_PADDING = 24;
-  const EDGE_ARROW_PATH = "M 0 -5 L 10 0 L 0 5 z";
-  const CARD_SHAPE = "energy-flow-card";
+  const EDGE_ACTIVE_GLOW = "rgba(214, 243, 232, 0.92)";
+  const DEFAULT_PADDING = 28;
 
   function escapeHtml(value) {
     return String(value)
@@ -93,21 +77,6 @@
     );
   }
 
-  function renderNodeBody(data) {
-    const lines = Array.isArray(data.lines) ? data.lines : [];
-    const body = lines.map((line) => renderLine(line)).join("");
-    const titleKey = data.titleKey ? ` data-i18n="${escapeHtml(data.titleKey)}"` : "";
-    return (
-      `<article class="efd-node efd-node-${escapeHtml(data.kind || "generic")}">` +
-      "<p class='node-title'>" +
-      `<span class='inline-icon' aria-hidden='true'>${iconMarkup(data.icon || data.kind)}</span>` +
-      `<span${titleKey}>${escapeHtml(data.title || "")}</span>` +
-      "</p>" +
-      body +
-      "</article>"
-    );
-  }
-
   function renderLine(line) {
     if (!line) return "";
     if (line.type === "soc") {
@@ -130,52 +99,19 @@
     return `<p${idAttr} class="${classAttr}"${i18nAttr}>${escapeHtml(text)}</p>`;
   }
 
-  HTMLShape.register({
-    shape: CARD_SHAPE,
-    width: 156,
-    height: 112,
-    effect: ["data"],
-    html(cell) {
-      return renderNodeBody(cell.getData() || {});
-    },
-  });
-
-  function createLabelConfig(text) {
-    const content = String(text ?? "");
-    const width = Math.max(76, Math.round(content.length * 8.8 + 24));
-    const height = 28;
-    return [{
-      position: 0.5,
-      markup: [
-        { tagName: "rect", selector: "body" },
-        { tagName: "text", selector: "label" },
-      ],
-      attrs: {
-        body: {
-          x: -width / 2,
-          y: -height / 2,
-          width,
-          height,
-          rx: 12,
-          ry: 12,
-          fill: EDGE_LABEL_BG,
-          stroke: EDGE_LABEL_BORDER,
-          strokeWidth: 1,
-        },
-        label: {
-          ref: "body",
-          refX: "50%",
-          refY: "50%",
-          text: content,
-          fill: "#2d4a3a",
-          fontSize: 17,
-          fontWeight: 700,
-          textAnchor: "middle",
-          textVerticalAnchor: "middle",
-          pointerEvents: "none",
-        },
-      },
-    }];
+  function renderNodeBody(data) {
+    const lines = Array.isArray(data.lines) ? data.lines : [];
+    const body = lines.map((line) => renderLine(line)).join("");
+    const titleKey = data.titleKey ? ` data-i18n="${escapeHtml(data.titleKey)}"` : "";
+    return (
+      `<article class="efd-node efd-node-${escapeHtml(data.kind || "generic")}">` +
+      "<p class='node-title'>" +
+      `<span class='inline-icon' aria-hidden='true'>${iconMarkup(data.icon || data.kind)}</span>` +
+      `<span${titleKey}>${escapeHtml(data.title || "")}</span>` +
+      "</p>" +
+      body +
+      "</article>"
+    );
   }
 
   function sortByOrder(items) {
@@ -185,6 +121,24 @@
       if (ao !== bo) return ao - bo;
       return String(a.id).localeCompare(String(b.id));
     });
+  }
+
+  function totalWidth(items, gap) {
+    if (!items.length) return 0;
+    return items.reduce((sum, item) => sum + item.width, 0) + (items.length - 1) * gap;
+  }
+
+  function totalHeight(items, gap) {
+    if (!items.length) return 0;
+    return items.reduce((sum, item) => sum + item.height, 0) + (items.length - 1) * gap;
+  }
+
+  function maxWidth(items) {
+    return items.reduce((max, item) => Math.max(max, item.width), 0);
+  }
+
+  function maxHeight(items) {
+    return items.reduce((max, item) => Math.max(max, item.height), 0);
   }
 
   function placeVertical(items, x, startY, gap, out) {
@@ -219,8 +173,7 @@
     const nodes = spec.nodes.map((node) => ({ ...node }));
     const groups = { center: [], top: [], left: [], right: [], bottom: [], extra: [] };
     nodes.forEach((node) => {
-      const bucket = classifyHubNode(node);
-      groups[bucket].push(node);
+      groups[classifyHubNode(node)].push(node);
     });
 
     const centerNodes = groups.center.length ? groups.center : groups.extra.slice(0, 1);
@@ -297,10 +250,13 @@
     const inverterRight = groups.inverterRight[0];
 
     const outerX = -10;
-    const solarX = -100;
+    const solarX = -174;
     const solarCenterX = solarX + (solar ? solar.width / 2 : 0);
     const columnGap = 72;
-    const leftInverterOffsetX = 100;
+    const leftBatteryShiftX = 0;
+    const leftInverterOffsetX = 90;
+    const rightInverterOffsetX = 90;
+    const switchboardOffsetX = -44;
     const topY = 20;
     const switchboardY = Math.round(height * 0.33);
     const batteryY = height - Math.max(maxHeight(groups.batteryLeft), maxHeight(groups.batteryRight)) - 44;
@@ -313,16 +269,14 @@
         height: grid.height,
       };
     }
-
     if (switchboard) {
       result[switchboard.id] = {
-        x: (width - switchboard.width) / 2,
+        x: ((width - switchboard.width) / 2) + switchboardOffsetX,
         y: switchboardY,
         width: switchboard.width,
         height: switchboard.height,
       };
     }
-
     if (solar) {
       result[solar.id] = {
         x: solarX,
@@ -331,16 +285,14 @@
         height: solar.height,
       };
     }
-
     if (batteryLeft) {
       result[batteryLeft.id] = {
-        x: solarCenterX - batteryLeft.width / 2,
+        x: solarCenterX - batteryLeft.width / 2 + leftBatteryShiftX,
         y: batteryY,
         width: batteryLeft.width,
         height: batteryLeft.height,
       };
     }
-
     if (batteryRight) {
       result[batteryRight.id] = {
         x: width - outerX - batteryRight.width,
@@ -349,7 +301,6 @@
         height: batteryRight.height,
       };
     }
-
     if (inverterLeft && batteryLeft) {
       result[inverterLeft.id] = {
         x: result[batteryLeft.id].x + batteryLeft.width + columnGap + leftInverterOffsetX,
@@ -358,103 +309,43 @@
         height: inverterLeft.height,
       };
     }
-
     if (inverterRight && batteryRight) {
       result[inverterRight.id] = {
-        x: result[batteryRight.id].x - columnGap - inverterRight.width,
+        x: result[batteryRight.id].x - columnGap - rightInverterOffsetX - inverterRight.width,
         y: result[batteryRight.id].y + (batteryRight.height - inverterRight.height) / 2,
         width: inverterRight.width,
         height: inverterRight.height,
       };
     }
-
-    if (load && switchboard) {
-      const switchboardCenterY = center(result[switchboard.id]).y;
+    if (load) {
+      const rightColumnX = width - outerX - Math.max(load.width, ev ? ev.width : 0);
+      const upperStackY = solar ? result[solar.id].y : Math.max(topY + 32, switchboardY - 132);
       result[load.id] = {
-        x: width - outerX - load.width,
-        y: switchboardCenterY - load.height / 2,
+        x: rightColumnX,
+        y: upperStackY,
         width: load.width,
         height: load.height,
       };
     }
-
     if (ev && load) {
       result[ev.id] = {
         x: result[load.id].x,
-        y: result[load.id].y + load.height + 54,
+        y: result[load.id].y + load.height + 36,
         width: ev.width,
         height: ev.height,
       };
     }
 
-    if (groups.fallback.length) {
-      const fallback = layoutDagre({
-        nodes: groups.fallback,
-        edges: spec.edges.filter((edge) => groups.fallback.some((node) => node.id === edge.source || node.id === edge.target)),
-        viewport: { width: width * 0.4, height: height * 0.4 },
-      });
-      Object.keys(fallback).forEach((id) => {
-        const item = fallback[id];
-        result[id] = {
-          x: item.x + width * 0.3,
-          y: item.y + height * 0.28,
-          width: item.width,
-          height: item.height,
-        };
-      });
-    }
-
-    return result;
-  }
-
-  function layoutDagre(spec) {
-    const graph = new dagreLib.graphlib.Graph();
-    graph.setGraph({
-      rankdir: spec.rankdir || "TB",
-      nodesep: 36,
-      ranksep: 52,
-      marginx: DEFAULT_PADDING,
-      marginy: DEFAULT_PADDING,
-    });
-    graph.setDefaultEdgeLabel(() => ({}));
-
-    spec.nodes.forEach((node) => {
-      graph.setNode(node.id, { width: node.width, height: node.height });
-    });
-    spec.edges.forEach((edge) => {
-      graph.setEdge(edge.source, edge.target);
-    });
-
-    dagreLib.layout(graph);
-    const result = {};
-    graph.nodes().forEach((id) => {
-      const node = graph.node(id);
-      result[id] = {
-        x: node.x - node.width / 2,
-        y: node.y - node.height / 2,
+    groups.fallback.forEach((node, index) => {
+      result[node.id] = {
+        x: 32 + ((index % 2) * (node.width + 24)),
+        y: 32 + (Math.floor(index / 2) * (node.height + 24)),
         width: node.width,
         height: node.height,
       };
     });
+
     return result;
-  }
-
-  function totalWidth(items, gap) {
-    if (!items.length) return 0;
-    return items.reduce((sum, item) => sum + item.width, 0) + (items.length - 1) * gap;
-  }
-
-  function totalHeight(items, gap) {
-    if (!items.length) return 0;
-    return items.reduce((sum, item) => sum + item.height, 0) + (items.length - 1) * gap;
-  }
-
-  function maxWidth(items) {
-    return items.reduce((max, item) => Math.max(max, item.width), 0);
-  }
-
-  function maxHeight(items) {
-    return items.reduce((max, item) => Math.max(max, item.height), 0);
   }
 
   function center(box) {
@@ -477,18 +368,32 @@
 
     if (Math.abs(dx) >= Math.abs(dy)) {
       return {
-        sourceAnchor: { name: dx >= 0 ? "right" : "left" },
-        targetAnchor: { name: dx >= 0 ? "left" : "right" },
+        sourceSide: dx >= 0 ? "right" : "left",
+        targetSide: dx >= 0 ? "left" : "right",
       };
     }
 
     return {
-      sourceAnchor: { name: dy >= 0 ? "bottom" : "top" },
-      targetAnchor: { name: dy >= 0 ? "top" : "bottom" },
+      sourceSide: dy >= 0 ? "bottom" : "top",
+      targetSide: dy >= 0 ? "top" : "bottom",
     };
   }
 
-  function combinedEdgeGeometry(edgeId, positions) {
+  function buildOrthogonalPoints(sourceBox, targetBox) {
+    const anchors = anchorForPair(sourceBox, targetBox);
+    const source = pointOnBox(sourceBox, anchors.sourceSide);
+    const target = pointOnBox(targetBox, anchors.targetSide);
+
+    if (anchors.sourceSide === "left" || anchors.sourceSide === "right") {
+      const midX = (source.x + target.x) / 2;
+      return [source, { x: midX, y: source.y }, { x: midX, y: target.y }, target];
+    }
+
+    const midY = (source.y + target.y) / 2;
+    return [source, { x: source.x, y: midY }, { x: target.x, y: midY }, target];
+  }
+
+  function combinedEdgeGeometry(edgeId, positions, viewport) {
     const solar = positions["combined-solarNode"];
     const battery1 = positions["combined-battery1Node"];
     const inverter1 = positions["combined-inverter1Node"];
@@ -500,151 +405,232 @@
     const tesla = positions["combined-teslaNode"];
     const switchboardBottomY = switchboard ? switchboard.y + switchboard.height : 0;
     const inverterBusY = switchboardBottomY + 34;
+    const switchboardCenter = switchboard ? center(switchboard) : { x: 0, y: 0 };
+    const guideInset = 12;
 
     if (edgeId === "combined-lineGridToSwitchboard") {
-      return {
-        source: pointOnBox(grid, "bottom"),
-        target: pointOnBox(switchboard, "top"),
-      };
+      return [pointOnBox(grid, "bottom"), pointOnBox(switchboard, "top")];
+    }
+    if (edgeId === "combined-lineSwitchboardMeasureLeft") {
+      return [{ x: switchboardCenter.x, y: switchboardCenter.y }, { x: guideInset, y: switchboardCenter.y }];
+    }
+    if (edgeId === "combined-lineSwitchboardMeasureRight") {
+      return [{ x: switchboardCenter.x, y: switchboardCenter.y }, { x: viewport.width - guideInset, y: switchboardCenter.y }];
     }
     if (edgeId === "combined-lineSolarToBattery1") {
-      return {
-        source: pointOnBox(solar, "bottom"),
-        target: pointOnBox(battery1, "top"),
-      };
+      return [pointOnBox(solar, "bottom"), pointOnBox(battery1, "top")];
     }
     if (edgeId === "combined-lineSolarToInverter1A") {
       const elbowX = inverter1.x - 24;
-      return {
-        source: pointOnBox(solar, "right"),
-        target: { x: elbowX, y: center(solar).y },
-      };
+      return [pointOnBox(solar, "right"), { x: elbowX, y: center(solar).y }];
     }
     if (edgeId === "combined-lineSolarToInverter1B") {
       const elbowX = inverter1.x - 24;
-      return {
-        source: { x: elbowX, y: center(solar).y },
-        target: pointOnBox(inverter1, "left"),
-        vertices: [{ x: elbowX, y: center(inverter1).y }],
-      };
+      return [{ x: elbowX, y: center(solar).y }, { x: elbowX, y: center(inverter1).y }, pointOnBox(inverter1, "left")];
     }
     if (edgeId === "combined-lineBattery1ToInverter1") {
-      return {
-        source: pointOnBox(battery1, "right"),
-        target: pointOnBox(inverter1, "left"),
-      };
+      return [pointOnBox(battery1, "right"), pointOnBox(inverter1, "left")];
     }
     if (edgeId === "combined-lineBattery2ToInverter2") {
-      return {
-        source: pointOnBox(battery2, "left"),
-        target: pointOnBox(inverter2, "right"),
-      };
+      return [pointOnBox(battery2, "left"), pointOnBox(inverter2, "right")];
     }
     if (edgeId === "combined-lineInverter1ToSwitchboardA") {
       const source = pointOnBox(inverter1, "top", 24);
-      return {
-        source,
-        target: { x: source.x, y: inverterBusY },
-      };
+      return [source, { x: source.x, y: inverterBusY }];
     }
     if (edgeId === "combined-lineInverter1ToSwitchboardB") {
       const source = { x: center(inverter1).x + 24, y: inverterBusY };
       const target = pointOnBox(switchboard, "bottom", -52);
-      return {
-        source,
-        target,
-        vertices: [{ x: target.x, y: inverterBusY }],
-      };
+      return [source, { x: target.x, y: inverterBusY }, target];
     }
     if (edgeId === "combined-lineInverter2ToSwitchboardA") {
       const source = pointOnBox(inverter2, "top", -24);
-      return {
-        source,
-        target: { x: source.x, y: inverterBusY },
-      };
+      return [source, { x: source.x, y: inverterBusY }];
     }
     if (edgeId === "combined-lineInverter2ToSwitchboardB") {
       const source = { x: center(inverter2).x - 24, y: inverterBusY };
       const target = pointOnBox(switchboard, "bottom", 52);
-      return {
-        source,
-        target,
-        vertices: [{ x: target.x, y: inverterBusY }],
-      };
+      return [source, { x: target.x, y: inverterBusY }, target];
     }
     if (edgeId === "combined-lineSwitchboardToHomeLoad") {
-      return {
-        source: pointOnBox(switchboard, "right"),
-        target: pointOnBox(load, "left"),
-      };
+      const trunkX = load.x - 22;
+      const source = pointOnBox(switchboard, "right", -26);
+      const target = pointOnBox(load, "left", -18);
+      return [
+        source,
+        { x: trunkX, y: source.y },
+        { x: trunkX, y: target.y },
+        target,
+      ];
     }
     if (edgeId === "combined-lineSwitchboardToTeslaA") {
-      const trunkX = tesla.x - 18;
-      return {
-        source: pointOnBox(switchboard, "right"),
-        target: { x: trunkX, y: center(switchboard).y },
-      };
+      const trunkX = tesla.x - 22;
+      const source = pointOnBox(switchboard, "right", 26);
+      return [source, { x: trunkX, y: source.y }];
     }
     if (edgeId === "combined-lineSwitchboardToTeslaB") {
-      const trunkX = tesla.x - 18;
-      return {
-        source: { x: trunkX, y: center(switchboard).y },
-        target: pointOnBox(tesla, "left"),
-        vertices: [{ x: trunkX, y: center(tesla).y }],
-      };
+      const trunkX = tesla.x - 22;
+      const sourceY = pointOnBox(switchboard, "right", 26).y;
+      const target = pointOnBox(tesla, "left", 18);
+      return [{ x: trunkX, y: sourceY }, { x: trunkX, y: target.y }, target];
     }
     return null;
   }
 
-  function edgeAttrs(active, reverse) {
-    const stroke = active ? EDGE_ACTIVE_COLOR : EDGE_INACTIVE_COLOR;
-    const marker = active
-      ? {
-          name: "path",
-          args: {
-            d: EDGE_ARROW_PATH,
-            fill: EDGE_ACTIVE_COLOR,
-            stroke: EDGE_ACTIVE_COLOR,
-          },
-        }
-      : null;
+  function flattenPoints(points) {
+    const out = [];
+    points.forEach((point) => {
+      out.push(point.x, point.y);
+    });
+    return out;
+  }
 
-    return {
-      line: {
-        stroke,
-        strokeWidth: active ? 3 : 2,
-        targetMarker: reverse ? null : marker,
-        sourceMarker: reverse ? marker : null,
-      },
-      outline: {
-        stroke: active ? EDGE_ACTIVE_GLOW : "transparent",
-        strokeWidth: active ? 8 : 0,
-      },
+  function polylineMidpoint(points) {
+    if (!Array.isArray(points) || !points.length) return { x: 0, y: 0 };
+    if (points.length === 1) return points[0];
+    let total = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      total += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+    }
+    let walked = 0;
+    const target = total / 2;
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1];
+      const b = points[i];
+      const seg = Math.hypot(b.x - a.x, b.y - a.y);
+      if (walked + seg >= target) {
+        const ratio = seg === 0 ? 0 : (target - walked) / seg;
+        return {
+          x: a.x + ((b.x - a.x) * ratio),
+          y: a.y + ((b.y - a.y) * ratio),
+        };
+      }
+      walked += seg;
+    }
+    return points[points.length - 1];
+  }
+
+  function expandBounds(bounds, x, y) {
+    bounds.minX = Math.min(bounds.minX, x);
+    bounds.maxX = Math.max(bounds.maxX, x);
+    bounds.minY = Math.min(bounds.minY, y);
+    bounds.maxY = Math.max(bounds.maxY, y);
+  }
+
+  function computeContentBounds(nodes, edgesById) {
+    const bounds = {
+      minX: Number.POSITIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
     };
+
+    nodes.forEach((node) => {
+      expandBounds(bounds, node.x, node.y);
+      expandBounds(bounds, node.x + node.width, node.y + node.height);
+    });
+
+    edgesById.forEach((edgeMeta) => {
+      edgeMeta.points.forEach((point) => {
+        expandBounds(bounds, point.x, point.y);
+      });
+    });
+
+    if (!Number.isFinite(bounds.minX)) {
+      return { minX: 0, minY: 0, maxX: 1, maxY: 1, width: 1, height: 1 };
+    }
+
+    bounds.width = Math.max(1, bounds.maxX - bounds.minX);
+    bounds.height = Math.max(1, bounds.maxY - bounds.minY);
+    return bounds;
+  }
+
+  function drawPolyline(ctx, points, stroke, lineWidth, dashed) {
+    if (!Array.isArray(points) || points.length < 2) return;
+    ctx.beginPath();
+    ctx.setLineDash(dashed ? [6, 6] : []);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.lineWidth = lineWidth;
+    ctx.strokeStyle = stroke;
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i += 1) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+    ctx.stroke();
+  }
+
+  function drawArrowHead(ctx, from, to, fill) {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const length = Math.hypot(dx, dy);
+    if (!length) return;
+    const ux = dx / length;
+    const uy = dy / length;
+    const size = 10;
+    const width = 5;
+    const baseX = to.x - (ux * size);
+    const baseY = to.y - (uy * size);
+    const px = -uy;
+    const py = ux;
+
+    ctx.beginPath();
+    ctx.moveTo(to.x, to.y);
+    ctx.lineTo(baseX + (px * width), baseY + (py * width));
+    ctx.lineTo(baseX - (px * width), baseY - (py * width));
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
   }
 
   class EnergyFlowDiagram {
     constructor(options) {
       this.container = options.container;
       this.spec = options.spec;
-      this.edgeCellById = new Map();
-      this.labelEdgeById = new Map();
-      this.graph = new Graph({
-        container: this.container,
-        grid: false,
-        background: false,
-        interacting: false,
-        panning: false,
-        mousewheel: false,
-      });
+      this.edgeStateById = new Map();
+      this.edgeMetaById = new Map();
+      this.labelMetaById = new Map();
+      this.lastPositions = {};
+      this.lastViewport = null;
+      this.contentBounds = { minX: 0, minY: 0, maxX: 1, maxY: 1, width: 1, height: 1 };
+      this.scale = 1;
+      this.translateX = 0;
+      this.translateY = 0;
+      this.buildShell();
       this.resizeObserver = new ResizeObserver(() => this.fit());
       this.resizeObserver.observe(this.container);
       this.render();
     }
 
+    buildShell() {
+      this.container.innerHTML = "";
+
+      this.scene = document.createElement("div");
+      this.scene.className = "efd-scene";
+
+      this.canvas = document.createElement("canvas");
+      this.canvas.className = "efd-canvas";
+
+      this.overlay = document.createElement("div");
+      this.overlay.className = "efd-overlay";
+
+      this.labelLayer = document.createElement("div");
+      this.labelLayer.className = "efd-label-layer";
+
+      this.nodeLayer = document.createElement("div");
+      this.nodeLayer.className = "efd-node-layer";
+
+      this.overlay.appendChild(this.labelLayer);
+      this.overlay.appendChild(this.nodeLayer);
+      this.scene.appendChild(this.canvas);
+      this.scene.appendChild(this.overlay);
+      this.container.appendChild(this.scene);
+      this.ctx = this.canvas.getContext("2d");
+    }
+
     render() {
-      this.edgeCellById.clear();
-      this.labelEdgeById.clear();
+      this.edgeMetaById.clear();
+      this.labelMetaById.clear();
 
       const nodes = this.spec.nodes.map((node) => ({
         ...node,
@@ -655,105 +641,177 @@
         nodes,
         edges: this.spec.edges,
         viewport: this.spec.viewport || { width: 1040, height: 700 },
-        rankdir: this.spec.rankdir,
       };
-      const positions = this.spec.layout === "hub" ? layoutHub(layoutInput) : this.spec.layout === "power" ? layoutPower(layoutInput) : layoutDagre(layoutInput);
+      const positions = this.spec.layout === "hub" ? layoutHub(layoutInput) : layoutPower(layoutInput);
+      this.lastPositions = positions;
+      this.lastViewport = layoutInput.viewport;
 
-      const cells = [];
+      this.renderNodes(nodes, positions);
+      this.buildEdges(positions, layoutInput.viewport);
+      this.contentBounds = computeContentBounds(Object.values(positions), this.edgeMetaById);
+      this.fit();
+    }
+
+    renderNodes(nodes, positions) {
+      this.nodeLayer.innerHTML = "";
       nodes.forEach((node) => {
         const position = positions[node.id];
-        cells.push(this.graph.createNode({
-          id: node.id,
-          shape: CARD_SHAPE,
-          x: position?.x || 0,
-          y: position?.y || 0,
-          width: node.width,
-          height: node.height,
-          data: {
-            kind: node.kind,
-            icon: node.icon,
-            title: node.title,
-            titleKey: node.titleKey,
-            lines: node.lines,
-          },
-        }));
+        const nodeEl = document.createElement("div");
+        nodeEl.className = "efd-node-shell";
+        nodeEl.style.left = `${position?.x || 0}px`;
+        nodeEl.style.top = `${position?.y || 0}px`;
+        nodeEl.style.width = `${node.width}px`;
+        nodeEl.style.height = `${node.height}px`;
+        nodeEl.innerHTML = renderNodeBody({
+          kind: node.kind,
+          icon: node.icon,
+          title: node.title,
+          titleKey: node.titleKey,
+          lines: node.lines,
+        });
+        this.nodeLayer.appendChild(nodeEl);
       });
+    }
 
+    buildEdges(positions, viewport) {
+      this.labelLayer.innerHTML = "";
       this.spec.edges.forEach((edge) => {
         const sourceBox = positions[edge.source];
         const targetBox = positions[edge.target];
-        const attrs = edgeAttrs(false, false);
-        const geometry = this.spec.layout === "power" ? combinedEdgeGeometry(edge.id, positions) : null;
-        const anchors = geometry ? null : anchorForPair(sourceBox, targetBox);
-        const edgeCell = this.graph.createEdge({
+        const points = this.spec.layout === "power"
+          ? (combinedEdgeGeometry(edge.id, positions, viewport) || buildOrthogonalPoints(sourceBox, targetBox))
+          : buildOrthogonalPoints(sourceBox, targetBox);
+        const labelPoint = polylineMidpoint(points);
+        this.edgeMetaById.set(edge.id, {
           id: edge.id,
-          source: geometry?.source || { cell: edge.source, anchor: anchors.sourceAnchor },
-          target: geometry?.target || { cell: edge.target, anchor: anchors.targetAnchor },
-          vertices: geometry?.vertices || [],
-          router: geometry ? { name: "normal" } : { name: "orth" },
-          connector: { name: "rounded", args: { radius: 14 } },
-          attrs,
-          zIndex: 0,
+          points,
+          flattened: flattenPoints(points),
+          measurement: Boolean(edge.measurement),
+          labelId: edge.labelId || null,
         });
-        cells.push(edgeCell);
-      });
+        this.edgeStateById.set(edge.id, {
+          active: false,
+          reverse: false,
+        });
 
-      this.graph.resetCells(cells);
-      this.spec.edges.forEach((edge) => {
-        const edgeCell = this.graph.getCellById(edge.id);
-        this.edgeCellById.set(edge.id, edgeCell);
-        if (edge.labelId) this.labelEdgeById.set(edge.labelId, edgeCell);
+        if (edge.labelId) {
+          const labelEl = document.createElement("div");
+          labelEl.id = edge.labelId;
+          labelEl.className = "flow-line-value";
+          labelEl.textContent = "-";
+          labelEl.style.left = `${labelPoint.x}px`;
+          labelEl.style.top = `${labelPoint.y}px`;
+          this.labelLayer.appendChild(labelEl);
+          this.labelMetaById.set(edge.labelId, {
+            edgeId: edge.id,
+            point: labelPoint,
+            element: labelEl,
+          });
+        }
       });
-      this.fit();
     }
 
     fit() {
       const rect = this.container.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      this.graph.resize(rect.width, rect.height);
-      const fitPadding = this.spec.layout === "power"
-        ? {
-            top: DEFAULT_PADDING,
-            right: 240,
-            bottom: DEFAULT_PADDING,
-            left: 8,
+      if (!rect.width || !rect.height || !this.ctx) return;
+
+      const dpr = global.devicePixelRatio || 1;
+      this.canvas.width = Math.round(rect.width * dpr);
+      this.canvas.height = Math.round(rect.height * dpr);
+      this.canvas.style.width = `${rect.width}px`;
+      this.canvas.style.height = `${rect.height}px`;
+
+      const paddedWidth = this.contentBounds.width + (DEFAULT_PADDING * 2);
+      const paddedHeight = this.contentBounds.height + (DEFAULT_PADDING * 2);
+      this.scale = Math.min(rect.width / paddedWidth, rect.height / paddedHeight);
+      if (!Number.isFinite(this.scale) || this.scale <= 0) this.scale = 1;
+
+      const scaledWidth = paddedWidth * this.scale;
+      const scaledHeight = paddedHeight * this.scale;
+      const outerOffsetX = (rect.width - scaledWidth) / 2;
+      const outerOffsetY = (rect.height - scaledHeight) / 2;
+
+      this.translateX = outerOffsetX + (DEFAULT_PADDING * this.scale) - (this.contentBounds.minX * this.scale);
+      this.translateY = outerOffsetY + (DEFAULT_PADDING * this.scale) - (this.contentBounds.minY * this.scale);
+
+      this.overlay.style.transform = `translate(${this.translateX}px, ${this.translateY}px) scale(${this.scale})`;
+      this.redraw(dpr);
+    }
+
+    redraw(dpr) {
+      const ctx = this.ctx;
+      if (!ctx) return;
+      const width = this.canvas.width / dpr;
+      const height = this.canvas.height / dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      ctx.translate(this.translateX, this.translateY);
+      ctx.scale(this.scale, this.scale);
+
+      this.spec.edges.forEach((edge) => {
+        const meta = this.edgeMetaById.get(edge.id);
+        const state = this.edgeStateById.get(edge.id) || { active: false, reverse: false };
+        if (!meta) return;
+
+        if (meta.measurement) {
+          drawPolyline(ctx, meta.points, "#6b7d74", 1.5, true);
+          return;
+        }
+
+        if (state.active) {
+          drawPolyline(ctx, meta.points, EDGE_ACTIVE_GLOW, 8, false);
+        }
+        drawPolyline(ctx, meta.points, state.active ? EDGE_ACTIVE_COLOR : EDGE_INACTIVE_COLOR, state.active ? 3 : 2, false);
+
+        if (state.active && meta.points.length >= 2) {
+          if (state.reverse) {
+            drawArrowHead(ctx, meta.points[1], meta.points[0], EDGE_ACTIVE_COLOR);
+          } else {
+            const last = meta.points.length - 1;
+            drawArrowHead(ctx, meta.points[last - 1], meta.points[last], EDGE_ACTIVE_COLOR);
           }
-        : {
-            top: DEFAULT_PADDING,
-            right: DEFAULT_PADDING,
-            bottom: DEFAULT_PADDING,
-            left: DEFAULT_PADDING,
-          };
-      this.graph.zoomToFit({
-        padding: fitPadding,
-        maxScale: 1,
+        }
       });
-      if (this.spec.layout !== "power") {
-        this.graph.centerContent();
-      }
     }
 
     setEdgeState(edgeId, active, reverse) {
-      const edgeCell = this.edgeCellById.get(edgeId);
-      if (!edgeCell) return false;
-      edgeCell.attr(edgeAttrs(Boolean(active), Boolean(reverse)));
+      if (!this.edgeMetaById.has(edgeId)) return false;
+      this.edgeStateById.set(edgeId, {
+        active: Boolean(active),
+        reverse: Boolean(reverse),
+      });
+      this.redraw(global.devicePixelRatio || 1);
       return true;
     }
 
     setEdgeLabel(labelId, text, active) {
-      const edgeCell = this.labelEdgeById.get(labelId);
-      if (!edgeCell) return false;
+      const meta = this.labelMetaById.get(labelId);
+      if (!meta) return false;
       if (!active || text === null || text === undefined || text === "-") {
-        edgeCell.setLabels([]);
+        meta.element.textContent = "-";
+        meta.element.classList.remove("active");
         return true;
       }
-      edgeCell.setLabels(createLabelConfig(text));
+      meta.element.textContent = String(text);
+      meta.element.classList.add("active");
       return true;
+    }
+
+    getNodeMetrics(nodeId) {
+      const box = this.lastPositions?.[nodeId];
+      if (!box) return null;
+      return {
+        ...box,
+        centerX: center(box).x,
+        centerY: center(box).y,
+        viewportWidth: this.lastViewport?.width || 0,
+        viewportHeight: this.lastViewport?.height || 0,
+      };
     }
 
     dispose() {
       this.resizeObserver.disconnect();
-      this.graph.dispose();
+      this.container.innerHTML = "";
     }
   }
 
