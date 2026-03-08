@@ -1518,6 +1518,16 @@ td {
   font-weight: 600;
 }
 
+.raw-meta-link {
+  color: #1d5f3f;
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.raw-meta-link:hover {
+  color: #0f452b;
+}
+
 .raw-status-badge {
   display: inline-flex;
   align-items: center;
@@ -1537,6 +1547,12 @@ td {
   background: #fde7e9;
   color: #b42a3a;
   border: 1px solid #efb5bc;
+}
+
+.raw-status-badge.stale {
+  background: #fff3d9;
+  color: #8b5a00;
+  border: 1px solid #e6c27a;
 }
 
 .raw-time-ago {

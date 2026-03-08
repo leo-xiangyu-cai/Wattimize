@@ -263,6 +263,8 @@ const I18N = {
     workerLogsTitle: "Worker API Logs",
     workerLogsSystemLabel: "System",
     workerLogsSystemAll: "All",
+    workerLogsServiceLabel: "Service",
+    workerLogsServiceAll: "All",
     workerLogsTableTime: "Time (UTC)",
     workerLogsTableSystem: "System",
     workerLogsTableService: "Service",
@@ -343,9 +345,11 @@ const I18N = {
     endpointOk: "OK",
     endpointError: "Error",
     endpointPath: "Path",
+    endpointUrl: "URL",
     rawStatusLabel: "Status",
     rawStatusSuccess: "Success",
     rawStatusFailed: "Failed",
+    rawStatusStale: "Stale",
     rawLastRequest: "Last request",
     rawLastSuccess: "Last success",
     rawLatency: "Latency",
@@ -622,6 +626,8 @@ const I18N = {
     workerLogsTitle: "Worker API 日志",
     workerLogsSystemLabel: "系统",
     workerLogsSystemAll: "全部",
+    workerLogsServiceLabel: "服务",
+    workerLogsServiceAll: "全部",
     workerLogsTableTime: "时间 (UTC)",
     workerLogsTableSystem: "系统",
     workerLogsTableService: "服务",
@@ -702,9 +708,11 @@ const I18N = {
     endpointOk: "成功",
     endpointError: "错误",
     endpointPath: "路径",
+    endpointUrl: "完整地址",
     rawStatusLabel: "状态",
     rawStatusSuccess: "成功",
     rawStatusFailed: "失败",
+    rawStatusStale: "已过期",
     rawLastRequest: "上次请求",
     rawLastSuccess: "最后成功",
     rawLatency: "耗时",
@@ -764,6 +772,7 @@ const workerLogsPager = {
   hasNext: false,
   hasPrev: false,
 };
+let workerLogsDefaultsApplied = false;
 const PAGE_SIZE = 80;
 const SAMPLING_PAGE_SIZE = 100;
 const AUTO_REFRESH_KEY = "autoRefreshSeconds";
@@ -1106,8 +1115,7 @@ function getAutoRefreshSeconds() {
 }
 
 function getSamplingTimezone() {
-  const saved = localStorage.getItem(SAMPLING_TIMEZONE_KEY);
-  return saved === "utc" ? "utc" : "local";
+  return "local";
 }
 
 function t(key, params = {}) {
@@ -1142,6 +1150,7 @@ function monthLabel(month) {
 function wattsToKwText(value, digits = 2) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "-";
+  if (Math.abs(n) < 1000) return `${Math.round(n)} W`;
   return `${(n / 1000).toFixed(digits)} kW`;
 }
 
@@ -1212,43 +1221,37 @@ function flowId(system, key) {
 }
 
 function formatUpdatedAt(isoText) {
-  if (!isoText) return `${t("updatedAt")}: -`;
-  const dt = new Date(isoText);
-  if (Number.isNaN(dt.getTime())) return `${t("updatedAt")}: -`;
-  return `${t("updatedAt")}: ${dt.toLocaleString()}`;
+  return `${t("updatedAt")}: ${formatDateTimeWithAgo(isoText)}`;
 }
 
-function formatSamplingDateTime(isoText) {
+function formatNoWrapText(text) {
+  return String(text || "").replaceAll(" ", "\u00A0");
+}
+
+function formatDateTimeWithAgo(isoText, options = {}) {
   if (!isoText) return "-";
   const dt = new Date(isoText);
   if (Number.isNaN(dt.getTime())) return "-";
-  if (samplingTimezone === "utc") {
-    return dt.toISOString().replace("T", " ").slice(0, 19) + " UTC";
-  }
-  return dt.toLocaleString();
+  const absoluteText = dt.toLocaleString();
+  const agoText = formatRelativeAgo(isoText);
+  const combined = agoText && agoText !== "-" ? `${absoluteText} (${agoText})` : absoluteText;
+  return formatNoWrapText(combined);
+}
+
+function formatSamplingDateTime(isoText) {
+  return formatDateTimeWithAgo(isoText);
 }
 
 function formatSamplingClock(value, withZone = false) {
   const dt = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(dt.getTime())) return "-";
-  let text;
-  if (samplingTimezone === "utc") {
-    const hh = String(dt.getUTCHours()).padStart(2, "0");
-    const mm = String(dt.getUTCMinutes()).padStart(2, "0");
-    text = `${hh}:${mm}`;
-  } else {
-    text = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-  }
+  const text = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
   if (!withZone) return text;
-  const zoneText = samplingTimezone === "utc" ? t("samplingTimezoneUtc") : t("samplingTimezoneLocal");
-  return `${text} ${zoneText}`;
+  return `${text} ${t("samplingTimezoneLocal")}`;
 }
 
 function formatLocalDateTime(isoText) {
-  if (!isoText) return "-";
-  const dt = new Date(isoText);
-  if (Number.isNaN(dt.getTime())) return "-";
-  return dt.toLocaleString();
+  return formatDateTimeWithAgo(isoText);
 }
 
 function escapeHtml(value) {
@@ -1448,13 +1451,18 @@ async function openConfigModal() {
 
 function formatPowerKwFromWatts(watts) {
   if (watts === null || watts === undefined) return "-";
-  return `${(Number(watts) / 1000).toFixed(3)} kW`;
+  const value = Number(watts);
+  if (!Number.isFinite(value)) return "-";
+  if (Math.abs(value) < 1000) return `${Math.round(value)} W`;
+  return `${(value / 1000).toFixed(3)} kW`;
 }
 
 function formatSignedKwFromWatts(watts) {
   if (watts === null || watts === undefined) return "-";
   const value = Number(watts);
+  if (!Number.isFinite(value)) return "-";
   const sign = value >= 0 ? "+" : "-";
+  if (Math.abs(value) < 1000) return `${sign}${Math.round(Math.abs(value))} W`;
   return `${sign}${Math.abs(value / 1000).toFixed(3)} kW`;
 }
 
@@ -1467,6 +1475,8 @@ const BATTERY_MIN_DISCHARGE_SOC = {
   saj: 20,
   solplanet: 10,
 };
+
+const POWER_FLOW_ACTIVE_THRESHOLD_W = 30;
 
 function formatTrimmedDecimal(value, digits = 1) {
   const fixed = Number(value).toFixed(digits);
@@ -1491,8 +1501,8 @@ function formatBatteryRuntimeText(system, batterySoc, batteryW) {
 
   const powerW = Number(batteryW);
   if (!Number.isFinite(powerW)) return t("batteryRuntimeNoData");
-  if (powerW < -5) return t("batteryRuntimeCharging");
-  if (Math.abs(powerW) <= 5) return t("batteryRuntimeIdle");
+  if (powerW <= -POWER_FLOW_ACTIVE_THRESHOLD_W) return t("batteryRuntimeCharging");
+  if (Math.abs(powerW) < POWER_FLOW_ACTIVE_THRESHOLD_W) return t("batteryRuntimeIdle");
 
   const clampedSoc = Math.max(0, Math.min(100, Number(batterySoc)));
   const usableSoc = Math.max(0, clampedSoc - minDischargeSoc);
@@ -1650,10 +1660,7 @@ function buildCombinedDiagramSpec() {
         titleKey: "switchboardTitle",
         width: 208,
         height: 152,
-        lines: [
-          { id: "combined-switchboardValue", className: "node-value", text: "-" },
-          { id: "combined-switchboardState", className: "node-state muted", text: "-" },
-        ],
+        lines: [],
       },
       {
         id: "combined-loadNode",
@@ -1759,15 +1766,12 @@ function buildCombinedDiagramSpec() {
     edges: [
       { id: "combined-lineGridToSwitchboard", source: "combined-gridNode", target: "combined-switchboardNode", labelId: "combined-flowLabelGridToSwitchboard" },
       { id: "combined-lineSolarToBattery1", source: "combined-solarNode", target: "combined-battery1Node", labelId: "combined-flowLabelSolarToBattery1" },
-      { id: "combined-lineSolarToInverter1A", source: "combined-solarNode", target: "combined-inverter1Node" },
       { id: "combined-lineSolarToInverter1B", source: "combined-solarNode", target: "combined-inverter1Node", labelId: "combined-flowLabelSolarToInverter1" },
       { id: "combined-lineSwitchboardToHomeLoad", source: "combined-switchboardNode", target: "combined-loadNode", labelId: "combined-flowLabelSwitchboardToHomeLoad" },
       { id: "combined-lineSwitchboardToTeslaB", source: "combined-switchboardNode", target: "combined-teslaNode", labelId: "combined-flowLabelSwitchboardToTesla" },
       { id: "combined-lineBattery1ToInverter1", source: "combined-battery1Node", target: "combined-inverter1Node", labelId: "combined-flowLabelBattery1ToInverter1" },
       { id: "combined-lineBattery2ToInverter2", source: "combined-battery2Node", target: "combined-inverter2Node", labelId: "combined-flowLabelBattery2ToInverter2" },
-      { id: "combined-lineInverter1ToSwitchboardA", source: "combined-inverter1Node", target: "combined-switchboardNode" },
       { id: "combined-lineInverter1ToSwitchboardB", source: "combined-inverter1Node", target: "combined-switchboardNode", labelId: "combined-flowLabelInverter1ToSwitchboard" },
-      { id: "combined-lineInverter2ToSwitchboardA", source: "combined-inverter2Node", target: "combined-switchboardNode" },
       { id: "combined-lineInverter2ToSwitchboardB", source: "combined-inverter2Node", target: "combined-switchboardNode", labelId: "combined-flowLabelInverter2ToSwitchboard" },
     ],
   };
@@ -1796,9 +1800,9 @@ function refreshFlowDiagrams() {
   });
 }
 
-function setFlowLine(id, active, reverse = false) {
+function setFlowLine(id, active, reverse = false, theme = "default") {
   const diagram = flowDiagrams.byEdgeId.get(id);
-  if (diagram && diagram.setEdgeState(id, active, reverse)) return;
+  if (diagram && diagram.setEdgeState(id, active, reverse, theme)) return;
   const el = document.getElementById(id);
   if (!el) return;
   el.classList.toggle("active", Boolean(active));
@@ -2004,10 +2008,15 @@ function renderEnergyFlow(system, flowPayload) {
   setText(flowId(system, "solarState"), solarActive ? t("stateProducing") : t("stateIdle"));
   setFlowLine(flowId(system, "lineSolar"), solarActive, false);
 
-  const gridActive = Boolean(metrics.grid_active);
-  const gridImport = Boolean(metrics.grid_import);
+  const gridActive = gridW !== null && Math.abs(gridW) >= POWER_FLOW_ACTIVE_THRESHOLD_W;
+  const gridImport = gridW !== null && gridW > 0;
   setText(flowId(system, "gridState"), gridActive ? (gridImport ? t("stateImporting") : t("stateExporting")) : t("stateIdle"));
-  setFlowLine(flowId(system, "lineGrid"), gridActive, !gridImport);
+  setFlowLine(
+    flowId(system, "lineGrid"),
+    gridActive,
+    !gridImport,
+    gridImport ? "gridImport" : "gridExport",
+  );
   if (gridActive) {
     setModeClass(flowId(system, "gridPowerValue"), gridImport ? "positive" : "negative");
     setModeClass(flowId(system, "gridState"), gridImport ? "positive" : "negative");
@@ -2039,7 +2048,12 @@ function renderEnergyFlow(system, flowPayload) {
     setModeClass(flowId(system, "batteryPowerValue"), "");
     setModeClass(flowId(system, "batteryState"), "");
   }
-  setFlowLine(flowId(system, "lineBattery"), batteryActive, batteryDischarging);
+  setFlowLine(
+    flowId(system, "lineBattery"),
+    batteryActive,
+    batteryDischarging,
+    batteryDischarging ? "batteryDischarge" : "batteryCharge",
+  );
 
   renderBatterySocDisplay({
     system,
@@ -2076,23 +2090,21 @@ function renderEnergyFlow(system, flowPayload) {
 }
 
 function setFlowValueLabel(id, wattsValue, active) {
+  const hasValue = wattsValue !== null && wattsValue !== undefined && !Number.isNaN(Number(wattsValue));
   const diagram = flowDiagrams.byLabelId.get(id);
   if (diagram) {
-    const text =
-      !active || wattsValue === null || wattsValue === undefined || Number.isNaN(Number(wattsValue))
-        ? "-"
-        : formatPowerKwFromWatts(Math.abs(Number(wattsValue)));
+    const text = hasValue ? formatPowerKwFromWatts(Math.abs(Number(wattsValue))) : "-";
     if (diagram.setEdgeLabel(id, text, active)) return;
   }
   const el = document.getElementById(id);
   if (!el) return;
-  if (!active || wattsValue === null || wattsValue === undefined || Number.isNaN(Number(wattsValue))) {
+  if (!hasValue) {
     el.textContent = "-";
     el.classList.remove("active");
     return;
   }
   el.textContent = formatPowerKwFromWatts(Math.abs(Number(wattsValue)));
-  el.classList.add("active");
+  el.classList.toggle("active", Boolean(active));
 }
 
 function setFlowTextLabel(id, text, active = true) {
@@ -2336,16 +2348,16 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
     currentLang === "zh" ? `来源: ${teslaInfo?.voltageEntityId || "-"}` : `Source: ${teslaInfo?.voltageEntityId || "-"}`,
   );
 
-  const solarActive = solarW !== null && solarW > 5;
+  const solarActive = solarW !== null && solarW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   setText("combined-solarState", solarActive ? t("stateProducing") : t("stateIdle"));
-  const gridActive = gridW !== null && Math.abs(gridW) > 5;
+  const gridActive = gridW !== null && Math.abs(gridW) >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const gridImport = gridW !== null && gridW > 0;
   setText("combined-gridState", gridActive ? (gridImport ? t("stateImporting") : t("stateExporting")) : t("stateIdle"));
-  const switchboardActive = solarActive || gridActive || (totalLoadW !== null && totalLoadW > 5);
+  const switchboardActive = solarActive || gridActive || (totalLoadW !== null && totalLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W);
   setText("combined-switchboardState", switchboardActive ? t("switchboardStateActive") : t("switchboardStateIdle"));
-  const loadActive = homeLoadW !== null && homeLoadW > 5;
-  const totalLoadActive = totalLoadW !== null && totalLoadW > 5;
-  const teslaChargingActive = teslaChargingW !== null && teslaChargingW > 5;
+  const loadActive = homeLoadW !== null && homeLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
+  const totalLoadActive = totalLoadW !== null && totalLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
+  const teslaChargingActive = teslaChargingW !== null && teslaChargingW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   setText("combined-loadState", loadActive ? t("stateConsuming") : t("stateIdle"));
   setText("combined-teslaChargingState", teslaChargingActive ? t("stateCharging") : t("stateIdle"));
   setModeClass("combined-teslaChargingValue", teslaChargingActive ? "positive" : "");
@@ -2353,31 +2365,43 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   setFlowLine("combined-lineSwitchboardToHomeLoad", loadActive, false);
   setFlowLine("combined-lineSwitchboardToTeslaB", teslaChargingActive, false);
 
-  const battery1Active = battery1W !== null && Math.abs(battery1W) > 5;
+  const battery1Active = battery1W !== null && Math.abs(battery1W) >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const battery1Discharging = battery1W !== null && battery1W > 0;
   setText("combined-battery1State", battery1Active ? (battery1Discharging ? t("stateDischarging") : t("stateCharging")) : t("stateBatteryIdle"));
-  setFlowLine("combined-lineBattery1ToInverter1", battery1Active, !battery1Discharging);
+  setFlowLine(
+    "combined-lineBattery1ToInverter1",
+    battery1Active,
+    !battery1Discharging,
+    battery1Discharging ? "batteryDischarge" : "batteryCharge",
+  );
 
-  const battery2Active = battery2W !== null && Math.abs(battery2W) > 5;
+  const battery2Active = battery2W !== null && Math.abs(battery2W) >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const battery2Discharging = battery2W !== null && battery2W > 0;
   setText("combined-battery2State", battery2Active ? (battery2Discharging ? t("stateDischarging") : t("stateCharging")) : t("stateBatteryIdle"));
-  setFlowLine("combined-lineBattery2ToInverter2", battery2Active, battery2Discharging);
+  setFlowLine(
+    "combined-lineBattery2ToInverter2",
+    battery2Active,
+    !battery2Discharging,
+    battery2Discharging ? "batteryDischarge" : "batteryCharge",
+  );
 
-  const inverter1Active = inverter1W !== null && Math.abs(inverter1W) > 5;
+  const inverter1Active = inverter1W !== null && Math.abs(inverter1W) >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const inverter1Exporting = inverter1W !== null && inverter1W > 0;
-  const inverter2Active = inverter2W !== null && Math.abs(inverter2W) > 5;
+  const inverter2Active = inverter2W !== null && Math.abs(inverter2W) >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const inverter2Exporting = inverter2W !== null && inverter2W > 0;
-  setFlowLine("combined-lineInverter1ToSwitchboardA", inverter1Active, !inverter1Exporting);
   setFlowLine("combined-lineInverter1ToSwitchboardB", inverter1Active, !inverter1Exporting);
-  setFlowLine("combined-lineInverter2ToSwitchboardA", inverter2Active, !inverter2Exporting);
   setFlowLine("combined-lineInverter2ToSwitchboardB", inverter2Active, !inverter2Exporting);
 
-  const solarToBattery1Active = solarToBattery1W > 5;
-  const solarToInverter1Active = solarToInverter1W > 5;
+  const solarToBattery1Active = solarToBattery1W >= POWER_FLOW_ACTIVE_THRESHOLD_W;
+  const solarToInverter1Active = solarToInverter1W >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   setFlowLine("combined-lineSolarToBattery1", solarToBattery1Active, false);
-  setFlowLine("combined-lineSolarToInverter1A", solarToInverter1Active, false);
   setFlowLine("combined-lineSolarToInverter1B", solarToInverter1Active, false);
-  setFlowLine("combined-lineGridToSwitchboard", gridActive, !gridImport);
+  setFlowLine(
+    "combined-lineGridToSwitchboard",
+    gridActive,
+    !gridImport,
+    gridImport ? "gridImport" : "gridExport",
+  );
 
   renderBatterySocDisplay({
     system: "saj",
@@ -2862,7 +2886,9 @@ function renderSamplingPage(payload) {
 function buildWorkerLogsUrl() {
   const params = new URLSearchParams();
   const system = document.getElementById("workerLogsSystemSelect")?.value || "";
+  const service = document.getElementById("workerLogsServiceSelect")?.value || "";
   if (system) params.set("system", system);
+  if (service) params.set("service", service);
   params.set("page", String(workerLogsPager.page));
   params.set("page_size", "100");
   return `/api/worker/logs?${params.toString()}`;
@@ -2874,7 +2900,7 @@ function renderWorkerLogsRows(items) {
   body.innerHTML = "";
   for (const item of items || []) {
     const tr = document.createElement("tr");
-    const sampledAt = item.requested_at_utc ? new Date(item.requested_at_utc).toLocaleString() : "-";
+    const sampledAt = formatDateTimeWithAgo(item.requested_at_utc);
     const statusText = item.ok ? t("workerLogsStatusOk") : t("workerLogsStatusFailed");
     const statusCode = item.status_code !== null && item.status_code !== undefined ? ` (${item.status_code})` : "";
     const resultText = item.error_text || item.result_text || "";
@@ -3313,6 +3339,25 @@ function formatDashboardUsageInline(usages) {
   return `<div class="raw-dashboard-note">${t("rawExplainUsedBy")}: ${formatDashboardUsageList(usages)}</div>`;
 }
 
+function buildEndpointFullUrl(state) {
+  const path = typeof state?.path === "string" ? state.path.trim() : "";
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  const source = state?.source && typeof state.source === "object" ? state.source : null;
+  const scheme = typeof source?.scheme === "string" && source.scheme ? source.scheme : "";
+  const host = typeof source?.host === "string" && source.host ? source.host : "";
+  const port = Number(source?.port);
+  if (!scheme || !host || !Number.isFinite(port) || port <= 0) return "";
+  const cleanPath = path.replace(/^\/+/, "");
+  return `${scheme}://${host}:${port}/${cleanPath}`;
+}
+
+function formatEndpointLinkHtml(url) {
+  const safeUrl = escapeHtml(url || "-");
+  if (!url) return safeUrl;
+  return `<a class="raw-meta-link" href="${safeUrl}" target="_blank" rel="noreferrer">${safeUrl}</a>`;
+}
+
 function renderRawExplainTable(api, state) {
   const container = document.getElementById(`raw-explain-${api.key}`);
   if (!container) return;
@@ -3410,19 +3455,28 @@ function renderRawCard(api, state, bodyId) {
     else if (state.phase === "done") progress.classList.add("done");
   }
   if (meta) {
-    meta.className = `raw-meta${state.phase === "failed" ? " error" : ""}`;
+    meta.className = `raw-meta${state.phase === "failed" && state.status !== "stale" ? " error" : ""}`;
+    const endpointUrl = buildEndpointFullUrl(state);
     const statusText = state.status || (state.phase === "done" ? "success" : state.phase === "failed" ? "failed" : "-");
     const requestText = formatLocalDateTime(state.last_requested_at || state.updated_at);
     const successText = formatLocalDateTime(state.last_success_at);
     const requestAgo = formatRelativeAgo(state.last_requested_at || state.updated_at);
     const successAgo = formatRelativeAgo(state.last_success_at);
-    const statusOk = String(statusText).toLowerCase() === "success" || state.phase === "done";
-    const statusBadgeText = statusOk ? t("rawStatusSuccess") : t("rawStatusFailed");
-    const statusBadgeClass = statusOk ? "raw-status-badge success" : "raw-status-badge failed";
+    const normalizedStatus = String(statusText).toLowerCase();
+    const statusBadgeText = normalizedStatus === "stale"
+      ? t("rawStatusStale")
+      : (normalizedStatus === "success" || state.phase === "done" ? t("rawStatusSuccess") : t("rawStatusFailed"));
+    const statusBadgeClass = normalizedStatus === "stale"
+      ? "raw-status-badge stale"
+      : (normalizedStatus === "success" || state.phase === "done" ? "raw-status-badge success" : "raw-status-badge failed");
     if (state.phase === "loading") {
-      meta.textContent = `${t("rawLoading")} · ${t("endpointPath")}: ${state.path || "-"}`;
+      meta.innerHTML =
+        `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawLoading"))}</span><span>${escapeHtml(state.path || "-")}</span></div>` +
+        `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("endpointUrl"))}</span><span>${formatEndpointLinkHtml(endpointUrl)}</span></div>`;
     } else if (state.phase === "failed") {
       meta.innerHTML =
+        `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("endpointPath"))}</span><span>${escapeHtml(state.path || "-")}</span></div>` +
+        `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("endpointUrl"))}</span><span>${formatEndpointLinkHtml(endpointUrl)}</span></div>` +
         `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawStatusLabel"))}</span><span class="${statusBadgeClass}">${escapeHtml(statusBadgeText)}</span></div>` +
         `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawLastRequest"))}</span><span>${escapeHtml(requestText)} <span class="raw-time-ago">(${escapeHtml(requestAgo)})</span></span></div>` +
         `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawLastSuccess"))}</span><span>${escapeHtml(successText)} <span class="raw-time-ago">(${escapeHtml(successAgo)})</span></span></div>` +
@@ -3430,6 +3484,7 @@ function renderRawCard(api, state, bodyId) {
     } else if (state.phase === "done") {
       meta.innerHTML =
         `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("endpointPath"))}</span><span>${escapeHtml(state.path || "-")}</span></div>` +
+        `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("endpointUrl"))}</span><span>${formatEndpointLinkHtml(endpointUrl)}</span></div>` +
         `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawStatusLabel"))}</span><span class="${statusBadgeClass}">${escapeHtml(statusBadgeText)}</span></div>` +
         `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawLastRequest"))}</span><span>${escapeHtml(requestText)} <span class="raw-time-ago">(${escapeHtml(requestAgo)})</span></span></div>` +
         `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawLastSuccess"))}</span><span>${escapeHtml(successText)} <span class="raw-time-ago">(${escapeHtml(successAgo)})</span></span></div>` +
@@ -3456,7 +3511,7 @@ function renderRawSummary(rawStateMap, metaId, updatedId) {
     .filter(Boolean)
     .sort()
     .slice(-1)[0];
-  const updatedText = latest ? new Date(latest).toLocaleString() : "-";
+  const updatedText = formatDateTimeWithAgo(latest);
   setText(metaId, t("rawSummary", { updated: updatedText, ok: okCount, total: states.length, failed: failedCount }));
   setText(updatedId, `${t("updatedAt")}: ${updatedText}`);
 }
@@ -3548,7 +3603,7 @@ function renderSolplanetKvFromCache() {
       tbody.appendChild(tr);
     }
   }
-  const updatedText = state.updated_at ? new Date(state.updated_at).toLocaleString() : "-";
+  const updatedText = formatDateTimeWithAgo(state.updated_at);
   const meta = t("rawKvMeta", { count: items.length });
   if (state.phase === "loading") setText("solplanetRawMeta", `${meta} · ${t("rawLoading")}`);
   else if (state.phase === "failed") setText("solplanetRawMeta", `${meta} · ${t("rawStatusFailed")}`);
@@ -4136,7 +4191,7 @@ function renderSajControlFromCache() {
     return;
   }
   const state = payload?.control_state || payload?.state || null;
-  const updatedAt = state?.updated_at ? new Date(state.updated_at).toLocaleString() : "-";
+  const updatedAt = formatDateTimeWithAgo(state?.updated_at);
   setText("sajControlUpdatedAt", `${t("updatedAt")}: ${updatedAt}`);
   const chargeEnableMask = state?.charge?.time_enable_mask ?? "-";
   const dischargeEnableMask = state?.discharge?.time_enable_mask ?? "-";
@@ -4520,7 +4575,7 @@ function renderSolplanetControlFromCache() {
     return;
   }
   const state = _solplanetControlStateFromCache();
-  const updatedAt = state?.updated_at ? new Date(state.updated_at).toLocaleString() : "-";
+  const updatedAt = formatDateTimeWithAgo(state?.updated_at);
   setText("solplanetControlUpdatedAt", `${t("updatedAt")}: ${updatedAt}`);
   const pin = state?.limits?.pin ?? "-";
   const pout = state?.limits?.pout ?? "-";
@@ -4881,7 +4936,7 @@ async function loadRawPanel(apis, stateMap, bodyId, metaId, updatedId) {
     try {
       const response = await fetchJson(api.url, { timeoutMs: 30000 });
       stateMap[api.key] = {
-        phase: response?.ok ? "done" : "failed",
+        phase: response?.status === "stale" ? "failed" : (response?.ok ? "done" : "failed"),
         path: response?.path || api.url,
         payload: response?.payload ?? null,
         error: response?.error || null,
@@ -4890,6 +4945,7 @@ async function loadRawPanel(apis, stateMap, bodyId, metaId, updatedId) {
         status: response?.status || (response?.ok ? "success" : "failed"),
         last_requested_at: response?.last_requested_at || response?.updated_at || null,
         last_success_at: response?.last_success_at || null,
+        source: response?.source || null,
       };
     } catch (err) {
       const prev = stateMap[api.key] || {};
@@ -4903,6 +4959,7 @@ async function loadRawPanel(apis, stateMap, bodyId, metaId, updatedId) {
         status: "failed",
         last_requested_at: prev.last_requested_at || null,
         last_success_at: prev.last_success_at || null,
+        source: prev.source || null,
       };
     }
     renderRawCard(api, stateMap[api.key], bodyId);
@@ -5079,6 +5136,13 @@ function rerenderSamplingViewFromCache() {
 }
 
 async function loadWorkerLogs() {
+  if (!workerLogsDefaultsApplied) {
+    const systemSelect = document.getElementById("workerLogsSystemSelect");
+    const serviceSelect = document.getElementById("workerLogsServiceSelect");
+    if (systemSelect && !systemSelect.value) systemSelect.value = "solplanet";
+    if (serviceSelect && !serviceSelect.value) serviceSelect.value = "solplanet_cgi";
+    workerLogsDefaultsApplied = true;
+  }
   try {
     const payload = await fetchJson(buildWorkerLogsUrl(), { timeoutMs: 10000 });
     workerLogsPager.hasNext = Boolean(payload.has_next);
@@ -5269,6 +5333,16 @@ bindChangeIfPresent("autoRefreshSelect", (event) => {
   setAutoRefresh(Number(event.target.value));
 });
 
+bindChangeIfPresent("workerLogsSystemSelect", () => {
+  workerLogsPager.page = 1;
+  void loadWorkerLogs();
+});
+
+bindChangeIfPresent("workerLogsServiceSelect", () => {
+  workerLogsPager.page = 1;
+  void loadWorkerLogs();
+});
+
 bindClickIfPresent("refreshBtn", () => {
   void loadCurrentTab();
 });
@@ -5355,8 +5429,9 @@ bindChangeIfPresent("samplingRangeModeSelect", async () => {
 });
 
 bindChangeIfPresent("samplingTimezoneSelect", (event) => {
-  samplingTimezone = event.target.value === "utc" ? "utc" : "local";
+  samplingTimezone = "local";
   localStorage.setItem(SAMPLING_TIMEZONE_KEY, samplingTimezone);
+  if (event?.target) event.target.value = "local";
   updateSamplingTimezoneText();
   rerenderSamplingViewFromCache();
 });
@@ -5402,6 +5477,11 @@ bindClickIfPresent("workerLogsNextPageBtn", async () => {
 });
 
 bindChangeIfPresent("workerLogsSystemSelect", async () => {
+  workerLogsPager.page = 1;
+  await loadWorkerLogs();
+});
+
+bindChangeIfPresent("workerLogsServiceSelect", async () => {
   workerLogsPager.page = 1;
   await loadWorkerLogs();
 });

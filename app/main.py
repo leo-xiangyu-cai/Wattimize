@@ -58,6 +58,8 @@ from app.solplanet_cgi import SolplanetCgiClient
 
 
 settings = load_settings()
+
+POWER_FLOW_ACTIVE_THRESHOLD_W = 30
 SUPPORTED_SYSTEMS = ("saj", "solplanet")
 SYSTEM_PREFIXES: dict[str, tuple[str, ...]] = {
     "saj": ("saj",),
@@ -170,6 +172,24 @@ solplanet_client = SolplanetCgiClient(
     timeout_seconds=settings.solplanet_request_timeout_seconds,
     request_logger=_handle_outbound_request_log,
 )
+
+
+def _new_solplanet_client(current_settings: Settings) -> SolplanetCgiClient:
+    return SolplanetCgiClient(
+        host=current_settings.solplanet_dongle_host,
+        port=current_settings.solplanet_dongle_port,
+        scheme=current_settings.solplanet_dongle_scheme,
+        verify_ssl=current_settings.solplanet_verify_ssl,
+        timeout_seconds=current_settings.solplanet_request_timeout_seconds,
+        request_logger=_handle_outbound_request_log,
+    )
+
+
+def _solplanet_collection_round_timeout_seconds(current_settings: Settings) -> float:
+    # One Solplanet sampling round may hit 8-9 CGI endpoints sequentially.
+    # Cap the whole round so the collector cannot hang indefinitely and stop retrying.
+    endpoint_budget = current_settings.solplanet_request_timeout_seconds * 10.0
+    return max(60.0, endpoint_budget)
 
 
 class ConfigPayload(BaseModel):
@@ -588,12 +608,12 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
             "inverter_status": inverter_status,
             "inverter_power_w": inverter_power_w,
             "inverter_power_source": str(inverter_power.get("entity_id")) if inverter_power else "unavailable",
-            "solar_active": bool(pv_w is not None and pv_w > 5),
-            "grid_active": bool(grid_w is not None and abs(grid_w) > 5),
+            "solar_active": bool(pv_w is not None and pv_w >= POWER_FLOW_ACTIVE_THRESHOLD_W),
+            "grid_active": bool(grid_w is not None and abs(grid_w) >= POWER_FLOW_ACTIVE_THRESHOLD_W),
             "grid_import": bool(grid_w is not None and grid_w > 0),
-            "battery_active": bool(battery_w is not None and abs(battery_w) > 5),
+            "battery_active": bool(battery_w is not None and abs(battery_w) >= POWER_FLOW_ACTIVE_THRESHOLD_W),
             "battery_discharging": bool(battery_w is not None and battery_w > 0),
-            "load_active": bool(load_w is not None and load_w > 5),
+            "load_active": bool(load_w is not None and load_w >= POWER_FLOW_ACTIVE_THRESHOLD_W),
             "balance_w": balance_w,
             "balanced": balanced,
             "matched_entities": len(matched_entities),
@@ -850,7 +870,7 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
         # NOTE: total_pac from getdev.cgi?device=3 is NOT used here because it mirrors
         # inverter.pac (AC output), not actual net grid power, giving severely wrong readings.
         meter_pac = _to_number(meter_info.get("meter_pac"))
-        if meter_pac is not None and abs(meter_pac) > 5:
+        if meter_pac is not None and abs(meter_pac) >= POWER_FLOW_ACTIVE_THRESHOLD_W:
             grid_w = meter_pac
             grid_source = "getdev_device_3.meter_pac"
 
@@ -986,12 +1006,12 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
             "inverter_status": inverter_status,
             "inverter_power_w": inverter_pac_w,
             "inverter_power_source": "getdevdata_device_2.pac" if inverter_pac_w is not None else "unavailable",
-            "solar_active": bool(pv_w is not None and pv_w > 5),
-            "grid_active": bool(grid_w is not None and abs(grid_w) > 5),
+            "solar_active": bool(pv_w is not None and pv_w >= POWER_FLOW_ACTIVE_THRESHOLD_W),
+            "grid_active": bool(grid_w is not None and abs(grid_w) >= POWER_FLOW_ACTIVE_THRESHOLD_W),
             "grid_import": bool(grid_w is not None and grid_w > 0),
-            "battery_active": bool(battery_w is not None and abs(battery_w) > 5),
+            "battery_active": bool(battery_w is not None and abs(battery_w) >= POWER_FLOW_ACTIVE_THRESHOLD_W),
             "battery_discharging": bool(battery_w is not None and battery_w > 0),
-            "load_active": bool(load_w is not None and load_w > 5),
+            "load_active": bool(load_w is not None and load_w >= POWER_FLOW_ACTIVE_THRESHOLD_W),
             "balance_w": balance_w,
             "balanced": balanced,
             "matched_entities": matched_entities,
@@ -1203,6 +1223,18 @@ def _build_solplanet_single_endpoint_response(
     }
 
 
+def _parse_iso_utc(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
 async def _solplanet_endpoint_response_from_snapshot(
     *,
     name: str,
@@ -1247,8 +1279,36 @@ async def _solplanet_endpoint_response_from_snapshot(
     response["error"] = snap_error
     if snapshot.get("fetch_ms") is not None:
         response["fetch_ms"] = snapshot.get("fetch_ms")
+    last_success_dt = _parse_iso_utc(snapshot.get("last_success_at_utc"))
+    last_requested_dt = _parse_iso_utc(snapshot.get("requested_at_utc"))
+    collector_solplanet = dict(collector_status.get("solplanet") or {})
+    collector_last_success_dt = _parse_iso_utc(collector_solplanet.get("last_success_at"))
+    collector_last_error_dt = _parse_iso_utc(collector_solplanet.get("last_error_at"))
+    stale_after_seconds = max(45.0, settings.solplanet_request_timeout_seconds * 3.0)
+    stale = False
+    stale_reason: str | None = None
+    if last_requested_dt is not None:
+        age_seconds = max((datetime.now(UTC) - last_requested_dt).total_seconds(), 0.0)
+        response["age_seconds"] = round(age_seconds, 1)
+        if age_seconds > stale_after_seconds:
+            stale = True
+            stale_reason = "snapshot_too_old"
+    if (
+        collector_last_error_dt is not None
+        and (collector_last_success_dt is None or collector_last_error_dt > collector_last_success_dt)
+        and (last_success_dt is None or collector_last_error_dt >= last_success_dt)
+    ):
+        stale = True
+        stale_reason = stale_reason or "collector_currently_failing"
+    if stale:
+        response["stale"] = True
+        response["stale_reason"] = stale_reason
+        response["status"] = "stale"
     response["source"] = {
         "type": "solplanet_endpoint_snapshot_table",
+        "host": settings.solplanet_dongle_host,
+        "port": settings.solplanet_dongle_port,
+        "scheme": settings.solplanet_dongle_scheme,
     }
     return response
 
@@ -2278,6 +2338,7 @@ async def worker_logs(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=100, ge=1, le=500),
     system: str | None = Query(default=None, description="saj or solplanet"),
+    service: str | None = Query(default=None, description="home_assistant or solplanet_cgi"),
 ) -> dict[str, object]:
     normalized_system: str | None = None
     if system:
@@ -2289,6 +2350,7 @@ async def worker_logs(
         page_size=page_size,
         worker="worker",
         system=normalized_system,
+        service=str(service or "").strip() or None,
     )
     payload["updated_at"] = datetime.now(UTC).isoformat()
     return payload

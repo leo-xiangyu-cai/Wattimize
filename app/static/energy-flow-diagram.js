@@ -1,10 +1,39 @@
 (function initEnergyFlowDiagram(global) {
   const EDGE_INACTIVE_COLOR = "#bfd0c7";
-  const EDGE_ACTIVE_COLOR = "#2fa27d";
-  const EDGE_ACTIVE_STROKE = "#245d68";
-  const EDGE_ACTIVE_GLOW = "rgba(214, 243, 232, 0.92)";
+  const EDGE_INACTIVE_CORE = "#f8fbf9";
+  const FLOW_THEMES = {
+    default: {
+      color: "#2fa27d",
+      stroke: "#245d68",
+      glow: "rgba(214, 243, 232, 0.92)",
+      core: "#dff4ea",
+    },
+    gridImport: {
+      color: "#d84c5b",
+      stroke: "#7d2431",
+      glow: "rgba(255, 224, 228, 0.94)",
+      core: "#fff0f2",
+    },
+    gridExport: {
+      color: "#3693ff",
+      stroke: "#1f4f8a",
+      glow: "rgba(218, 235, 255, 0.94)",
+      core: "#eef6ff",
+    },
+    batteryCharge: {
+      color: "#3693ff",
+      stroke: "#1f4f8a",
+      glow: "rgba(218, 235, 255, 0.94)",
+      core: "#eef6ff",
+    },
+    batteryDischarge: {
+      color: "#d84c5b",
+      stroke: "#7d2431",
+      glow: "rgba(255, 224, 228, 0.94)",
+      core: "#fff0f2",
+    },
+  };
   const EDGE_INACTIVE_GLOW = "rgba(255, 255, 255, 0.7)";
-  const EDGE_INACTIVE_DASH = [10, 8];
   const DEFAULT_PADDING = 28;
   const FLOW_MARKER_SPACING = 84;
   const FLOW_MARKER_SPEED = 46;
@@ -48,11 +77,18 @@
         "</svg>"
       );
     }
-    if (name === "load") {
+    if (name === "load" || name === "home") {
       return (
         "<svg viewBox='0 0 24 24' focusable='false'>" +
-        "<path d='M4 11l8-7 8 7v9H4z'></path>" +
-        "<path d='M10 20v-5h4v5'></path>" +
+        "<path d='M3.5 11L12 3.75L20.5 11'></path>" +
+        "<path d='M5.75 10.25V19C5.75 19.83 6.42 20.5 7.25 20.5H16.75C17.58 20.5 18.25 19.83 18.25 19V10.25'></path>" +
+        "<path d='M8 20.5V15.5C8 14.67 8.67 14 9.5 14H14.5C15.33 14 16 14.67 16 15.5V20.5'></path>" +
+        "<path d='M7.9 9.25H16.1'></path>" +
+        "<path d='M9 11.75H11.25V13.95H9z'></path>" +
+        "<path d='M12.75 11.75H15V13.95H12.75z'></path>" +
+        "<path d='M16.9 5.9V8.05'></path>" +
+        "<path d='M15.7 8.05H18.1'></path>" +
+        "<path d='M12 3.75V2.25'></path>" +
         "</svg>"
       );
     }
@@ -435,13 +471,10 @@
     if (edgeId === "combined-lineSolarToBattery1") {
       return [pointOnBox(solar, "bottom"), pointOnBox(battery1, "top")];
     }
-    if (edgeId === "combined-lineSolarToInverter1A") {
-      const target = pointOnBox(inverter1, "top", -18);
-      return [pointOnBox(solar, "right"), { x: target.x, y: center(solar).y }];
-    }
     if (edgeId === "combined-lineSolarToInverter1B") {
+      const source = pointOnBox(solar, "right");
       const target = pointOnBox(inverter1, "top", -18);
-      return [{ x: target.x, y: center(solar).y }, target];
+      return [source, { x: target.x, y: source.y }, target];
     }
     if (edgeId === "combined-lineBattery1ToInverter1") {
       return [pointOnBox(battery1, "right"), pointOnBox(inverter1, "left")];
@@ -449,29 +482,23 @@
     if (edgeId === "combined-lineBattery2ToInverter2") {
       return [pointOnBox(battery2, "left"), pointOnBox(inverter2, "right")];
     }
-    if (edgeId === "combined-lineInverter1ToSwitchboardA") {
-      const source = pointOnBox(inverter1, "top", 24);
-      return [source, { x: source.x, y: inverterBusY }];
-    }
     if (edgeId === "combined-lineInverter1ToSwitchboardB") {
-      const source = { x: center(inverter1).x + 24, y: inverterBusY };
+      const source = pointOnBox(inverter1, "top", 24);
+      const busPoint = { x: source.x, y: inverterBusY };
       const pairedSource = { x: center(inverter2).x - 24, y: inverterBusY };
-      const sharedMidX = (source.x + pairedSource.x) / 2;
+      const sharedMidX = (busPoint.x + pairedSource.x) / 2;
       const bridgeGap = 64;
       const target = { x: sharedMidX - (bridgeGap / 2), y: switchboard.y + switchboard.height };
-      return [source, { x: target.x, y: inverterBusY }, target];
-    }
-    if (edgeId === "combined-lineInverter2ToSwitchboardA") {
-      const source = pointOnBox(inverter2, "top", -24);
-      return [source, { x: source.x, y: inverterBusY }];
+      return [source, busPoint, { x: target.x, y: inverterBusY }, target];
     }
     if (edgeId === "combined-lineInverter2ToSwitchboardB") {
-      const source = { x: center(inverter2).x - 24, y: inverterBusY };
+      const source = pointOnBox(inverter2, "top", -24);
+      const busPoint = { x: source.x, y: inverterBusY };
       const pairedSource = { x: center(inverter1).x + 24, y: inverterBusY };
-      const sharedMidX = (source.x + pairedSource.x) / 2;
+      const sharedMidX = (busPoint.x + pairedSource.x) / 2;
       const bridgeGap = 64;
       const target = { x: sharedMidX + (bridgeGap / 2), y: switchboard.y + switchboard.height };
-      return [source, { x: target.x, y: inverterBusY }, target];
+      return [source, busPoint, { x: target.x, y: inverterBusY }, target];
     }
     if (edgeId === "combined-lineSwitchboardToHomeLoad") {
       const source = { x: center(switchboard).x + 42, y: switchboard.y + 34 };
@@ -619,7 +646,7 @@
     };
   }
 
-  function drawFlowMarker(ctx, x, y, angle, scale = 1) {
+  function drawFlowMarker(ctx, x, y, angle, theme, scale = 1) {
     const halfLength = 9 * scale;
     const halfHeight = 5.5 * scale;
     const notchDepth = 4 * scale;
@@ -636,15 +663,15 @@
     ctx.lineTo(-halfLength, halfHeight);
     ctx.lineTo((-halfLength + notchDepth), 0);
     ctx.closePath();
-    ctx.fillStyle = EDGE_ACTIVE_COLOR;
-    ctx.strokeStyle = EDGE_ACTIVE_STROKE;
+    ctx.fillStyle = theme.color;
+    ctx.strokeStyle = theme.stroke;
     ctx.lineWidth = 1.2;
     ctx.fill();
     ctx.stroke();
     ctx.restore();
   }
 
-  function drawFlowMarkers(ctx, points, reverse, now) {
+  function drawFlowMarkers(ctx, points, reverse, now, theme) {
     const length = polylineLength(points);
     if (length <= 24) return;
 
@@ -654,7 +681,7 @@
       if (distance <= 14 || distance >= length - 14) continue;
       const sample = pointAndAngleAtDistance(points, distance);
       if (!sample) continue;
-      drawFlowMarker(ctx, sample.x, sample.y, reverse ? sample.angle + Math.PI : sample.angle, 1);
+      drawFlowMarker(ctx, sample.x, sample.y, reverse ? sample.angle + Math.PI : sample.angle, theme, 1);
     }
   }
 
@@ -831,8 +858,9 @@
 
       this.spec.edges.forEach((edge) => {
         const meta = this.edgeMetaById.get(edge.id);
-        const state = this.edgeStateById.get(edge.id) || { active: false, reverse: false };
+        const state = this.edgeStateById.get(edge.id) || { active: false, reverse: false, theme: "default" };
         if (!meta) return;
+        const theme = FLOW_THEMES[state.theme] || FLOW_THEMES.default;
 
         if (meta.measurement) {
           drawPolyline(ctx, meta.points, "#6b7d74", 1.5, true);
@@ -840,34 +868,33 @@
         }
 
         if (state.active) {
-          drawPolyline(ctx, meta.points, EDGE_ACTIVE_GLOW, 24, false);
+          drawPolyline(ctx, meta.points, theme.glow, 24, false);
         } else {
-          drawPolyline(ctx, meta.points, EDGE_INACTIVE_GLOW, 6, false);
+          drawPolyline(ctx, meta.points, EDGE_INACTIVE_GLOW, 24, false);
         }
         drawPolyline(
           ctx,
           meta.points,
-          state.active ? EDGE_ACTIVE_COLOR : EDGE_INACTIVE_COLOR,
-          state.active ? 14 : 2,
-          state.active ? false : EDGE_INACTIVE_DASH,
+          state.active ? theme.color : EDGE_INACTIVE_COLOR,
+          state.active ? 14 : 14,
+          false,
         );
 
         if (state.active) {
-          drawPolyline(ctx, meta.points, "#dff4ea", 5, false);
-          drawFlowMarkers(ctx, meta.points, state.reverse, now);
-        }
-
-        if (!state.active) {
-          drawInactiveMidMarker(ctx, meta.points);
+          drawPolyline(ctx, meta.points, theme.core, 5, false);
+          drawFlowMarkers(ctx, meta.points, state.reverse, now, theme);
+        } else {
+          drawPolyline(ctx, meta.points, EDGE_INACTIVE_CORE, 5, false);
         }
       });
     }
 
-    setEdgeState(edgeId, active, reverse) {
+    setEdgeState(edgeId, active, reverse, theme = "default") {
       if (!this.edgeMetaById.has(edgeId)) return false;
       this.edgeStateById.set(edgeId, {
         active: Boolean(active),
         reverse: Boolean(reverse),
+        theme: String(theme || "default"),
       });
       this.updateAnimationState();
       this.redraw(global.devicePixelRatio || 1);
@@ -877,13 +904,13 @@
     setEdgeLabel(labelId, text, active) {
       const meta = this.labelMetaById.get(labelId);
       if (!meta) return false;
-      if (!active || text === null || text === undefined || text === "-") {
+      if (text === null || text === undefined || text === "-") {
         meta.element.textContent = "-";
         meta.element.classList.remove("active");
         return true;
       }
       meta.element.textContent = String(text);
-      meta.element.classList.add("active");
+      meta.element.classList.toggle("active", Boolean(active));
       return true;
     }
 
