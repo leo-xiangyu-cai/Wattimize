@@ -2,6 +2,8 @@
   const EDGE_INACTIVE_COLOR = "#bfd0c7";
   const EDGE_ACTIVE_COLOR = "#2fa27d";
   const EDGE_ACTIVE_GLOW = "rgba(214, 243, 232, 0.92)";
+  const EDGE_INACTIVE_GLOW = "rgba(255, 255, 255, 0.7)";
+  const EDGE_INACTIVE_DASH = [10, 8];
   const DEFAULT_PADDING = 28;
 
   function escapeHtml(value) {
@@ -256,27 +258,11 @@
     const leftBatteryShiftX = 0;
     const leftInverterOffsetX = 90;
     const rightInverterOffsetX = 90;
-    const switchboardOffsetX = -44;
+    const switchboardOffsetX = 0;
     const topY = 20;
     const switchboardY = Math.round(height * 0.33);
     const batteryY = height - Math.max(maxHeight(groups.batteryLeft), maxHeight(groups.batteryRight)) - 44;
 
-    if (grid) {
-      result[grid.id] = {
-        x: (width - grid.width) / 2,
-        y: topY,
-        width: grid.width,
-        height: grid.height,
-      };
-    }
-    if (switchboard) {
-      result[switchboard.id] = {
-        x: ((width - switchboard.width) / 2) + switchboardOffsetX,
-        y: switchboardY,
-        width: switchboard.width,
-        height: switchboard.height,
-      };
-    }
     if (solar) {
       result[solar.id] = {
         x: solarX,
@@ -317,22 +303,48 @@
         height: inverterRight.height,
       };
     }
-    if (load) {
-      const rightColumnX = width - outerX - Math.max(load.width, ev ? ev.width : 0);
-      const upperStackY = solar ? result[solar.id].y : Math.max(topY + 32, switchboardY - 132);
-      result[load.id] = {
-        x: rightColumnX,
-        y: upperStackY,
-        width: load.width,
-        height: load.height,
+    if (switchboard) {
+      let switchboardX = ((width - switchboard.width) / 2) + switchboardOffsetX;
+      if (result[inverterLeft.id] && result[inverterRight.id]) {
+        switchboardX =
+          (((center(result[inverterLeft.id]).x + center(result[inverterRight.id]).x) / 2) - (switchboard.width / 2)) +
+          switchboardOffsetX;
+      }
+      result[switchboard.id] = {
+        x: switchboardX,
+        y: switchboardY,
+        width: switchboard.width,
+        height: switchboard.height,
+      };
+    }
+    if (grid) {
+      const switchboardCenterX = result[switchboard.id].x + (switchboard.width / 2);
+      result[grid.id] = {
+        x: switchboardCenterX - (grid.width / 2),
+        y: topY,
+        width: grid.width,
+        height: grid.height,
       };
     }
     if (ev && load) {
+      const teslaLineOffsetY = 30;
       result[ev.id] = {
-        x: result[load.id].x,
-        y: result[load.id].y + load.height + 36,
+        x: width - outerX - ev.width,
+        y: (result[switchboard.id].y + (result[switchboard.id].height / 2) + teslaLineOffsetY) - (ev.height / 2),
         width: ev.width,
         height: ev.height,
+      };
+    }
+    if (load) {
+      const loadOffsetLeftOfTesla = 104;
+      const loadGapAboveTesla = 78;
+      const teslaX = ev ? result[ev.id].x : width - outerX - load.width;
+      const teslaY = ev ? result[ev.id].y : (result[switchboard.id].y + 40);
+      result[load.id] = {
+        x: teslaX - loadOffsetLeftOfTesla,
+        y: Math.max(topY + 8, teslaY - load.height - loadGapAboveTesla),
+        width: load.width,
+        height: load.height,
       };
     }
 
@@ -421,12 +433,12 @@
       return [pointOnBox(solar, "bottom"), pointOnBox(battery1, "top")];
     }
     if (edgeId === "combined-lineSolarToInverter1A") {
-      const elbowX = inverter1.x - 24;
-      return [pointOnBox(solar, "right"), { x: elbowX, y: center(solar).y }];
+      const target = pointOnBox(inverter1, "top", -18);
+      return [pointOnBox(solar, "right"), { x: target.x, y: center(solar).y }];
     }
     if (edgeId === "combined-lineSolarToInverter1B") {
-      const elbowX = inverter1.x - 24;
-      return [{ x: elbowX, y: center(solar).y }, { x: elbowX, y: center(inverter1).y }, pointOnBox(inverter1, "left")];
+      const target = pointOnBox(inverter1, "top", -18);
+      return [{ x: target.x, y: center(solar).y }, target];
     }
     if (edgeId === "combined-lineBattery1ToInverter1") {
       return [pointOnBox(battery1, "right"), pointOnBox(inverter1, "left")];
@@ -440,7 +452,10 @@
     }
     if (edgeId === "combined-lineInverter1ToSwitchboardB") {
       const source = { x: center(inverter1).x + 24, y: inverterBusY };
-      const target = pointOnBox(switchboard, "bottom", -52);
+      const pairedSource = { x: center(inverter2).x - 24, y: inverterBusY };
+      const sharedMidX = (source.x + pairedSource.x) / 2;
+      const bridgeGap = 64;
+      const target = { x: sharedMidX - (bridgeGap / 2), y: switchboard.y + switchboard.height };
       return [source, { x: target.x, y: inverterBusY }, target];
     }
     if (edgeId === "combined-lineInverter2ToSwitchboardA") {
@@ -449,30 +464,19 @@
     }
     if (edgeId === "combined-lineInverter2ToSwitchboardB") {
       const source = { x: center(inverter2).x - 24, y: inverterBusY };
-      const target = pointOnBox(switchboard, "bottom", 52);
+      const pairedSource = { x: center(inverter1).x + 24, y: inverterBusY };
+      const sharedMidX = (source.x + pairedSource.x) / 2;
+      const bridgeGap = 64;
+      const target = { x: sharedMidX + (bridgeGap / 2), y: switchboard.y + switchboard.height };
       return [source, { x: target.x, y: inverterBusY }, target];
     }
     if (edgeId === "combined-lineSwitchboardToHomeLoad") {
-      const trunkX = load.x - 22;
-      const source = pointOnBox(switchboard, "right", -26);
-      const target = pointOnBox(load, "left", -18);
-      return [
-        source,
-        { x: trunkX, y: source.y },
-        { x: trunkX, y: target.y },
-        target,
-      ];
-    }
-    if (edgeId === "combined-lineSwitchboardToTeslaA") {
-      const trunkX = tesla.x - 22;
-      const source = pointOnBox(switchboard, "right", 26);
-      return [source, { x: trunkX, y: source.y }];
+      const source = { x: center(switchboard).x + 42, y: switchboard.y + 34 };
+      const target = pointOnBox(load, "bottom", 0);
+      return [source, { x: target.x, y: source.y }, target];
     }
     if (edgeId === "combined-lineSwitchboardToTeslaB") {
-      const trunkX = tesla.x - 22;
-      const sourceY = pointOnBox(switchboard, "right", 26).y;
-      const target = pointOnBox(tesla, "left", 18);
-      return [{ x: trunkX, y: sourceY }, { x: trunkX, y: target.y }, target];
+      return [pointOnBox(switchboard, "right", 30), pointOnBox(tesla, "left", 0)];
     }
     return null;
   }
@@ -548,7 +552,7 @@
   function drawPolyline(ctx, points, stroke, lineWidth, dashed) {
     if (!Array.isArray(points) || points.length < 2) return;
     ctx.beginPath();
-    ctx.setLineDash(dashed ? [6, 6] : []);
+    ctx.setLineDash(Array.isArray(dashed) ? dashed : dashed ? [6, 6] : []);
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     ctx.lineWidth = lineWidth;
@@ -558,6 +562,20 @@
       ctx.lineTo(points[i].x, points[i].y);
     }
     ctx.stroke();
+  }
+
+  function drawInactiveMidMarker(ctx, points) {
+    const marker = polylineMidpoint(points);
+    if (!marker) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.fillStyle = "#f7fbf8";
+    ctx.strokeStyle = "#b7c6be";
+    ctx.lineWidth = 1.5;
+    ctx.arc(marker.x, marker.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
 
   function drawArrowHead(ctx, from, to, fill) {
@@ -760,8 +778,20 @@
 
         if (state.active) {
           drawPolyline(ctx, meta.points, EDGE_ACTIVE_GLOW, 8, false);
+        } else {
+          drawPolyline(ctx, meta.points, EDGE_INACTIVE_GLOW, 6, false);
         }
-        drawPolyline(ctx, meta.points, state.active ? EDGE_ACTIVE_COLOR : EDGE_INACTIVE_COLOR, state.active ? 3 : 2, false);
+        drawPolyline(
+          ctx,
+          meta.points,
+          state.active ? EDGE_ACTIVE_COLOR : EDGE_INACTIVE_COLOR,
+          state.active ? 3 : 2,
+          state.active ? false : EDGE_INACTIVE_DASH,
+        );
+
+        if (!state.active) {
+          drawInactiveMidMarker(ctx, meta.points);
+        }
 
         if (state.active && meta.points.length >= 2) {
           if (state.reverse) {

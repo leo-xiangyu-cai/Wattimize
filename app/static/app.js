@@ -1762,7 +1762,6 @@ function buildCombinedDiagramSpec() {
       { id: "combined-lineSolarToInverter1A", source: "combined-solarNode", target: "combined-inverter1Node" },
       { id: "combined-lineSolarToInverter1B", source: "combined-solarNode", target: "combined-inverter1Node", labelId: "combined-flowLabelSolarToInverter1" },
       { id: "combined-lineSwitchboardToHomeLoad", source: "combined-switchboardNode", target: "combined-loadNode", labelId: "combined-flowLabelSwitchboardToHomeLoad" },
-      { id: "combined-lineSwitchboardToTeslaA", source: "combined-switchboardNode", target: "combined-teslaNode" },
       { id: "combined-lineSwitchboardToTeslaB", source: "combined-switchboardNode", target: "combined-teslaNode", labelId: "combined-flowLabelSwitchboardToTesla" },
       { id: "combined-lineBattery1ToInverter1", source: "combined-battery1Node", target: "combined-inverter1Node", labelId: "combined-flowLabelBattery1ToInverter1" },
       { id: "combined-lineBattery2ToInverter2", source: "combined-battery2Node", target: "combined-inverter2Node", labelId: "combined-flowLabelBattery2ToInverter2" },
@@ -2352,7 +2351,6 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   setModeClass("combined-teslaChargingValue", teslaChargingActive ? "positive" : "");
   setModeClass("combined-teslaChargingState", teslaChargingActive ? "positive" : "");
   setFlowLine("combined-lineSwitchboardToHomeLoad", loadActive, false);
-  setFlowLine("combined-lineSwitchboardToTeslaA", teslaChargingActive, false);
   setFlowLine("combined-lineSwitchboardToTeslaB", teslaChargingActive, false);
 
   const battery1Active = battery1W !== null && Math.abs(battery1W) > 5;
