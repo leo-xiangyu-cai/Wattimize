@@ -631,6 +631,14 @@ td {
   color: #213029;
 }
 
+.efd-node:not(.efd-node-battery) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
 .efd-node.efd-node-inverter,
 .efd-node.efd-node-switchboard {
   border-color: #88b09a;
@@ -910,12 +918,15 @@ td {
 .node-title {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: 100%;
   gap: 5px;
   font-size: 15px;
   color: var(--muted);
   margin: 0;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+  text-align: center;
 }
 
 .inline-icon {
@@ -947,6 +958,7 @@ td {
   margin-top: 7px;
   font-size: 24px;
   font-weight: 700;
+  text-align: center;
 }
 
 .node-sub-value {
@@ -958,11 +970,13 @@ td {
 .node-mini-value {
   margin-top: 2px;
   font-size: 14px;
+  text-align: center;
 }
 
 .node-state {
   margin-top: 4px;
   font-size: 15px;
+  text-align: center;
 }
 
 .node-solar {

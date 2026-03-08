@@ -873,20 +873,17 @@ async def _build_solplanet_energy_flow_payload_from_cgi() -> dict[str, object]:
             grid_w = meter_pac
             grid_source = "getdev_device_3.meter_pac"
 
-    # Solplanet battery power sign assumption: positive means discharging.
+    # Solplanet inverter pac sign assumption: positive means inverter AC output to loads/grid,
+    # negative means inverter is drawing AC (for example grid-charging the battery).
     load_w: float | None = None
     load_source = "unavailable"
-    if pv_w is not None and grid_w is not None and battery_w is not None:
-        battery_discharge_w = max(battery_w, 0)
-        battery_charge_w = max(-battery_w, 0)
-        grid_import_w = max(grid_w, 0)
-        grid_export_w = max(-grid_w, 0)
-        derived_load_w = pv_w + battery_discharge_w + grid_import_w - battery_charge_w - grid_export_w
+    if inverter_pac_w is not None and grid_w is not None:
+        derived_load_w = inverter_pac_w + grid_w
         # Clamp tiny negative residuals caused by firmware timing skew/noise.
         if derived_load_w < 0 and abs(derived_load_w) <= BALANCE_TOLERANCE_W:
             derived_load_w = 0.0
         load_w = max(derived_load_w, 0.0)
-        load_source = "calc:pv + battery_discharge + grid_import - battery_charge - grid_export"
+        load_source = "calc:getdevdata_device_2.pac + getdevdata_device_3.pac"
     elif inverter_pac_w is not None and battery_w is not None and inverter_pac_w < -5 and battery_w < -5:
         # Grid-charging scene: inverter AC draw = battery charge + home load.
         load_w = max(abs(inverter_pac_w) - abs(battery_w), 0.0)

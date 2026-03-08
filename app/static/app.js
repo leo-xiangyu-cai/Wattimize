@@ -1030,7 +1030,7 @@ const SOLPLANET_DASHBOARD_FIELD_MAP = {
     ppv: [{ metric: "pv_w", kind: "backup", noteZh: "太阳能卡片数值备用来源", noteEn: "Backup source for Solar value on Dashboard" }],
   },
   solplanet_metrics: {
-    "notes.solplanet_load_w_source:power_balance_derived": [{ metric: "load_w", kind: "primary", noteZh: "家庭负载由功率平衡推导：PV + 电池放电 + 电网购电 - 电池充电 - 电网上网", noteEn: "Primary home-load source derived from power balance: PV + battery discharge + grid import - battery charge - grid export" }],
+    "notes.solplanet_load_w_source:inverter_pac_plus_grid_pac": [{ metric: "load_w", kind: "primary", noteZh: "家庭负载主来源：逆变器功率 + 电网功率", noteEn: "Primary home-load source: inverter power + grid power" }],
     "notes.solplanet_load_w_source:inverter_pac_minus_battery_charge_abs": [{ metric: "load_w", kind: "fallback", noteZh: "兜底：|inverter.pac| - |battery.pb(充电)|", noteEn: "Fallback: |inverter.pac| - |battery.pb(charging)|" }],
     "notes.solplanet_load_w_source:inverter_pac_minus_battery_discharge_abs": [{ metric: "load_w", kind: "fallback", noteZh: "兜底：|inverter.pac| - |battery.pb(放电)|", noteEn: "Fallback: |inverter.pac| - |battery.pb(discharging)|" }],
     "notes.solplanet_load_w_source:abs_inverter_pac": [{ metric: "load_w", kind: "fallback", noteZh: "兜底：|inverter.pac|", noteEn: "Fallback: |inverter.pac|" }],
@@ -2288,15 +2288,15 @@ function buildCombinedFlowMetrics(sajFlow, solplanetFlow) {
   const inverter2Status = solplanetMetrics.inverter_status ?? null;
 
   let totalLoadW = null;
-  if (solarW !== null && gridW !== null && battery1W !== null && battery2W !== null) {
-    totalLoadW = solarW + gridW + battery1W + battery2W;
+  if (inverter1W !== null && inverter2W !== null && gridW !== null) {
+    totalLoadW = inverter1W + inverter2W + gridW;
     if (Math.abs(totalLoadW) <= BALANCE_TOLERANCE_W) totalLoadW = 0;
   }
 
   const solarToBattery1W = solarW !== null && battery1W !== null && battery1W < 0 ? Math.min(Math.max(solarW, 0), Math.abs(battery1W)) : 0;
   const solarToInverter1W = solarW !== null ? Math.max(solarW - solarToBattery1W, 0) : 0;
 
-  const availableCount = [solarW, gridW, battery1W, battery2W, totalLoadW].filter((v) => v !== null).length;
+  const availableCount = [solarW, gridW, inverter1W, inverter2W, totalLoadW].filter((v) => v !== null).length;
   return {
     solarW,
     gridW,
@@ -2318,7 +2318,7 @@ function buildCombinedFlowMetrics(sajFlow, solplanetFlow) {
       grid: sajMetrics.grid_source || "unavailable",
       battery1: sajMetrics.battery_source || "unavailable",
       battery2: solplanetMetrics.battery_source || "unavailable",
-      load: "calc:corrected_saj_solar + saj_grid + saj_battery + solplanet_battery",
+      load: "calc:saj_inverter_power + solplanet_inverter_power + saj_grid",
     },
   };
 }
@@ -2503,7 +2503,7 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   });
   const formula =
     `${t("balanceFormulaLabel")}: ` +
-    `${formatPowerKwFromWatts(solarW)} + ${formatPowerKwFromWatts(gridW)} + ${formatSignedKwFromWatts(battery1W)} + ${formatSignedKwFromWatts(battery2W)} = ${formatPowerKwFromWatts(totalLoadW)} ` +
+    `${formatSignedKwFromWatts(inverter1W)} + ${formatSignedKwFromWatts(inverter2W)} + ${formatSignedKwFromWatts(gridW)} = ${formatPowerKwFromWatts(totalLoadW)} ` +
     `(SOC1 ${battery1SocText}, SOC2 ${battery2SocText})` +
     ` · Solar→Battery1 ${formatPowerKwFromWatts(solarToBattery1W)} / Solar→Inverter1 ${formatPowerKwFromWatts(solarToInverter1W)}` +
     ` · ${teslaSuffix}`;
