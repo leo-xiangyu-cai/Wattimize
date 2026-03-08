@@ -219,28 +219,48 @@ const I18N = {
     entityExplorerTitle: "Entity Explorer",
     samplingTitle: "Sampling Records",
     samplingSystemLabel: "System",
+    samplingSystemOverall: "Overall",
     samplingRangeModeLabel: "Range",
     samplingRangeDay: "Day",
     samplingRangeWeek: "Week",
     samplingRangeMonth: "Month",
     samplingRangeCustomDate: "Custom Date",
     samplingRangeCustomDateTime: "Custom Date + Time",
-    samplingTimezoneLabel: "Time Display",
-    samplingTimezoneUtc: "UTC",
-    samplingTimezoneLocal: "Local Time",
     samplingWeekDisplay: "Week {week} ({start} ~ {end})",
-    samplingMonthYear: "{year} UTC",
-    samplingDayLabel: "Day (UTC)",
-    samplingWeekLabel: "Week Anchor (UTC)",
-    samplingMonthLabel: "Month (UTC)",
-    samplingStartLabel: "Start (UTC)",
-    samplingEndLabel: "End (UTC)",
+    samplingMonthYear: "{year}",
+    samplingDayLabel: "Day",
+    samplingWeekLabel: "Week",
+    samplingMonthLabel: "Month",
+    samplingStartLabel: "Start",
+    samplingEndLabel: "End",
     samplingStorageMeta: "DB {sizeMb} MB · Rows {rows} · Interval {interval}s · Estimated/day {estMb} MB",
     samplingUsageMeta: "Range usage ({system}, {range}): Load {load} kWh · PV {pv} kWh · Grid import {gridImport} kWh · Grid export {gridExport} kWh",
     samplingUsageMetaNoData: "Range usage ({system}, {range}): not enough samples yet",
     samplingChartTitle: "Power Trend",
     samplingChartMeta: "{system} · {range} · {count} points",
     samplingChartNoData: "No chart data yet for this range",
+    samplingTotalsTitle: "Trend Totals",
+    samplingTotalsMeta: "{system} · {range} · directional energy totals",
+    samplingTotalsMetaNoData: "{system} · {range} · not enough samples for totals yet",
+    samplingTotalsScope: "Scope",
+    samplingTotalsMetric: "Metric",
+    samplingTotalsValue: "Value (kWh)",
+    samplingTotalsScopeOverall: "Overall",
+    samplingTotalsScopeSystem: "{system}",
+    samplingTotalsScopeSajBattery: "SAJ Battery",
+    samplingTotalsScopeSolplanetBattery: "Solplanet Battery",
+    samplingTotalsGridTitle: "Grid",
+    samplingTotalsBatteryTitle: "Battery",
+    samplingTotalsNoData: "No totals available for this range",
+    samplingOverallMetricPv: "PV Generation",
+    samplingOverallMetricGridImport: "Grid Import",
+    samplingOverallMetricGridExport: "Grid Export",
+    samplingOverallMetricBatteryCharge: "Battery Charge",
+    samplingOverallMetricBatteryDischarge: "Battery Discharge",
+    samplingOverallSeriesSajBatteryCharge: "SAJ Battery Charge",
+    samplingOverallSeriesSajBatteryDischarge: "SAJ Battery Discharge",
+    samplingOverallSeriesSolplanetBatteryCharge: "Solplanet Battery Charge",
+    samplingOverallSeriesSolplanetBatteryDischarge: "Solplanet Battery Discharge",
     samplingSmoothLabel: "Smoothing",
     samplingSmoothModeDetail: "Detail",
     samplingSmoothModeSmooth: "Smooth",
@@ -586,28 +606,48 @@ const I18N = {
     entityExplorerTitle: "实体浏览",
     samplingTitle: "采样记录",
     samplingSystemLabel: "系统",
+    samplingSystemOverall: "综合",
     samplingRangeModeLabel: "范围",
     samplingRangeDay: "天",
     samplingRangeWeek: "周",
     samplingRangeMonth: "月",
     samplingRangeCustomDate: "自定义日期",
     samplingRangeCustomDateTime: "自定义日期+时间",
-    samplingTimezoneLabel: "时间显示",
-    samplingTimezoneUtc: "UTC",
-    samplingTimezoneLocal: "本地时间",
     samplingWeekDisplay: "第{week}周（{start} ~ {end}）",
-    samplingMonthYear: "{year} UTC",
-    samplingDayLabel: "日期 (UTC)",
-    samplingWeekLabel: "周锚点 (UTC)",
-    samplingMonthLabel: "月份 (UTC)",
-    samplingStartLabel: "开始时间 (UTC)",
-    samplingEndLabel: "结束时间 (UTC)",
+    samplingMonthYear: "{year}",
+    samplingDayLabel: "日期",
+    samplingWeekLabel: "周",
+    samplingMonthLabel: "月份",
+    samplingStartLabel: "开始时间",
+    samplingEndLabel: "结束时间",
     samplingStorageMeta: "数据库 {sizeMb} MB · 记录 {rows} 条 · 采样间隔 {interval}s · 预计每天 {estMb} MB",
     samplingUsageMeta: "区间统计 ({system}, {range}): 负载 {load} kWh · 光伏 {pv} kWh · 电网购电 {gridImport} kWh · 电网上网 {gridExport} kWh",
     samplingUsageMetaNoData: "区间统计 ({system}, {range}): 当前样本不足",
     samplingChartTitle: "功率趋势图",
     samplingChartMeta: "{system} · {range} · {count} 个点",
     samplingChartNoData: "当前时间范围暂无图表数据",
+    samplingTotalsTitle: "趋势累计值",
+    samplingTotalsMeta: "{system} · {range} · 分方向累计电量",
+    samplingTotalsMetaNoData: "{system} · {range} · 当前样本不足，无法统计累计值",
+    samplingTotalsScope: "范围",
+    samplingTotalsMetric: "指标",
+    samplingTotalsValue: "数值 (kWh)",
+    samplingTotalsScopeOverall: "综合",
+    samplingTotalsScopeSystem: "{system}",
+    samplingTotalsScopeSajBattery: "SAJ 电池",
+    samplingTotalsScopeSolplanetBattery: "Solplanet 电池",
+    samplingTotalsGridTitle: "电网",
+    samplingTotalsBatteryTitle: "电池",
+    samplingTotalsNoData: "当前区间暂无可显示的累计值",
+    samplingOverallMetricPv: "光伏发电",
+    samplingOverallMetricGridImport: "电网购电",
+    samplingOverallMetricGridExport: "电网上网",
+    samplingOverallMetricBatteryCharge: "电池充电",
+    samplingOverallMetricBatteryDischarge: "电池放电",
+    samplingOverallSeriesSajBatteryCharge: "SAJ 电池充电",
+    samplingOverallSeriesSajBatteryDischarge: "SAJ 电池放电",
+    samplingOverallSeriesSolplanetBatteryCharge: "Solplanet 电池充电",
+    samplingOverallSeriesSolplanetBatteryDischarge: "Solplanet 电池放电",
     samplingSmoothLabel: "平滑度",
     samplingSmoothModeDetail: "细节优先",
     samplingSmoothModeSmooth: "平滑",
@@ -784,7 +824,6 @@ let workerLogsDefaultsApplied = false;
 const PAGE_SIZE = 80;
 const SAMPLING_PAGE_SIZE = 100;
 const AUTO_REFRESH_KEY = "autoRefreshSeconds";
-const SAMPLING_TIMEZONE_KEY = "samplingTimezone";
 const SOLPLANET_RAW_MODE_KEY = "solplanetRawMode";
 const SAJ_ACTION_DEBUG_MODE_KEY = "sajActionDebugMode";
 const AUTO_REFRESH_OPTIONS = [0, 5, 10];
@@ -812,6 +851,15 @@ const SAMPLING_SERIES = [
   { key: "grid_w", labelKey: "samplingSeriesGrid", color: "#2563eb" },
   { key: "battery_w", labelKey: "samplingSeriesBattery", color: "#10b981" },
   { key: "load_w", labelKey: "samplingSeriesLoad", color: "#ef4444" },
+];
+const SAMPLING_OVERALL_SERIES = [
+  { key: "pv_total_w", labelKey: "samplingOverallMetricPv", color: "#f59e0b" },
+  { key: "grid_import_w", labelKey: "samplingOverallMetricGridImport", color: "#2563eb" },
+  { key: "grid_export_w", labelKey: "samplingOverallMetricGridExport", color: "#7c3aed" },
+  { key: "saj_battery_charge_w", labelKey: "samplingOverallSeriesSajBatteryCharge", color: "#0f766e" },
+  { key: "saj_battery_discharge_w", labelKey: "samplingOverallSeriesSajBatteryDischarge", color: "#10b981" },
+  { key: "solplanet_battery_charge_w", labelKey: "samplingOverallSeriesSolplanetBatteryCharge", color: "#9a3412" },
+  { key: "solplanet_battery_discharge_w", labelKey: "samplingOverallSeriesSolplanetBatteryDischarge", color: "#ef4444" },
 ];
 const SOLPLANET_RAW_FIELD_HELP = {
   getdev_device_0: {
@@ -1058,6 +1106,7 @@ const stateCache = {
   lastSolplanetControlFetch: null,
   lastSamplingStatus: null,
   lastSamplingDaily: null,
+  lastSamplingUsageBySystem: null,
   lastSamplingPage: null,
   lastSamplingSeries: null,
   lastWorkerLogsPage: null,
@@ -1089,7 +1138,6 @@ let sajControlLastEditAt = 0;
 let solplanetControlBusy = false;
 let summaryRequestId = 0;
 let configReady = false;
-let samplingTimezone = getSamplingTimezone();
 let samplingChart = null;
 let samplingChartFocusSeries = null;
 let samplingChartLastPayload = null;
@@ -1120,10 +1168,6 @@ const samplingRangeState = {
 function getAutoRefreshSeconds() {
   const saved = Number(localStorage.getItem(AUTO_REFRESH_KEY));
   return AUTO_REFRESH_OPTIONS.includes(saved) ? saved : 5;
-}
-
-function getSamplingTimezone() {
-  return "local";
 }
 
 function t(key, params = {}) {
@@ -1261,7 +1305,7 @@ function formatSamplingClock(value, withZone = false) {
   if (Number.isNaN(dt.getTime())) return "-";
   const text = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
   if (!withZone) return text;
-  return `${text} ${t("samplingTimezoneLocal")}`;
+  return text;
 }
 
 function formatLocalDateTime(isoText) {
@@ -1367,11 +1411,9 @@ function applyTranslations() {
 
   const autoRefreshSelect = document.getElementById("autoRefreshSelect");
   if (autoRefreshSelect) autoRefreshSelect.value = String(autoRefreshSeconds);
-  const samplingTimezoneSelect = document.getElementById("samplingTimezoneSelect");
-  if (samplingTimezoneSelect) samplingTimezoneSelect.value = samplingTimezone;
   const sajDebugInput = document.getElementById("sajActionDebugModeInput");
   if (sajDebugInput) sajDebugInput.checked = sajActionDebugMode;
-  updateSamplingTimezoneText();
+  updateSamplingTimeHeader();
 
   if (stateCache.lastSummary) renderSummary(stateCache.lastSummary);
   renderSystemLoadMeta("saj");
@@ -1383,14 +1425,14 @@ function applyTranslations() {
   renderSajRawFromCache();
   renderSajControlFromCache();
   renderSolplanetControlFromCache();
+  rerenderSamplingViewFromCache();
   if (stateCache.lastEntities) renderEntitiesPage(stateCache.lastEntities);
 }
 
-function updateSamplingTimezoneText() {
+function updateSamplingTimeHeader() {
   const tableHeader = document.querySelector("#samplingView th[data-i18n='samplingTableTime']");
   if (!tableHeader) return;
-  const zoneText = samplingTimezone === "utc" ? t("samplingTimezoneUtc") : t("samplingTimezoneLocal");
-  tableHeader.textContent = `${t("samplingTableTime")} (${zoneText})`;
+  tableHeader.textContent = t("samplingTableTime");
 }
 
 function setConfigModalVisible(visible) {
@@ -2571,14 +2613,29 @@ function formatMaybeNumber(value, digits = 1) {
   return Number(value).toFixed(digits);
 }
 
+function localDateParts(dateText) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateText || ""));
+  if (!match) return null;
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  if (!Number.isInteger(year) || !Number.isInteger(monthIndex) || !Number.isInteger(day)) return null;
+  return { year, monthIndex, day };
+}
+
 function toUtcIsoFromDateOnly(dateText) {
-  const d = new Date(`${dateText}T00:00:00Z`);
+  const parts = localDateParts(dateText);
+  if (!parts) return null;
+  const d = new Date(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0);
+  if (Number.isNaN(d.getTime())) return null;
   return d.toISOString();
 }
 
 function toUtcIsoFromDateEndExclusive(dateText) {
-  const d = new Date(`${dateText}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + 1);
+  const parts = localDateParts(dateText);
+  if (!parts) return null;
+  const d = new Date(parts.year, parts.monthIndex, parts.day + 1, 0, 0, 0, 0);
+  if (Number.isNaN(d.getTime())) return null;
   return d.toISOString();
 }
 
@@ -2655,37 +2712,50 @@ async function applyChartSelectionRange(startMs, endMs) {
   }
 }
 
-function getUtcDateText(offsetDays = 0) {
+function getLocalDateText(offsetDays = 0) {
   const d = new Date();
-  d.setUTCDate(d.getUTCDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
+  d.setDate(d.getDate() + offsetDays);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function getWeekInfo(anchorDateText) {
-  const base = new Date(`${anchorDateText}T00:00:00Z`);
-  const anchor = Number.isNaN(base.getTime()) ? new Date(`${getUtcDateText()}T00:00:00Z`) : base;
-  const day = anchor.getUTCDay();
+  const anchorParts = localDateParts(anchorDateText);
+  const now = new Date();
+  const anchor = anchorParts
+    ? new Date(anchorParts.year, anchorParts.monthIndex, anchorParts.day, 0, 0, 0, 0)
+    : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  const day = anchor.getDay();
   const diffToMonday = day === 0 ? -6 : 1 - day;
   const monday = new Date(anchor);
-  monday.setUTCDate(anchor.getUTCDate() + diffToMonday);
+  monday.setDate(anchor.getDate() + diffToMonday);
   const endExclusive = new Date(monday);
-  endExclusive.setUTCDate(monday.getUTCDate() + 7);
+  endExclusive.setDate(monday.getDate() + 7);
   const sunday = new Date(monday);
-  sunday.setUTCDate(monday.getUTCDate() + 6);
+  sunday.setDate(monday.getDate() + 6);
 
   const thursday = new Date(monday);
-  thursday.setUTCDate(monday.getUTCDate() + 3);
-  const year = thursday.getUTCFullYear();
-  const jan4 = new Date(Date.UTC(year, 0, 4));
-  const jan4Day = jan4.getUTCDay() || 7;
-  const firstThursday = new Date(Date.UTC(year, 0, 4 + (4 - jan4Day)));
+  thursday.setDate(monday.getDate() + 3);
+  const year = thursday.getFullYear();
+  const jan4 = new Date(year, 0, 4, 0, 0, 0, 0);
+  const jan4Day = jan4.getDay() || 7;
+  const firstThursday = new Date(year, 0, 4 + (4 - jan4Day), 0, 0, 0, 0);
   const week = 1 + Math.floor((thursday.getTime() - firstThursday.getTime()) / (7 * 86400000));
 
+  const localDateText = (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const dayText = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dayText}`;
+  };
+
   return {
-    anchor: anchor.toISOString().slice(0, 10),
+    anchor: localDateText(anchor),
     week,
-    monday: monday.toISOString().slice(0, 10),
-    sunday: sunday.toISOString().slice(0, 10),
+    monday: localDateText(monday),
+    sunday: localDateText(sunday),
     startUtc: monday.toISOString(),
     endUtc: endExclusive.toISOString(),
   };
@@ -2693,10 +2763,10 @@ function getWeekInfo(anchorDateText) {
 
 function getSamplingRange() {
   const mode = document.getElementById("samplingRangeModeSelect")?.value || "day";
-  const dayText = samplingRangeState.day || getUtcDateText();
+  const dayText = samplingRangeState.day || getLocalDateText();
   const weekText = samplingRangeState.week || dayText;
-  const monthNumber = Number(samplingRangeState.month || `${new Date().getUTCMonth() + 1}`);
-  const monthYear = Number(samplingRangeState.monthYear || new Date().getUTCFullYear());
+  const monthNumber = Number(samplingRangeState.month || `${new Date().getMonth() + 1}`);
+  const monthYear = Number(samplingRangeState.monthYear || new Date().getFullYear());
   const startDate = samplingRangeState.startDate || "";
   const endDate = samplingRangeState.endDate || "";
   const startDateTime = samplingRangeState.startDateTime || "";
@@ -2713,13 +2783,13 @@ function getSamplingRange() {
   }
   if (mode === "month") {
     const safeMonth = Math.max(1, Math.min(12, monthNumber || 1));
-    const start = new Date(Date.UTC(monthYear, safeMonth - 1, 1, 0, 0, 0));
-    const end = new Date(Date.UTC(monthYear, safeMonth, 1, 0, 0, 0));
+    const start = new Date(monthYear, safeMonth - 1, 1, 0, 0, 0, 0);
+    const end = new Date(monthYear, safeMonth, 1, 0, 0, 0, 0);
     return {
       mode,
       startUtc: start.toISOString(),
       endUtc: end.toISOString(),
-      label: `${monthYear}-${String(safeMonth).padStart(2, "0")} UTC`,
+      label: `${monthYear}-${String(safeMonth).padStart(2, "0")}`,
     };
   }
   if (mode === "custom_date") {
@@ -2731,31 +2801,30 @@ function getSamplingRange() {
       mode,
       startUtc,
       endUtc,
-      label: `${startLabel} ~ ${endLabel} UTC`,
+      label: `${startLabel} ~ ${endLabel}`,
       invalid: !startUtc || !endUtc || startUtc >= endUtc,
     };
   }
   if (mode === "custom_datetime") {
     const startUtc = toUtcIsoFromDateTimeLocal(startDateTime);
     const endUtc = toUtcIsoFromDateTimeLocal(endDateTime);
-    const startLabel = startUtc ? startUtc.replace("T", " ").slice(0, 16) : "-";
-    const endLabel = endUtc ? endUtc.replace("T", " ").slice(0, 16) : "-";
+    const startLabel = startDateTime ? startDateTime.replace("T", " ") : "-";
+    const endLabel = endDateTime ? endDateTime.replace("T", " ") : "-";
     return {
       mode,
       startUtc,
       endUtc,
-      label: `${startLabel} ~ ${endLabel} UTC`,
+      label: `${startLabel} ~ ${endLabel}`,
       invalid: !startUtc || !endUtc || startUtc >= endUtc,
     };
   }
   const startUtc = toUtcIsoFromDateOnly(dayText);
-  const dayEndDate = new Date(startUtc);
-  dayEndDate.setUTCDate(dayEndDate.getUTCDate() + 1);
+  const endUtc = toUtcIsoFromDateEndExclusive(dayText);
   return {
     mode: "day",
     startUtc,
-    endUtc: dayEndDate.toISOString(),
-    label: `${dayText} UTC`,
+    endUtc,
+    label: dayText,
   };
 }
 
@@ -2765,7 +2834,7 @@ function renderSamplingRangeInputContainer() {
   if (!container) return;
 
   if (mode === "week") {
-    const info = getWeekInfo(samplingRangeState.week || getUtcDateText());
+    const info = getWeekInfo(samplingRangeState.week || getLocalDateText());
     samplingRangeState.week = info.anchor;
     container.innerHTML = `
       <label>
@@ -2778,8 +2847,8 @@ function renderSamplingRangeInputContainer() {
       </label>
     `;
   } else if (mode === "month") {
-    const year = Number(samplingRangeState.monthYear || new Date().getUTCFullYear());
-    const selectedMonth = Number(samplingRangeState.month || `${new Date().getUTCMonth() + 1}`);
+    const year = Number(samplingRangeState.monthYear || new Date().getFullYear());
+    const selectedMonth = Number(samplingRangeState.month || `${new Date().getMonth() + 1}`);
     const monthOptions = Array.from({ length: 12 }, (_, i) => i + 1)
       .map((m) => `<option value="${m}"${m === selectedMonth ? " selected" : ""}>${monthLabel(m)}</option>`)
       .join("");
@@ -2849,9 +2918,12 @@ function bindSamplingRangeInputEvents() {
     const prevBtn = document.getElementById("samplingWeekPrevBtn");
     const nextBtn = document.getElementById("samplingWeekNextBtn");
     const moveWeek = async (deltaDays) => {
-      const current = new Date(`${samplingRangeState.week || getUtcDateText()}T00:00:00Z`);
-      current.setUTCDate(current.getUTCDate() + deltaDays);
-      samplingRangeState.week = current.toISOString().slice(0, 10);
+      const parts = localDateParts(samplingRangeState.week || getLocalDateText());
+      const current = parts
+        ? new Date(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0)
+        : new Date();
+      current.setDate(current.getDate() + deltaDays);
+      samplingRangeState.week = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`;
       renderSamplingRangeInputContainer();
       samplingPager.page = 1;
       await loadSampling();
@@ -2887,7 +2959,7 @@ function buildSamplingUrl() {
   const params = new URLSearchParams();
   const system = document.getElementById("samplingSystemSelect")?.value || "";
   const range = getSamplingRange();
-  if (system) params.set("system", system);
+  if (system && system !== "overall") params.set("system", system);
   if (range.startUtc) params.set("start_utc", range.startUtc);
   if (range.endUtc) params.set("end_utc", range.endUtc);
   params.set("page", String(samplingPager.page));
@@ -2992,13 +3064,19 @@ function renderWorkerLogsConfigMeta(configPayload) {
 function renderSamplingStatus(status) {
   const sizeMb = status?.db_size_bytes ? (Number(status.db_size_bytes) / (1024 * 1024)).toFixed(2) : "0.00";
   const estMb = status?.estimated_mb_per_day_total ?? 0;
-  const selectedSystem = document.getElementById("samplingSystemSelect")?.value || "saj";
+  const selectedSystem = document.getElementById("samplingSystemSelect")?.value || "overall";
   let interval = status?.sample_interval_seconds;
   if (selectedSystem === "saj" && status?.saj_sample_interval_seconds !== undefined) {
     interval = status.saj_sample_interval_seconds;
   }
   if (selectedSystem === "solplanet" && status?.solplanet_sample_interval_seconds !== undefined) {
     interval = status.solplanet_sample_interval_seconds;
+  }
+  if (selectedSystem === "overall") {
+    const sajInterval = status?.saj_sample_interval_seconds;
+    const solplanetInterval = status?.solplanet_sample_interval_seconds;
+    interval =
+      sajInterval !== undefined && solplanetInterval !== undefined ? `${sajInterval}/${solplanetInterval}` : interval ?? "-";
   }
   setText(
     "samplingStorageMeta",
@@ -3014,7 +3092,7 @@ function renderSamplingStatus(status) {
 }
 
 function renderSamplingUsage(usage, rangeLabel) {
-  const system = usage?.system || "-";
+  const system = formatSamplingSystemLabel(usage?.system || "-");
   const energy = usage?.energy_kwh || {};
   const hasData = Number(usage?.samples || 0) >= 2;
   if (!hasData) {
@@ -3032,6 +3110,222 @@ function renderSamplingUsage(usage, rangeLabel) {
       gridExport: formatMaybeNumber(energy.grid_export, 3),
     }),
   );
+}
+
+function formatEnergyKwhText(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${formatTrimmedDecimal(n, 3)} kWh`;
+}
+
+function formatSamplingSystemLabel(system) {
+  if (system === "overall") return t("samplingSystemOverall");
+  if (system === "solplanet") return "Solplanet";
+  if (system === "saj") return "SAJ";
+  return String(system || "-");
+}
+
+function getSamplingChartSeriesMeta(system) {
+  return system === "overall" ? SAMPLING_OVERALL_SERIES : SAMPLING_SERIES;
+}
+
+function combineSamplingUsageForOverall(usageBySystem) {
+  const sajUsage = usageBySystem?.saj || null;
+  const solplanetUsage = usageBySystem?.solplanet || null;
+  const sajEnergy = sajUsage?.energy_kwh || {};
+  const solplanetEnergy = solplanetUsage?.energy_kwh || {};
+  const sajHasData = Number(sajUsage?.samples || 0) >= 2;
+  const solplanetHasData = Number(solplanetUsage?.samples || 0) >= 2;
+  return {
+    system: "overall",
+    samples: sajHasData || solplanetHasData ? 2 : 0,
+    energy_kwh: {
+      home_load: (sajHasData ? Number(sajEnergy.home_load || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.home_load || 0) : 0),
+      solar_generation:
+        (sajHasData ? Number(sajEnergy.solar_generation || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.solar_generation || 0) : 0),
+      grid_import: (sajHasData ? Number(sajEnergy.grid_import || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.grid_import || 0) : 0),
+      grid_export: (sajHasData ? Number(sajEnergy.grid_export || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.grid_export || 0) : 0),
+      battery_charge:
+        (sajHasData ? Number(sajEnergy.battery_charge || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.battery_charge || 0) : 0),
+      battery_discharge:
+        (sajHasData ? Number(sajEnergy.battery_discharge || 0) : 0) +
+        (solplanetHasData ? Number(solplanetEnergy.battery_discharge || 0) : 0),
+    },
+  };
+}
+
+function buildSamplingTotalsRows(usageBySystem, selectedSystem) {
+  const sajUsage = usageBySystem?.saj || null;
+  const solplanetUsage = usageBySystem?.solplanet || null;
+  const sajEnergy = sajUsage?.energy_kwh || {};
+  const solplanetEnergy = solplanetUsage?.energy_kwh || {};
+  const sajHasData = Number(sajUsage?.samples || 0) >= 2;
+  const solplanetHasData = Number(solplanetUsage?.samples || 0) >= 2;
+
+  if (selectedSystem === "overall") {
+    return [
+      {
+        scope: t("samplingTotalsScopeOverall"),
+        title: t("samplingOverallMetricPv"),
+        leftLabel: "",
+        leftValue: 0,
+        leftKind: "pv",
+        rightLabel: t("samplingOverallMetricPv"),
+        rightValue: sajHasData || solplanetHasData ? Number(sajEnergy.solar_generation || 0) + Number(solplanetEnergy.solar_generation || 0) : 0,
+        rightKind: "pv",
+      },
+      {
+        scope: t("samplingTotalsScopeOverall"),
+        title: t("samplingTotalsGridTitle"),
+        leftLabel: t("samplingOverallMetricGridImport"),
+        leftValue: sajHasData || solplanetHasData ? Number(sajEnergy.grid_import || 0) + Number(solplanetEnergy.grid_import || 0) : 0,
+        leftKind: "import",
+        rightLabel: t("samplingOverallMetricGridExport"),
+        rightValue: sajHasData || solplanetHasData ? Number(sajEnergy.grid_export || 0) + Number(solplanetEnergy.grid_export || 0) : 0,
+        rightKind: "export",
+      },
+      {
+        scope: t("samplingTotalsScopeSajBattery"),
+        title: t("samplingTotalsBatteryTitle"),
+        leftLabel: t("samplingOverallMetricBatteryCharge"),
+        leftValue: sajHasData ? Number(sajEnergy.battery_charge || 0) : 0,
+        leftKind: "charge",
+        rightLabel: t("samplingOverallMetricBatteryDischarge"),
+        rightValue: sajHasData ? Number(sajEnergy.battery_discharge || 0) : 0,
+        rightKind: "discharge",
+      },
+      {
+        scope: t("samplingTotalsScopeSolplanetBattery"),
+        title: t("samplingTotalsBatteryTitle"),
+        leftLabel: t("samplingOverallMetricBatteryCharge"),
+        leftValue: solplanetHasData ? Number(solplanetEnergy.battery_charge || 0) : 0,
+        leftKind: "charge",
+        rightLabel: t("samplingOverallMetricBatteryDischarge"),
+        rightValue: solplanetHasData ? Number(solplanetEnergy.battery_discharge || 0) : 0,
+        rightKind: "discharge",
+      },
+    ];
+  }
+
+  const selectedUsage = selectedSystem === "solplanet" ? solplanetUsage : sajUsage;
+  const selectedEnergy = selectedUsage?.energy_kwh || {};
+  const selectedHasData = Number(selectedUsage?.samples || 0) >= 2;
+  const selectedLabel = formatSamplingSystemLabel(selectedSystem);
+  return [
+    {
+      scope: t("samplingTotalsScopeSystem", { system: selectedLabel }),
+      title: t("samplingOverallMetricPv"),
+      leftLabel: "",
+      leftValue: 0,
+      leftKind: "pv",
+      rightLabel: t("samplingOverallMetricPv"),
+      rightValue: selectedHasData ? Number(selectedEnergy.solar_generation || 0) : 0,
+      rightKind: "pv",
+    },
+    {
+      scope: t("samplingTotalsScopeSystem", { system: selectedLabel }),
+      title: t("samplingTotalsGridTitle"),
+      leftLabel: t("samplingOverallMetricGridImport"),
+      leftValue: selectedHasData ? Number(selectedEnergy.grid_import || 0) : 0,
+      leftKind: "import",
+      rightLabel: t("samplingOverallMetricGridExport"),
+      rightValue: selectedHasData ? Number(selectedEnergy.grid_export || 0) : 0,
+      rightKind: "export",
+    },
+    {
+      scope: t("samplingTotalsScopeSystem", { system: selectedLabel }),
+      title: t("samplingTotalsBatteryTitle"),
+      leftLabel: t("samplingOverallMetricBatteryCharge"),
+      leftValue: selectedHasData ? Number(selectedEnergy.battery_charge || 0) : 0,
+      leftKind: "charge",
+      rightLabel: t("samplingOverallMetricBatteryDischarge"),
+      rightValue: selectedHasData ? Number(selectedEnergy.battery_discharge || 0) : 0,
+      rightKind: "discharge",
+    },
+  ];
+}
+
+function pickActiveOverallValue(latest, ts, maxGapMs, key) {
+  if (!latest) return 0;
+  if (!Number.isFinite(ts - latest.ts) || ts - latest.ts > maxGapMs) return 0;
+  return Number(latest[key] || 0);
+}
+
+function normalizeOverallSeriesItems(items, system) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const ts = new Date(item.sampled_at_utc || "").getTime();
+      if (!Number.isFinite(ts)) return null;
+      const pv = Math.max(Number(item.pv_w || 0), 0);
+      const grid = Number(item.grid_w || 0);
+      const battery = Number(item.battery_w || 0);
+      return {
+        ts,
+        sampled_at_utc: item.sampled_at_utc,
+        pv_total_w: pv,
+        grid_import_w: Math.max(grid, 0),
+        grid_export_w: Math.max(-grid, 0),
+        [`${system}_battery_charge_w`]: Math.max(-battery, 0),
+        [`${system}_battery_discharge_w`]: Math.max(battery, 0),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.ts - b.ts);
+}
+
+function buildOverallSeriesPayload(seriesBySystem, status, range) {
+  const sajItems = normalizeOverallSeriesItems(seriesBySystem?.saj?.items, "saj");
+  const solplanetItems = normalizeOverallSeriesItems(seriesBySystem?.solplanet?.items, "solplanet");
+  const tsSet = new Set([...sajItems.map((item) => item.ts), ...solplanetItems.map((item) => item.ts)]);
+  const timestamps = Array.from(tsSet).sort((a, b) => a - b);
+  const sajGapMs = Number(status?.saj_sample_interval_seconds || 5) * 2500;
+  const solplanetGapMs = Number(status?.solplanet_sample_interval_seconds || 60) * 2500;
+  let sajIndex = 0;
+  let solplanetIndex = 0;
+  let latestSaj = null;
+  let latestSolplanet = null;
+
+  const items = timestamps.map((ts) => {
+    while (sajIndex < sajItems.length && sajItems[sajIndex].ts <= ts) {
+      latestSaj = sajItems[sajIndex];
+      sajIndex += 1;
+    }
+    while (solplanetIndex < solplanetItems.length && solplanetItems[solplanetIndex].ts <= ts) {
+      latestSolplanet = solplanetItems[solplanetIndex];
+      solplanetIndex += 1;
+    }
+    const pvTotal =
+      pickActiveOverallValue(latestSaj, ts, sajGapMs, "pv_total_w") + pickActiveOverallValue(latestSolplanet, ts, solplanetGapMs, "pv_total_w");
+    const gridImport =
+      pickActiveOverallValue(latestSaj, ts, sajGapMs, "grid_import_w") +
+      pickActiveOverallValue(latestSolplanet, ts, solplanetGapMs, "grid_import_w");
+    const gridExport =
+      pickActiveOverallValue(latestSaj, ts, sajGapMs, "grid_export_w") +
+      pickActiveOverallValue(latestSolplanet, ts, solplanetGapMs, "grid_export_w");
+    return {
+      sampled_at_utc: new Date(ts).toISOString(),
+      pv_total_w: pvTotal,
+      grid_import_w: gridImport,
+      grid_export_w: gridExport,
+      saj_battery_charge_w: pickActiveOverallValue(latestSaj, ts, sajGapMs, "saj_battery_charge_w"),
+      saj_battery_discharge_w: pickActiveOverallValue(latestSaj, ts, sajGapMs, "saj_battery_discharge_w"),
+      solplanet_battery_charge_w: pickActiveOverallValue(latestSolplanet, ts, solplanetGapMs, "solplanet_battery_charge_w"),
+      solplanet_battery_discharge_w: pickActiveOverallValue(
+        latestSolplanet,
+        ts,
+        solplanetGapMs,
+        "solplanet_battery_discharge_w",
+      ),
+    };
+  });
+
+  return {
+    system: "overall",
+    count: items.length,
+    items,
+    start_at_utc: range.startUtc,
+    end_at_utc: range.endUtc,
+  };
 }
 
 function ensureSamplingChart() {
@@ -3096,13 +3390,17 @@ function renderSamplingChart(seriesPayload) {
   const chart = ensureSamplingChart();
   if (!chart) return;
   const items = Array.isArray(seriesPayload?.items) ? seriesPayload.items : [];
+  const chartSeriesMeta = getSamplingChartSeriesMeta(seriesPayload?.system || (document.getElementById("samplingSystemSelect")?.value || "overall"));
+  if (samplingChartFocusSeries && !chartSeriesMeta.some((meta) => meta.key === samplingChartFocusSeries)) {
+    samplingChartFocusSeries = null;
+  }
   const startMs = new Date(seriesPayload?.start_at_utc || "").getTime();
   const endMs = new Date(seriesPayload?.end_at_utc || "").getTime();
   const xMin = Number.isFinite(startMs) ? startMs : null;
   const xMax = Number.isFinite(endMs) ? endMs : null;
 
   const smoothCfg = getSamplingSmoothConfig();
-  const preparedSeries = SAMPLING_SERIES.map((meta) => {
+  const preparedSeries = chartSeriesMeta.map((meta) => {
     const focused = !samplingChartFocusSeries || samplingChartFocusSeries === meta.key;
     const color = focused ? meta.color : "#b8c2bc";
     const lineOpacity = focused ? 0.95 : 0.35;
@@ -3180,11 +3478,11 @@ function renderSamplingChart(seriesPayload) {
         top: 10,
         left: 12,
         selectedMode: true,
-        selected: Object.fromEntries(SAMPLING_SERIES.map((item) => [item.key, true])),
+        selected: Object.fromEntries(chartSeriesMeta.map((item) => [item.key, true])),
         itemWidth: 12,
         itemHeight: 8,
         formatter: (name) => {
-          const hit = SAMPLING_SERIES.find((item) => item.key === name);
+          const hit = chartSeriesMeta.find((item) => item.key === name);
           const label = hit ? t(hit.labelKey) : String(name);
           if (!samplingChartFocusSeries) return label;
           return samplingChartFocusSeries === name ? `● ${label}` : `○ ${label}`;
@@ -3203,7 +3501,7 @@ function renderSamplingChart(seriesPayload) {
           const ts = params[0].axisValue;
           const lines = [formatSamplingClock(ts, true)];
           for (const p of params) {
-            const hit = SAMPLING_SERIES.find((item) => item.key === p.seriesName);
+            const hit = chartSeriesMeta.find((item) => item.key === p.seriesName);
             const label = hit ? t(hit.labelKey) : p.seriesName;
             lines.push(`${p.marker}${label}: ${wattsToKwText(Number(p.value?.[1] ?? p.value), 2)}`);
           }
@@ -3259,6 +3557,77 @@ function renderSamplingChart(seriesPayload) {
       brushMode: "single",
     },
   });
+}
+
+function renderSamplingTotals(usageBySystem, selectedSystem, rangeLabel, options = {}) {
+  const body = document.getElementById("samplingTotalsBody");
+  if (!body) return;
+  const systemText = formatSamplingSystemLabel(selectedSystem);
+  const rows = buildSamplingTotalsRows(usageBySystem, selectedSystem);
+  const hasData = rows.some((row) => Number(row.leftValue || 0) > 0 || Number(row.rightValue || 0) > 0);
+  const maxValue = Math.max(0, ...rows.map((row) => Number(row.leftValue || 0)), ...rows.map((row) => Number(row.rightValue || 0)));
+
+  if (options.metaText !== undefined) {
+    setText("samplingTotalsMeta", options.metaText);
+  } else {
+    setText(
+      "samplingTotalsMeta",
+      hasData
+        ? t("samplingTotalsMeta", { system: systemText, range: rangeLabel })
+        : t("samplingTotalsMetaNoData", { system: systemText, range: rangeLabel }),
+    );
+  }
+
+  if (!rows.length) {
+    body.innerHTML = `<div class="sampling-total-empty">${escapeHtml(t("samplingTotalsNoData"))}</div>`;
+    return;
+  }
+  if (!hasData) {
+    body.innerHTML = `<div class="sampling-total-empty">${escapeHtml(t("samplingTotalsNoData"))}</div>`;
+    return;
+  }
+
+  const widthPct = (value) => {
+    const n = Number(value || 0);
+    if (!Number.isFinite(n) || n <= 0 || maxValue <= 0) return 0;
+    return Math.max(0, Math.min(100, (n / maxValue) * 100));
+  };
+
+  body.innerHTML = rows
+    .map((row) => {
+      const leftWidth = widthPct(row.leftValue);
+      const rightWidth = widthPct(row.rightValue);
+      const leftValueText = Number(row.leftValue || 0) > 0 ? formatEnergyKwhText(row.leftValue) : "-";
+      const rightValueText = Number(row.rightValue || 0) > 0 ? formatEnergyKwhText(row.rightValue) : "-";
+      return `
+        <div class="sampling-total-row">
+          <div class="sampling-total-head">
+            <span class="sampling-total-scope">${escapeHtml(row.scope)}</span>
+            <span class="sampling-total-title">${escapeHtml(row.title)}</span>
+          </div>
+          <div class="sampling-total-bar">
+            <div class="sampling-total-side is-left">
+              <div class="sampling-total-fill is-${escapeHtml(row.leftKind)}" style="width:${leftWidth}%;"></div>
+            </div>
+            <div class="sampling-total-axis"></div>
+            <div class="sampling-total-side is-right">
+              <div class="sampling-total-fill is-${escapeHtml(row.rightKind)}" style="width:${rightWidth}%;"></div>
+            </div>
+          </div>
+          <div class="sampling-total-labels">
+            <div class="sampling-total-label">
+              <span class="sampling-total-label-name">${escapeHtml(row.leftLabel || "")}</span>
+              <span class="sampling-total-label-value">${escapeHtml(leftValueText)}</span>
+            </div>
+            <div class="sampling-total-label is-right">
+              <span class="sampling-total-label-name">${escapeHtml(row.rightLabel || "")}</span>
+              <span class="sampling-total-label-value">${escapeHtml(rightValueText)}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
 }
 
 function getRawCardMode(key) {
@@ -5101,24 +5470,38 @@ async function importSamplingCsv(file) {
 }
 
 async function loadSampling() {
-  const system = document.getElementById("samplingSystemSelect")?.value || "saj";
+  const system = document.getElementById("samplingSystemSelect")?.value || "overall";
+  const overallMode = system === "overall";
   const range = getSamplingRange();
   if (!range.startUtc || !range.endUtc || range.invalid) {
+    stateCache.lastSamplingDaily = null;
+    stateCache.lastSamplingUsageBySystem = null;
+    stateCache.lastSamplingPage = null;
+    stateCache.lastSamplingSeries = null;
     setText("samplingDailyMeta", t("loadFailed", { error: "Invalid time range" }));
+    setText("samplingChartMeta", t("loadFailed", { error: "Invalid time range" }));
     renderSamplingRows([]);
     renderSamplingChart({ items: [] });
+    renderSamplingTotals(null, system, range.label, { metaText: t("loadFailed", { error: "Invalid time range" }) });
     return;
   }
-  const usageUrl =
-    `/api/storage/usage-range?system=${encodeURIComponent(system)}&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}`;
-  const seriesUrl =
-    `/api/storage/series?system=${encodeURIComponent(system)}&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}&max_points=500`;
+  const sajUsageUrl =
+    `/api/storage/usage-range?system=saj&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}`;
+  const solplanetUsageUrl =
+    `/api/storage/usage-range?system=solplanet&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}`;
+  const sajSeriesUrl =
+    `/api/storage/series?system=saj&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}&max_points=500`;
+  const solplanetSeriesUrl =
+    `/api/storage/series?system=solplanet&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}&max_points=500`;
+  const selectedSeriesUrl = overallMode ? sajSeriesUrl : system === "solplanet" ? solplanetSeriesUrl : sajSeriesUrl;
 
-  const [statusResult, usageResult, samplesResult, seriesResult] = await Promise.allSettled([
+  const [statusResult, sajUsageResult, solplanetUsageResult, samplesResult, seriesResult, overallPeerSeriesResult] = await Promise.allSettled([
     fetchJson("/api/storage/status", { timeoutMs: 6000 }),
-    fetchJson(usageUrl, { timeoutMs: 6000 }),
+    fetchJson(sajUsageUrl, { timeoutMs: 6000 }),
+    fetchJson(solplanetUsageUrl, { timeoutMs: 6000 }),
     fetchJson(buildSamplingUrl(), { timeoutMs: 6000 }),
-    fetchJson(seriesUrl, { timeoutMs: 6000 }),
+    fetchJson(selectedSeriesUrl, { timeoutMs: 6000 }),
+    overallMode ? fetchJson(solplanetSeriesUrl, { timeoutMs: 6000 }) : Promise.resolve(null),
   ]);
 
   if (statusResult.status === "fulfilled") {
@@ -5128,12 +5511,25 @@ async function loadSampling() {
     setText("samplingStorageMeta", t("loadFailed", { error: String(statusResult.reason) }));
   }
 
-  if (usageResult.status === "fulfilled") {
-    stateCache.lastSamplingDaily = usageResult.value;
-    renderSamplingUsage(usageResult.value, range.label);
+  const usageBySystem = {
+    saj: sajUsageResult.status === "fulfilled" ? sajUsageResult.value : null,
+    solplanet: solplanetUsageResult.status === "fulfilled" ? solplanetUsageResult.value : null,
+  };
+  stateCache.lastSamplingUsageBySystem = usageBySystem;
+  const selectedUsage = overallMode
+    ? combineSamplingUsageForOverall(usageBySystem)
+    : system === "solplanet"
+      ? usageBySystem.solplanet
+      : usageBySystem.saj;
+  stateCache.lastSamplingDaily = selectedUsage || null;
+
+  if (selectedUsage) {
+    renderSamplingUsage(selectedUsage, range.label);
   } else {
-    setText("samplingDailyMeta", t("loadFailed", { error: String(usageResult.reason) }));
+    const selectedUsageError = system === "solplanet" ? solplanetUsageResult.reason : sajUsageResult.reason;
+    setText("samplingDailyMeta", t("loadFailed", { error: String(selectedUsageError) }));
   }
+  renderSamplingTotals(usageBySystem, system, range.label);
 
   if (samplesResult.status === "fulfilled") {
     const payload = samplesResult.value;
@@ -5142,24 +5538,33 @@ async function loadSampling() {
     stateCache.lastSamplingPage = payload;
     renderSamplingPage(payload);
   } else {
+    stateCache.lastSamplingPage = null;
     setText("samplingCount", t("loadFailed", { error: String(samplesResult.reason) }));
     setText("samplingPageInfo", t("pageDash"));
     renderSamplingRows([]);
   }
 
-  if (seriesResult.status === "fulfilled") {
-    const payload = seriesResult.value;
+  const overallHasAnySeries =
+    overallMode && (seriesResult.status === "fulfilled" || overallPeerSeriesResult.status === "fulfilled");
+  if (seriesResult.status === "fulfilled" || overallHasAnySeries) {
+    let payload = seriesResult.status === "fulfilled" ? seriesResult.value : { items: [], count: 0 };
+    if (overallMode) {
+      const sajSeries = seriesResult.status === "fulfilled" ? seriesResult.value : null;
+      const solplanetSeries = overallPeerSeriesResult.status === "fulfilled" ? overallPeerSeriesResult.value : null;
+      payload = buildOverallSeriesPayload({ saj: sajSeries, solplanet: solplanetSeries }, stateCache.lastSamplingStatus, range);
+    }
     stateCache.lastSamplingSeries = payload;
     setText(
       "samplingChartMeta",
       t("samplingChartMeta", {
-        system: payload.system || system,
+        system: formatSamplingSystemLabel(payload.system || system),
         range: range.label,
         count: payload.count || 0,
       }),
     );
     renderSamplingChart(payload);
   } else {
+    stateCache.lastSamplingSeries = null;
     setText("samplingChartMeta", t("loadFailed", { error: String(seriesResult.reason) }));
     renderSamplingChart({ items: [] });
   }
@@ -5171,6 +5576,11 @@ function rerenderSamplingViewFromCache() {
     const range = getSamplingRange();
     renderSamplingUsage(stateCache.lastSamplingDaily, range.label);
   }
+  if (stateCache.lastSamplingUsageBySystem) {
+    const range = getSamplingRange();
+    const system = document.getElementById("samplingSystemSelect")?.value || "overall";
+    renderSamplingTotals(stateCache.lastSamplingUsageBySystem, system, range.label);
+  }
   if (stateCache.lastSamplingPage) renderSamplingPage(stateCache.lastSamplingPage);
   if (stateCache.lastSamplingSeries) {
     const range = getSamplingRange();
@@ -5178,7 +5588,7 @@ function rerenderSamplingViewFromCache() {
     setText(
       "samplingChartMeta",
       t("samplingChartMeta", {
-        system: payload.system || (document.getElementById("samplingSystemSelect")?.value || "saj"),
+        system: formatSamplingSystemLabel(payload.system || (document.getElementById("samplingSystemSelect")?.value || "overall")),
         range: range.label,
         count: payload.count || 0,
       }),
@@ -5485,14 +5895,6 @@ bindChangeIfPresent("samplingRangeModeSelect", async () => {
   await loadSampling();
 });
 
-bindChangeIfPresent("samplingTimezoneSelect", (event) => {
-  samplingTimezone = "local";
-  localStorage.setItem(SAMPLING_TIMEZONE_KEY, samplingTimezone);
-  if (event?.target) event.target.value = "local";
-  updateSamplingTimezoneText();
-  rerenderSamplingViewFromCache();
-});
-
 bindChangeIfPresent("samplingSmoothModeSelect", () => {
   if (samplingChartLastPayload) renderSamplingChart(samplingChartLastPayload);
 });
@@ -5750,15 +6152,17 @@ initFlowDiagrams();
 applyTranslations();
 samplingRangeState.day = new Date().toISOString().slice(0, 10);
 samplingRangeState.week = samplingRangeState.day;
-samplingRangeState.monthYear = new Date().getUTCFullYear();
-samplingRangeState.month = String(new Date().getUTCMonth() + 1);
+samplingRangeState.day = getLocalDateText();
+samplingRangeState.week = samplingRangeState.day;
+samplingRangeState.monthYear = new Date().getFullYear();
+samplingRangeState.month = String(new Date().getMonth() + 1);
 samplingRangeState.endDate = samplingRangeState.day;
-samplingRangeState.startDate = getUtcDateText(-1);
+samplingRangeState.startDate = getLocalDateText(-1);
 {
   const now = new Date();
-  now.setUTCMinutes(0, 0, 0);
-  samplingRangeState.endDateTime = now.toISOString().slice(0, 16);
-  samplingRangeState.startDateTime = new Date(now.getTime() - 6 * 3600 * 1000).toISOString().slice(0, 16);
+  now.setMinutes(0, 0, 0);
+  samplingRangeState.endDateTime = toLocalDateTimeInputValueFromMs(now.getTime());
+  samplingRangeState.startDateTime = toLocalDateTimeInputValueFromMs(now.getTime() - 6 * 3600 * 1000);
 }
 renderSamplingRangeInputContainer();
 setActiveTab(currentTab, false);

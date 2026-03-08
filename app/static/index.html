@@ -256,6 +256,7 @@
               <select id="samplingSystemSelect">
                 <option value="saj">SAJ</option>
                 <option value="solplanet">Solplanet</option>
+                <option value="overall" data-i18n="samplingSystemOverall" selected>Overall</option>
               </select>
             </label>
             <label data-i18n="samplingRangeModeLabel">
@@ -266,13 +267,6 @@
                 <option value="month" data-i18n="samplingRangeMonth">Month</option>
                 <option value="custom_date" data-i18n="samplingRangeCustomDate">Custom Date</option>
                 <option value="custom_datetime" data-i18n="samplingRangeCustomDateTime">Custom Date + Time</option>
-              </select>
-            </label>
-            <label data-i18n="samplingTimezoneLabel">
-              Time Display
-              <select id="samplingTimezoneSelect">
-                <option value="utc" data-i18n="samplingTimezoneUtc">UTC</option>
-                <option value="local" data-i18n="samplingTimezoneLocal">Local Time</option>
               </select>
             </label>
             <div id="samplingRangeInputContainer"></div>
@@ -299,6 +293,13 @@
             <div class="sampling-chart-wrap">
               <div id="samplingChartCanvas" class="sampling-chart"></div>
             </div>
+          </section>
+          <section class="sampling-chart-card sampling-totals-card">
+            <div class="section-header">
+              <h3 data-i18n="samplingTotalsTitle">Trend Totals</h3>
+            </div>
+            <p id="samplingTotalsMeta" class="muted">-</p>
+            <div id="samplingTotalsBody" class="sampling-totals-bars"></div>
           </section>
           <p id="samplingCount" class="muted">-</p>
           <div class="pager">
