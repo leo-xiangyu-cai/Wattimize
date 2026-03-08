@@ -123,13 +123,13 @@
     if (line.type === "soc") {
       return (
         "<div class='soc-wrap'>" +
-        "<div class='soc-label'><span data-i18n='socLabel'>SOC</span></div>" +
-        "<div class='soc-track'>" +
         `<div id='${escapeHtml(line.fillId)}' class='soc-fill'></div>` +
         "<div class='soc-value-inside'>" +
         `<span id='${escapeHtml(line.valueId)}'>-</span>` +
         `<span id='${escapeHtml(line.energyId)}' class='soc-energy-inside'>-</span>` +
-        "</div></div></div>"
+        `<span id='${escapeHtml(line.usableId)}' class='soc-usable-inside'>-</span>` +
+        `<span id='${escapeHtml(line.runtimeId)}' class='soc-runtime-inside'>-</span>` +
+        "</div></div>"
       );
     }
 
