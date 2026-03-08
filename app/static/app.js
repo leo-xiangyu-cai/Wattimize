@@ -2367,10 +2367,10 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   const inverter1Exporting = inverter1W !== null && inverter1W > 0;
   const inverter2Active = inverter2W !== null && Math.abs(inverter2W) > 5;
   const inverter2Exporting = inverter2W !== null && inverter2W > 0;
-  setFlowLine("combined-lineInverter1ToSwitchboardA", inverter1Active, inverter1Exporting);
+  setFlowLine("combined-lineInverter1ToSwitchboardA", inverter1Active, !inverter1Exporting);
   setFlowLine("combined-lineInverter1ToSwitchboardB", inverter1Active, !inverter1Exporting);
-  setFlowLine("combined-lineInverter2ToSwitchboardA", inverter2Active, inverter2Exporting);
-  setFlowLine("combined-lineInverter2ToSwitchboardB", inverter2Active, inverter2Exporting);
+  setFlowLine("combined-lineInverter2ToSwitchboardA", inverter2Active, !inverter2Exporting);
+  setFlowLine("combined-lineInverter2ToSwitchboardB", inverter2Active, !inverter2Exporting);
 
   const solarToBattery1Active = solarToBattery1W > 5;
   const solarToInverter1Active = solarToInverter1W > 5;
