@@ -17,6 +17,8 @@
 body {
   margin: 0;
   font-family: "IBM Plex Sans", "Noto Sans", sans-serif;
+  font-size: 18px;
+  line-height: 1.5;
   color: var(--text);
   background:
     radial-gradient(circle at 0% 0%, #dff8ea 0, transparent 45%),
@@ -54,7 +56,8 @@ body {
   background: #eef4ee;
   color: var(--muted);
   border-radius: 999px;
-  padding: 8px 14px;
+  padding: 10px 18px;
+  font-size: 17px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -77,7 +80,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 17px;
   color: var(--muted);
 }
 
@@ -94,18 +97,18 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 17px;
   color: var(--muted);
 }
 
 h1 {
   margin: 0;
-  font-size: 28px;
+  font-size: 36px;
 }
 
 h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 26px;
 }
 
 .title-with-icon {
@@ -133,14 +136,14 @@ p {
 }
 
 .value {
-  font-size: 22px;
+  font-size: 29px;
   font-weight: 700;
   margin-top: 10px;
 }
 
 .muted {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 17px;
 }
 
 .section-header {
@@ -167,11 +170,11 @@ p {
 
 .metric .label {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 16px;
 }
 
 .metric .number {
-  font-size: 20px;
+  font-size: 27px;
   font-weight: 700;
   margin-top: 6px;
 }
@@ -187,21 +190,21 @@ p {
 label {
   display: grid;
   gap: 6px;
-  font-size: 13px;
+  font-size: 17px;
 }
 
 input {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px 10px;
-  font-size: 14px;
+  font-size: 17px;
 }
 
 select {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px 10px;
-  font-size: 14px;
+  font-size: 17px;
   background: #fff;
   color: var(--text);
 }
@@ -213,6 +216,7 @@ select {
   background: var(--accent);
   color: #fff;
   cursor: pointer;
+  font-size: 17px;
   font-weight: 600;
 }
 
@@ -520,17 +524,20 @@ td {
 .flow-board {
   margin-top: 14px;
   position: relative;
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  grid-template-rows: 1fr 1fr 1fr;
-  gap: 8px;
-  min-height: 540px;
+  display: block;
+  width: 100%;
+  min-height: 500px;
+  border-radius: 14px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0) 40%),
+    linear-gradient(180deg, rgba(247, 251, 248, 0.92), rgba(240, 247, 242, 0.96));
 }
 
 .flow-compare-grid {
   margin-top: 12px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
   gap: 12px;
 }
 
@@ -551,8 +558,50 @@ td {
 }
 
 .combined-flow-board {
-  display: block;
-  min-height: 700px;
+  min-height: 640px;
+}
+
+.diagram-host .x6-graph,
+.diagram-host .x6-graph-background,
+.diagram-host .x6-graph-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.diagram-host .x6-node {
+  cursor: default;
+}
+
+.diagram-host .x6-edge .connection-wrap,
+.diagram-host .x6-edge .vertices,
+.diagram-host .x6-edge .arrowheads,
+.diagram-host .x6-edge .tools {
+  display: none;
+}
+
+.efd-node {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: 1px solid #bdd0c1;
+  border-radius: 14px;
+  padding: 7px;
+  background: linear-gradient(160deg, #fbfdf9 0%, #eef7f1 100%);
+  color: #213029;
+}
+
+.efd-node.efd-node-inverter,
+.efd-node.efd-node-switchboard {
+  border-color: #88b09a;
+  background: linear-gradient(165deg, #f8fffa 0%, #dff4e8 100%);
+}
+
+.efd-node.efd-node-switchboard {
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 50% 12%, rgba(255, 255, 255, 0.95) 0, rgba(255, 255, 255, 0.18) 38%, transparent 60%),
+    linear-gradient(180deg, #fbf7ef 0%, #eef5ea 100%);
+  box-shadow: 0 16px 28px rgba(86, 105, 81, 0.12);
 }
 
 .combined-flow-board .flow-node {
@@ -561,7 +610,7 @@ td {
 }
 
 .combined-flow-board .combined-node-grid {
-  left: calc(50% - 76px);
+  left: calc(50% - 68px);
   top: 4%;
 }
 
@@ -571,12 +620,12 @@ td {
 }
 
 .combined-flow-board .combined-node-switchboard {
-  left: calc(50% - 110px);
+  left: calc(50% - 96px);
   top: 23%;
-  width: 220px;
-  min-height: 188px;
-  padding: 12px 14px 14px;
-  border-radius: 28px;
+  width: 192px;
+  min-height: 164px;
+  padding: 10px 12px 12px;
+  border-radius: 24px;
   background:
     radial-gradient(circle at 50% 12%, rgba(255, 255, 255, 0.95) 0, rgba(255, 255, 255, 0.18) 38%, transparent 60%),
     linear-gradient(180deg, #fbf7ef 0%, #eef5ea 100%);
@@ -584,39 +633,39 @@ td {
 }
 
 .combined-flow-board .combined-node-home-load {
-  left: calc(96% - 172px);
+  left: calc(96% - 156px);
   top: 20%;
-  width: 172px;
-  min-height: 124px;
+  width: 156px;
+  min-height: 110px;
 }
 
 .combined-flow-board .combined-node-tesla {
-  left: calc(96% - 172px);
+  left: calc(96% - 156px);
   top: 44%;
-  width: 172px;
-  min-height: 136px;
+  width: 156px;
+  min-height: 122px;
 }
 
 .combined-flow-board .combined-node-battery1 {
-  left: 4%;
+  left: 2.5%;
   top: 62%;
 }
 
 .combined-flow-board .combined-node-inverter1 {
-  left: 20%;
-  top: 63%;
-  width: 156px;
+  left: 24%;
+  top: 62%;
+  width: 144px;
 }
 
 .combined-flow-board .combined-node-inverter2 {
-  left: calc(80% - 156px);
-  top: 63%;
-  width: 156px;
+  left: calc(76% - 144px);
+  top: 62%;
+  width: 144px;
 }
 
 .combined-flow-board .combined-node-battery2 {
-  left: calc(96% - 152px);
-  top: 68%;
+  left: calc(97.5% - 136px);
+  top: 62%;
 }
 
 .combined-flow-board .line-grid-switchboard {
@@ -626,86 +675,86 @@ td {
 }
 
 .combined-flow-board .line-solar-battery1 {
-  left: calc(4% + 71px);
+  left: calc(4% + 63px);
   top: 41%;
   height: 21%;
 }
 
 .combined-flow-board .line-solar-inverter1-a {
-  top: calc(36% - 5px);
-  left: calc(4% + 152px);
-  width: calc(20% - 4% - 74px);
+  top: calc(35% - 5px);
+  left: calc(4% + 136px);
+  width: calc(21% - 4% - 64px);
 }
 
 .combined-flow-board .line-solar-inverter1-b {
-  left: calc(20% + 73px);
-  top: 36%;
+  left: calc(21% + 67px);
+  top: 35%;
   height: 27%;
 }
 
 .combined-flow-board .line-switchboard-home-load {
-  top: calc(36% - 5px);
-  left: calc(50% + 110px);
-  width: calc(24% - 48px);
+  top: calc(35% - 5px);
+  left: calc(50% + 96px);
+  width: calc(24% - 36px);
 }
 
 .combined-flow-board .line-switchboard-tesla-a {
-  left: calc(50% + 110px - 5px);
-  top: 36%;
-  height: 19%;
+  left: calc(50% + 96px - 5px);
+  top: 35%;
+  height: 18%;
 }
 
 .combined-flow-board .line-switchboard-tesla-b {
-  top: calc(51% - 5px);
-  left: calc(50% + 110px);
-  width: calc(24% - 48px);
+  top: calc(49% - 5px);
+  left: calc(50% + 96px);
+  width: calc(24% - 36px);
 }
 
 .combined-flow-board .line-battery1-inverter1 {
-  top: calc(74% - 5px);
-  left: calc(4% + 152px);
-  width: calc(20% - 4% - 74px);
+  top: calc(72% - 5px);
+  left: calc(2.5% + 136px);
+  width: calc(24% - 2.5% - 64px);
 }
 
 .combined-flow-board .line-battery2-inverter2 {
-  top: calc(74% - 5px);
-  left: 80%;
-  width: calc(16% - 152px);
+  top: calc(72% - 5px);
+  left: calc(76% - 8px);
+  width: calc(21.5% - 128px);
 }
 
 .combined-flow-board .line-inverter1-switchboard-a {
-  left: calc(50% - 110px - 5px);
-  top: 49%;
-  height: 19%;
+  left: calc(50% - 96px - 5px);
+  top: 47%;
+  height: 18%;
 }
 
 .combined-flow-board .line-inverter1-switchboard-b {
-  top: calc(68% - 5px);
-  left: calc(20% + 156px);
-  width: calc(30% - 266px);
+  top: calc(65% - 5px);
+  left: calc(21% + 144px);
+  width: calc(29% - 240px);
 }
 
 .combined-flow-board .line-inverter2-switchboard-a {
-  left: calc(50% + 110px - 5px);
-  top: 49%;
-  height: 19%;
+  left: calc(50% + 96px - 5px);
+  top: 47%;
+  height: 18%;
 }
 
 .combined-flow-board .line-inverter2-switchboard-b {
-  top: calc(68% - 5px);
-  left: calc(50% + 110px);
-  width: calc(30% - 266px);
+  top: calc(65% - 5px);
+  left: calc(50% + 96px);
+  width: calc(30% - 240px);
 }
 
 .flow-line-value {
   position: absolute;
   z-index: 2;
   transform: translate(-50%, -50%);
-  font-size: 11px;
+  font-size: 16px;
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
-  padding: 3px 6px;
+  padding: 5px 8px;
   border-radius: 999px;
   border: 1px solid #b9cbc0;
   color: #2d4a3a;
@@ -720,14 +769,14 @@ td {
 }
 
 .combined-flow-board .line-label-grid-switchboard { left: 53.5%; top: 20%; }
-.combined-flow-board .line-label-solar-battery1 { left: calc(4% + 96px); top: 52%; }
-.combined-flow-board .line-label-solar-inverter1 { left: 19%; top: 33%; }
-.combined-flow-board .line-label-switchboard-home-load { left: 78%; top: 33%; }
-.combined-flow-board .line-label-switchboard-tesla { left: 78%; top: 48%; }
-.combined-flow-board .line-label-battery1-inverter1 { left: 19%; top: 71%; }
-.combined-flow-board .line-label-battery2-inverter2 { left: 78%; top: 71%; }
-.combined-flow-board .line-label-inverter1-switchboard { left: 40%; top: 63%; }
-.combined-flow-board .line-label-inverter2-switchboard { left: 60%; top: 63%; }
+.combined-flow-board .line-label-solar-battery1 { left: calc(4% + 86px); top: 52%; }
+.combined-flow-board .line-label-solar-inverter1 { left: 19.5%; top: 32%; }
+.combined-flow-board .line-label-switchboard-home-load { left: 79%; top: 32%; }
+.combined-flow-board .line-label-switchboard-tesla { left: 79%; top: 46%; }
+.combined-flow-board .line-label-battery1-inverter1 { left: 20.5%; top: 69.5%; }
+.combined-flow-board .line-label-battery2-inverter2 { left: 78.5%; top: 69.5%; }
+.combined-flow-board .line-label-inverter1-switchboard { left: 40%; top: 61.5%; }
+.combined-flow-board .line-label-inverter2-switchboard { left: 60%; top: 61.5%; }
 
 .alert-high {
   color: #c43f4e !important;
@@ -735,7 +784,7 @@ td {
 
 .flow-system-title {
   margin: 2px 4px 0;
-  font-size: 14px;
+  font-size: 17px;
   letter-spacing: 0.04em;
   color: var(--muted);
   text-transform: uppercase;
@@ -765,11 +814,11 @@ td {
 
 .flow-node {
   border: 1px solid #bdd0c1;
-  border-radius: 14px;
-  padding: 8px;
+  border-radius: 12px;
+  padding: 7px;
   background: linear-gradient(160deg, #fbfdf9 0%, #eef7f1 100%);
   z-index: 2;
-  width: 152px;
+  width: 136px;
   justify-self: center;
   align-self: center;
 }
@@ -777,8 +826,8 @@ td {
 .node-title {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: 5px;
+  font-size: 15px;
   color: var(--muted);
   margin: 0;
   letter-spacing: 0.03em;
@@ -786,8 +835,8 @@ td {
 }
 
 .inline-icon {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -798,8 +847,8 @@ td {
 }
 
 .inline-icon svg {
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
 }
 
 .inline-icon svg * {
@@ -811,20 +860,20 @@ td {
 }
 
 .node-value {
-  margin-top: 8px;
-  font-size: 17px;
+  margin-top: 7px;
+  font-size: 24px;
   font-weight: 700;
 }
 
 .node-sub-value {
   margin-top: 4px;
-  font-size: 15px;
+  font-size: 19px;
   font-weight: 700;
 }
 
 .node-mini-value {
   margin-top: 2px;
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .battery-runtime {
@@ -835,7 +884,7 @@ td {
 
 .node-state {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: 15px;
 }
 
 .node-solar {
@@ -1254,8 +1303,7 @@ td {
   }
 
   .flow-board {
-    min-height: 500px;
-    gap: 8px;
+    min-height: 460px;
   }
 
   .flow-compare-grid {
@@ -1267,19 +1315,19 @@ td {
   }
 
   .flow-node {
-    width: 132px;
-    padding: 8px;
+    width: 120px;
+    padding: 6px;
   }
 
   .combined-flow-board {
-    min-height: 620px;
+    min-height: 560px;
     grid-template-rows: 0.82fr 0.92fr 1.26fr;
   }
 
   .combined-flow-board .combined-node-switchboard {
-    width: 248px;
-    min-height: 184px;
-    padding: 10px 12px 12px;
+    width: 172px;
+    min-height: 154px;
+    padding: 8px 10px 10px;
   }
 
   .inline-icon {

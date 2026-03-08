@@ -222,6 +222,9 @@ const I18N = {
     samplingRangeMonth: "Month",
     samplingRangeCustomDate: "Custom Date",
     samplingRangeCustomDateTime: "Custom Date + Time",
+    samplingTimezoneLabel: "Time Display",
+    samplingTimezoneUtc: "UTC",
+    samplingTimezoneLocal: "Local Time",
     samplingWeekDisplay: "Week {week} ({start} ~ {end})",
     samplingMonthYear: "{year} UTC",
     samplingDayLabel: "Day (UTC)",
@@ -242,7 +245,7 @@ const I18N = {
     samplingSeriesGrid: "Grid",
     samplingSeriesBattery: "Battery",
     samplingSeriesLoad: "Load",
-    samplingTableTime: "Sampled At (UTC)",
+    samplingTableTime: "Sampled At",
     samplingTableSystem: "System",
     samplingTablePv: "PV(W)",
     samplingTableGrid: "Grid(W)",
@@ -578,6 +581,9 @@ const I18N = {
     samplingRangeMonth: "月",
     samplingRangeCustomDate: "自定义日期",
     samplingRangeCustomDateTime: "自定义日期+时间",
+    samplingTimezoneLabel: "时间显示",
+    samplingTimezoneUtc: "UTC",
+    samplingTimezoneLocal: "本地时间",
     samplingWeekDisplay: "第{week}周（{start} ~ {end}）",
     samplingMonthYear: "{year} UTC",
     samplingDayLabel: "日期 (UTC)",
@@ -598,7 +604,7 @@ const I18N = {
     samplingSeriesGrid: "电网",
     samplingSeriesBattery: "电池",
     samplingSeriesLoad: "负载",
-    samplingTableTime: "采样时间 (UTC)",
+    samplingTableTime: "采样时间",
     samplingTableSystem: "系统",
     samplingTablePv: "光伏(W)",
     samplingTableGrid: "电网(W)",
@@ -761,6 +767,7 @@ const workerLogsPager = {
 const PAGE_SIZE = 80;
 const SAMPLING_PAGE_SIZE = 100;
 const AUTO_REFRESH_KEY = "autoRefreshSeconds";
+const SAMPLING_TIMEZONE_KEY = "samplingTimezone";
 const SOLPLANET_RAW_MODE_KEY = "solplanetRawMode";
 const SAJ_ACTION_DEBUG_MODE_KEY = "sajActionDebugMode";
 const AUTO_REFRESH_OPTIONS = [0, 5, 10];
@@ -1065,6 +1072,7 @@ let sajControlLastEditAt = 0;
 let solplanetControlBusy = false;
 let summaryRequestId = 0;
 let configReady = false;
+let samplingTimezone = getSamplingTimezone();
 let samplingChart = null;
 let samplingChartFocusSeries = null;
 let samplingChartLastPayload = null;
@@ -1095,6 +1103,11 @@ const samplingRangeState = {
 function getAutoRefreshSeconds() {
   const saved = Number(localStorage.getItem(AUTO_REFRESH_KEY));
   return AUTO_REFRESH_OPTIONS.includes(saved) ? saved : 5;
+}
+
+function getSamplingTimezone() {
+  const saved = localStorage.getItem(SAMPLING_TIMEZONE_KEY);
+  return saved === "utc" ? "utc" : "local";
 }
 
 function t(key, params = {}) {
@@ -1205,6 +1218,32 @@ function formatUpdatedAt(isoText) {
   return `${t("updatedAt")}: ${dt.toLocaleString()}`;
 }
 
+function formatSamplingDateTime(isoText) {
+  if (!isoText) return "-";
+  const dt = new Date(isoText);
+  if (Number.isNaN(dt.getTime())) return "-";
+  if (samplingTimezone === "utc") {
+    return dt.toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  }
+  return dt.toLocaleString();
+}
+
+function formatSamplingClock(value, withZone = false) {
+  const dt = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(dt.getTime())) return "-";
+  let text;
+  if (samplingTimezone === "utc") {
+    const hh = String(dt.getUTCHours()).padStart(2, "0");
+    const mm = String(dt.getUTCMinutes()).padStart(2, "0");
+    text = `${hh}:${mm}`;
+  } else {
+    text = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+  if (!withZone) return text;
+  const zoneText = samplingTimezone === "utc" ? t("samplingTimezoneUtc") : t("samplingTimezoneLocal");
+  return `${text} ${zoneText}`;
+}
+
 function formatLocalDateTime(isoText) {
   if (!isoText) return "-";
   const dt = new Date(isoText);
@@ -1311,8 +1350,11 @@ function applyTranslations() {
 
   const autoRefreshSelect = document.getElementById("autoRefreshSelect");
   if (autoRefreshSelect) autoRefreshSelect.value = String(autoRefreshSeconds);
+  const samplingTimezoneSelect = document.getElementById("samplingTimezoneSelect");
+  if (samplingTimezoneSelect) samplingTimezoneSelect.value = samplingTimezone;
   const sajDebugInput = document.getElementById("sajActionDebugModeInput");
   if (sajDebugInput) sajDebugInput.checked = sajActionDebugMode;
+  updateSamplingTimezoneText();
 
   if (stateCache.lastSummary) renderSummary(stateCache.lastSummary);
   renderSystemLoadMeta("saj");
@@ -1325,6 +1367,13 @@ function applyTranslations() {
   renderSajControlFromCache();
   renderSolplanetControlFromCache();
   if (stateCache.lastEntities) renderEntitiesPage(stateCache.lastEntities);
+}
+
+function updateSamplingTimezoneText() {
+  const tableHeader = document.querySelector("#samplingView th[data-i18n='samplingTableTime']");
+  if (!tableHeader) return;
+  const zoneText = samplingTimezone === "utc" ? t("samplingTimezoneUtc") : t("samplingTimezoneLocal");
+  tableHeader.textContent = `${t("samplingTableTime")} (${zoneText})`;
 }
 
 function setConfigModalVisible(visible) {
@@ -1468,7 +1517,289 @@ function formatBatteryRuntimeText(system, batterySoc, batteryW) {
   return t("batteryRuntimeDischarging", { time });
 }
 
+const flowDiagrams = {
+  byBoard: new Map(),
+  byEdgeId: new Map(),
+  byLabelId: new Map(),
+};
+
+function buildSystemDiagramSpec(system) {
+  const prefix = String(system);
+  return {
+    layout: "hub",
+    viewport: { width: 760, height: 520 },
+    nodes: [
+      {
+        id: `${prefix}-solarNode`,
+        kind: "solar",
+        icon: "solar",
+        title: "Solar",
+        titleKey: "solarTitle",
+        width: 156,
+        height: 102,
+        lines: [
+          { id: `${prefix}-solarPowerValue`, className: "node-value", text: "-" },
+          { id: `${prefix}-solarState`, className: "node-state muted", text: "idle" },
+        ],
+      },
+      {
+        id: `${prefix}-gridNode`,
+        kind: "grid",
+        icon: "grid",
+        title: "Grid",
+        titleKey: "gridTitle",
+        width: 156,
+        height: 102,
+        lines: [
+          { id: `${prefix}-gridPowerValue`, className: "node-value", text: "-" },
+          { id: `${prefix}-gridState`, className: "node-state muted", text: "idle" },
+        ],
+      },
+      {
+        id: `${prefix}-inverterNode`,
+        kind: "inverter",
+        icon: "inverter",
+        title: "Inverter",
+        titleKey: "inverterTitle",
+        width: 172,
+        height: 112,
+        lines: [
+          { id: `${prefix}-inverterStatusValue`, className: "node-value", text: "-" },
+          { id: `${prefix}-systemBalance`, className: "node-state muted", text: "balance -" },
+        ],
+      },
+      {
+        id: `${prefix}-loadNode`,
+        kind: "load",
+        icon: "load",
+        title: "Home Load",
+        titleKey: "loadTitle",
+        width: 156,
+        height: 102,
+        lines: [
+          { id: `${prefix}-loadPowerValue`, className: "node-value", text: "-" },
+          { id: `${prefix}-loadState`, className: "node-state muted", text: "idle" },
+        ],
+      },
+      {
+        id: `${prefix}-batteryNode`,
+        kind: "battery",
+        icon: "battery",
+        title: "Battery",
+        titleKey: "batteryTitle",
+        width: 176,
+        height: 170,
+        lines: [
+          { id: `${prefix}-batteryPowerValue`, className: "node-value", text: "-" },
+          { id: `${prefix}-batteryState`, className: "node-state muted", text: "idle" },
+          {
+            type: "soc",
+            fillId: `${prefix}-batterySocFill`,
+            valueId: `${prefix}-batterySocValue`,
+            energyId: `${prefix}-batteryEnergyValue`,
+          },
+          { id: `${prefix}-batteryRuntimeValue`, className: "node-mini-value muted battery-runtime", text: "-" },
+        ],
+      },
+    ],
+    edges: [
+      { id: `${prefix}-lineSolar`, source: `${prefix}-solarNode`, target: `${prefix}-inverterNode` },
+      { id: `${prefix}-lineGrid`, source: `${prefix}-gridNode`, target: `${prefix}-inverterNode` },
+      { id: `${prefix}-lineLoad`, source: `${prefix}-inverterNode`, target: `${prefix}-loadNode` },
+      { id: `${prefix}-lineBattery`, source: `${prefix}-batteryNode`, target: `${prefix}-inverterNode` },
+    ],
+  };
+}
+
+function buildCombinedDiagramSpec() {
+  return {
+    layout: "power",
+    viewport: { width: 1100, height: 720 },
+    nodes: [
+      {
+        id: "combined-gridNode",
+        kind: "grid",
+        icon: "grid",
+        title: "Grid",
+        titleKey: "gridTitle",
+        width: 156,
+        height: 102,
+        lines: [
+          { id: "combined-gridPowerValue", className: "node-value", text: "-" },
+          { id: "combined-gridState", className: "node-state muted", text: "idle" },
+        ],
+      },
+      {
+        id: "combined-solarNode",
+        kind: "solar",
+        icon: "solar",
+        title: "Solar",
+        titleKey: "solarTitle",
+        width: 156,
+        height: 102,
+        lines: [
+          { id: "combined-solarPowerValue", className: "node-value", text: "-" },
+          { id: "combined-solarState", className: "node-state muted", text: "idle" },
+        ],
+      },
+      {
+        id: "combined-switchboardNode",
+        kind: "switchboard",
+        icon: "switchboard",
+        title: "Switchboard",
+        titleKey: "switchboardTitle",
+        width: 208,
+        height: 152,
+        lines: [
+          { id: "combined-switchboardValue", className: "node-value", text: "-" },
+          { id: "combined-switchboardState", className: "node-state muted", text: "-" },
+        ],
+      },
+      {
+        id: "combined-loadNode",
+        kind: "load",
+        icon: "load",
+        title: "Home Load",
+        titleKey: "loadTitle",
+        width: 162,
+        height: 110,
+        lines: [
+          { id: "combined-loadPowerValue", className: "node-value", text: "-" },
+          { id: "combined-loadState", className: "node-state muted", text: "idle" },
+        ],
+      },
+      {
+        id: "combined-teslaNode",
+        kind: "tesla",
+        icon: "tesla",
+        title: "Tesla Charging",
+        titleKey: "teslaChargingLabel",
+        width: 162,
+        height: 132,
+        lines: [
+          { id: "combined-teslaChargingValue", className: "node-value", text: "-" },
+          { id: "combined-teslaChargingState", className: "node-state muted", text: "idle" },
+          { id: "combined-teslaChargingCurrentValue", className: "node-mini-value muted", text: "Current: -" },
+          { id: "combined-teslaChargingVoltageValue", className: "node-mini-value muted", text: "Voltage: -" },
+        ],
+      },
+      {
+        id: "combined-battery1Node",
+        kind: "battery",
+        side: "left",
+        icon: "battery",
+        title: "Battery 1",
+        titleKey: "battery1Title",
+        width: 182,
+        height: 176,
+        lines: [
+          { id: "combined-battery1PowerValue", className: "node-value", text: "-" },
+          { id: "combined-battery1State", className: "node-state muted", text: "idle" },
+          {
+            type: "soc",
+            fillId: "combined-battery1SocFill",
+            valueId: "combined-battery1SocValue",
+            energyId: "combined-battery1EnergyValue",
+          },
+          { id: "combined-battery1RuntimeValue", className: "node-mini-value muted battery-runtime", text: "-" },
+        ],
+      },
+      {
+        id: "combined-inverter1Node",
+        kind: "inverter",
+        side: "left",
+        icon: "inverter",
+        title: "Inverter 1",
+        titleKey: "inverter1Title",
+        width: 152,
+        height: 120,
+        lines: [
+          { id: "combined-inverter1PowerValue", className: "node-value", text: "-" },
+          { id: "combined-inverter1State", className: "node-state muted", text: "-" },
+          { className: "node-state muted", text: "SAJ" },
+        ],
+      },
+      {
+        id: "combined-inverter2Node",
+        kind: "inverter",
+        side: "right",
+        icon: "inverter",
+        title: "Inverter 2",
+        titleKey: "inverter2Title",
+        width: 152,
+        height: 120,
+        lines: [
+          { id: "combined-inverter2PowerValue", className: "node-value", text: "-" },
+          { id: "combined-inverter2State", className: "node-state muted", text: "-" },
+          { className: "node-state muted", text: "Solplanet" },
+        ],
+      },
+      {
+        id: "combined-battery2Node",
+        kind: "battery",
+        side: "right",
+        icon: "battery",
+        title: "Battery 2",
+        titleKey: "battery2Title",
+        width: 182,
+        height: 176,
+        lines: [
+          { id: "combined-battery2PowerValue", className: "node-value", text: "-" },
+          { id: "combined-battery2State", className: "node-state muted", text: "idle" },
+          {
+            type: "soc",
+            fillId: "combined-battery2SocFill",
+            valueId: "combined-battery2SocValue",
+            energyId: "combined-battery2EnergyValue",
+          },
+          { id: "combined-battery2RuntimeValue", className: "node-mini-value muted battery-runtime", text: "-" },
+        ],
+      },
+    ],
+    edges: [
+      { id: "combined-lineGridToSwitchboard", source: "combined-gridNode", target: "combined-switchboardNode", labelId: "combined-flowLabelGridToSwitchboard" },
+      { id: "combined-lineSolarToBattery1", source: "combined-solarNode", target: "combined-battery1Node", labelId: "combined-flowLabelSolarToBattery1" },
+      { id: "combined-lineSolarToInverter1A", source: "combined-solarNode", target: "combined-inverter1Node" },
+      { id: "combined-lineSolarToInverter1B", source: "combined-solarNode", target: "combined-inverter1Node", labelId: "combined-flowLabelSolarToInverter1" },
+      { id: "combined-lineSwitchboardToHomeLoad", source: "combined-switchboardNode", target: "combined-loadNode", labelId: "combined-flowLabelSwitchboardToHomeLoad" },
+      { id: "combined-lineSwitchboardToTeslaA", source: "combined-switchboardNode", target: "combined-teslaNode" },
+      { id: "combined-lineSwitchboardToTeslaB", source: "combined-switchboardNode", target: "combined-teslaNode", labelId: "combined-flowLabelSwitchboardToTesla" },
+      { id: "combined-lineBattery1ToInverter1", source: "combined-battery1Node", target: "combined-inverter1Node", labelId: "combined-flowLabelBattery1ToInverter1" },
+      { id: "combined-lineBattery2ToInverter2", source: "combined-battery2Node", target: "combined-inverter2Node", labelId: "combined-flowLabelBattery2ToInverter2" },
+      { id: "combined-lineInverter1ToSwitchboardA", source: "combined-inverter1Node", target: "combined-switchboardNode" },
+      { id: "combined-lineInverter1ToSwitchboardB", source: "combined-inverter1Node", target: "combined-switchboardNode", labelId: "combined-flowLabelInverter1ToSwitchboard" },
+      { id: "combined-lineInverter2ToSwitchboardA", source: "combined-inverter2Node", target: "combined-switchboardNode" },
+      { id: "combined-lineInverter2ToSwitchboardB", source: "combined-inverter2Node", target: "combined-switchboardNode", labelId: "combined-flowLabelInverter2ToSwitchboard" },
+    ],
+  };
+}
+
+function registerFlowDiagram(boardId, spec) {
+  const container = document.getElementById(boardId);
+  if (!container || typeof EnergyFlowDiagram !== "function") return;
+  const diagram = new EnergyFlowDiagram({ container, spec });
+  flowDiagrams.byBoard.set(boardId, diagram);
+  spec.edges.forEach((edge) => {
+    flowDiagrams.byEdgeId.set(edge.id, diagram);
+    if (edge.labelId) flowDiagrams.byLabelId.set(edge.labelId, diagram);
+  });
+}
+
+function initFlowDiagrams() {
+  registerFlowDiagram("energyFlowCombined", buildCombinedDiagramSpec());
+  registerFlowDiagram("energyFlowSaj", buildSystemDiagramSpec("saj"));
+  registerFlowDiagram("energyFlowSolplanet", buildSystemDiagramSpec("solplanet"));
+}
+
+function refreshFlowDiagrams() {
+  flowDiagrams.byBoard.forEach((diagram) => {
+    diagram.fit();
+  });
+}
+
 function setFlowLine(id, active, reverse = false) {
+  const diagram = flowDiagrams.byEdgeId.get(id);
+  if (diagram && diagram.setEdgeState(id, active, reverse)) return;
   const el = document.getElementById(id);
   if (!el) return;
   el.classList.toggle("active", Boolean(active));
@@ -1746,6 +2077,14 @@ function renderEnergyFlow(system, flowPayload) {
 }
 
 function setFlowValueLabel(id, wattsValue, active) {
+  const diagram = flowDiagrams.byLabelId.get(id);
+  if (diagram) {
+    const text =
+      !active || wattsValue === null || wattsValue === undefined || Number.isNaN(Number(wattsValue))
+        ? "-"
+        : formatPowerKwFromWatts(Math.abs(Number(wattsValue)));
+    if (diagram.setEdgeLabel(id, text, active)) return;
+  }
   const el = document.getElementById(id);
   if (!el) return;
   if (!active || wattsValue === null || wattsValue === undefined || Number.isNaN(Number(wattsValue))) {
@@ -2467,7 +2806,7 @@ function renderSamplingRows(items) {
   body.innerHTML = "";
   for (const item of items) {
     const tr = document.createElement("tr");
-    const sampledAt = item.sampled_at_utc ? new Date(item.sampled_at_utc).toLocaleString() : "-";
+    const sampledAt = formatSamplingDateTime(item.sampled_at_utc);
     tr.innerHTML = `
       <td>${sampledAt}</td>
       <td>${item.system || "-"}</td>
@@ -2569,7 +2908,7 @@ function renderSamplingStatus(status) {
       estMb: Number(estMb).toFixed(2),
     }),
   );
-  const updatedAt = status?.last_sample_utc ? new Date(status.last_sample_utc).toLocaleString() : "-";
+  const updatedAt = formatSamplingDateTime(status?.last_sample_utc);
   setText("samplingUpdatedAt", `${t("updatedAt")}: ${updatedAt}`);
 }
 
@@ -2761,10 +3100,7 @@ function renderSamplingChart(seriesPayload) {
         formatter: (params) => {
           if (!Array.isArray(params) || !params.length) return "";
           const ts = params[0].axisValue;
-          const d = new Date(ts);
-          const hh = String(d.getUTCHours()).padStart(2, "0");
-          const mm = String(d.getUTCMinutes()).padStart(2, "0");
-          const lines = [`${hh}:${mm} UTC`];
+          const lines = [formatSamplingClock(ts, true)];
           for (const p of params) {
             const hit = SAMPLING_SERIES.find((item) => item.key === p.seriesName);
             const label = hit ? t(hit.labelKey) : p.seriesName;
@@ -2781,12 +3117,7 @@ function renderSamplingChart(seriesPayload) {
         splitLine: { lineStyle: { color: "#eef4ee" } },
         axisLabel: {
           color: "#6b7f72",
-          formatter: (value) => {
-            const d = new Date(value);
-            const hh = String(d.getUTCHours()).padStart(2, "0");
-            const mm = String(d.getUTCMinutes()).padStart(2, "0");
-            return `${hh}:${mm}`;
-          },
+          formatter: (value) => formatSamplingClock(value, false),
         },
       },
       yAxis: {
@@ -4704,6 +5035,28 @@ async function loadSampling() {
   }
 }
 
+function rerenderSamplingViewFromCache() {
+  if (stateCache.lastSamplingStatus) renderSamplingStatus(stateCache.lastSamplingStatus);
+  if (stateCache.lastSamplingDaily) {
+    const range = getSamplingRange();
+    renderSamplingUsage(stateCache.lastSamplingDaily, range.label);
+  }
+  if (stateCache.lastSamplingPage) renderSamplingPage(stateCache.lastSamplingPage);
+  if (stateCache.lastSamplingSeries) {
+    const range = getSamplingRange();
+    const payload = stateCache.lastSamplingSeries;
+    setText(
+      "samplingChartMeta",
+      t("samplingChartMeta", {
+        system: payload.system || (document.getElementById("samplingSystemSelect")?.value || "saj"),
+        range: range.label,
+        count: payload.count || 0,
+      }),
+    );
+    renderSamplingChart(payload);
+  }
+}
+
 async function loadWorkerLogs() {
   try {
     const payload = await fetchJson(buildWorkerLogsUrl(), { timeoutMs: 10000 });
@@ -4871,6 +5224,11 @@ function setActiveTab(tab, load = true) {
   if (tabEntities) tabEntities.classList.toggle("active", currentTab === "entities");
   if (tabSampling) tabSampling.classList.toggle("active", samplingActive);
   if (tabWorkerLogs) tabWorkerLogs.classList.toggle("active", workerLogsActive);
+  if (dashboardActive) {
+    window.requestAnimationFrame(() => {
+      refreshFlowDiagrams();
+    });
+  }
 
   if (load && !tabHasCachedData(currentTab)) {
     void loadCurrentTab();
@@ -4882,6 +5240,7 @@ bindChangeIfPresent("langSelect", (event) => {
   currentLang = nextLang;
   localStorage.setItem("lang", nextLang);
   applyTranslations();
+  refreshFlowDiagrams();
   renderSamplingRangeInputContainer();
 });
 
@@ -4972,6 +5331,13 @@ bindChangeIfPresent("samplingRangeModeSelect", async () => {
   renderSamplingRangeInputContainer();
   samplingPager.page = 1;
   await loadSampling();
+});
+
+bindChangeIfPresent("samplingTimezoneSelect", (event) => {
+  samplingTimezone = event.target.value === "utc" ? "utc" : "local";
+  localStorage.setItem(SAMPLING_TIMEZONE_KEY, samplingTimezone);
+  updateSamplingTimezoneText();
+  rerenderSamplingViewFromCache();
 });
 
 bindChangeIfPresent("samplingSmoothModeSelect", () => {
@@ -5219,8 +5585,10 @@ bindClickIfPresent("configCloseBtn", () => {
 
 window.addEventListener("resize", () => {
   if (samplingChart) samplingChart.resize();
+  refreshFlowDiagrams();
 });
 
+initFlowDiagrams();
 applyTranslations();
 samplingRangeState.day = new Date().toISOString().slice(0, 10);
 samplingRangeState.week = samplingRangeState.day;
