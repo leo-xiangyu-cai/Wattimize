@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from time import monotonic
 from typing import Any, Callable
+from uuid import uuid4
 
 import httpx
 
@@ -40,6 +41,8 @@ class SolplanetCgiClient:
     def _emit_log(
         self,
         *,
+        phase: str,
+        request_token: str,
         method: str,
         url: str,
         requested_at_utc: str,
@@ -48,12 +51,15 @@ class SolplanetCgiClient:
         duration_ms: float | None,
         result_text: str | None,
         error_text: str | None,
+        response_json: Any = None,
     ) -> None:
         if not self._request_logger:
             return
         try:
             self._request_logger(
                 {
+                    "phase": phase,
+                    "request_token": request_token,
                     "service": "solplanet_cgi",
                     "method": method,
                     "url": url,
@@ -63,6 +69,7 @@ class SolplanetCgiClient:
                     "duration_ms": duration_ms,
                     "result_text": result_text,
                     "error_text": error_text,
+                    "response_json": response_json,
                 }
             )
         except Exception:
@@ -71,11 +78,27 @@ class SolplanetCgiClient:
     async def _get_json(self, endpoint: str) -> dict[str, Any]:
         url = self._url(endpoint)
         requested_at_utc = datetime.now(UTC).isoformat()
+        request_token = uuid4().hex
         started = monotonic()
+        self._emit_log(
+            phase="start",
+            request_token=request_token,
+            method="GET",
+            url=url,
+            requested_at_utc=requested_at_utc,
+            ok=False,
+            status_code=None,
+            duration_ms=None,
+            result_text=None,
+            error_text=None,
+        )
         try:
             response = await self._client.get(url)
             response.raise_for_status()
+            payload = response.json()
             self._emit_log(
+                phase="finish",
+                request_token=request_token,
                 method="GET",
                 url=url,
                 requested_at_utc=requested_at_utc,
@@ -84,12 +107,20 @@ class SolplanetCgiClient:
                 duration_ms=round((monotonic() - started) * 1000, 1),
                 result_text=response.text,
                 error_text=None,
+                response_json=payload,
             )
-            payload = response.json()
             return payload if isinstance(payload, dict) else {}
         except httpx.HTTPStatusError as exc:
             response = exc.response
+            payload_json: Any = None
+            if response is not None:
+                try:
+                    payload_json = response.json()
+                except ValueError:
+                    payload_json = None
             self._emit_log(
+                phase="finish",
+                request_token=request_token,
                 method="GET",
                 url=url,
                 requested_at_utc=requested_at_utc,
@@ -98,10 +129,13 @@ class SolplanetCgiClient:
                 duration_ms=round((monotonic() - started) * 1000, 1),
                 result_text=response.text if response is not None else None,
                 error_text=str(exc),
+                response_json=payload_json,
             )
             raise
         except httpx.HTTPError as exc:
             self._emit_log(
+                phase="finish",
+                request_token=request_token,
                 method="GET",
                 url=url,
                 requested_at_utc=requested_at_utc,
@@ -116,11 +150,27 @@ class SolplanetCgiClient:
     async def _post_json(self, endpoint: str, data: dict[str, Any]) -> dict[str, Any]:
         url = self._url(endpoint)
         requested_at_utc = datetime.now(UTC).isoformat()
+        request_token = uuid4().hex
         started = monotonic()
+        self._emit_log(
+            phase="start",
+            request_token=request_token,
+            method="POST",
+            url=url,
+            requested_at_utc=requested_at_utc,
+            ok=False,
+            status_code=None,
+            duration_ms=None,
+            result_text=None,
+            error_text=None,
+        )
         try:
             response = await self._client.post(url, json=data)
             response.raise_for_status()
+            payload = response.json()
             self._emit_log(
+                phase="finish",
+                request_token=request_token,
                 method="POST",
                 url=url,
                 requested_at_utc=requested_at_utc,
@@ -129,12 +179,20 @@ class SolplanetCgiClient:
                 duration_ms=round((monotonic() - started) * 1000, 1),
                 result_text=response.text,
                 error_text=None,
+                response_json=payload,
             )
-            payload = response.json()
             return payload if isinstance(payload, dict) else {}
         except httpx.HTTPStatusError as exc:
             response = exc.response
+            payload_json: Any = None
+            if response is not None:
+                try:
+                    payload_json = response.json()
+                except ValueError:
+                    payload_json = None
             self._emit_log(
+                phase="finish",
+                request_token=request_token,
                 method="POST",
                 url=url,
                 requested_at_utc=requested_at_utc,
@@ -143,10 +201,13 @@ class SolplanetCgiClient:
                 duration_ms=round((monotonic() - started) * 1000, 1),
                 result_text=response.text if response is not None else None,
                 error_text=str(exc),
+                response_json=payload_json,
             )
             raise
         except httpx.HTTPError as exc:
             self._emit_log(
+                phase="finish",
+                request_token=request_token,
                 method="POST",
                 url=url,
                 requested_at_utc=requested_at_utc,

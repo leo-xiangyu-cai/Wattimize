@@ -43,6 +43,8 @@ class Settings:
     saj_core_entity_ids: tuple[str, ...]
     solplanet_core_entity_ids: tuple[str, ...]
     solplanet_dongle_host: str
+    solplanet_inverter_sn: str
+    solplanet_battery_sn: str
     solplanet_dongle_port: int
     solplanet_dongle_scheme: str
     solplanet_verify_ssl: bool
@@ -93,6 +95,8 @@ def _env_values() -> dict[str, object]:
         "ha_url": os.getenv("HA_URL", "").strip(),
         "ha_token": os.getenv("HA_TOKEN", "").strip(),
         "solplanet_dongle_host": os.getenv("SOLPLANET_DONGLE_HOST", "").strip(),
+        "solplanet_inverter_sn": os.getenv("SOLPLANET_INVERTER_SN", "").strip(),
+        "solplanet_battery_sn": os.getenv("SOLPLANET_BATTERY_SN", "").strip(),
         "saj_sample_interval_seconds": os.getenv("WATTIMIZE_SAMPLE_INTERVAL_SECONDS", "").strip(),
         "solplanet_sample_interval_seconds": os.getenv("WATTIMIZE_SOLPLANET_SAMPLE_INTERVAL_SECONDS", "").strip(),
     }
@@ -105,6 +109,8 @@ def _build_settings(raw: dict[str, object]) -> Settings:
         saj_core_entity_ids=DEFAULT_SAJ_ENTITY_IDS,
         solplanet_core_entity_ids=DEFAULT_SOLPLANET_ENTITY_IDS,
         solplanet_dongle_host=str(raw.get("solplanet_dongle_host") or "").strip(),
+        solplanet_inverter_sn=str(raw.get("solplanet_inverter_sn") or "").strip(),
+        solplanet_battery_sn=str(raw.get("solplanet_battery_sn") or "").strip(),
         solplanet_dongle_port=CONST_SOLPLANET_DONGLE_PORT,
         solplanet_dongle_scheme=CONST_SOLPLANET_DONGLE_SCHEME,
         solplanet_verify_ssl=CONST_SOLPLANET_VERIFY_SSL,
@@ -131,6 +137,8 @@ def settings_to_dict(settings: Settings) -> dict[str, object]:
         "ha_url": settings.ha_url,
         "ha_token": settings.ha_token,
         "solplanet_dongle_host": settings.solplanet_dongle_host,
+        "solplanet_inverter_sn": settings.solplanet_inverter_sn,
+        "solplanet_battery_sn": settings.solplanet_battery_sn,
         "saj_sample_interval_seconds": settings.saj_sample_interval_seconds,
         "solplanet_sample_interval_seconds": settings.solplanet_sample_interval_seconds,
     }

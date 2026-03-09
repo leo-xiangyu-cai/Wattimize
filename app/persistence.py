@@ -41,9 +41,27 @@ WORKER_API_LOG_RESULT_MAX_CHARS = 20000
 
 
 @dataclass(frozen=True)
-class EnergySample:
+class RawRequestResult:
+    round_id: str
+    system: str | None
+    source: str
+    endpoint: str
+    method: str
+    request_url: str
+    requested_at_utc: datetime
+    duration_ms: float | None
+    ok: bool
+    status_code: int | None
+    error_text: str | None
+    response_text: str | None
+    response_json: object | None
+
+
+@dataclass(frozen=True)
+class AssembledFlowSnapshot:
+    round_id: str
     system: str
-    sampled_at_utc: datetime
+    assembled_at_utc: datetime
     source: str
     pv_w: float | None
     grid_w: float | None
@@ -52,7 +70,10 @@ class EnergySample:
     battery_soc_percent: float | None
     inverter_status: str | None
     balance_w: float | None
-    payload: dict[str, object]
+    flow: dict[str, object]
+
+
+EnergySample = AssembledFlowSnapshot
 
 
 def init_db(db_path: Path) -> None:
@@ -61,11 +82,12 @@ def init_db(db_path: Path) -> None:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS energy_samples (
+            CREATE TABLE IF NOT EXISTS assembled_flow_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                round_id TEXT NOT NULL,
                 system TEXT NOT NULL,
-                sampled_at_utc TEXT NOT NULL,
-                sampled_at_epoch REAL NOT NULL,
+                assembled_at_utc TEXT NOT NULL,
+                assembled_at_epoch REAL NOT NULL,
                 source TEXT NOT NULL,
                 pv_w REAL,
                 grid_w REAL,
@@ -74,14 +96,14 @@ def init_db(db_path: Path) -> None:
                 battery_soc_percent REAL,
                 inverter_status TEXT,
                 balance_w REAL,
-                payload_json TEXT NOT NULL
+                flow_json TEXT NOT NULL
             );
             """
         )
         conn.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_energy_samples_system_epoch
-            ON energy_samples(system, sampled_at_epoch);
+            CREATE INDEX IF NOT EXISTS idx_assembled_flow_snapshots_system_epoch
+            ON assembled_flow_snapshots(system, assembled_at_epoch);
             """
         )
         conn.execute(
@@ -97,6 +119,7 @@ def init_db(db_path: Path) -> None:
             """
             CREATE TABLE IF NOT EXISTS worker_api_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_token TEXT,
                 worker TEXT NOT NULL,
                 system TEXT,
                 service TEXT NOT NULL,
@@ -105,6 +128,7 @@ def init_db(db_path: Path) -> None:
                 requested_at_utc TEXT NOT NULL,
                 requested_at_epoch REAL NOT NULL,
                 ok INTEGER NOT NULL,
+                status TEXT,
                 status_code INTEGER,
                 duration_ms REAL,
                 result_text TEXT,
@@ -112,28 +136,59 @@ def init_db(db_path: Path) -> None:
             );
             """
         )
+        worker_api_log_columns = {
+            str(row[1])
+            for row in conn.execute("PRAGMA table_info(worker_api_logs);").fetchall()
+        }
+        if "request_token" not in worker_api_log_columns:
+            conn.execute("ALTER TABLE worker_api_logs ADD COLUMN request_token TEXT;")
+        if "status" not in worker_api_log_columns:
+            conn.execute("ALTER TABLE worker_api_logs ADD COLUMN status TEXT;")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_worker_api_logs_time
             ON worker_api_logs(requested_at_epoch DESC);
             """
         )
-        for table_name in SOLPLANET_ENDPOINT_TABLES.values():
-            conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {table_name} (
-                    id INTEGER PRIMARY KEY CHECK(id = 1),
-                    path TEXT NOT NULL,
-                    requested_at_utc TEXT NOT NULL,
-                    requested_at_epoch REAL NOT NULL,
-                    ok INTEGER NOT NULL,
-                    error TEXT,
-                    payload_json TEXT,
-                    fetch_ms REAL,
-                    last_success_at_utc TEXT
-                );
-                """
-            )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_worker_api_logs_request_token
+            ON worker_api_logs(request_token);
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS raw_request_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                round_id TEXT NOT NULL,
+                system TEXT,
+                source TEXT NOT NULL,
+                endpoint TEXT NOT NULL,
+                method TEXT NOT NULL,
+                request_url TEXT NOT NULL,
+                requested_at_utc TEXT NOT NULL,
+                requested_at_epoch REAL NOT NULL,
+                duration_ms REAL,
+                ok INTEGER NOT NULL,
+                status_code INTEGER,
+                error_text TEXT,
+                response_text TEXT,
+                response_json TEXT
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_raw_request_results_round
+            ON raw_request_results(round_id, requested_at_epoch);
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_raw_request_results_endpoint_time
+            ON raw_request_results(source, endpoint, requested_at_epoch DESC);
+            """
+        )
         conn.commit()
 
 
@@ -149,6 +204,7 @@ def _truncate_result_text(text: str | None) -> str:
 def insert_worker_api_log(
     db_path: Path,
     *,
+    request_token: str | None = None,
     worker: str,
     system: str | None,
     service: str,
@@ -156,11 +212,12 @@ def insert_worker_api_log(
     api_link: str,
     requested_at_utc: str,
     ok: bool,
+    status: str | None = None,
     status_code: int | None,
     duration_ms: float | None,
     result_text: str | None,
     error_text: str | None,
-) -> None:
+) -> int:
     parsed_requested = datetime.fromisoformat(requested_at_utc.replace("Z", "+00:00"))
     if parsed_requested.tzinfo is None:
         parsed_requested = parsed_requested.replace(tzinfo=UTC)
@@ -168,9 +225,10 @@ def insert_worker_api_log(
     requested_epoch = parsed_requested.astimezone(UTC).timestamp()
     with sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
         conn.execute(f"PRAGMA busy_timeout={int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)};")
-        conn.execute(
+        cursor = conn.execute(
             """
             INSERT INTO worker_api_logs (
+                request_token,
                 worker,
                 system,
                 service,
@@ -179,13 +237,15 @@ def insert_worker_api_log(
                 requested_at_utc,
                 requested_at_epoch,
                 ok,
+                status,
                 status_code,
                 duration_ms,
                 result_text,
                 error_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
+                str(request_token or "") or None,
                 str(worker or "worker"),
                 str(system or "") or None,
                 str(service or "unknown"),
@@ -194,10 +254,58 @@ def insert_worker_api_log(
                 requested_norm,
                 requested_epoch,
                 1 if ok else 0,
+                str(status or "") or None,
                 status_code,
                 duration_ms,
                 _truncate_result_text(result_text),
                 str(error_text or "") or None,
+            ),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+
+
+def update_worker_api_log(
+    db_path: Path,
+    *,
+    request_token: str,
+    ok: bool,
+    status: str | None,
+    status_code: int | None,
+    duration_ms: float | None,
+    result_text: str | None,
+    error_text: str | None,
+) -> None:
+    if not request_token:
+        return
+    with sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
+        conn.execute(f"PRAGMA busy_timeout={int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)};")
+        conn.execute(
+            """
+            UPDATE worker_api_logs
+            SET
+                ok = ?,
+                status = ?,
+                status_code = ?,
+                duration_ms = ?,
+                result_text = ?,
+                error_text = ?
+            WHERE id = (
+                SELECT id
+                FROM worker_api_logs
+                WHERE request_token = ?
+                ORDER BY id DESC
+                LIMIT 1
+            );
+            """,
+            (
+                1 if ok else 0,
+                str(status or "") or None,
+                status_code,
+                duration_ms,
+                _truncate_result_text(result_text),
+                str(error_text or "") or None,
+                request_token,
             ),
         )
         conn.commit()
@@ -257,6 +365,7 @@ def list_worker_api_logs(
                 f"""
                 SELECT
                     id,
+                    request_token,
                     worker,
                     system,
                     service,
@@ -264,6 +373,7 @@ def list_worker_api_logs(
                     api_link,
                     requested_at_utc,
                     ok,
+                    status,
                     status_code,
                     duration_ms,
                     result_text,
@@ -282,17 +392,19 @@ def list_worker_api_logs(
     items = [
         {
             "id": int(row[0]),
-            "worker": str(row[1]),
-            "system": str(row[2] or ""),
-            "service": str(row[3]),
-            "method": str(row[4]),
-            "api_link": str(row[5]),
-            "requested_at_utc": row[6],
-            "ok": bool(row[7]),
-            "status_code": row[8],
-            "duration_ms": row[9],
-            "result_text": str(row[10] or ""),
-            "error_text": str(row[11] or ""),
+            "request_token": str(row[1] or ""),
+            "worker": str(row[2]),
+            "system": str(row[3] or ""),
+            "service": str(row[4]),
+            "method": str(row[5]),
+            "api_link": str(row[6]),
+            "requested_at_utc": row[7],
+            "ok": bool(row[8]),
+            "status": str(row[9] or ""),
+            "status_code": row[10],
+            "duration_ms": row[11],
+            "result_text": str(row[12] or ""),
+            "error_text": str(row[13] or ""),
         }
         for row in rows
     ]
@@ -309,14 +421,15 @@ def list_worker_api_logs(
 
 
 def insert_sample(db_path: Path, sample: EnergySample) -> None:
-    sampled_at_utc = sample.sampled_at_utc.astimezone(UTC)
+    assembled_at_utc = sample.assembled_at_utc.astimezone(UTC)
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
-            INSERT INTO energy_samples (
+            INSERT INTO assembled_flow_snapshots (
+                round_id,
                 system,
-                sampled_at_utc,
-                sampled_at_epoch,
+                assembled_at_utc,
+                assembled_at_epoch,
                 source,
                 pv_w,
                 grid_w,
@@ -325,13 +438,14 @@ def insert_sample(db_path: Path, sample: EnergySample) -> None:
                 battery_soc_percent,
                 inverter_status,
                 balance_w,
-                payload_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                flow_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
+                sample.round_id,
                 sample.system,
-                sampled_at_utc.isoformat(),
-                sampled_at_utc.timestamp(),
+                assembled_at_utc.isoformat(),
+                assembled_at_utc.timestamp(),
                 sample.source,
                 sample.pv_w,
                 sample.grid_w,
@@ -340,7 +454,7 @@ def insert_sample(db_path: Path, sample: EnergySample) -> None:
                 sample.battery_soc_percent,
                 sample.inverter_status,
                 sample.balance_w,
-                json.dumps(sample.payload, ensure_ascii=False),
+                json.dumps(sample.flow, ensure_ascii=False),
             ),
         )
         conn.commit()
@@ -360,8 +474,8 @@ def export_samples_csv(db_path: Path) -> str:
                 """
                 SELECT
                     system,
-                    sampled_at_utc,
-                    sampled_at_epoch,
+                    assembled_at_utc,
+                    assembled_at_epoch,
                     source,
                     pv_w,
                     grid_w,
@@ -370,9 +484,9 @@ def export_samples_csv(db_path: Path) -> str:
                     battery_soc_percent,
                     inverter_status,
                     balance_w,
-                    payload_json
-                FROM energy_samples
-                ORDER BY sampled_at_epoch ASC;
+                    flow_json
+                FROM assembled_flow_snapshots
+                ORDER BY assembled_at_epoch ASC;
                 """
             ).fetchall()
     except sqlite3.OperationalError:
@@ -418,7 +532,7 @@ def import_samples_csv(db_path: Path, csv_text: str, *, replace_existing: bool =
     imported = 0
     with sqlite3.connect(db_path) as conn:
         if replace_existing:
-            conn.execute("DELETE FROM energy_samples;")
+            conn.execute("DELETE FROM assembled_flow_snapshots;")
         for row in reader:
             system = str(row.get("system") or "").strip().lower()
             if not system:
@@ -444,10 +558,11 @@ def import_samples_csv(db_path: Path, csv_text: str, *, replace_existing: bool =
 
             conn.execute(
                 """
-                INSERT INTO energy_samples (
+                INSERT INTO assembled_flow_snapshots (
+                    round_id,
                     system,
-                    sampled_at_utc,
-                    sampled_at_epoch,
+                    assembled_at_utc,
+                    assembled_at_epoch,
                     source,
                     pv_w,
                     grid_w,
@@ -456,10 +571,11 @@ def import_samples_csv(db_path: Path, csv_text: str, *, replace_existing: bool =
                     battery_soc_percent,
                     inverter_status,
                     balance_w,
-                    payload_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    flow_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
+                    f"import-{int(sampled_at_epoch)}-{system}",
                     system,
                     sampled_at.isoformat(),
                     sampled_at_epoch,
@@ -499,18 +615,18 @@ def get_storage_status(db_path: Path, sample_interval_seconds: float) -> dict[st
 
     try:
         with sqlite3.connect(db_path) as conn:
-            total_rows = int(conn.execute("SELECT COUNT(*) FROM energy_samples;").fetchone()[0])
+            total_rows = int(conn.execute("SELECT COUNT(*) FROM assembled_flow_snapshots;").fetchone()[0])
             rows_by_system_rows = conn.execute(
                 """
                 SELECT system, COUNT(*) AS c
-                FROM energy_samples
+                FROM assembled_flow_snapshots
                 GROUP BY system
                 ORDER BY system ASC;
                 """
             ).fetchall()
             rows_by_system = {str(row[0]): int(row[1]) for row in rows_by_system_rows}
             last_sample_utc = conn.execute(
-                "SELECT sampled_at_utc FROM energy_samples ORDER BY sampled_at_epoch DESC LIMIT 1;"
+                "SELECT assembled_at_utc FROM assembled_flow_snapshots ORDER BY assembled_at_epoch DESC LIMIT 1;"
             ).fetchone()
     except sqlite3.OperationalError:
         total_rows = 0
@@ -559,10 +675,10 @@ def compute_daily_usage(
             with sqlite3.connect(db_path) as conn:
                 rows = conn.execute(
                     """
-                    SELECT sampled_at_epoch, pv_w, grid_w, battery_w, load_w
-                    FROM energy_samples
-                    WHERE system = ? AND sampled_at_epoch >= ? AND sampled_at_epoch < ?
-                    ORDER BY sampled_at_epoch ASC;
+                    SELECT assembled_at_epoch, pv_w, grid_w, battery_w, load_w
+                    FROM assembled_flow_snapshots
+                    WHERE system = ? AND assembled_at_epoch >= ? AND assembled_at_epoch < ?
+                    ORDER BY assembled_at_epoch ASC;
                     """,
                     (system, start_ts, end_ts),
                 ).fetchall()
@@ -668,14 +784,14 @@ def list_samples(
     if target_day_utc is not None:
         day_start = datetime.combine(target_day_utc, time.min, tzinfo=UTC)
         day_end = day_start + timedelta(days=1)
-        where_conditions.append("sampled_at_epoch >= ?")
-        where_conditions.append("sampled_at_epoch < ?")
+        where_conditions.append("assembled_at_epoch >= ?")
+        where_conditions.append("assembled_at_epoch < ?")
         params.extend([day_start.timestamp(), day_end.timestamp()])
     if start_at_utc is not None:
-        where_conditions.append("sampled_at_epoch >= ?")
+        where_conditions.append("assembled_at_epoch >= ?")
         params.append(start_at_utc.astimezone(UTC).timestamp())
     if end_at_utc is not None:
-        where_conditions.append("sampled_at_epoch < ?")
+        where_conditions.append("assembled_at_epoch < ?")
         params.append(end_at_utc.astimezone(UTC).timestamp())
     where_sql = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
 
@@ -694,7 +810,7 @@ def list_samples(
         with sqlite3.connect(db_path) as conn:
             total = int(
                 conn.execute(
-                    f"SELECT COUNT(*) FROM energy_samples {where_sql};",
+                    f"SELECT COUNT(*) FROM assembled_flow_snapshots {where_sql};",
                     params,
                 ).fetchone()[0]
             )
@@ -705,7 +821,7 @@ def list_samples(
                 SELECT
                     id,
                     system,
-                    sampled_at_utc,
+                    assembled_at_utc,
                     source,
                     pv_w,
                     grid_w,
@@ -714,9 +830,9 @@ def list_samples(
                     battery_soc_percent,
                     inverter_status,
                     balance_w
-                FROM energy_samples
+                FROM assembled_flow_snapshots
                 {where_sql}
-                ORDER BY sampled_at_epoch DESC
+                ORDER BY assembled_at_epoch DESC
                 LIMIT ? OFFSET ?;
                 """,
                 query_params,
@@ -762,7 +878,7 @@ def get_latest_sample(db_path: Path, *, system: str) -> dict[str, object] | None
             row = conn.execute(
                 """
                 SELECT
-                    sampled_at_utc,
+                    assembled_at_utc,
                     source,
                     pv_w,
                     grid_w,
@@ -771,10 +887,10 @@ def get_latest_sample(db_path: Path, *, system: str) -> dict[str, object] | None
                     battery_soc_percent,
                     inverter_status,
                     balance_w,
-                    payload_json
-                FROM energy_samples
+                    flow_json
+                FROM assembled_flow_snapshots
                 WHERE system = ?
-                ORDER BY sampled_at_epoch DESC
+                ORDER BY assembled_at_epoch DESC
                 LIMIT 1;
                 """,
                 (system,),
@@ -898,92 +1014,101 @@ def list_realtime_kv_rows(db_path: Path, *, prefix: str | None = None) -> list[d
     return items
 
 
-def upsert_solplanet_endpoint_snapshot(
+def insert_raw_request_result(
     db_path: Path,
     *,
+    round_id: str,
+    system: str | None,
+    source: str,
     endpoint: str,
-    path: str,
+    method: str,
+    request_url: str,
     requested_at_utc: str,
+    duration_ms: float | None,
     ok: bool,
-    error: str | None,
-    payload: dict[str, object] | None,
-    fetch_ms: float | None,
+    status_code: int | None,
+    error_text: str | None,
+    response_text: str | None,
+    response_json: object | None,
 ) -> None:
-    table_name = SOLPLANET_ENDPOINT_TABLES.get(endpoint)
-    if not table_name:
-        raise ValueError(f"Unsupported endpoint: {endpoint}")
-
     parsed_requested = datetime.fromisoformat(requested_at_utc.replace("Z", "+00:00"))
     if parsed_requested.tzinfo is None:
         parsed_requested = parsed_requested.replace(tzinfo=UTC)
     requested_norm = parsed_requested.astimezone(UTC).isoformat()
     requested_epoch = parsed_requested.astimezone(UTC).timestamp()
-
-    payload_json = None if payload is None else json.dumps(payload, ensure_ascii=False)
+    response_json_text = None if response_json is None else json.dumps(response_json, ensure_ascii=False)
 
     with sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
         conn.execute(f"PRAGMA busy_timeout={int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)};")
-        existing = conn.execute(
-            f"SELECT last_success_at_utc FROM {table_name} WHERE id = 1;"
-        ).fetchone()
-        previous_success = existing[0] if existing else None
-        last_success = requested_norm if ok else previous_success
         conn.execute(
-            f"""
-            INSERT INTO {table_name} (
-                id,
-                path,
+            """
+            INSERT INTO raw_request_results (
+                round_id,
+                system,
+                source,
+                endpoint,
+                method,
+                request_url,
                 requested_at_utc,
                 requested_at_epoch,
+                duration_ms,
                 ok,
-                error,
-                payload_json,
-                fetch_ms,
-                last_success_at_utc
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                path = excluded.path,
-                requested_at_utc = excluded.requested_at_utc,
-                requested_at_epoch = excluded.requested_at_epoch,
-                ok = excluded.ok,
-                error = excluded.error,
-                payload_json = excluded.payload_json,
-                fetch_ms = excluded.fetch_ms,
-                last_success_at_utc = excluded.last_success_at_utc;
+                status_code,
+                error_text,
+                response_text,
+                response_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
-                path,
+                round_id,
+                str(system or "") or None,
+                source,
+                endpoint,
+                method,
+                request_url,
                 requested_norm,
                 requested_epoch,
+                duration_ms,
                 1 if ok else 0,
-                error,
-                payload_json,
-                fetch_ms,
-                last_success,
+                status_code,
+                error_text,
+                _truncate_result_text(response_text),
+                response_json_text,
             ),
         )
         conn.commit()
 
 
-def get_solplanet_endpoint_snapshot(db_path: Path, *, endpoint: str) -> dict[str, object] | None:
-    table_name = SOLPLANET_ENDPOINT_TABLES.get(endpoint)
-    if not table_name or not db_path.exists():
+def get_latest_raw_request_result(
+    db_path: Path,
+    *,
+    source: str,
+    endpoint: str,
+) -> dict[str, object] | None:
+    if not db_path.exists():
         return None
     try:
         with sqlite3.connect(db_path) as conn:
             row = conn.execute(
-                f"""
-                SELECT
-                    path,
-                    requested_at_utc,
-                    ok,
-                    error,
-                    payload_json,
-                    fetch_ms,
-                    last_success_at_utc
-                FROM {table_name}
-                WHERE id = 1;
                 """
+                SELECT
+                    round_id,
+                    system,
+                    request_url,
+                    requested_at_utc,
+                    duration_ms,
+                    ok,
+                    status_code,
+                    error_text,
+                    response_json,
+                    response_text
+                FROM raw_request_results
+                WHERE source = ? AND endpoint = ?
+                ORDER BY requested_at_epoch DESC
+                LIMIT 1;
+                """
+                ,
+                (source, endpoint),
             ).fetchone()
     except sqlite3.OperationalError:
         return None
@@ -991,25 +1116,136 @@ def get_solplanet_endpoint_snapshot(db_path: Path, *, endpoint: str) -> dict[str
     if not row:
         return None
 
-    payload_json = row[4]
-    payload: dict[str, object] | None = None
+    payload_json = row[8]
+    payload: object | None = None
     if isinstance(payload_json, str) and payload_json.strip():
         try:
-            parsed = json.loads(payload_json)
-            if isinstance(parsed, dict):
-                payload = parsed
+            payload = json.loads(payload_json)
         except json.JSONDecodeError:
             payload = None
 
     return {
+        "round_id": row[0],
+        "system": row[1],
         "endpoint": endpoint,
-        "path": row[0],
-        "requested_at_utc": row[1],
-        "ok": bool(row[2]),
-        "error": row[3],
+        "path": row[2],
+        "requested_at_utc": row[3],
+        "fetch_ms": row[4],
+        "ok": bool(row[5]),
+        "status_code": row[6],
+        "error": row[7],
         "payload": payload,
-        "fetch_ms": row[5],
-        "last_success_at_utc": row[6],
+        "response_text": row[9],
+        "last_success_at_utc": None,
+    }
+
+
+def list_raw_request_results(
+    db_path: Path,
+    *,
+    page: int,
+    page_size: int,
+    round_id: str | None = None,
+    system: str | None = None,
+    source: str | None = None,
+) -> dict[str, object]:
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 1
+    if page_size > 500:
+        page_size = 500
+
+    where_conditions: list[str] = []
+    params: list[object] = []
+    if round_id:
+        where_conditions.append("round_id = ?")
+        params.append(round_id)
+    if system:
+        where_conditions.append("system = ?")
+        params.append(system)
+    if source:
+        where_conditions.append("source = ?")
+        params.append(source)
+    where_sql = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
+
+    if not db_path.exists():
+        return {
+            "count": 0,
+            "total": 0,
+            "page": page,
+            "page_size": page_size,
+            "has_next": False,
+            "has_prev": False,
+            "items": [],
+        }
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            total = int(conn.execute(f"SELECT COUNT(*) FROM raw_request_results {where_sql};", params).fetchone()[0])
+            start = (page - 1) * page_size
+            query_params = [*params, page_size, start]
+            rows = conn.execute(
+                f"""
+                SELECT
+                    id,
+                    round_id,
+                    system,
+                    source,
+                    endpoint,
+                    method,
+                    request_url,
+                    requested_at_utc,
+                    duration_ms,
+                    ok,
+                    status_code,
+                    error_text,
+                    response_json
+                FROM raw_request_results
+                {where_sql}
+                ORDER BY requested_at_epoch DESC
+                LIMIT ? OFFSET ?;
+                """,
+                query_params,
+            ).fetchall()
+    except sqlite3.OperationalError:
+        total = 0
+        rows = []
+
+    items: list[dict[str, object]] = []
+    for row in rows:
+        parsed_json: object = None
+        if isinstance(row[12], str) and row[12].strip():
+            try:
+                parsed_json = json.loads(row[12])
+            except json.JSONDecodeError:
+                parsed_json = row[12]
+        items.append(
+            {
+                "id": int(row[0]),
+                "round_id": str(row[1]),
+                "system": str(row[2] or ""),
+                "source": str(row[3]),
+                "endpoint": str(row[4]),
+                "method": str(row[5]),
+                "request_url": str(row[6]),
+                "requested_at_utc": row[7],
+                "duration_ms": row[8],
+                "ok": bool(row[9]),
+                "status_code": row[10],
+                "error_text": str(row[11] or ""),
+                "response_json": parsed_json,
+            }
+        )
+    end = page * page_size
+    return {
+        "count": len(items),
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "has_next": end < total,
+        "has_prev": page > 1,
+        "items": items,
     }
 
 
@@ -1051,15 +1287,15 @@ def get_series_samples(
             rows = conn.execute(
                 """
                 SELECT
-                    sampled_at_utc,
-                    sampled_at_epoch,
+                    assembled_at_utc,
+                    assembled_at_epoch,
                     pv_w,
                     grid_w,
                     battery_w,
                     load_w
-                FROM energy_samples
-                WHERE system = ? AND sampled_at_epoch >= ? AND sampled_at_epoch <= ?
-                ORDER BY sampled_at_epoch ASC;
+                    FROM assembled_flow_snapshots
+                    WHERE system = ? AND assembled_at_epoch >= ? AND assembled_at_epoch <= ?
+                    ORDER BY assembled_at_epoch ASC;
                 """,
                 (system, start_at.timestamp(), end_at.timestamp()),
             ).fetchall()
@@ -1113,10 +1349,10 @@ def compute_usage_between(
             with sqlite3.connect(db_path) as conn:
                 rows = conn.execute(
                     """
-                    SELECT sampled_at_epoch, pv_w, grid_w, battery_w, load_w
-                    FROM energy_samples
-                    WHERE system = ? AND sampled_at_epoch >= ? AND sampled_at_epoch < ?
-                    ORDER BY sampled_at_epoch ASC;
+                    SELECT assembled_at_epoch, pv_w, grid_w, battery_w, load_w
+                    FROM assembled_flow_snapshots
+                    WHERE system = ? AND assembled_at_epoch >= ? AND assembled_at_epoch < ?
+                    ORDER BY assembled_at_epoch ASC;
                     """,
                     (system, start_ts, end_ts),
                 ).fetchall()

@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import traceback
+from urllib.parse import urlparse
 from collections import Counter
 from contextvars import ContextVar
 from datetime import UTC, date, datetime
@@ -41,19 +42,21 @@ from app.persistence import (
     compute_daily_usage,
     compute_usage_between,
     export_samples_csv,
+    get_latest_raw_request_result,
     get_realtime_kv_by_prefix,
-    get_solplanet_endpoint_snapshot,
     get_latest_sample,
     get_series_samples,
     get_storage_status,
+    insert_raw_request_result,
     insert_worker_api_log,
     import_samples_csv,
     init_db,
     insert_sample,
+    list_raw_request_results,
     list_realtime_kv_rows,
     list_samples,
     list_worker_api_logs,
-    upsert_solplanet_endpoint_snapshot,
+    update_worker_api_log,
     upsert_realtime_kv,
 )
 from app.solplanet_cgi import SolplanetCgiClient
@@ -90,23 +93,19 @@ worker_failure_log_path = Path(
 )
 request_actor_ctx: ContextVar[str] = ContextVar("request_actor_ctx", default="api")
 request_system_ctx: ContextVar[str | None] = ContextVar("request_system_ctx", default=None)
+request_round_ctx: ContextVar[str | None] = ContextVar("request_round_ctx", default=None)
 sample_interval_seconds = float(settings.saj_sample_interval_seconds)
 solplanet_sample_interval_seconds = float(settings.solplanet_sample_interval_seconds)
 COLLECTOR_ROUND_SLEEP_SECONDS = 0.1
 ENDPOINT_BACKOFF_MAX_SKIP_ROUNDS = 8
 SOLPLANET_ENDPOINTS: tuple[str, ...] = (
-    "getdev_device_0",
-    "getdev_device_2",
     "getdevdata_device_2",
     "getdevdata_device_3",
-    "getdev_device_3",
-    "getdev_device_4",
-    "getdefine",
-    "getdevdata_device_5",
     "getdevdata_device_4",
 )
 SAJ_ENDPOINTS: tuple[str, ...] = ("home_assistant_all_states",)
 collector_round_number = 0
+collector_next_due_monotonic: dict[str, float] = {system: 0.0 for system in POLLED_SYSTEMS}
 collector_status: dict[str, dict[str, object]] = {
     "saj": {
         "in_progress": False,
@@ -259,8 +258,11 @@ def _handle_outbound_request_log(event: dict[str, object]) -> None:
     if request_actor_ctx.get() != "worker":
         return
     requested_at = str(event.get("requested_at_utc") or datetime.now(UTC).isoformat())
+    phase = str(event.get("phase") or "finish").strip().lower()
+    request_token = str(event.get("request_token") or "").strip()
     worker = request_actor_ctx.get() or "worker"
     system = request_system_ctx.get()
+    round_id = str(request_round_ctx.get() or "").strip()
     service = str(event.get("service") or "unknown")
     method = str(event.get("method") or "GET").upper()
     api_link = str(event.get("url") or "")
@@ -271,24 +273,106 @@ def _handle_outbound_request_log(event: dict[str, object]) -> None:
     duration_ms = round(float(duration_raw), 1) if isinstance(duration_raw, (int, float)) else None
     result_text = str(event.get("result_text") or "")
     error_text = str(event.get("error_text") or "")
+    response_json = event.get("response_json")
+    endpoint = _endpoint_name_from_event(service=service, method=method, url=api_link)
+    parsed_url = urlparse(api_link)
+    log_before_request = parsed_url.hostname == settings.solplanet_dongle_host
 
     try:
-        insert_worker_api_log(
-            storage_db_path,
-            worker=worker,
-            system=system,
-            service=service,
-            method=method,
-            api_link=api_link,
-            requested_at_utc=requested_at,
-            ok=ok,
-            status_code=status_code,
-            duration_ms=duration_ms,
-            result_text=result_text,
-            error_text=error_text,
-        )
+        if phase == "start" and log_before_request:
+            insert_worker_api_log(
+                storage_db_path,
+                request_token=request_token or None,
+                worker=worker,
+                system=system,
+                service=service,
+                method=method,
+                api_link=api_link,
+                requested_at_utc=requested_at,
+                ok=False,
+                status="pending",
+                status_code=None,
+                duration_ms=None,
+                result_text=None,
+                error_text=None,
+            )
+            return
+        if round_id:
+            insert_raw_request_result(
+                storage_db_path,
+                round_id=round_id,
+                system=system,
+                source=service,
+                endpoint=endpoint,
+                method=method,
+                request_url=api_link,
+                requested_at_utc=requested_at,
+                duration_ms=duration_ms,
+                ok=ok,
+                status_code=status_code,
+                error_text=error_text or None,
+                response_text=result_text or None,
+                response_json=response_json,
+            )
+        if request_token and log_before_request:
+            update_worker_api_log(
+                storage_db_path,
+                request_token=request_token,
+                ok=ok,
+                status="ok" if ok else "failed",
+                status_code=status_code,
+                duration_ms=duration_ms,
+                result_text=result_text,
+                error_text=error_text,
+            )
+        else:
+            insert_worker_api_log(
+                storage_db_path,
+                request_token=request_token or None,
+                worker=worker,
+                system=system,
+                service=service,
+                method=method,
+                api_link=api_link,
+                requested_at_utc=requested_at,
+                ok=ok,
+                status="ok" if ok else "failed",
+                status_code=status_code,
+                duration_ms=duration_ms,
+                result_text=result_text,
+                error_text=error_text,
+            )
     except Exception as exc:
         logger.warning("Failed to persist worker_api_log for %s %s: %s", service, api_link, exc)
+
+
+def _endpoint_name_from_event(*, service: str, method: str, url: str) -> str:
+    normalized_service = str(service or "").strip().lower()
+    normalized_method = str(method or "GET").upper()
+    lowered_url = str(url or "").lower()
+    if normalized_service == "home_assistant":
+        if "/api/states" in lowered_url and normalized_method == "GET":
+            return "home_assistant_all_states"
+        if "/api/" in lowered_url:
+            return f"home_assistant:{normalized_method}:{lowered_url.split('/api/', 1)[1]}"
+        return f"home_assistant:{normalized_method}"
+    if normalized_service == "solplanet_cgi":
+        mapping = {
+            "getdev.cgi?device=0": "getdev_device_0",
+            "getdev.cgi?device=2": "getdev_device_2",
+            "getdev.cgi?device=3": "getdev_device_3",
+            "getdev.cgi?device=4": "getdev_device_4",
+            "getdevdata.cgi?device=2": "getdevdata_device_2",
+            "getdevdata.cgi?device=3": "getdevdata_device_3",
+            "getdevdata.cgi?device=4": "getdevdata_device_4",
+            "getdevdata.cgi?device=5": "getdevdata_device_5",
+            "getdefine.cgi": "getdefine",
+        }
+        for needle, endpoint in mapping.items():
+            if needle in lowered_url:
+                return endpoint
+        return f"solplanet_cgi:{normalized_method}"
+    return f"{normalized_service}:{normalized_method}"
 
 
 def _snapshot_endpoint_backoff_state(system: str) -> dict[str, dict[str, object]]:
@@ -513,6 +597,10 @@ class SolplanetRawSettingPayload(BaseModel):
     payload: dict[str, object] = Field(default_factory=dict)
 
 
+class TeslaChargingTogglePayload(BaseModel):
+    enabled: bool = Field(...)
+
+
 def _split_entity_id(entity_id: str) -> tuple[str, str]:
     if "." not in entity_id:
         return "", entity_id
@@ -650,6 +738,215 @@ def _find_state_by_keywords(
             if all(kw in haystack for kw in keyword_group):
                 return state
     return None
+
+
+def _tesla_haystack(state: dict[str, object]) -> str:
+    entity_id = str(state.get("entity_id", ""))
+    friendly_name = str(state.get("attributes", {}).get("friendly_name") or "")  # type: ignore[union-attr]
+    return f"{entity_id} {friendly_name}".lower()
+
+
+def _pick_best_state(states: list[dict[str, object]], scorer: Callable[[dict[str, object]], int]) -> dict[str, object] | None:
+    best_state: dict[str, object] | None = None
+    best_score = 0
+    for state in states:
+        score = scorer(state)
+        if score > best_score:
+            best_score = score
+            best_state = state
+    return best_state
+
+
+def _pick_tesla_charge_switch(states: list[dict[str, object]]) -> dict[str, object] | None:
+    def _score(state: dict[str, object]) -> int:
+        entity_id = str(state.get("entity_id", ""))
+        domain, _ = _split_entity_id(entity_id)
+        if domain != "switch":
+            return 0
+        haystack = _tesla_haystack(state)
+        if "tesla" not in haystack:
+            return 0
+        score = 0
+        if "charger" in haystack:
+            score += 140
+        if "charging" in haystack:
+            score += 110
+        if "charge" in haystack:
+            score += 70
+        if "vehicle" in haystack:
+            score += 10
+        if any(term in haystack for term in ("port", "door", "cable", "lock", "unlock")):
+            score -= 220
+        if str(state.get("state", "")).lower() in ("on", "off"):
+            score += 25
+        return max(score, 0)
+
+    return _pick_best_state(states, _score)
+
+
+def _pick_tesla_charge_button(states: list[dict[str, object]], action: Literal["start", "stop"]) -> dict[str, object] | None:
+    def _score(state: dict[str, object]) -> int:
+        entity_id = str(state.get("entity_id", ""))
+        domain, _ = _split_entity_id(entity_id)
+        if domain != "button":
+            return 0
+        haystack = _tesla_haystack(state)
+        if "tesla" not in haystack:
+            return 0
+        score = 0
+        if action in haystack:
+            score += 120
+        if "charger" in haystack:
+            score += 100
+        if "charging" in haystack:
+            score += 90
+        if "charge" in haystack:
+            score += 60
+        if any(term in haystack for term in ("port", "door", "cable", "lock", "unlock")):
+            score -= 220
+        return max(score, 0)
+
+    return _pick_best_state(states, _score)
+
+
+def _pick_tesla_charge_status_entity(states: list[dict[str, object]]) -> dict[str, object] | None:
+    def _score(state: dict[str, object]) -> int:
+        entity_id = str(state.get("entity_id", ""))
+        domain, _ = _split_entity_id(entity_id)
+        if domain not in ("binary_sensor", "sensor"):
+            return 0
+        haystack = _tesla_haystack(state)
+        if "tesla" not in haystack:
+            return 0
+        if any(term in haystack for term in ("power", "current", "voltage", "energy")):
+            return 0
+        score = 0
+        if "charging" in haystack:
+            score += 150
+        if "charger" in haystack:
+            score += 120
+        if "charge" in haystack:
+            score += 60
+        state_text = str(state.get("state", "")).lower()
+        if state_text in ("on", "off", "charging", "stopped", "complete", "disconnected", "idle"):
+            score += 30
+        return max(score, 0)
+
+    return _pick_best_state(states, _score)
+
+
+def _pick_tesla_charge_power_entity(states: list[dict[str, object]]) -> dict[str, object] | None:
+    def _score(state: dict[str, object]) -> int:
+        entity_id = str(state.get("entity_id", ""))
+        domain, _ = _split_entity_id(entity_id)
+        if domain != "sensor":
+            return 0
+        haystack = _tesla_haystack(state)
+        if "tesla" not in haystack:
+            return 0
+        score = 0
+        if "charger_power" in haystack:
+            score += 160
+        if "charge_power" in haystack:
+            score += 145
+        if "charger power" in haystack:
+            score += 130
+        if "charging power" in haystack:
+            score += 120
+        unit = str(state.get("attributes", {}).get("unit_of_measurement") or "").lower()  # type: ignore[union-attr]
+        if unit in ("w", "kw", "mw"):
+            score += 25
+        return max(score, 0)
+
+    return _pick_best_state(states, _score)
+
+
+def _tesla_charge_enabled_from_status(state: dict[str, object] | None) -> bool | None:
+    if not isinstance(state, dict):
+        return None
+    state_text = str(state.get("state", "")).strip().lower()
+    if state_text in ("on", "charging"):
+        return True
+    if state_text in ("off", "stopped", "complete", "disconnected", "idle"):
+        return False
+    return None
+
+
+def _build_tesla_control_state(states: list[dict[str, object]]) -> dict[str, object]:
+    switch_state = _pick_tesla_charge_switch(states)
+    start_button_state = _pick_tesla_charge_button(states, "start")
+    stop_button_state = _pick_tesla_charge_button(states, "stop")
+    status_state = _pick_tesla_charge_status_entity(states)
+    power_state = _pick_tesla_charge_power_entity(states)
+    power_value = _power_to_watts(
+        _to_number(power_state.get("state")) if isinstance(power_state, dict) else None,
+        power_state.get("attributes", {}).get("unit_of_measurement") if isinstance(power_state, dict) else None,  # type: ignore[union-attr]
+    )
+
+    enabled = None
+    if isinstance(switch_state, dict):
+        enabled = str(switch_state.get("state", "")).lower() == "on"
+    if enabled is None:
+        enabled = _tesla_charge_enabled_from_status(status_state)
+    if enabled is None and power_value is not None:
+        enabled = power_value >= POWER_FLOW_ACTIVE_THRESHOLD_W
+
+    control_mode = "unavailable"
+    if isinstance(switch_state, dict):
+        control_mode = "switch"
+    elif isinstance(start_button_state, dict) or isinstance(stop_button_state, dict):
+        control_mode = "buttons"
+
+    return {
+        "available": control_mode != "unavailable",
+        "control_mode": control_mode,
+        "charging_enabled": enabled,
+        "can_start": isinstance(switch_state, dict) or isinstance(start_button_state, dict),
+        "can_stop": isinstance(switch_state, dict) or isinstance(stop_button_state, dict),
+        "switch_entity": _compact_raw_ha_state(switch_state),
+        "start_button_entity": _compact_raw_ha_state(start_button_state),
+        "stop_button_entity": _compact_raw_ha_state(stop_button_state),
+        "status_entity": _compact_raw_ha_state(status_state),
+        "power_entity": _compact_raw_ha_state(power_state),
+    }
+
+
+async def _tesla_control_states() -> list[dict[str, object]]:
+    return await ha_client.all_states()
+
+
+async def _tesla_set_charging(enabled: bool) -> dict[str, object]:
+    states = await _tesla_control_states()
+    control_state = _build_tesla_control_state(states)
+    switch_entity = control_state.get("switch_entity")
+    start_button_entity = control_state.get("start_button_entity")
+    stop_button_entity = control_state.get("stop_button_entity")
+    control_mode = str(control_state.get("control_mode") or "unavailable")
+
+    if control_mode == "switch":
+        entity_id = str((switch_entity or {}).get("entity_id") or "")
+        if not entity_id:
+            raise HTTPException(status_code=400, detail="Tesla charging switch entity unavailable")
+        service = "turn_on" if enabled else "turn_off"
+        await ha_client.call_service("switch", service, {"entity_id": entity_id})
+    elif enabled:
+        entity_id = str((start_button_entity or {}).get("entity_id") or "")
+        if not entity_id:
+            raise HTTPException(status_code=400, detail="Tesla start charging button unavailable")
+        await ha_client.call_service("button", "press", {"entity_id": entity_id})
+    else:
+        entity_id = str((stop_button_entity or {}).get("entity_id") or "")
+        if not entity_id:
+            raise HTTPException(status_code=400, detail="Tesla stop charging button unavailable")
+        await ha_client.call_service("button", "press", {"entity_id": entity_id})
+
+    refreshed_states = await _tesla_control_states()
+    refreshed_control_state = _build_tesla_control_state(refreshed_states)
+    return {
+        "ok": True,
+        "requested_enabled": enabled,
+        "control_state": refreshed_control_state,
+    }
 
 
 def _is_saj_offnet_mode(*, mode_sensor: object, inverter_status: object) -> bool:
@@ -932,20 +1229,47 @@ async def _save_solplanet_endpoint_snapshot(
     fetch_ms: float | None,
     requested_at_utc: str | None = None,
 ) -> None:
+    round_id = str(request_round_ctx.get() or "").strip() or "manual"
+    request_url = (
+        f"{settings.solplanet_dongle_scheme}://"
+        f"{settings.solplanet_dongle_host}:{settings.solplanet_dongle_port}/{path.lstrip('/')}"
+    )
     try:
         await asyncio.to_thread(
-            upsert_solplanet_endpoint_snapshot,
+            insert_raw_request_result,
             storage_db_path,
+            round_id=round_id,
+            system="solplanet",
+            source="solplanet_cgi",
             endpoint=endpoint,
-            path=path,
             requested_at_utc=requested_at_utc or datetime.now(UTC).isoformat(),
+            method="GET",
+            request_url=request_url,
+            duration_ms=fetch_ms,
             ok=ok,
-            error=error,
-            payload=payload,
-            fetch_ms=fetch_ms,
+            status_code=None,
+            error_text=error,
+            response_text=json.dumps(payload, ensure_ascii=False) if payload is not None else None,
+            response_json=payload,
         )
+        if request_actor_ctx.get() == "worker":
+            await asyncio.to_thread(
+                insert_worker_api_log,
+                storage_db_path,
+                worker=str(request_actor_ctx.get() or "worker"),
+                system=str(request_system_ctx.get() or "solplanet"),
+                service="solplanet_cgi",
+                method="GET",
+                api_link=request_url,
+                requested_at_utc=requested_at_utc or datetime.now(UTC).isoformat(),
+                ok=ok,
+                status_code=None,
+                duration_ms=fetch_ms,
+                result_text=json.dumps(payload, ensure_ascii=False) if payload is not None else None,
+                error_text=error,
+            )
     except Exception as exc:
-        logger.warning("Failed to persist Solplanet endpoint snapshot for %s (%s): %s", endpoint, path, exc)
+        logger.warning("Failed to persist raw Solplanet result for %s (%s): %s", endpoint, path, exc)
 
 
 def _extract_solplanet_context(inverter_info: dict[str, object]) -> dict[str, object]:
@@ -967,6 +1291,23 @@ def _extract_solplanet_context(inverter_info: dict[str, object]) -> dict[str, ob
     }
 
 
+async def _persist_solplanet_context(context: dict[str, object]) -> None:
+    inverter_sn = str(context.get("inverter_sn") or "").strip()
+    battery_sn = str(context.get("battery_sn") or "").strip()
+    if not inverter_sn:
+        return
+    if inverter_sn == settings.solplanet_inverter_sn and battery_sn == settings.solplanet_battery_sn:
+        return
+    persisted = await asyncio.to_thread(
+        save_settings,
+        {
+            "solplanet_inverter_sn": inverter_sn,
+            "solplanet_battery_sn": battery_sn,
+        },
+    )
+    await _replace_runtime(persisted)
+
+
 def _get_solplanet_runtime_context() -> dict[str, object] | None:
     payload = solplanet_context_cache.get("payload")
     return payload if isinstance(payload, dict) else None
@@ -975,6 +1316,20 @@ def _get_solplanet_runtime_context() -> dict[str, object] | None:
 def _set_solplanet_runtime_context(payload: dict[str, object]) -> None:
     solplanet_context_cache["payload"] = payload
     solplanet_context_cache["at_monotonic"] = monotonic()
+
+
+def _config_backed_solplanet_context() -> dict[str, object] | None:
+    inverter_sn = str(settings.solplanet_inverter_sn or "").strip()
+    battery_sn = str(settings.solplanet_battery_sn or "").strip()
+    if not inverter_sn:
+        return None
+    return {
+        "inverter_info": {},
+        "inverter_item": {},
+        "inverter_sn": inverter_sn,
+        "battery_sn": battery_sn or None,
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
 
 
 async def _run_solplanet_endpoint_request(
@@ -992,32 +1347,24 @@ async def _run_solplanet_endpoint_request(
         result = await asyncio.wait_for(build_coro(), timeout=settings.solplanet_request_timeout_seconds)
         payload = result if isinstance(result, dict) else {}
         fetch_ms = round((monotonic() - fetch_started) * 1000, 1)
-        await _save_solplanet_endpoint_snapshot(
-            endpoint=endpoint,
-            path=path,
-            ok=True,
-            error=None,
-            payload=payload,
-            fetch_ms=fetch_ms,
-            requested_at_utc=requested_at_utc,
-        )
         if round_number is not None:
             _mark_endpoint_success("solplanet", endpoint, round_number)
         return endpoint, payload, None, path, fetch_ms
     except Exception as exc:  # noqa: BLE001
         error_text = f"{type(exc).__name__}: {exc}"
         fetch_ms = round((monotonic() - fetch_started) * 1000, 1)
-        await _save_solplanet_endpoint_snapshot(
-            endpoint=endpoint,
-            path=path,
-            ok=False,
-            error=error_text,
-            payload=None,
-            fetch_ms=fetch_ms,
-            requested_at_utc=requested_at_utc,
-        )
         if round_number is not None:
             _mark_endpoint_failure("solplanet", endpoint, round_number, error_text)
+        if not isinstance(exc, httpx.HTTPError):
+            await _save_solplanet_endpoint_snapshot(
+                endpoint=endpoint,
+                path=path,
+                ok=False,
+                error=error_text,
+                payload=None,
+                fetch_ms=fetch_ms,
+                requested_at_utc=requested_at_utc,
+            )
         return endpoint, {}, error_text, path, fetch_ms
 
 
@@ -1059,32 +1406,12 @@ def _build_solplanet_endpoint_steps(
     initial_steps: list[tuple[str, str, Callable[[], object]]] = []
     followup_steps: list[tuple[str, str, Callable[[], object]]] = []
 
-    independent: list[tuple[str, str, Callable[[], object]]] = [
-        ("getdev_device_0", "getdev.cgi?device=0", lambda: solplanet_client.get_dongle_info()),
-        ("getdev_device_2", "getdev.cgi?device=2", lambda: solplanet_client.get_inverter_info()),
+    endpoint_defs: list[tuple[str, str, Callable[[], object]] | tuple[str, None, None]] = [
         ("getdevdata_device_3", "getdevdata.cgi?device=3", lambda: solplanet_client.get_meter_data()),
-        ("getdev_device_3", "getdev.cgi?device=3", lambda: solplanet_client.get_meter_info()),
-        ("getdefine", "getdefine.cgi", lambda: solplanet_client.get_schedule()),
-        ("getdevdata_device_5", "getdevdata.cgi?device=5", lambda: solplanet_client.get_device_data(5)),
-    ]
-    for endpoint, path, build_coro in independent:
-        if _include(endpoint):
-            initial_steps.append((endpoint, path, build_coro))
-        else:
-            skipped.append(endpoint)
-            if round_number is not None:
-                _mark_endpoint_skipped("solplanet", endpoint, round_number)
-
-    dependent_defs: list[tuple[str, str, Callable[[], object]] | tuple[str, None, None]] = [
         (
             "getdevdata_device_2",
             f"getdevdata.cgi?device=2&sn={inverter_sn}" if inverter_sn else "",
             (lambda sn=inverter_sn: solplanet_client.get_inverter_data(sn)) if inverter_sn else None,
-        ),
-        (
-            "getdev_device_4",
-            f"getdev.cgi?device=4&sn={inverter_sn}" if inverter_sn else "",
-            (lambda sn=inverter_sn: solplanet_client.get_battery_info(sn)) if inverter_sn else None,
         ),
         (
             "getdevdata_device_4",
@@ -1092,7 +1419,7 @@ def _build_solplanet_endpoint_steps(
             (lambda sn=battery_sn: solplanet_client.get_battery_data(sn)) if battery_sn else None,
         ),
     ]
-    for endpoint, path, build_coro in dependent_defs:
+    for endpoint, path, build_coro in endpoint_defs:
         if not _include(endpoint):
             skipped.append(endpoint)
             if round_number is not None:
@@ -1105,10 +1432,6 @@ def _build_solplanet_endpoint_steps(
     if not inverter_sn and _include("getdevdata_device_2"):
         followup_steps.append(
             ("getdevdata_device_2", "", lambda: asyncio.sleep(0, result={}))
-        )
-    if not inverter_sn and _include("getdev_device_4"):
-        followup_steps.append(
-            ("getdev_device_4", "", lambda: asyncio.sleep(0, result={}))
         )
     if not battery_sn and _include("getdevdata_device_4"):
         followup_steps.append(
@@ -1124,12 +1447,7 @@ def _build_solplanet_energy_flow_from_endpoint_map(
     started_at: float,
     skipped_endpoints: list[str] | None = None,
 ) -> dict[str, object]:
-    inverter_info = endpoint_map.get("getdev_device_2", ({}, None, "", 0.0))[0] or {}
-    inv_list = inverter_info.get("inv") if isinstance(inverter_info, dict) else None
-    inverter_item = inv_list[0] if isinstance(inv_list, list) and inv_list and isinstance(inv_list[0], dict) else {}
     meter_data = endpoint_map.get("getdevdata_device_3", ({}, None, "", 0.0))[0] or {}
-    meter_info = endpoint_map.get("getdev_device_3", ({}, None, "", 0.0))[0] or {}
-    schedule_data = endpoint_map.get("getdefine", ({}, None, "", 0.0))[0] or {}
     battery_data = endpoint_map.get("getdevdata_device_4", ({}, None, "", 0.0))[0] or {}
     inverter_data = endpoint_map.get("getdevdata_device_2", ({}, None, "", 0.0))[0] or {}
     endpoint_errors = [
@@ -1164,15 +1482,6 @@ def _build_solplanet_energy_flow_from_endpoint_map(
     if meter_data_valid:
         grid_w = _to_number(meter_data.get("pac"))
         grid_source = "getdevdata_device_3.pac" if grid_w is not None else "unavailable"
-    else:
-        # getdevdata.cgi?device=3 returned flg=0 (meter offline/disconnected).
-        # meter_pac from getdev.cgi?device=3 is used if it is non-zero.
-        # NOTE: total_pac from getdev.cgi?device=3 is NOT used here because it mirrors
-        # inverter.pac (AC output), not actual net grid power, giving severely wrong readings.
-        meter_pac = _to_number(meter_info.get("meter_pac"))
-        if meter_pac is not None and abs(meter_pac) >= POWER_FLOW_ACTIVE_THRESHOLD_W:
-            grid_w = meter_pac
-            grid_source = "getdev_device_3.meter_pac"
 
     # Solplanet inverter pac sign assumption: positive means inverter AC output to loads/grid,
     # negative means inverter is drawing AC (for example grid-charging the battery).
@@ -1283,11 +1592,8 @@ def _build_solplanet_energy_flow_from_endpoint_map(
         "updated_at": updated_at,
         "entities": entities,
         "raw": {
-            "inverter_info": inverter_item,
             "inverter_data": inverter_data,
             "meter_data": meter_data,
-            "meter_info": meter_info,
-            "schedule": schedule_data,
             "battery_data": battery_data,
         },
         "metrics": {
@@ -1315,11 +1621,10 @@ def _build_solplanet_energy_flow_from_endpoint_map(
             "notes": [
                 "solplanet_pv_w_prefer_ppv",
                 f"solplanet_load_w_source:{load_source}",
-                "solplanet_grid_w_prefers_meter_data_pac_then_meter_pac",
+                "solplanet_grid_w_uses_meter_data_pac_only",
                 f"solplanet_grid_w_source:{grid_source}",
                 f"solplanet_meter_data_valid:{str(meter_data_valid).lower()}",
                 "solplanet_battery_w_uses_battery_pb",
-                "solplanet_total_pac_not_used:mirrors_inverter_pac_not_grid",
                 *endpoint_errors,
             ],
             "fetch_ms": round((monotonic() - started_at) * 1000, 1),
@@ -1341,34 +1646,21 @@ async def _build_solplanet_energy_flow_payload_from_cgi(
         )
 
     started_at = monotonic()
-    runtime_context = _get_solplanet_runtime_context()
+    runtime_context = _get_solplanet_runtime_context() or _config_backed_solplanet_context()
+    if runtime_context is not None and _get_solplanet_runtime_context() is None:
+        _set_solplanet_runtime_context(runtime_context)
     initial_steps, followup_placeholders, skipped = _build_solplanet_endpoint_steps(
         runtime_context,
         round_number=round_number,
     )
     endpoint_map = await _run_solplanet_endpoint_batch(initial_steps, round_number=round_number)
 
-    getdev2_payload = endpoint_map.get("getdev_device_2", ({}, None, "", 0.0))[0] or {}
-    fresh_context = _extract_solplanet_context(getdev2_payload) if isinstance(getdev2_payload, dict) and getdev2_payload else None
-    if fresh_context is not None:
-        _set_solplanet_runtime_context(fresh_context)
-
-    has_runtime_context = bool(runtime_context and runtime_context.get("inverter_sn"))
-    if not has_runtime_context and fresh_context is not None:
-        followup_steps, _, _ = _build_solplanet_endpoint_steps(fresh_context, round_number=round_number)
-        followup_only = [
-            step for step in followup_steps
-            if step[0] not in endpoint_map
-            and step[0] in {"getdevdata_device_2", "getdev_device_4", "getdevdata_device_4"}
-        ]
-        endpoint_map.update(await _run_solplanet_endpoint_batch(followup_only, round_number=round_number))
-    elif followup_placeholders:
+    if followup_placeholders:
         for endpoint, _, _ in followup_placeholders:
             if endpoint in endpoint_map:
                 continue
             path = {
                 "getdevdata_device_2": "getdevdata.cgi?device=2",
-                "getdev_device_4": "getdev.cgi?device=4",
                 "getdevdata_device_4": "getdevdata.cgi?device=4",
             }.get(endpoint, endpoint)
             error_text = "ValueError: Missing runtime context"
@@ -1607,19 +1899,9 @@ async def _get_solplanet_cgi_dump() -> dict[str, object]:
         )
 
     started_at = monotonic()
-    inverter_info = await asyncio.wait_for(
-        solplanet_client.get_inverter_info(),
-        timeout=settings.solplanet_request_timeout_seconds,
-    )
-    inv_list = inverter_info.get("inv")
-    inverter_item = inv_list[0] if isinstance(inv_list, list) and inv_list else {}
-    inverter_sn = str(inverter_item.get("isn") or "")
-    battery_sn: str | None = None
-    battery_topo = inverter_item.get("battery_topo")
-    if isinstance(battery_topo, list) and battery_topo and isinstance(battery_topo[0], dict):
-        maybe_bat_sn = battery_topo[0].get("bat_sn")
-        if maybe_bat_sn:
-            battery_sn = str(maybe_bat_sn)
+    context = await _get_solplanet_context_cached()
+    inverter_sn = str(context.get("inverter_sn") or "")
+    battery_sn = str(context.get("battery_sn") or "")
 
     async def _safe_task(name: str, coro: object) -> tuple[str, dict[str, object] | None, str | None]:
         try:
@@ -1632,29 +1914,18 @@ async def _get_solplanet_cgi_dump() -> dict[str, object]:
         _safe_task("getdevdata_device_2", solplanet_client.get_inverter_data(inverter_sn))
         if inverter_sn
         else _safe_task("getdevdata_device_2", asyncio.sleep(0, result={})),
-        _safe_task("getdev_device_3", solplanet_client.get_meter_info()),
         _safe_task("getdevdata_device_3", solplanet_client.get_meter_data()),
-        _safe_task("getdefine", solplanet_client.get_schedule()),
     ]
     if battery_sn:
         tasks.append(_safe_task("getdevdata_device_4", solplanet_client.get_battery_data(battery_sn)))
 
     task_results = await asyncio.gather(*tasks)
-    endpoints: dict[str, object] = {
-        "getdev_device_2": {
-            "path": "getdev.cgi?device=2",
-            "ok": True,
-            "error": None,
-            "payload": inverter_info,
-        }
-    }
+    endpoints: dict[str, object] = {}
     for name, payload, error in task_results:
         endpoint_path = {
             "getdevdata_device_2": f"getdevdata.cgi?device=2&sn={inverter_sn}" if inverter_sn else "getdevdata.cgi?device=2",
-            "getdev_device_3": "getdev.cgi?device=3",
             "getdevdata_device_3": "getdevdata.cgi?device=3",
             "getdevdata_device_4": f"getdevdata.cgi?device=4&sn={battery_sn}" if battery_sn else "getdevdata.cgi?device=4",
-            "getdefine": "getdefine.cgi",
         }.get(name, name)
         endpoints[name] = {
             "path": endpoint_path,
@@ -1696,10 +1967,18 @@ async def _get_solplanet_context_cached() -> dict[str, object]:
     cached = _get_cached_solplanet_context()
     if cached is not None:
         return cached
+    config_context = _config_backed_solplanet_context()
+    if config_context is not None:
+        _set_solplanet_runtime_context(config_context)
+        return config_context
     async with solplanet_context_lock:
         cached = _get_cached_solplanet_context()
         if cached is not None:
             return cached
+        config_context = _config_backed_solplanet_context()
+        if config_context is not None:
+            _set_solplanet_runtime_context(config_context)
+            return config_context
 
         inverter_info = await asyncio.wait_for(
             solplanet_client.get_inverter_info(),
@@ -1722,8 +2001,8 @@ async def _get_solplanet_context_cached() -> dict[str, object]:
             "battery_sn": battery_sn,
             "updated_at": datetime.now(UTC).isoformat(),
         }
-        solplanet_context_cache["payload"] = payload
-        solplanet_context_cache["at_monotonic"] = monotonic()
+        _set_solplanet_runtime_context(payload)
+        await _persist_solplanet_context(payload)
         return payload
 
 
@@ -1771,7 +2050,12 @@ async def _solplanet_endpoint_response_from_snapshot(
     path: str,
     started_at: float,
 ) -> dict[str, object]:
-    snapshot = await asyncio.to_thread(get_solplanet_endpoint_snapshot, storage_db_path, endpoint=name)
+    snapshot = await asyncio.to_thread(
+        get_latest_raw_request_result,
+        storage_db_path,
+        source="solplanet_cgi",
+        endpoint=name,
+    )
     if not snapshot:
         response = _build_solplanet_single_endpoint_response(
             name=name,
@@ -1783,7 +2067,7 @@ async def _solplanet_endpoint_response_from_snapshot(
         response["status"] = "missing"
         response["last_requested_at"] = None
         response["last_success_at"] = None
-        response["source"] = {"type": "solplanet_endpoint_snapshot_table"}
+        response["source"] = {"type": "raw_request_results"}
         return response
 
     snap_ok = bool(snapshot.get("ok"))
@@ -1803,13 +2087,13 @@ async def _solplanet_endpoint_response_from_snapshot(
         response["last_requested_at"] = requested_at
     else:
         response["last_requested_at"] = None
-    response["last_success_at"] = snapshot.get("last_success_at_utc")
+    response["last_success_at"] = None
     response["status"] = "success" if snap_ok else "failed"
     response["ok"] = snap_ok
     response["error"] = snap_error
     if snapshot.get("fetch_ms") is not None:
         response["fetch_ms"] = snapshot.get("fetch_ms")
-    last_success_dt = _parse_iso_utc(snapshot.get("last_success_at_utc"))
+    last_success_dt = None
     last_requested_dt = _parse_iso_utc(snapshot.get("requested_at_utc"))
     collector_solplanet = dict(collector_status.get("solplanet") or {})
     collector_last_success_dt = _parse_iso_utc(collector_solplanet.get("last_success_at"))
@@ -1835,7 +2119,7 @@ async def _solplanet_endpoint_response_from_snapshot(
         response["stale_reason"] = stale_reason
         response["status"] = "stale"
     response["source"] = {
-        "type": "solplanet_endpoint_snapshot_table",
+        "type": "raw_request_results",
         "host": settings.solplanet_dongle_host,
         "port": settings.solplanet_dongle_port,
         "scheme": settings.solplanet_dongle_scheme,
@@ -2307,7 +2591,12 @@ async def _solplanet_get_schedule_with_fallback() -> dict[str, object]:
     try:
         return await _solplanet_get_schedule_live()
     except Exception:  # noqa: BLE001
-        snapshot = await asyncio.to_thread(get_solplanet_endpoint_snapshot, storage_db_path, endpoint="getdefine")
+        snapshot = await asyncio.to_thread(
+            get_latest_raw_request_result,
+            storage_db_path,
+            source="solplanet_cgi",
+            endpoint="getdefine",
+        )
         payload = snapshot.get("payload") if isinstance(snapshot, dict) else None
         if not isinstance(payload, dict):
             raise
@@ -2372,7 +2661,7 @@ async def _recreate_solplanet_client() -> None:
     await old_solplanet.aclose()
 
 
-def _sample_from_flow(system: str, flow: dict[str, object]) -> EnergySample:
+def _sample_from_flow(system: str, flow: dict[str, object], *, round_id: str) -> EnergySample:
     metrics = flow.get("metrics")
     metrics_map = metrics if isinstance(metrics, dict) else {}
     if system == "solplanet":
@@ -2382,8 +2671,9 @@ def _sample_from_flow(system: str, flow: dict[str, object]) -> EnergySample:
     else:
         source = "home_assistant"
     return EnergySample(
+        round_id=round_id,
         system=system,
-        sampled_at_utc=datetime.now(UTC),
+        assembled_at_utc=datetime.now(UTC),
         source=source,
         pv_w=_to_number(metrics_map.get("pv_w")),
         grid_w=_to_number(metrics_map.get("grid_w")),
@@ -2394,7 +2684,7 @@ def _sample_from_flow(system: str, flow: dict[str, object]) -> EnergySample:
         if metrics_map.get("inverter_status") is not None
         else None,
         balance_w=_to_number(metrics_map.get("balance_w")),
-        payload=flow,
+        flow=flow,
     )
 
 
@@ -2658,15 +2948,16 @@ async def _get_energy_flow_from_realtime_kv(system: str) -> dict[str, object]:
     return _build_flow_from_kv(system, kv_map)
 
 
-async def _store_flow_sample(system: str, flow: dict[str, object]) -> None:
-    sample = _sample_from_flow(system, flow)
+async def _store_flow_sample(system: str, flow: dict[str, object], *, round_id: str) -> None:
+    sample = _sample_from_flow(system, flow, round_id=round_id)
     await asyncio.to_thread(insert_sample, storage_db_path, sample)
     await _store_realtime_kv_snapshot(system, flow)
 
 
-async def _collect_for_system(system: str, *, round_number: int) -> dict[str, object]:
+async def _collect_for_system(system: str, *, round_number: int, round_id: str) -> dict[str, object]:
     actor_token = request_actor_ctx.set("worker")
     system_token = request_system_ctx.set(system)
+    round_token = request_round_ctx.set(round_id)
     try:
         if system == "saj":
             if _missing_required_config():
@@ -2710,7 +3001,7 @@ async def _collect_for_system(system: str, *, round_number: int) -> dict[str, ob
                     "reason": "incomplete_flow",
                     "missing_metrics": missing_metrics,
                 }
-            await _store_flow_sample("saj", flow)
+            await _store_flow_sample("saj", flow, round_id=round_id)
             return {
                 "attempted": [endpoint],
                 "succeeded": [endpoint],
@@ -2755,7 +3046,7 @@ async def _collect_for_system(system: str, *, round_number: int) -> dict[str, ob
                     "reason": "incomplete_flow",
                     "missing_metrics": missing_metrics,
                 }
-            await _store_flow_sample("solplanet", flow)
+            await _store_flow_sample("solplanet", flow, round_id=round_id)
             return {
                 "attempted": attempted,
                 "succeeded": succeeded,
@@ -2766,6 +3057,7 @@ async def _collect_for_system(system: str, *, round_number: int) -> dict[str, ob
             }
         raise ValueError(f"Unsupported system: {system}")
     finally:
+        request_round_ctx.reset(round_token)
         request_system_ctx.reset(system_token)
         request_actor_ctx.reset(actor_token)
 
@@ -2794,21 +3086,53 @@ def _collector_mark_finish(system: str, started_monotonic: float, *, error: Exce
     status["failure_count"] = int(status.get("failure_count") or 0) + 1
 
 
+def _collector_sleep_seconds(now_monotonic: float) -> float:
+    due_in_values = [
+        max(0.0, collector_next_due_monotonic.get(system, 0.0) - now_monotonic)
+        for system in POLLED_SYSTEMS
+    ]
+    if not due_in_values:
+        return COLLECTOR_ROUND_SLEEP_SECONDS
+    return max(COLLECTOR_ROUND_SLEEP_SECONDS, min(due_in_values))
+
+
 async def _collector_loop() -> None:
     global collector_round_number  # noqa: PLW0603
     while not collector_stop_event.is_set():
         collector_round_number += 1
         round_number = collector_round_number
+        round_id = f"round-{round_number}-{int(datetime.now(UTC).timestamp() * 1000)}"
         round_tasks: dict[str, asyncio.Task[dict[str, object]]] = {}
         started_monotonic_by_system: dict[str, float] = {}
+        loop_started_monotonic = monotonic()
         for system in POLLED_SYSTEMS:
+            if loop_started_monotonic < collector_next_due_monotonic.get(system, 0.0):
+                status = collector_status.setdefault(system, {})
+                status["in_progress"] = False
+                status["round_number"] = round_number
+                status["round_id"] = round_id
+                continue
             started_monotonic = _collector_mark_start(system)
             collector_status.setdefault(system, {})["round_number"] = round_number
+            collector_status.setdefault(system, {})["round_id"] = round_id
             started_monotonic_by_system[system] = started_monotonic
-            round_tasks[system] = asyncio.create_task(_collect_for_system(system, round_number=round_number))
+            round_tasks[system] = asyncio.create_task(
+                _collect_for_system(system, round_number=round_number, round_id=round_id)
+            )
 
         round_results: dict[str, dict[str, object]] = {}
         for system in POLLED_SYSTEMS:
+            if system not in round_tasks:
+                round_results[system] = {
+                    "attempted": [],
+                    "succeeded": [],
+                    "failed": [],
+                    "skipped": [],
+                    "stored_sample": False,
+                    "flow": None,
+                    "reason": "interval_wait",
+                }
+                continue
             started_monotonic = started_monotonic_by_system[system]
             try:
                 result = await round_tasks[system]
@@ -2842,9 +3166,11 @@ async def _collector_loop() -> None:
                         status = collector_status.setdefault("solplanet", {})
                         status["client_recreate_error_at"] = datetime.now(UTC).isoformat()
                         status["client_recreate_error"] = f"{type(recreate_exc).__name__}: {recreate_exc}"
+            collector_next_due_monotonic[system] = monotonic() + _sample_interval_for_system(system)
 
         combined_started_monotonic = _collector_mark_start("combined")
         collector_status.setdefault("combined", {})["round_number"] = round_number
+        collector_status.setdefault("combined", {})["round_id"] = round_id
         try:
             saj_result = round_results.get("saj") or {}
             solplanet_result = round_results.get("solplanet") or {}
@@ -2867,7 +3193,7 @@ async def _collector_loop() -> None:
                         "missing_metrics": missing_metrics,
                     }
                 else:
-                    await _store_flow_sample("combined", combined_flow)
+                    await _store_flow_sample("combined", combined_flow, round_id=round_id)
                     round_results["combined"] = {
                         "attempted": ["combined_assembly"],
                         "succeeded": ["combined_assembly"],
@@ -2915,7 +3241,10 @@ async def _collector_loop() -> None:
                 status["last_round_review"] = system_review
 
         try:
-            await asyncio.wait_for(collector_stop_event.wait(), timeout=COLLECTOR_ROUND_SLEEP_SECONDS)
+            await asyncio.wait_for(
+                collector_stop_event.wait(),
+                timeout=_collector_sleep_seconds(monotonic()),
+            )
         except asyncio.TimeoutError:
             continue
 
@@ -2925,6 +3254,8 @@ async def _start_collector() -> None:
     await asyncio.to_thread(init_db, storage_db_path)
     if collector_task and not collector_task.done():
         return
+    for system in POLLED_SYSTEMS:
+        collector_next_due_monotonic[system] = 0.0
     collector_stop_event.clear()
     collector_task = asyncio.create_task(_collector_loop())
 
@@ -3089,6 +3420,30 @@ async def worker_failure_log(
     before: int = Query(default=0, ge=0),
 ) -> dict[str, object]:
     payload = await asyncio.to_thread(_read_worker_failure_log, limit=limit, before=before)
+    payload["updated_at"] = datetime.now(UTC).isoformat()
+    return payload
+
+
+@app.get("/api/raw-requests")
+async def raw_requests(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+    round_id: str | None = Query(default=None),
+    system: str | None = Query(default=None, description="saj or solplanet"),
+    source: str | None = Query(default=None, description="home_assistant or solplanet_cgi"),
+) -> dict[str, object]:
+    normalized_system: str | None = None
+    if system:
+        normalized_system = _normalize_system_name(system) if system.lower().strip() != "combined" else "combined"
+    payload = await asyncio.to_thread(
+        list_raw_request_results,
+        storage_db_path,
+        page=page,
+        page_size=page_size,
+        round_id=str(round_id or "").strip() or None,
+        system=normalized_system,
+        source=str(source or "").strip() or None,
+    )
     payload["updated_at"] = datetime.now(UTC).isoformat()
     return payload
 
@@ -3407,6 +3762,39 @@ async def get_saj_control_state() -> dict[str, object]:
     try:
         _, states_by_id = await _saj_control_states()
         return {"system": "saj", "control_state": _build_saj_control_state(states_by_id)}
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+@app.get("/api/tesla/control/state")
+async def get_tesla_control_state() -> dict[str, object]:
+    _ensure_ha_configured()
+    try:
+        states = await _tesla_control_states()
+        return {"system": "tesla", "control_state": _build_tesla_control_state(states)}
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+@app.post("/api/tesla/control/charging")
+async def post_tesla_control_charging(payload: TeslaChargingTogglePayload) -> dict[str, object]:
+    _ensure_ha_configured()
+    try:
+        return await _tesla_set_charging(payload.enabled)
     except httpx.HTTPStatusError as exc:
         detail = {
             "message": "Home Assistant API returned an error",
