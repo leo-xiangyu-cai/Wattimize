@@ -203,6 +203,9 @@ const I18N = {
     inverter1Title: "Inverter 1",
     inverter2Title: "Inverter 2",
     inverterBatteryRatioUnavailable: "-",
+    dataKindReal: "real data",
+    dataKindEstimate: "estimate data",
+    dataKindCalculated: "calculated data",
     loadTitle: "Home Load",
     teslaChargingLabel: "Tesla",
     teslaChargingIncludedHint: "Total Load = Home Load + Tesla",
@@ -599,6 +602,9 @@ const I18N = {
     inverter1Title: "逆变器 1",
     inverter2Title: "逆变器 2",
     inverterBatteryRatioUnavailable: "-",
+    dataKindReal: "real data",
+    dataKindEstimate: "estimate data",
+    dataKindCalculated: "calculated data",
     loadTitle: "家庭负载",
     teslaChargingLabel: "特斯拉",
     teslaChargingIncludedHint: "总负载 = 家庭负载 + 特斯拉",
@@ -1293,6 +1299,27 @@ function formatMetricSourceText(system, metricKey, sourceValue) {
   return `${sourceLabel}: ${kind} ${detail}`;
 }
 
+function dataKindFromSource(sourceValue, fallbackKind = null) {
+  const sourceText = typeof sourceValue === "string" ? sourceValue.trim() : "";
+  if (!sourceText || sourceText === "unavailable") return fallbackKind;
+  if (/\bestimate\b/i.test(sourceText)) return "estimate";
+  if (sourceText.startsWith("calc:")) return "calculated";
+  return "real";
+}
+
+function dataKindLabel(kind) {
+  if (kind === "real") return t("dataKindReal");
+  if (kind === "estimate") return t("dataKindEstimate");
+  if (kind === "calculated") return t("dataKindCalculated");
+  return "";
+}
+
+function formatValueWithDataKind(text, kind) {
+  const normalized = String(text ?? "-");
+  if (!kind || normalized.trim() === "-") return normalized;
+  return `${normalized} [${dataKindLabel(kind)}]`;
+}
+
 function flowId(system, key) {
   return `${system}-${key}`;
 }
@@ -1539,6 +1566,14 @@ function formatSignedKwFromWatts(watts) {
   const sign = value >= 0 ? "+" : "-";
   if (Math.abs(value) < 1000) return `${sign}${Math.round(Math.abs(value))} W`;
   return `${sign}${Math.abs(value / 1000).toFixed(3)} kW`;
+}
+
+function formatPowerKwFromWattsWithDataKind(watts, kind) {
+  return formatValueWithDataKind(formatPowerKwFromWatts(watts), kind);
+}
+
+function formatSignedKwFromWattsWithDataKind(watts, kind) {
+  return formatValueWithDataKind(formatSignedKwFromWatts(watts), kind);
 }
 
 const BATTERY_CAPACITY_KWH = {
@@ -1998,22 +2033,35 @@ function setSocFillLevel(socFillId, socPercent) {
   }
 }
 
-function renderBatterySocDisplay({ system, soc, batteryW, socValueId, socFillId, energyValueId, usableValueId, runtimeValueId }) {
+function renderBatterySocDisplay({
+  system,
+  soc,
+  batteryW,
+  socValueId,
+  socFillId,
+  energyValueId,
+  usableValueId,
+  runtimeValueId,
+  socDataKind = "real",
+  energyDataKind = "estimate",
+  usableDataKind = "estimate",
+  runtimeDataKind = "estimate",
+}) {
   if (soc === null || soc === undefined) {
     setText(socValueId, "-");
-    if (energyValueId) setText(energyValueId, formatBatteryEnergyKwh(system, null));
-    if (usableValueId) setText(usableValueId, formatBatteryUsableKwh(system, null));
-    if (runtimeValueId) setText(runtimeValueId, formatBatteryRuntimeEstimate(system, null, batteryW));
+    if (energyValueId) setText(energyValueId, formatValueWithDataKind(formatBatteryEnergyKwh(system, null), energyDataKind));
+    if (usableValueId) setText(usableValueId, formatValueWithDataKind(formatBatteryUsableKwh(system, null), usableDataKind));
+    if (runtimeValueId) setText(runtimeValueId, formatValueWithDataKind(formatBatteryRuntimeEstimate(system, null, batteryW), runtimeDataKind));
     setSocFillLevel(socFillId, 0);
     setSocTextContrastBySocValueId(socValueId, 0);
     return;
   }
 
   const clampedSoc = Math.max(0, Math.min(100, Number(soc)));
-  setText(socValueId, `${clampedSoc.toFixed(0)}%`);
-  if (energyValueId) setText(energyValueId, formatBatteryEnergyKwh(system, clampedSoc));
-  if (usableValueId) setText(usableValueId, formatBatteryUsableKwh(system, clampedSoc));
-  if (runtimeValueId) setText(runtimeValueId, formatBatteryRuntimeEstimate(system, clampedSoc, batteryW));
+  setText(socValueId, formatValueWithDataKind(`${clampedSoc.toFixed(0)}%`, socDataKind));
+  if (energyValueId) setText(energyValueId, formatValueWithDataKind(formatBatteryEnergyKwh(system, clampedSoc), energyDataKind));
+  if (usableValueId) setText(usableValueId, formatValueWithDataKind(formatBatteryUsableKwh(system, clampedSoc), usableDataKind));
+  if (runtimeValueId) setText(runtimeValueId, formatValueWithDataKind(formatBatteryRuntimeEstimate(system, clampedSoc, batteryW), runtimeDataKind));
   setSocFillLevel(socFillId, clampedSoc);
   setSocTextContrastBySocValueId(socValueId, clampedSoc);
 }
@@ -2083,10 +2131,10 @@ function setBalanceStatus(system, balanceW) {
   const balanced = Math.abs(Number(balanceW) || 0) <= BALANCE_TOLERANCE_W;
   setText(statusId, balanced ? t("balanceStatusBalanced") : t("balanceStatusUnbalanced"));
   statusEl.classList.add(balanced ? "status-balanced" : "status-unbalanced");
-  setText(residualId, t("balanceResidualLabel", { value: formatPowerKwFromWatts(balanceW) }));
+  setText(residualId, t("balanceResidualLabel", { value: formatPowerKwFromWattsWithDataKind(balanceW, "calculated") }));
 }
 
-function setBalanceFormula(system, pvW, gridW, batteryW, loadW, netW) {
+function setBalanceFormula(system, pvW, gridW, batteryW, loadW, netW, kinds = {}) {
   const formulaId = flowId(system, "balanceFormulaText");
   if (
     pvW === null ||
@@ -2108,15 +2156,19 @@ function setBalanceFormula(system, pvW, gridW, batteryW, loadW, netW) {
   const batteryChargeW = Math.max(-batteryW, 0);
   const gridImportW = Math.max(gridW, 0);
   const gridExportW = Math.max(-gridW, 0);
+  const pvKind = kinds.pv || "real";
+  const batteryKind = kinds.battery || "real";
+  const gridKind = kinds.grid || "real";
+  const loadKind = kinds.load || "real";
   const formula =
     `${t("balanceFormulaLabel")}: ` +
-    `(${formatPowerKwFromWatts(pvW)}) + ` +
-    `(${formatPowerKwFromWatts(batteryDischargeW)}) + ` +
-    `(${formatPowerKwFromWatts(gridImportW)}) - ` +
-    `(${formatPowerKwFromWatts(loadW)}) - ` +
-    `(${formatPowerKwFromWatts(batteryChargeW)}) - ` +
-    `(${formatPowerKwFromWatts(gridExportW)}) = ` +
-    `${formatSignedKwFromWatts(netW)}`;
+    `(${formatPowerKwFromWattsWithDataKind(pvW, pvKind)}) + ` +
+    `(${formatPowerKwFromWattsWithDataKind(batteryDischargeW, batteryKind)}) + ` +
+    `(${formatPowerKwFromWattsWithDataKind(gridImportW, gridKind)}) - ` +
+    `(${formatPowerKwFromWattsWithDataKind(loadW, loadKind)}) - ` +
+    `(${formatPowerKwFromWattsWithDataKind(batteryChargeW, batteryKind)}) - ` +
+    `(${formatPowerKwFromWattsWithDataKind(gridExportW, gridKind)}) = ` +
+    `${formatSignedKwFromWattsWithDataKind(netW, "calculated")}`;
   setText(formulaId, formula);
 }
 
@@ -2133,10 +2185,14 @@ function renderEnergyFlow(system, flowPayload) {
   const batterySoc = metrics.battery_soc_percent ?? null;
   const inverterStatus = metrics.inverter_status ?? null;
   const balanceW = metrics.balance_w ?? null;
+  const solarKind = dataKindFromSource(metrics.pv_source, "real");
+  const gridKind = dataKindFromSource(metrics.grid_source, "real");
+  const batteryKind = dataKindFromSource(metrics.battery_source, "real");
+  const loadKind = dataKindFromSource(metrics.load_source, "real");
 
-  setText(flowId(system, "solarPowerValue"), formatPowerKwFromWatts(pvW));
-  setText(flowId(system, "gridPowerValue"), formatPowerKwFromWatts(gridW === null ? null : Math.abs(gridW)));
-  setText(flowId(system, "loadPowerValue"), formatPowerKwFromWatts(loadW));
+  setText(flowId(system, "solarPowerValue"), formatPowerKwFromWattsWithDataKind(pvW, solarKind));
+  setText(flowId(system, "gridPowerValue"), formatPowerKwFromWattsWithDataKind(gridW === null ? null : Math.abs(gridW), gridKind));
+  setText(flowId(system, "loadPowerValue"), formatPowerKwFromWattsWithDataKind(loadW, loadKind));
   setNodeSourceTip(flowId(system, "solarPowerValue"), formatMetricSourceText(system, "solar", metrics.pv_source));
   setNodeSourceTip(flowId(system, "gridPowerValue"), formatMetricSourceText(system, "grid", metrics.grid_source));
   setNodeSourceTip(flowId(system, "loadPowerValue"), formatMetricSourceText(system, "load", metrics.load_source));
@@ -2190,15 +2246,24 @@ function renderEnergyFlow(system, flowPayload) {
     energyValueId: flowId(system, "batteryEnergyValue"),
     usableValueId: flowId(system, "batteryUsableValue"),
     runtimeValueId: flowId(system, "batteryRuntimeValue"),
+    socDataKind: "real",
+    energyDataKind: "estimate",
+    usableDataKind: "estimate",
+    runtimeDataKind: "estimate",
   });
   if (balanceW === null || balanceW === undefined) {
     setText(flowId(system, "systemBalance"), `${t("balanceLabel")} -`);
     setBalanceStatus(system, null);
     setBalanceFormula(system, null, null, null, null, null);
   } else {
-    setText(flowId(system, "systemBalance"), `${t("balanceLabel")} ${formatPowerKwFromWatts(balanceW)}`);
+    setText(flowId(system, "systemBalance"), `${t("balanceLabel")} ${formatPowerKwFromWattsWithDataKind(balanceW, "calculated")}`);
     setBalanceStatus(system, balanceW);
-    setBalanceFormula(system, pvW, gridW, batteryW, loadW, balanceW);
+    setBalanceFormula(system, pvW, gridW, batteryW, loadW, balanceW, {
+      pv: solarKind,
+      grid: gridKind,
+      battery: batteryKind,
+      load: loadKind,
+    });
   }
 
   if (system === "solplanet") {
@@ -2211,11 +2276,11 @@ function renderEnergyFlow(system, flowPayload) {
   }
 }
 
-function setFlowValueLabel(id, wattsValue, active) {
+function setFlowValueLabel(id, wattsValue, active, dataKind = null) {
   const hasValue = wattsValue !== null && wattsValue !== undefined && !Number.isNaN(Number(wattsValue));
   const diagram = flowDiagrams.byLabelId.get(id);
   if (diagram) {
-    const text = hasValue ? formatPowerKwFromWatts(Math.abs(Number(wattsValue))) : "-";
+    const text = hasValue ? formatPowerKwFromWattsWithDataKind(Math.abs(Number(wattsValue)), dataKind) : "-";
     if (diagram.setEdgeLabel(id, text, active)) return;
   }
   const el = document.getElementById(id);
@@ -2225,7 +2290,7 @@ function setFlowValueLabel(id, wattsValue, active) {
     el.classList.remove("active");
     return;
   }
-  el.textContent = formatPowerKwFromWatts(Math.abs(Number(wattsValue)));
+  el.textContent = formatPowerKwFromWattsWithDataKind(Math.abs(Number(wattsValue)), dataKind);
   el.classList.toggle("active", Boolean(active));
 }
 
@@ -2364,6 +2429,12 @@ function buildCombinedFlowMetrics(sajFlow, solplanetFlow) {
   const inverter2W = toFiniteNumber(solplanetMetrics.inverter_power_w);
   const inverter1Status = sajMetrics.inverter_status ?? null;
   const inverter2Status = solplanetMetrics.inverter_status ?? null;
+  const solarKind = dataKindFromSource(sajMetrics.pv_source, "real");
+  const gridKind = dataKindFromSource(sajMetrics.grid_source, "real");
+  const battery1Kind = dataKindFromSource(sajMetrics.battery_source, "real");
+  const battery2Kind = dataKindFromSource(solplanetMetrics.battery_source, "real");
+  const inverter1Kind = dataKindFromSource(sajMetrics.inverter_power_source, "real");
+  const inverter2Kind = dataKindFromSource(solplanetMetrics.inverter_power_source, "real");
 
   let totalLoadW = null;
   if (inverter1W !== null && inverter2W !== null && gridW !== null) {
@@ -2391,6 +2462,21 @@ function buildCombinedFlowMetrics(sajFlow, solplanetFlow) {
     solarToBattery1W,
     solarToInverter1W,
     availableCount,
+    dataKinds: {
+      solar: solarKind,
+      grid: gridKind,
+      battery1: battery1Kind,
+      battery2: battery2Kind,
+      inverter1: inverter1Kind,
+      inverter2: inverter2Kind,
+      totalLoad: "calculated",
+      homeLoad: "calculated",
+      teslaCurrent: "real",
+      teslaSoc: "real",
+      inverterRatio: "calculated",
+      solarToBattery1: "estimate",
+      solarToInverter1: "estimate",
+    },
     sources: {
       solar: sajMetrics.pv_source || "unavailable",
       grid: sajMetrics.grid_source || "unavailable",
@@ -2418,6 +2504,7 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
     solarToBattery1W,
     solarToInverter1W,
     sources,
+    dataKinds,
   } = combined;
   const teslaChargingW = toFiniteNumber(teslaInfo?.chargingW);
   const teslaCurrentA = toFiniteNumber(teslaInfo?.currentA);
@@ -2439,14 +2526,14 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
     count: combined.availableCount,
   });
 
-  setText("combined-solarPowerValue", formatPowerKwFromWatts(solarW));
-  setText("combined-gridPowerValue", formatPowerKwFromWatts(gridW === null ? null : Math.abs(gridW)));
-  setText("combined-inverter1RatioValue", formatInverterBatteryRatio(inverter1W, battery1W));
-  setText("combined-inverter2RatioValue", formatInverterBatteryRatio(inverter2W, battery2W));
-  setText("combined-loadPowerValue", formatPowerKwFromWatts(homeLoadW));
+  setText("combined-solarPowerValue", formatPowerKwFromWattsWithDataKind(solarW, dataKinds.solar));
+  setText("combined-gridPowerValue", formatPowerKwFromWattsWithDataKind(gridW === null ? null : Math.abs(gridW), dataKinds.grid));
+  setText("combined-inverter1RatioValue", formatValueWithDataKind(formatInverterBatteryRatio(inverter1W, battery1W), dataKinds.inverterRatio));
+  setText("combined-inverter2RatioValue", formatValueWithDataKind(formatInverterBatteryRatio(inverter2W, battery2W), dataKinds.inverterRatio));
+  setText("combined-loadPowerValue", formatPowerKwFromWattsWithDataKind(homeLoadW, dataKinds.homeLoad));
   setText(
     "combined-teslaChargingCurrentValue",
-    formatTeslaCurrentValue(teslaCurrentA, teslaInfo?.currentUnit || "A"),
+    formatValueWithDataKind(formatTeslaCurrentValue(teslaCurrentA, teslaInfo?.currentUnit || "A"), dataKinds.teslaCurrent),
   );
   renderBatterySocDisplay({
     system: null,
@@ -2454,6 +2541,7 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
     batteryW: null,
     socValueId: "combined-teslaSocValue",
     socFillId: "combined-teslaSocFill",
+    socDataKind: dataKinds.teslaSoc,
   });
   setText("combined-switchboardValue", "-");
   setText("combined-inverter1State", getSajDashboardModeText() || inverterStateText(inverter1Status));
@@ -2528,6 +2616,10 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
     energyValueId: "combined-battery1EnergyValue",
     usableValueId: "combined-battery1UsableValue",
     runtimeValueId: "combined-battery1RuntimeValue",
+    socDataKind: "real",
+    energyDataKind: "estimate",
+    usableDataKind: "estimate",
+    runtimeDataKind: "estimate",
   });
   renderBatterySocDisplay({
     system: "solplanet",
@@ -2538,6 +2630,10 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
     energyValueId: "combined-battery2EnergyValue",
     usableValueId: "combined-battery2UsableValue",
     runtimeValueId: "combined-battery2RuntimeValue",
+    socDataKind: "real",
+    energyDataKind: "estimate",
+    usableDataKind: "estimate",
+    runtimeDataKind: "estimate",
   });
 
   const gridHigh = gridW !== null && Math.abs(gridW) > 15000;
@@ -2546,15 +2642,15 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   if (gridPowerEl) gridPowerEl.classList.toggle("alert-high", gridHigh);
   if (gridStateEl) gridStateEl.classList.toggle("alert-high", gridHigh);
 
-  setFlowValueLabel("combined-flowLabelGridToSwitchboard", gridW, gridActive);
-  setFlowValueLabel("combined-flowLabelSolarToBattery1", solarToBattery1W, solarToBattery1Active);
-  setFlowValueLabel("combined-flowLabelSolarToInverter1", solarToInverter1W, solarToInverter1Active);
-  setFlowValueLabel("combined-flowLabelSwitchboardToHomeLoad", homeLoadW, loadActive);
-  setFlowValueLabel("combined-flowLabelSwitchboardToTesla", teslaChargingW, teslaChargingActive);
-  setFlowValueLabel("combined-flowLabelBattery1ToInverter1", battery1W, battery1Active);
-  setFlowValueLabel("combined-flowLabelBattery2ToInverter2", battery2W, battery2Active);
-  setFlowValueLabel("combined-flowLabelInverter1ToSwitchboard", inverter1W, inverter1Active);
-  setFlowValueLabel("combined-flowLabelInverter2ToSwitchboard", inverter2W, inverter2Active);
+  setFlowValueLabel("combined-flowLabelGridToSwitchboard", gridW, gridActive, dataKinds.grid);
+  setFlowValueLabel("combined-flowLabelSolarToBattery1", solarToBattery1W, solarToBattery1Active, dataKinds.solarToBattery1);
+  setFlowValueLabel("combined-flowLabelSolarToInverter1", solarToInverter1W, solarToInverter1Active, dataKinds.solarToInverter1);
+  setFlowValueLabel("combined-flowLabelSwitchboardToHomeLoad", homeLoadW, loadActive, dataKinds.homeLoad);
+  setFlowValueLabel("combined-flowLabelSwitchboardToTesla", teslaChargingW, teslaChargingActive, dataKinds.teslaCurrent);
+  setFlowValueLabel("combined-flowLabelBattery1ToInverter1", battery1W, battery1Active, dataKinds.battery1);
+  setFlowValueLabel("combined-flowLabelBattery2ToInverter2", battery2W, battery2Active, dataKinds.battery2);
+  setFlowValueLabel("combined-flowLabelInverter1ToSwitchboard", inverter1W, inverter1Active, dataKinds.inverter1);
+  setFlowValueLabel("combined-flowLabelInverter2ToSwitchboard", inverter2W, inverter2Active, dataKinds.inverter2);
   const combinedDiagram = flowDiagrams.byBoard.get("energyFlowCombined");
   const switchboardMetrics = combinedDiagram?.getNodeMetrics?.("combined-switchboardNode");
   if (switchboardMetrics) {
@@ -2563,8 +2659,8 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
     const rightDistancePx = Math.round((switchboardMetrics.viewportWidth - guideInset) - switchboardMetrics.centerX);
   }
 
-  const battery1SocText = battery1Soc === null ? "-" : `${Math.max(0, Math.min(100, battery1Soc)).toFixed(0)}%`;
-  const battery2SocText = battery2Soc === null ? "-" : `${Math.max(0, Math.min(100, battery2Soc)).toFixed(0)}%`;
+  const battery1SocText = battery1Soc === null ? "-" : formatValueWithDataKind(`${Math.max(0, Math.min(100, battery1Soc)).toFixed(0)}%`, "real");
+  const battery2SocText = battery2Soc === null ? "-" : formatValueWithDataKind(`${Math.max(0, Math.min(100, battery2Soc)).toFixed(0)}%`, "real");
   const teslaSuffix = t("teslaChargingFormulaNote", {
     total: formatPowerKwFromWatts(totalLoadW),
     home: formatPowerKwFromWatts(homeLoadW),
@@ -5969,6 +6065,9 @@ bindClickIfPresent("tabSampling", () => {
 });
 bindClickIfPresent("tabWorkerLogs", () => {
   setActiveTab("workerLogs");
+});
+bindClickIfPresent("tabWorkerFailureLog", () => {
+  setActiveTab("workerFailureLog");
 });
 
 {

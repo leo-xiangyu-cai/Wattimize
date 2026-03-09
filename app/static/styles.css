@@ -1134,8 +1134,10 @@ td {
   transform: translate(-50%, -50%);
   font-size: 16px;
   font-weight: 700;
-  line-height: 1;
-  white-space: nowrap;
+  line-height: 1.2;
+  white-space: normal;
+  text-align: center;
+  max-width: 132px;
   padding: 5px 8px;
   border-radius: 999px;
   border: 1px solid #b9cbc0;
