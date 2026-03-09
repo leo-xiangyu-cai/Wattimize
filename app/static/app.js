@@ -44,6 +44,8 @@ const I18N = {
     configHaUrlLabel: "HA URL",
     configHaTokenLabel: "HA Token",
     configDongleHostLabel: "Solplanet Dongle Host",
+    configInverterSnLabel: "Solplanet Inverter SN",
+    configBatterySnLabel: "Solplanet Battery SN",
     configSajSampleIntervalLabel: "SAJ Sampling Interval",
     configSolplanetSampleIntervalLabel: "Solplanet Sampling Interval",
     configHaUrlPlaceholder: "http://<home-assistant-host>:8123",
@@ -211,8 +213,14 @@ const I18N = {
     loadTitle: "Home Load",
     teslaChargingLabel: "Tesla",
     teslaChargingIncludedHint: "Total Load = Home Load + Tesla",
+    teslaChargingPowerLabel: "Power",
     teslaChargingCurrentLabel: "Current",
     teslaChargingVoltageLabel: "Voltage",
+    teslaControlStart: "Start Charging",
+    teslaControlStop: "Stop Charging",
+    teslaControlBusy: "Updating...",
+    teslaControlUnavailable: "Control Unavailable",
+    teslaControlApplyFailed: "Tesla charging control failed: {error}",
     batteryTitle: "Battery",
     battery1Title: "Battery 1",
     battery2Title: "Battery 2",
@@ -450,6 +458,8 @@ const I18N = {
     configHaUrlLabel: "HA URL",
     configHaTokenLabel: "HA Token",
     configDongleHostLabel: "Solplanet Dongle Host",
+    configInverterSnLabel: "Solplanet Inverter SN",
+    configBatterySnLabel: "Solplanet Battery SN",
     configSajSampleIntervalLabel: "SAJ 采样频率",
     configSolplanetSampleIntervalLabel: "Solplanet 采样频率",
     configHaUrlPlaceholder: "http://<home-assistant-host>:8123",
@@ -617,8 +627,14 @@ const I18N = {
     loadTitle: "家庭负载",
     teslaChargingLabel: "特斯拉",
     teslaChargingIncludedHint: "总负载 = 家庭负载 + 特斯拉",
+    teslaChargingPowerLabel: "功率",
     teslaChargingCurrentLabel: "电流",
     teslaChargingVoltageLabel: "电压",
+    teslaControlStart: "开始充电",
+    teslaControlStop: "停止充电",
+    teslaControlBusy: "正在更新...",
+    teslaControlUnavailable: "控制不可用",
+    teslaControlApplyFailed: "特斯拉充电控制失败：{error}",
     batteryTitle: "电池",
     battery1Title: "电池 1",
     battery2Title: "电池 2",
@@ -875,15 +891,9 @@ const CONFIG_SAMPLE_INTERVAL_OPTIONS = [5, 10, 30, 60, 300];
 const BALANCE_TOLERANCE_W = 120;
 const SOLPLANET_REALTIME_KV_URL = "/api/solplanet/realtime-kv";
 const SOLPLANET_RAW_APIS = [
-  { key: "getdev_device_0", titleKey: "rawApiGetdev0", url: "/api/solplanet/cgi/getdev-device-0" },
-  { key: "getdev_device_2", titleKey: "rawApiGetdev2", url: "/api/solplanet/cgi/getdev-device-2" },
-  { key: "getdev_device_3", titleKey: "rawApiGetdev3", url: "/api/solplanet/cgi/getdev-device-3" },
-  { key: "getdev_device_4", titleKey: "rawApiGetdev4", url: "/api/solplanet/cgi/getdev-device-4" },
   { key: "getdevdata_device_2", titleKey: "rawApiGetdevdata2", url: "/api/solplanet/cgi/getdevdata-device-2" },
   { key: "getdevdata_device_3", titleKey: "rawApiGetdevdata3", url: "/api/solplanet/cgi/getdevdata-device-3" },
   { key: "getdevdata_device_4", titleKey: "rawApiGetdevdata4", url: "/api/solplanet/cgi/getdevdata-device-4" },
-  { key: "getdevdata_device_5", titleKey: "rawApiGetdevdata5", url: "/api/solplanet/cgi/getdevdata-device-5" },
-  { key: "getdefine", titleKey: "rawApiGetdefine", url: "/api/solplanet/cgi/getdefine" },
 ];
 const SAJ_RAW_APIS = [
   { key: "saj_dashboard_sources", titleKey: "rawApiSajDashboardSources", url: "/api/saj/raw/dashboard-sources" },
@@ -905,54 +915,6 @@ const SAMPLING_OVERALL_SERIES = [
   { key: "solplanet_battery_discharge_w", labelKey: "samplingOverallSeriesSolplanetBatteryDischarge", color: "#ef4444" },
 ];
 const SOLPLANET_RAW_FIELD_HELP = {
-  getdev_device_0: {
-    psn: { zh: "Dongle 序列号", en: "Dongle serial number" },
-    nam: { zh: "设备名称", en: "Device name" },
-    mod: { zh: "设备型号", en: "Model name" },
-    sw: { zh: "固件版本", en: "Firmware version" },
-    tim: { zh: "设备当前时间", en: "Device timestamp" },
-    ali_ip: { zh: "云服务区域", en: "Cloud region" },
-    ali_port: { zh: "云服务端口", en: "Cloud service port" },
-    status: { zh: "云连接状态", en: "Cloud connection status" },
-  },
-  getdev_device_2: {
-    isn: { zh: "逆变器序列号", en: "Inverter serial number" },
-    add: { zh: "设备地址/编号", en: "Device address/index" },
-    safety: { zh: "安规/并网规则代码", en: "Grid/safety profile code" },
-    rate: { zh: "逆变器额定功率（W）", en: "Inverter rated power (W)" },
-    msw: { zh: "主控固件版本", en: "Main firmware version" },
-    ssw: { zh: "通信/从控固件版本", en: "Subsystem firmware version" },
-    tsw: { zh: "触摸屏/终端固件版本", en: "Terminal firmware version" },
-    pac: { zh: "当前有功功率（W）", en: "Current active power (W)" },
-    etd: { zh: "当日发电量（通常 kWh）", en: "Today yield (typically kWh)" },
-    eto: { zh: "累计发电量（通常 kWh）", en: "Lifetime yield (typically kWh)" },
-    err: { zh: "故障码（0 通常表示无故障）", en: "Error code (0 usually means no fault)" },
-    cmv: { zh: "通信模块版本", en: "Communication module version" },
-    mty: { zh: "机型类型编码", en: "Model type code" },
-    typ: { zh: "设备类别编码", en: "Device category code" },
-    model: { zh: "设备型号", en: "Model name" },
-    Isw: { zh: "逆变器软件版本", en: "Inverter software version" },
-    afci: { zh: "AFCI 相关状态/版本（空为未上报）", en: "AFCI status/version (empty when not reported)" },
-    battery_topo: { zh: "电池拓扑列表（包含电池 SN/ID）", en: "Battery topology list (battery SN/ID)" },
-    bat_sn: { zh: "主电池序列号", en: "Primary battery serial number" },
-    bat_id: { zh: "主电池编号", en: "Primary battery id" },
-    host: { zh: "主从拓扑角色编码", en: "Topology host role code" },
-    "battery_topo.0.bat_sn": { zh: "电池序列号", en: "Battery serial number" },
-    "battery_topo.0.bat_id": { zh: "电池编号", en: "Battery id" },
-  },
-  getdev_device_3: {
-    mod: { zh: "电表模式编码", en: "Meter mode code" },
-    enb: { zh: "电表使能状态", en: "Meter enable state" },
-    exp_m: { zh: "并网/导出模式编码", en: "Export mode code" },
-    regulate: { zh: "调节模式编码", en: "Regulation mode code" },
-    enb_PF: { zh: "功率因数控制使能", en: "Power factor control enabled" },
-    target_PF: { zh: "目标功率因数", en: "Target power factor" },
-    abs: { zh: "绝对控制参数", en: "Absolute control parameter" },
-    abs_offset: { zh: "绝对控制偏移量", en: "Absolute control offset" },
-    total_pac: { zh: "总有功功率（W）", en: "Total active power (W)" },
-    total_fac: { zh: "总频率（常见 0.01Hz 缩放）", en: "Total frequency (often 0.01Hz scaled)" },
-    meter_pac: { zh: "电表有功功率（W）", en: "Meter active power (W)" },
-  },
   getdevdata_device_2: {
     flg: { zh: "数据有效标记（1=有效）", en: "Data valid flag (1=valid)" },
     tim: { zh: "设备时间（YYYYMMDDhhmmss）", en: "Device timestamp (YYYYMMDDhhmmss)" },
@@ -1050,31 +1012,6 @@ const SOLPLANET_RAW_FIELD_HELP = {
     vbinv: { zh: "逆变器侧电池电压", en: "Inverter-side battery voltage" },
     cbinv: { zh: "逆变器侧电池电流", en: "Inverter-side battery current" },
   },
-  getdev_device_4: {
-    isn: { zh: "逆变器序列号", en: "Inverter serial number" },
-    type: { zh: "电池类型编码", en: "Battery type code" },
-    muf: { zh: "电池厂商编码", en: "Battery vendor code" },
-    mod: { zh: "电池型号编码", en: "Battery model code" },
-    num: { zh: "电池模块数量", en: "Battery module count" },
-    discharge_max: { zh: "最大放电值", en: "Max discharge value" },
-    charge_max: { zh: "最大充电值", en: "Max charge value" },
-    battery: { zh: "电池详细信息对象", en: "Battery detail object" },
-  },
-  getdevdata_device_5: {
-    flg: { zh: "数据有效标记", en: "Data valid flag" },
-    tim: { zh: "设备时间", en: "Device timestamp" },
-  },
-  getdefine: {
-    Pin: { zh: "充电功率上限（W）", en: "Charge power limit (W)" },
-    Pout: { zh: "放电功率上限（W）", en: "Discharge power limit (W)" },
-    Sun: { zh: "周日时段配置（6 段编码）", en: "Sunday schedule config (6 encoded slots)" },
-    Mon: { zh: "周一时段配置（6 段编码）", en: "Monday schedule config (6 encoded slots)" },
-    Tus: { zh: "周二时段配置（6 段编码）", en: "Tuesday schedule config (6 encoded slots)" },
-    Wen: { zh: "周三时段配置（6 段编码）", en: "Wednesday schedule config (6 encoded slots)" },
-    Thu: { zh: "周四时段配置（6 段编码）", en: "Thursday schedule config (6 encoded slots)" },
-    Fri: { zh: "周五时段配置（6 段编码）", en: "Friday schedule config (6 encoded slots)" },
-    Sat: { zh: "周六时段配置（6 段编码）", en: "Saturday schedule config (6 encoded slots)" },
-  },
   saj_dashboard_sources: {
     dashboard_values: { zh: "Dashboard 实际显示值（后端计算后）", en: "Final values shown on Dashboard" },
     "dashboard_values.solar_power_w": { zh: "太阳能节点功率（W）", en: "Solar node power (W)" },
@@ -1101,10 +1038,6 @@ const SOLPLANET_RAW_FIELD_HELP = {
   },
 };
 const SOLPLANET_DASHBOARD_FIELD_MAP = {
-  getdev_device_3: {
-    meter_pac: [{ metric: "grid_w", kind: "backup", noteZh: "当 device=3 实时包无效时可作为电网功率参考", noteEn: "Fallback grid reference when device-3 realtime payload is invalid" }],
-    total_pac: [{ metric: "grid_w", kind: "unused", noteZh: "⚠ 不再用于电网功率计算：该值等同于逆变器 pac（AC 输出），并非真实电网净功率", noteEn: "⚠ No longer used for grid power: mirrors inverter pac (AC output), not real grid net power" }],
-  },
   getdevdata_device_2: {
     ppv: [{ metric: "pv_w", kind: "primary", noteZh: "对应 Dashboard 的太阳能卡片数值", noteEn: "Feeds the Solar value shown on Dashboard" }],
     vpv: [{ metric: "pv_w", kind: "backup", noteZh: "与 ipv 组合后作为太阳能卡片备用来源", noteEn: "With ipv, acts as backup source for Solar value" }],
@@ -1125,7 +1058,6 @@ const SOLPLANET_DASHBOARD_FIELD_MAP = {
     "notes.solplanet_load_w_source:inverter_pac_minus_battery_charge_abs": [{ metric: "load_w", kind: "fallback", noteZh: "兜底：|inverter.pac| - |battery.pb(充电)|", noteEn: "Fallback: |inverter.pac| - |battery.pb(charging)|" }],
     "notes.solplanet_load_w_source:inverter_pac_minus_battery_discharge_abs": [{ metric: "load_w", kind: "fallback", noteZh: "兜底：|inverter.pac| - |battery.pb(放电)|", noteEn: "Fallback: |inverter.pac| - |battery.pb(discharging)|" }],
     "notes.solplanet_load_w_source:abs_inverter_pac": [{ metric: "load_w", kind: "fallback", noteZh: "兜底：|inverter.pac|", noteEn: "Fallback: |inverter.pac|" }],
-    "notes.solplanet_grid_w_source:meter_info_total_pac_sign_flipped": [{ metric: "grid_w", kind: "backup", noteZh: "电网功率来自 meter_info.total_pac（符号反转）", noteEn: "Grid source from meter_info.total_pac with sign flip" }],
     "notes.solplanet_grid_w_source:inferred_from_balance_assume_no_export": [{ metric: "grid_w", kind: "fallback", noteZh: "电网功率由功率平衡反推（假设无并网回馈）", noteEn: "Grid inferred from power balance (assumes no export)" }],
   },
   saj_dashboard_sources: {
@@ -1161,6 +1093,7 @@ const stateCache = {
     combined: { phase: "idle", updatedAt: null, quality: "ok", count: 0 },
   },
 };
+let teslaControlBusy = false;
 
 function getLang() {
   const saved = localStorage.getItem("lang");
@@ -1567,6 +1500,8 @@ function fillConfigForm(payload = {}) {
   document.getElementById("cfgHaUrl").value = payload.ha_url || "";
   document.getElementById("cfgHaToken").value = payload.ha_token || "";
   document.getElementById("cfgDongleHost").value = payload.solplanet_dongle_host || "";
+  document.getElementById("cfgSolplanetInverterSn").value = payload.solplanet_inverter_sn || "";
+  document.getElementById("cfgSolplanetBatterySn").value = payload.solplanet_battery_sn || "";
   const sajInterval = Number(payload.saj_sample_interval_seconds);
   const solplanetInterval = Number(payload.solplanet_sample_interval_seconds);
   document.getElementById("cfgSajSampleIntervalSeconds").value = String(
@@ -1953,14 +1888,16 @@ function buildCombinedDiagramSpec() {
         title: "Tesla",
         titleKey: "teslaChargingLabel",
         width: 176,
-        height: 222,
+        height: 270,
         lines: [
           {
             type: "soc",
             fillId: "combined-teslaSocFill",
             valueId: "combined-teslaSocValue",
           },
+          { id: "combined-teslaChargingPowerValue", className: "node-sub-value", text: "-" },
           { id: "combined-teslaChargingCurrentValue", className: "node-mini-value muted", text: "-" },
+          { type: "button", id: "combined-teslaChargingToggleBtn", className: "tesla-control-btn btn secondary", text: "-" },
         ],
       },
       {
@@ -2031,6 +1968,15 @@ function buildCombinedDiagramSpec() {
     edges: [
       { id: "combined-lineGridToSwitchboard", source: "combined-gridNode", target: "combined-switchboardNode", labelId: "combined-flowLabelGridToSwitchboard" },
       { id: "combined-lineSolarToInverter1B", source: "combined-solarNode", target: "combined-inverter1Node", labelId: "combined-flowLabelSolarToInverter1" },
+      {
+        id: "combined-lineSwitchboardToTotalLoad",
+        source: "combined-switchboardNode",
+        target: "combined-teslaNode",
+        labelId: "combined-flowLabelSwitchboardToTotalLoad",
+        glowWidth: 28,
+        lineWidth: 18,
+        coreWidth: 6,
+      },
       { id: "combined-lineSwitchboardToHomeLoad", source: "combined-switchboardNode", target: "combined-loadNode", labelId: "combined-flowLabelSwitchboardToHomeLoad" },
       { id: "combined-lineSwitchboardToTeslaB", source: "combined-switchboardNode", target: "combined-teslaNode", labelId: "combined-flowLabelSwitchboardToTesla" },
       { id: "combined-lineBattery1ToInverter1", source: "combined-battery1Node", target: "combined-inverter1Node", labelId: "combined-flowLabelBattery1ToInverter1" },
@@ -2508,11 +2454,46 @@ function pickTeslaMetricEntity(items, metricKind) {
 function formatTeslaCurrentValue(value, unit) {
   const numeric = toFiniteNumber(value);
   const unitText = String(unit || "").trim();
-  if (numeric === null) return "-";
+  if (numeric === null) return `${t("teslaChargingCurrentLabel")} -`;
   const normalizedUnit = currentLang === "zh" && unitText.toLowerCase() === "a"
     ? "安"
     : (unitText || (currentLang === "zh" ? "安" : "A"));
-  return `${numeric.toFixed(1)}${normalizedUnit}`;
+  return `${t("teslaChargingCurrentLabel")} ${numeric.toFixed(1)}${normalizedUnit}`;
+}
+
+function formatTeslaPowerValue(watts) {
+  return `${t("teslaChargingPowerLabel")} ${formatPowerKwFromWatts(watts)}`;
+}
+
+function mergeTeslaControlInfo(baseInfo, controlPayload) {
+  const controlState = controlPayload?.control_state || controlPayload || {};
+  return {
+    ...baseInfo,
+    controlAvailable: Boolean(controlState?.available),
+    controlMode: controlState?.control_mode || "unavailable",
+    chargingEnabled: typeof controlState?.charging_enabled === "boolean" ? controlState.charging_enabled : null,
+    canStart: Boolean(controlState?.can_start),
+    canStop: Boolean(controlState?.can_stop),
+    controlSwitchEntityId: controlState?.switch_entity?.entity_id || null,
+    controlStartButtonEntityId: controlState?.start_button_entity?.entity_id || null,
+    controlStopButtonEntityId: controlState?.stop_button_entity?.entity_id || null,
+  };
+}
+
+function renderTeslaControlButton(teslaInfo = null) {
+  const button = document.getElementById("combined-teslaChargingToggleBtn");
+  if (!button) return;
+  const controlAvailable = Boolean(teslaInfo?.controlAvailable);
+  const chargingEnabled = teslaInfo?.chargingEnabled === true;
+  let label = t("teslaControlUnavailable");
+  if (teslaControlBusy) {
+    label = t("teslaControlBusy");
+  } else if (controlAvailable) {
+    label = chargingEnabled ? t("teslaControlStop") : t("teslaControlStart");
+  }
+  button.textContent = label;
+  button.disabled = teslaControlBusy || !controlAvailable;
+  button.classList.toggle("active", controlAvailable && chargingEnabled);
 }
 
 function buildCombinedFlowMetrics(combinedFlow) {
@@ -2626,6 +2607,10 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   );
   setHtml("combined-loadPowerValue", formatValueWithDataKindHtml(formatPowerKwFromWatts(homeLoadW), dataKinds.homeLoad));
   setHtml(
+    "combined-teslaChargingPowerValue",
+    formatValueWithDataKindHtml(formatTeslaPowerValue(teslaChargingW), "real"),
+  );
+  setHtml(
     "combined-teslaChargingCurrentValue",
     formatValueWithDataKindHtml(formatTeslaCurrentValue(teslaCurrentA, teslaInfo?.currentUnit || "A"), dataKinds.teslaCurrent),
   );
@@ -2637,6 +2622,7 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
     socFillId: "combined-teslaSocFill",
     socDataKind: dataKinds.teslaSoc,
   });
+  renderTeslaControlButton(teslaInfo);
   setText("combined-switchboardValue", "-");
   setText("combined-inverter1State", getSajDashboardModeText() || inverterStateText(inverter1Status));
   setText("combined-inverter2State", inverterStateText(inverter2Status));
@@ -2649,6 +2635,7 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
       ? `来源: 计算 ${sources.load}\n说明: 家庭负载(不含 Tesla) = 总负载 - 特斯拉充电`
       : `Source: Calculated ${sources.load}\nNote: Home load (excluding Tesla) = total load - Tesla charging`,
   );
+  setNodeSourceTip("combined-teslaChargingPowerValue", null);
   setNodeSourceTip("combined-teslaChargingCurrentValue", null);
   setNodeSourceTip("combined-teslaSocValue", null);
 
@@ -2661,7 +2648,9 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   setText("combined-switchboardState", switchboardActive ? t("switchboardStateActive") : t("switchboardStateIdle"));
   const loadActive = homeLoadW !== null && homeLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const teslaChargingActive = teslaChargingW !== null && teslaChargingW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
+  const totalLoadActive = totalLoadW !== null && totalLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   setText("combined-loadState", loadActive ? t("stateConsuming") : t("stateIdle"));
+  setFlowLine("combined-lineSwitchboardToTotalLoad", totalLoadActive, false);
   setFlowLine("combined-lineSwitchboardToHomeLoad", loadActive, false);
   setFlowLine("combined-lineSwitchboardToTeslaB", teslaChargingActive, false);
 
@@ -2736,6 +2725,7 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
 
   setFlowValueLabel("combined-flowLabelGridToSwitchboard", gridW, gridActive, dataKinds.grid);
   setFlowValueLabel("combined-flowLabelSolarToInverter1", solarToInverter1W, solarToInverter1Active, dataKinds.solarToInverter1);
+  setFlowValueLabel("combined-flowLabelSwitchboardToTotalLoad", totalLoadW, totalLoadActive, dataKinds.totalLoad);
   setFlowValueLabel("combined-flowLabelSwitchboardToHomeLoad", homeLoadW, loadActive, dataKinds.homeLoad);
   setFlowValueLabel("combined-flowLabelSwitchboardToTesla", teslaChargingW, teslaChargingActive, dataKinds.teslaCurrent);
   setFlowValueLabel("combined-flowLabelBattery1ToInverter1", battery1W, battery1Active, dataKinds.battery1);
@@ -5566,13 +5556,18 @@ function buildEntityUrl() {
 }
 
 async function fetchTeslaChargingInfo() {
-  const payload = await fetchJson("/api/entities?domain=sensor&q=tesla&page=1&page_size=500", { timeoutMs: 6000 });
-  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const [entityResult, controlResult] = await Promise.allSettled([
+    fetchJson("/api/entities?domain=sensor&q=tesla&page=1&page_size=500", { timeoutMs: 6000 }),
+    fetchJson("/api/tesla/control/state", { timeoutMs: 6000 }),
+  ]);
+  const entityPayload = entityResult.status === "fulfilled" ? entityResult.value : null;
+  const items = Array.isArray(entityPayload?.items) ? entityPayload.items : [];
   const powerEntity = pickTeslaChargingEntity(items);
   const currentEntity = pickTeslaMetricEntity(items, "current");
   const socEntity = pickTeslaMetricEntity(items, "soc");
+  let result;
   if (!powerEntity && !currentEntity && !socEntity) {
-    return {
+    result = {
       chargingW: null,
       entityId: null,
       friendlyName: null,
@@ -5582,20 +5577,69 @@ async function fetchTeslaChargingInfo() {
       currentUnit: "A",
       socPercent: null,
       socEntityId: null,
+      controlAvailable: false,
+      controlMode: "unavailable",
+      chargingEnabled: null,
+      canStart: false,
+      canStop: false,
+      controlSwitchEntityId: null,
+      controlStartButtonEntityId: null,
+      controlStopButtonEntityId: null,
+    };
+  } else {
+    const chargingW = powerEntity ? wattsFromStateUnit(powerEntity.state, powerEntity.unit) : null;
+    result = {
+      chargingW: chargingW === null ? null : Math.max(0, chargingW),
+      entityId: powerEntity?.entity_id || null,
+      friendlyName: powerEntity?.friendly_name || null,
+      updatedAt: latestIsoTime(powerEntity?.last_updated, currentEntity?.last_updated, socEntity?.last_updated),
+      currentA: currentEntity ? toFiniteNumber(currentEntity.state) : null,
+      currentEntityId: currentEntity?.entity_id || null,
+      currentUnit: currentEntity?.unit || "A",
+      socPercent: socEntity ? toFiniteNumber(socEntity.state) : null,
+      socEntityId: socEntity?.entity_id || null,
+      controlAvailable: false,
+      controlMode: "unavailable",
+      chargingEnabled: null,
+      canStart: false,
+      canStop: false,
+      controlSwitchEntityId: null,
+      controlStartButtonEntityId: null,
+      controlStopButtonEntityId: null,
     };
   }
-  const chargingW = powerEntity ? wattsFromStateUnit(powerEntity.state, powerEntity.unit) : null;
-  return {
-    chargingW: chargingW === null ? null : Math.max(0, chargingW),
-    entityId: powerEntity?.entity_id || null,
-    friendlyName: powerEntity?.friendly_name || null,
-    updatedAt: latestIsoTime(powerEntity?.last_updated, currentEntity?.last_updated, socEntity?.last_updated),
-    currentA: currentEntity ? toFiniteNumber(currentEntity.state) : null,
-    currentEntityId: currentEntity?.entity_id || null,
-    currentUnit: currentEntity?.unit || "A",
-    socPercent: socEntity ? toFiniteNumber(socEntity.state) : null,
-    socEntityId: socEntity?.entity_id || null,
-  };
+  if (controlResult.status === "fulfilled") {
+    result = mergeTeslaControlInfo(result, controlResult.value);
+  }
+  return result;
+}
+
+async function toggleTeslaCharging() {
+  if (teslaControlBusy) return;
+  const summary = stateCache.lastSummary;
+  const teslaInfo = summary?.tesla || null;
+  if (!teslaInfo?.controlAvailable) return;
+  const targetEnabled = teslaInfo?.chargingEnabled === true ? false : true;
+  teslaControlBusy = true;
+  renderTeslaControlButton(teslaInfo);
+  try {
+    const payload = await fetchJson("/api/tesla/control/charging", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: targetEnabled }),
+      timeoutMs: 10000,
+    });
+    if (summary) {
+      summary.tesla = mergeTeslaControlInfo(summary.tesla || {}, payload);
+      renderSummary(summary);
+    }
+    await loadSummary();
+  } catch (err) {
+    window.alert(t("teslaControlApplyFailed", { error: String(err) }));
+  } finally {
+    teslaControlBusy = false;
+    renderTeslaControlButton(stateCache.lastSummary?.tesla || teslaInfo);
+  }
 }
 
 async function loadSummary() {
@@ -5610,6 +5654,9 @@ async function loadSummary() {
       chargingW: null, entityId: null, friendlyName: null, updatedAt: null,
       currentA: null, currentEntityId: null, currentUnit: "A",
       socPercent: null, socEntityId: null,
+      controlAvailable: false, controlMode: "unavailable", chargingEnabled: null,
+      canStart: false, canStop: false,
+      controlSwitchEntityId: null, controlStartButtonEntityId: null, controlStopButtonEntityId: null,
     },
   };
   stateCache.lastSummary = summary;
@@ -5651,6 +5698,9 @@ async function loadSummary() {
       chargingW: null, entityId: null, friendlyName: null, updatedAt: null,
       currentA: null, currentEntityId: null, currentUnit: "A",
       socPercent: null, socEntityId: null,
+      controlAvailable: false, controlMode: "unavailable", chargingEnabled: null,
+      canStart: false, canStop: false,
+      controlSwitchEntityId: null, controlStartButtonEntityId: null, controlStopButtonEntityId: null,
     };
   }
   renderSummary(summary);
@@ -6222,6 +6272,9 @@ bindChangeIfPresent("workerLogsServiceSelect", () => {
 bindClickIfPresent("refreshBtn", () => {
   void loadCurrentTab();
 });
+bindClickIfPresent("combined-teslaChargingToggleBtn", () => {
+  void toggleTeslaCharging();
+});
 bindClickIfPresent("configBtn", () => {
   void openConfigModal();
 });
@@ -6566,6 +6619,9 @@ window.addEventListener("resize", () => {
 });
 
 initFlowDiagrams();
+bindClickIfPresent("combined-teslaChargingToggleBtn", () => {
+  void toggleTeslaCharging();
+});
 applyTranslations();
 samplingRangeState.day = new Date().toISOString().slice(0, 10);
 samplingRangeState.week = samplingRangeState.day;

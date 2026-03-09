@@ -358,6 +358,12 @@ select {
   gap: 6px;
 }
 
+.config-form input[readonly] {
+  background: #f3f4f6;
+  color: #6b7280;
+  cursor: not-allowed;
+}
+
 .config-actions {
   display: flex;
   align-items: center;
@@ -1402,6 +1408,37 @@ td {
   color: #4d5a51;
   background: transparent;
   box-shadow: none;
+}
+
+.efd-node.efd-node-tesla .node-sub-value {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 36px;
+  z-index: 3;
+  margin-top: 0;
+  font-size: 18px;
+  font-weight: 800;
+  text-align: center;
+  color: #2f382f;
+}
+
+.efd-node.efd-node-tesla .tesla-control-btn {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 10px;
+  z-index: 3;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.efd-node.efd-node-tesla .tesla-control-btn.active {
+  background: #b7383a;
+  border-color: #b7383a;
+  color: #fff;
 }
 
 .efd-node.efd-node-tesla .soc-wrap {
