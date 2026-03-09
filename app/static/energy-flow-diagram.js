@@ -481,9 +481,6 @@
     if (edgeId === "combined-lineSwitchboardMeasureRight") {
       return [{ x: switchboardCenter.x, y: switchboardCenter.y }, { x: viewport.width - guideInset, y: switchboardCenter.y }];
     }
-    if (edgeId === "combined-lineSolarToBattery1") {
-      return [pointOnBox(solar, "bottom"), pointOnBox(battery1, "top")];
-    }
     if (edgeId === "combined-lineSolarToInverter1B") {
       const source = pointOnBox(solar, "right");
       const target = pointOnBox(inverter1, "top", -18);

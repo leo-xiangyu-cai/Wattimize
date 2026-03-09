@@ -203,7 +203,8 @@ const I18N = {
     switchboardTitle: "Switchboard",
     inverter1Title: "Inverter 1",
     inverter2Title: "Inverter 2",
-    inverterBatteryRatioUnavailable: "-",
+    inverterConversionUnavailable: "-",
+    inverterConversionMixed: "Mixed",
     dataKindReal: "Real data from the system",
     dataKindEstimate: "Estimated data",
     dataKindCalculated: "Calculated from other readings",
@@ -608,7 +609,8 @@ const I18N = {
     switchboardTitle: "母线配电盘",
     inverter1Title: "逆变器 1",
     inverter2Title: "逆变器 2",
-    inverterBatteryRatioUnavailable: "-",
+    inverterConversionUnavailable: "-",
+    inverterConversionMixed: "混合",
     dataKindReal: "系统实时读取的真实数据",
     dataKindEstimate: "估算数据",
     dataKindCalculated: "基于其他读数计算得到的数据",
@@ -1289,7 +1291,10 @@ function setText(id, text) {
 
 function setHtml(id, html) {
   const el = document.getElementById(id);
-  if (el) el.innerHTML = html;
+  if (el) {
+    el.innerHTML = html;
+    syncDataKindBadgeTooltip(el);
+  }
 }
 
 function setNodeSourceTip(id, tipText) {
@@ -1298,13 +1303,13 @@ function setNodeSourceTip(id, tipText) {
   if (tipText === null || tipText === undefined || tipText === "") {
     el.classList.remove("has-source-tip");
     el.removeAttribute("data-source-tip");
-    el.removeAttribute("title");
+    syncDataKindBadgeTooltip(el);
     return;
   }
   const normalized = String(tipText || "-");
   el.classList.add("has-source-tip");
   el.setAttribute("data-source-tip", normalized);
-  el.setAttribute("title", normalized);
+  syncDataKindBadgeTooltip(el);
 }
 
 function formatMetricSourceText(system, metricKey, sourceValue) {
@@ -1345,15 +1350,42 @@ function dataKindBadgeLetter(kind) {
   return "";
 }
 
+function dataKindLegendText() {
+  return [
+    `R = ${dataKindLabel("real")}`,
+    `E = ${dataKindLabel("estimate")}`,
+    `C = ${dataKindLabel("calculated")}`,
+  ].join("\n");
+}
+
+function dataKindTooltipText(kind, sourceTip = "") {
+  const sections = [dataKindLegendText()];
+  const normalizedSourceTip = String(sourceTip || "").trim();
+  if (normalizedSourceTip) sections.push(normalizedSourceTip);
+  return sections.join("\n\n");
+}
+
+function syncDataKindBadgeTooltip(el) {
+  if (!el) return;
+  const badge = el.querySelector(".data-kind-badge");
+  if (!badge) return;
+  const kind = badge.getAttribute("data-kind") || "";
+  const sourceTip = el.getAttribute("data-source-tip") || "";
+  const tooltip = dataKindTooltipText(kind, sourceTip);
+  badge.setAttribute("data-tooltip", tooltip);
+  badge.setAttribute("title", tooltip);
+  badge.setAttribute("aria-label", tooltip);
+}
+
 function formatValueWithDataKindHtml(text, kind) {
   const normalized = String(text ?? "-");
   if (!kind || normalized.trim() === "-") return escapeHtml(normalized);
-  const label = dataKindLabel(kind);
   const letter = dataKindBadgeLetter(kind);
+  const tooltip = dataKindTooltipText(kind);
   return (
     `<span class="data-kind-value">` +
     `<span class="data-kind-main">${escapeHtml(normalized)}</span>` +
-    `<span class="data-kind-badge data-kind-${escapeHtml(kind)}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${escapeHtml(letter)}</span>` +
+    `<span class="data-kind-badge data-kind-${escapeHtml(kind)}" data-kind="${escapeHtml(kind)}" data-tooltip="${escapeHtml(tooltip)}" title="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}">${escapeHtml(letter)}</span>` +
     `</span>`
   );
 }
@@ -1705,13 +1737,32 @@ function formatBatteryRuntimeEstimate(system, batterySoc, batteryW) {
   });
 }
 
-function formatInverterBatteryRatio(inverterW, batteryW) {
-  const inverter = Math.abs(Number(inverterW));
-  const battery = Math.abs(Number(batteryW));
-  if (!Number.isFinite(inverter) || !Number.isFinite(battery) || battery < POWER_FLOW_ACTIVE_THRESHOLD_W) {
-    return t("inverterBatteryRatioUnavailable");
+function formatInverterConversion(inverterW, batteryW, solarInputW = null) {
+  const inverterSigned = toFiniteNumber(inverterW);
+  const batterySigned = toFiniteNumber(batteryW);
+  const solarInputSigned = toFiniteNumber(solarInputW);
+  if (inverterSigned === null || batterySigned === null) return t("inverterConversionUnavailable");
+
+  const battery = Math.abs(batterySigned);
+  if (battery < POWER_FLOW_ACTIVE_THRESHOLD_W) return t("inverterConversionUnavailable");
+
+  if (batterySigned < -POWER_FLOW_ACTIVE_THRESHOLD_W) {
+    const solarInput = Math.max(solarInputSigned || 0, 0);
+    const acInput = Math.max(-inverterSigned, 0);
+    const totalInput = solarInput + acInput;
+    if (totalInput < POWER_FLOW_ACTIVE_THRESHOLD_W) return t("inverterConversionUnavailable");
+    return `${Math.round((Math.min(battery, totalInput) / Math.max(battery, totalInput)) * 100)}%`;
   }
-  return `${Math.round((inverter / battery) * 100)}%`;
+
+  if (batterySigned > POWER_FLOW_ACTIVE_THRESHOLD_W && inverterSigned > POWER_FLOW_ACTIVE_THRESHOLD_W) {
+    const solarInput = Math.max(solarInputSigned || 0, 0);
+    if (solarInput >= POWER_FLOW_ACTIVE_THRESHOLD_W) return t("inverterConversionUnavailable");
+    const inverter = Math.abs(inverterSigned);
+    if (inverter < POWER_FLOW_ACTIVE_THRESHOLD_W) return t("inverterConversionUnavailable");
+    return `${Math.round((Math.min(inverter, battery) / Math.max(inverter, battery)) * 100)}%`;
+  }
+
+  return t("inverterConversionUnavailable");
 }
 
 function formatBatteryRuntimeText(system, batterySoc, batteryW) {
@@ -1979,7 +2030,6 @@ function buildCombinedDiagramSpec() {
     ],
     edges: [
       { id: "combined-lineGridToSwitchboard", source: "combined-gridNode", target: "combined-switchboardNode", labelId: "combined-flowLabelGridToSwitchboard" },
-      { id: "combined-lineSolarToBattery1", source: "combined-solarNode", target: "combined-battery1Node", labelId: "combined-flowLabelSolarToBattery1" },
       { id: "combined-lineSolarToInverter1B", source: "combined-solarNode", target: "combined-inverter1Node", labelId: "combined-flowLabelSolarToInverter1" },
       { id: "combined-lineSwitchboardToHomeLoad", source: "combined-switchboardNode", target: "combined-loadNode", labelId: "combined-flowLabelSwitchboardToHomeLoad" },
       { id: "combined-lineSwitchboardToTeslaB", source: "combined-switchboardNode", target: "combined-teslaNode", labelId: "combined-flowLabelSwitchboardToTesla" },
@@ -2465,36 +2515,29 @@ function formatTeslaCurrentValue(value, unit) {
   return `${numeric.toFixed(1)}${normalizedUnit}`;
 }
 
-function buildCombinedFlowMetrics(sajFlow, solplanetFlow) {
-  const sajMetrics = sajFlow?.metrics || {};
-  const solplanetMetrics = solplanetFlow?.metrics || {};
-  const solarW = toFiniteNumber(sajMetrics.pv_w);
-  const gridW = toFiniteNumber(sajMetrics.grid_w);
-  const battery1W = toFiniteNumber(sajMetrics.battery_w);
-  const battery2W = toFiniteNumber(solplanetMetrics.battery_w);
-  const inverter1W = toFiniteNumber(sajMetrics.inverter_power_w);
-  const inverter2W = toFiniteNumber(solplanetMetrics.inverter_power_w);
-  const inverter1Status = sajMetrics.inverter_status ?? null;
-  const inverter2Status = solplanetMetrics.inverter_status ?? null;
-  const solarKind = dataKindFromSource(sajMetrics.pv_source, "real");
-  const gridKind = dataKindFromSource(sajMetrics.grid_source, "real");
-  const battery1Kind = dataKindFromSource(sajMetrics.battery_source, "real");
-  const battery2Kind = dataKindFromSource(solplanetMetrics.battery_source, "real");
-  const inverter1Kind = dataKindFromSource(sajMetrics.inverter_power_source, "real");
-  const inverter2Kind = dataKindFromSource(solplanetMetrics.inverter_power_source, "real");
-
-  let totalLoadW = null;
-  if (inverter1W !== null && inverter2W !== null && gridW !== null) {
-    totalLoadW = inverter1W + inverter2W + gridW;
-    if (Math.abs(totalLoadW) <= BALANCE_TOLERANCE_W) totalLoadW = 0;
-  }
-
-  const solarToBattery1W = solarW !== null && battery1W !== null && battery1W < 0 ? Math.min(Math.max(solarW, 0), Math.abs(battery1W)) : 0;
-  const solarToInverter1W = solarW !== null ? Math.max(solarW - solarToBattery1W, 0) : 0;
-
+function buildCombinedFlowMetrics(combinedFlow) {
+  const metrics = combinedFlow?.metrics || {};
+  const solarW = toFiniteNumber(metrics.solar_primary_w);
+  const solar2W = toFiniteNumber(metrics.solar_secondary_w);
+  const gridW = toFiniteNumber(metrics.grid_w);
+  const battery1W = toFiniteNumber(metrics.battery1_w);
+  const battery2W = toFiniteNumber(metrics.battery2_w);
+  const inverter1W = toFiniteNumber(metrics.inverter1_w);
+  const inverter2W = toFiniteNumber(metrics.inverter2_w);
+  const inverter1Status = metrics.inverter1_status ?? null;
+  const inverter2Status = metrics.inverter2_status ?? null;
+  const solarKind = dataKindFromSource(metrics.pv_source, "real");
+  const gridKind = dataKindFromSource(metrics.grid_source, "real");
+  const battery1Kind = dataKindFromSource(metrics.battery1_source, "real");
+  const battery2Kind = dataKindFromSource(metrics.battery2_source, "real");
+  const inverter1Kind = dataKindFromSource(metrics.inverter1_power_source, "real");
+  const inverter2Kind = dataKindFromSource(metrics.inverter2_power_source, "real");
+  const totalLoadW = toFiniteNumber(metrics.load_w);
+  const solarToInverter1W = solarW !== null ? Math.max(solarW, 0) : 0;
   const availableCount = [solarW, gridW, inverter1W, inverter2W, totalLoadW].filter((v) => v !== null).length;
   return {
     solarW,
+    solar2W,
     gridW,
     battery1W,
     battery2W,
@@ -2504,9 +2547,8 @@ function buildCombinedFlowMetrics(sajFlow, solplanetFlow) {
     inverter2Status,
     totalLoadW,
     homeLoadW: totalLoadW,
-    battery1Soc: toFiniteNumber(sajMetrics.battery_soc_percent),
-    battery2Soc: toFiniteNumber(solplanetMetrics.battery_soc_percent),
-    solarToBattery1W,
+    battery1Soc: toFiniteNumber(metrics.battery1_soc_percent),
+    battery2Soc: toFiniteNumber(metrics.battery2_soc_percent),
     solarToInverter1W,
     availableCount,
     dataKinds: {
@@ -2521,23 +2563,23 @@ function buildCombinedFlowMetrics(sajFlow, solplanetFlow) {
       teslaCurrent: "real",
       teslaSoc: "real",
       inverterRatio: "calculated",
-      solarToBattery1: "estimate",
       solarToInverter1: "estimate",
     },
     sources: {
-      solar: sajMetrics.pv_source || "unavailable",
-      grid: sajMetrics.grid_source || "unavailable",
-      battery1: sajMetrics.battery_source || "unavailable",
-      battery2: solplanetMetrics.battery_source || "unavailable",
-      load: "calc:saj_inverter_power + solplanet_inverter_power + saj_grid",
+      solar: metrics.pv_source || "unavailable",
+      grid: metrics.grid_source || "unavailable",
+      battery1: metrics.battery1_source || "unavailable",
+      battery2: metrics.battery2_source || "unavailable",
+      load: metrics.load_source || "unavailable",
     },
   };
 }
 
-function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
-  const combined = buildCombinedFlowMetrics(sajFlow, solplanetFlow);
+function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
+  const combined = buildCombinedFlowMetrics(combinedFlow);
   const {
     solarW,
+    solar2W,
     gridW,
     battery1W,
     battery2W,
@@ -2548,7 +2590,6 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
     totalLoadW,
     battery1Soc,
     battery2Soc,
-    solarToBattery1W,
     solarToInverter1W,
     sources,
     dataKinds,
@@ -2563,20 +2604,26 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
     if (Math.abs(homeLoadW) <= BALANCE_TOLERANCE_W) homeLoadW = 0;
   }
 
-  const sajLoadError = Boolean(sajFlow?.__load_error);
-  const sajBasePending = !sajLoadError && solarW === null && gridW === null;
-  const hasSajBase = solarW !== null && gridW !== null;
+  const combinedLoadError = Boolean(combinedFlow?.__load_error);
+  const combinedPending = !combinedLoadError && solarW === null && gridW === null;
+  const hasCombinedBase = solarW !== null && gridW !== null;
   setSystemLoadMeta("combined", {
-    phase: sajBasePending ? "loading" : (hasSajBase ? "done" : "failed"),
-    updatedAt: latestIsoTime(sajFlow?.updated_at, solplanetFlow?.updated_at, teslaInfo?.updatedAt),
-    quality: hasSajBase ? (combined.availableCount >= 5 ? "ok" : "partial") : "failed",
+    phase: combinedPending ? "loading" : (hasCombinedBase ? "done" : "failed"),
+    updatedAt: latestIsoTime(combinedFlow?.updated_at, teslaInfo?.updatedAt),
+    quality: hasCombinedBase ? getFlowQuality(combinedFlow, Number(combinedFlow?.metrics?.matched_entities) || 0) : "failed",
     count: combined.availableCount,
   });
 
   setHtml("combined-solarPowerValue", formatValueWithDataKindHtml(formatPowerKwFromWatts(solarW), dataKinds.solar));
   setHtml("combined-gridPowerValue", formatValueWithDataKindHtml(formatPowerKwFromWatts(gridW === null ? null : Math.abs(gridW)), dataKinds.grid));
-  setHtml("combined-inverter1RatioValue", formatValueWithDataKindHtml(formatInverterBatteryRatio(inverter1W, battery1W), dataKinds.inverterRatio));
-  setHtml("combined-inverter2RatioValue", formatValueWithDataKindHtml(formatInverterBatteryRatio(inverter2W, battery2W), dataKinds.inverterRatio));
+  setHtml(
+    "combined-inverter1RatioValue",
+    formatValueWithDataKindHtml(formatInverterConversion(inverter1W, battery1W, solarToInverter1W), dataKinds.inverterRatio),
+  );
+  setHtml(
+    "combined-inverter2RatioValue",
+    formatValueWithDataKindHtml(formatInverterConversion(inverter2W, battery2W, solar2W), dataKinds.inverterRatio),
+  );
   setHtml("combined-loadPowerValue", formatValueWithDataKindHtml(formatPowerKwFromWatts(homeLoadW), dataKinds.homeLoad));
   setHtml(
     "combined-teslaChargingCurrentValue",
@@ -2643,9 +2690,7 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   setFlowLine("combined-lineInverter1ToSwitchboardB", inverter1Active, !inverter1Exporting);
   setFlowLine("combined-lineInverter2ToSwitchboardB", inverter2Active, !inverter2Exporting);
 
-  const solarToBattery1Active = solarToBattery1W >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const solarToInverter1Active = solarToInverter1W >= POWER_FLOW_ACTIVE_THRESHOLD_W;
-  setFlowLine("combined-lineSolarToBattery1", solarToBattery1Active, false);
   setFlowLine("combined-lineSolarToInverter1B", solarToInverter1Active, false);
   setFlowLine(
     "combined-lineGridToSwitchboard",
@@ -2690,7 +2735,6 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   if (gridStateEl) gridStateEl.classList.toggle("alert-high", gridHigh);
 
   setFlowValueLabel("combined-flowLabelGridToSwitchboard", gridW, gridActive, dataKinds.grid);
-  setFlowValueLabel("combined-flowLabelSolarToBattery1", solarToBattery1W, solarToBattery1Active, dataKinds.solarToBattery1);
   setFlowValueLabel("combined-flowLabelSolarToInverter1", solarToInverter1W, solarToInverter1Active, dataKinds.solarToInverter1);
   setFlowValueLabel("combined-flowLabelSwitchboardToHomeLoad", homeLoadW, loadActive, dataKinds.homeLoad);
   setFlowValueLabel("combined-flowLabelSwitchboardToTesla", teslaChargingW, teslaChargingActive, dataKinds.teslaCurrent);
@@ -2717,26 +2761,31 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
     `${escapeHtml(t("balanceFormulaLabel"))}: ` +
     `${formatValueWithDataKindHtml(formatSignedKwFromWatts(inverter1W), dataKinds.inverter1)} + ${formatValueWithDataKindHtml(formatSignedKwFromWatts(inverter2W), dataKinds.inverter2)} + ${formatValueWithDataKindHtml(formatSignedKwFromWatts(gridW), dataKinds.grid)} = ${formatValueWithDataKindHtml(formatPowerKwFromWatts(totalLoadW), dataKinds.totalLoad)} ` +
     `(SOC1 ${battery1SocText}, SOC2 ${battery2SocText})` +
-    ` · Solar→Battery1 ${formatValueWithDataKindHtml(formatPowerKwFromWatts(solarToBattery1W), dataKinds.solarToBattery1)} / Solar→Inverter1 ${formatValueWithDataKindHtml(formatPowerKwFromWatts(solarToInverter1W), dataKinds.solarToInverter1)}` +
+    ` · Solar→Inverter1 ${formatValueWithDataKindHtml(formatPowerKwFromWatts(solarToInverter1W), dataKinds.solarToInverter1)}` +
     ` · ${formatValueWithDataKindHtml(teslaSuffix, dataKinds.homeLoad)}`;
   setHtml("combined-loadFormulaText", formula);
 }
 
 function renderSummary(payload) {
-  const { health, ha, sajFlow, solplanetFlow, tesla } = payload;
+  const { health, ha, sajFlow, solplanetFlow, combinedFlow, tesla } = payload;
   setText("healthValue", health.status || "ok");
   setText("haValue", ha.ok ? t("connected") : t("error"));
   const sajCount = sajFlow?.metrics?.matched_entities ?? 0;
   const solplanetCount = solplanetFlow?.metrics?.matched_entities ?? 0;
+  const combinedCount = combinedFlow?.metrics?.matched_entities ?? 0;
   setSystemLoadMeta("saj", { quality: getFlowQuality(sajFlow, Number(sajCount) || 0), count: Number(sajCount) || 0 });
   setSystemLoadMeta("solplanet", {
     quality: getFlowQuality(solplanetFlow, Number(solplanetCount) || 0),
     count: Number(solplanetCount) || 0,
   });
+  setSystemLoadMeta("combined", {
+    quality: getFlowQuality(combinedFlow, Number(combinedCount) || 0),
+    count: Number(combinedCount) || 0,
+  });
   setText("coreCount", t("coreDualLabel", { saj: sajCount, solplanet: solplanetCount }));
   renderEnergyFlow("saj", sajFlow);
   renderEnergyFlow("solplanet", solplanetFlow);
-  renderCombinedEnergyFlow(sajFlow, solplanetFlow, tesla);
+  renderCombinedEnergyFlow(combinedFlow, tesla);
 }
 
 function renderEntities(items) {
@@ -5556,6 +5605,7 @@ async function loadSummary() {
     ha: { ok: false },
     sajFlow: { metrics: {} },
     solplanetFlow: { metrics: {} },
+    combinedFlow: { metrics: {} },
     tesla: {
       chargingW: null, entityId: null, friendlyName: null, updatedAt: null,
       currentA: null, currentEntityId: null, currentUnit: "A",
@@ -5620,6 +5670,23 @@ async function loadSummary() {
       if (requestId !== summaryRequestId) return;
       summary.solplanetFlow = { metrics: {}, __load_error: true };
       setSystemLoadMeta("solplanet", { phase: "failed", updatedAt: null, quality: "failed", count: 0 });
+      renderSummary(summary);
+    });
+
+  void fetchJson("/api/energy-flow/combined", { timeoutMs: 30000 })
+    .then((combinedFlow) => {
+      if (requestId !== summaryRequestId) return;
+      summary.combinedFlow = { ...combinedFlow, __load_error: false };
+      setSystemLoadMeta("combined", {
+        phase: "done",
+        updatedAt: combinedFlow?.updated_at || new Date().toISOString(),
+      });
+      renderSummary(summary);
+    })
+    .catch(() => {
+      if (requestId !== summaryRequestId) return;
+      summary.combinedFlow = { metrics: {}, __load_error: true };
+      setSystemLoadMeta("combined", { phase: "failed", updatedAt: null, quality: "failed", count: 0 });
       renderSummary(summary);
     });
 }
