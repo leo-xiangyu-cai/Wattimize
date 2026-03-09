@@ -2064,6 +2064,11 @@ td {
   word-break: break-word;
 }
 
+.worker-failure-log-pre {
+  min-height: 320px;
+  max-height: 560px;
+}
+
 .saj-control-grid {
   margin-top: 12px;
   display: grid;

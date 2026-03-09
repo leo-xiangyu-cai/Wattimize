@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import traceback
 from collections import Counter
 from contextvars import ContextVar
 from datetime import UTC, date, datetime, timedelta
@@ -83,6 +84,9 @@ runtime_lock = asyncio.Lock()
 collector_task: asyncio.Task[None] | None = None
 collector_stop_event = asyncio.Event()
 storage_db_path = Path(os.getenv("WATTIMIZE_DB_PATH", "").strip() or DEFAULT_DB_PATH)
+worker_failure_log_path = Path(
+    os.getenv("WATTIMIZE_WORKER_FAILURE_LOG_PATH", "").strip() or storage_db_path.with_name("worker_failures.log")
+)
 request_actor_ctx: ContextVar[str] = ContextVar("request_actor_ctx", default="api")
 request_system_ctx: ContextVar[str | None] = ContextVar("request_system_ctx", default=None)
 sample_interval_seconds = float(settings.saj_sample_interval_seconds)
@@ -117,6 +121,86 @@ collector_status: dict[str, dict[str, object]] = {
         "failure_count": 0,
     },
 }
+
+
+def _append_worker_failure_log(
+    system: str,
+    *,
+    stage: str,
+    error: Exception,
+    started_monotonic: float | None = None,
+    extra: dict[str, object] | None = None,
+) -> None:
+    timestamp = datetime.now(UTC).isoformat()
+    duration_ms = round((monotonic() - started_monotonic) * 1000, 1) if started_monotonic is not None else None
+    traceback_text = "".join(traceback.format_exception(type(error), error, error.__traceback__)).strip()
+    lines = [
+        "=" * 80,
+        f"time_utc: {timestamp}",
+        f"system: {system}",
+        f"stage: {stage}",
+    ]
+    if duration_ms is not None:
+        lines.append(f"duration_ms: {duration_ms}")
+    lines.append(f"error: {type(error).__name__}: {error}")
+    if extra:
+        for key, value in extra.items():
+            lines.append(f"{key}: {value}")
+    lines.extend(
+        [
+            "traceback:",
+            traceback_text or f"{type(error).__name__}: {error}",
+            "",
+        ]
+    )
+    try:
+        worker_failure_log_path.parent.mkdir(parents=True, exist_ok=True)
+        with worker_failure_log_path.open("a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines))
+    except Exception as log_exc:  # noqa: BLE001
+        logger.warning("Failed to append worker failure log: %s", log_exc)
+
+
+def _read_worker_failure_log(*, limit: int = 100, before: int = 0) -> dict[str, object]:
+    safe_limit = max(1, min(500, int(limit)))
+    safe_before = max(0, int(before))
+    if not worker_failure_log_path.exists():
+        return {
+            "path": str(worker_failure_log_path),
+            "total_lines": 0,
+            "count": 0,
+            "limit": safe_limit,
+            "before": safe_before,
+            "next_before": safe_before,
+            "has_more": False,
+            "from_line": None,
+            "to_line": None,
+            "lines": [],
+        }
+
+    with worker_failure_log_path.open("r", encoding="utf-8", errors="replace") as fh:
+        all_lines = fh.read().splitlines()
+
+    total_lines = len(all_lines)
+    end_index = max(0, total_lines - safe_before)
+    start_index = max(0, end_index - safe_limit)
+    selected_lines = all_lines[start_index:end_index]
+    items = [
+        {"number": start_index + index + 1, "text": text}
+        for index, text in enumerate(selected_lines)
+    ]
+    return {
+        "path": str(worker_failure_log_path),
+        "total_lines": total_lines,
+        "count": len(items),
+        "limit": safe_limit,
+        "before": safe_before,
+        "next_before": safe_before + len(items),
+        "has_more": start_index > 0,
+        "from_line": items[0]["number"] if items else None,
+        "to_line": items[-1]["number"] if items else None,
+        "lines": items,
+    }
 
 
 def _handle_outbound_request_log(event: dict[str, object]) -> None:
@@ -2179,11 +2263,28 @@ async def _collector_loop() -> None:
                     status["next_retry_at"] = None
             except Exception as exc:  # noqa: BLE001
                 # Keep collector alive even if one round fails.
+                _append_worker_failure_log(
+                    system,
+                    stage="collector_round",
+                    error=exc,
+                    started_monotonic=started_monotonic,
+                )
                 _collector_mark_finish(system, started_monotonic, error=exc)
                 if system == "solplanet":
                     try:
                         await _recreate_solplanet_client()
                     except Exception as recreate_exc:  # noqa: BLE001
+                        _append_worker_failure_log(
+                            "solplanet",
+                            stage="solplanet_client_recreate",
+                            error=recreate_exc,
+                            extra={
+                                "retry_after_seconds": round(
+                                    max(SOLPLANET_BACKOFF_INITIAL_SECONDS, solplanet_backoff_seconds),
+                                    1,
+                                ),
+                            },
+                        )
                         status = collector_status.setdefault("solplanet", {})
                         status["client_recreate_error_at"] = datetime.now(UTC).isoformat()
                         status["client_recreate_error"] = f"{type(recreate_exc).__name__}: {recreate_exc}"
@@ -2359,6 +2460,16 @@ async def worker_logs(
         system=normalized_system,
         service=str(service or "").strip() or None,
     )
+    payload["updated_at"] = datetime.now(UTC).isoformat()
+    return payload
+
+
+@app.get("/api/worker/failure-log")
+async def worker_failure_log(
+    limit: int = Query(default=100, ge=1, le=500),
+    before: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    payload = await asyncio.to_thread(_read_worker_failure_log, limit=limit, before=before)
     payload["updated_at"] = datetime.now(UTC).isoformat()
     return payload
 

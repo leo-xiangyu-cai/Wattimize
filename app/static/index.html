@@ -56,6 +56,9 @@
         <button id="tabWorkerLogs" class="tab-btn" type="button" data-tab="workerLogs" data-i18n="workerLogsTab">
           Worker Logs
         </button>
+        <button id="tabWorkerFailureLog" class="tab-btn" type="button" data-tab="workerFailureLog" data-i18n="failureLogTab">
+          Failure Logs
+        </button>
       </nav>
 
       <section id="dashboardView" class="view">
@@ -377,6 +380,23 @@
               <tbody id="workerLogsBody"></tbody>
             </table>
           </div>
+        </section>
+      </section>
+
+      <section id="workerFailureLogView" class="view hidden">
+        <section class="card">
+          <div class="section-header">
+            <h2 data-i18n="failureLogTitle">Worker Failure Logs</h2>
+            <span id="workerFailureLogUpdatedAt" class="muted">-</span>
+          </div>
+          <p id="workerFailureLogMeta" class="muted">-</p>
+          <div class="pager">
+            <span id="workerFailureLogCount" class="muted">-</span>
+            <button id="workerFailureLogLoadMoreBtn" class="btn secondary" type="button" data-i18n="failureLogLoadMore">
+              Load More
+            </button>
+          </div>
+          <pre id="workerFailureLogPre" class="raw-pre worker-failure-log-pre">-</pre>
         </section>
       </section>
     </main>

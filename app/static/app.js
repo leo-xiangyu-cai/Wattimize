@@ -70,6 +70,7 @@ const I18N = {
     entitiesTab: "Entities",
     samplingTab: "Sampling",
     workerLogsTab: "Worker Logs",
+    failureLogTab: "Failure Logs",
     sajControlTitle: "SAJ Control",
     solplanetControlTitle: "Solplanet Control",
     solplanetControlLimitsTitle: "Power Limits",
@@ -313,6 +314,11 @@ const I18N = {
     workerLogsPageInfo: "Page {page}/{totalPages} (showing {count})",
     workerLogsStatusOk: "OK",
     workerLogsStatusFailed: "Failed",
+    failureLogTitle: "Worker Failure Logs",
+    failureLogMeta: "File {path} · lines {fromLine}-{toLine} / {total}",
+    failureLogLoadMore: "Load More",
+    failureLogShowing: "Showing {count}/{total} lines",
+    failureLogEmpty: "No failure logs yet.",
     totalSamples: "Total {total} samples",
     samplePageInfo: "Page {page}/{totalPages} (showing {count})",
     domainLabel: "Domain",
@@ -469,6 +475,7 @@ const I18N = {
     entitiesTab: "实体",
     samplingTab: "采样",
     workerLogsTab: "Worker日志",
+    failureLogTab: "失败日志",
     sajControlTitle: "SAJ 管理",
     solplanetControlTitle: "Solplanet 管理",
     solplanetControlLimitsTitle: "功率限制",
@@ -712,6 +719,11 @@ const I18N = {
     workerLogsPageInfo: "第 {page}/{totalPages} 页（当前 {count} 条）",
     workerLogsStatusOk: "成功",
     workerLogsStatusFailed: "失败",
+    failureLogTitle: "Worker 失败日志",
+    failureLogMeta: "文件 {path} · 第 {fromLine}-{toLine} 行 / 共 {total} 行",
+    failureLogLoadMore: "加载更多",
+    failureLogShowing: "已显示 {count}/{total} 行",
+    failureLogEmpty: "暂时没有失败日志。",
     totalSamples: "共 {total} 条采样",
     samplePageInfo: "第 {page}/{totalPages} 页（当前 {count} 条）",
     domainLabel: "域",
@@ -844,9 +856,14 @@ const workerLogsPager = {
   hasNext: false,
   hasPrev: false,
 };
+const workerFailureLogState = {
+  before: 0,
+  hasMore: false,
+};
 let workerLogsDefaultsApplied = false;
 const PAGE_SIZE = 80;
 const SAMPLING_PAGE_SIZE = 100;
+const WORKER_FAILURE_LOG_PAGE_SIZE = 100;
 const AUTO_REFRESH_KEY = "autoRefreshSeconds";
 const SOLPLANET_RAW_MODE_KEY = "solplanetRawMode";
 const SAJ_ACTION_DEBUG_MODE_KEY = "sajActionDebugMode";
@@ -1134,6 +1151,7 @@ const stateCache = {
   lastSamplingPage: null,
   lastSamplingSeries: null,
   lastWorkerLogsPage: null,
+  lastWorkerFailureLog: null,
   rawCardMode: {},
   systemLoadMeta: {
     saj: { phase: "idle", updatedAt: null, quality: "ok", count: 0 },
@@ -1150,10 +1168,10 @@ function getLang() {
 }
 
 let currentLang = getLang();
-let currentTab = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling", "workerLogs"].includes(localStorage.getItem("activeTab"))
+let currentTab = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling", "workerLogs", "workerFailureLog"].includes(localStorage.getItem("activeTab"))
   ? localStorage.getItem("activeTab")
   : "dashboard";
-const ALL_TABS = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling", "workerLogs"];
+const ALL_TABS = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling", "workerLogs", "workerFailureLog"];
 let solplanetRawMode = localStorage.getItem(SOLPLANET_RAW_MODE_KEY) === "table" ? "table" : "cards";
 let sajActionDebugMode = localStorage.getItem(SAJ_ACTION_DEBUG_MODE_KEY) === "1";
 let autoRefreshTimerId = null;
@@ -1177,6 +1195,7 @@ const tabLoadState = {
   solplanetControl: { inFlight: false },
   sampling: { inFlight: false },
   workerLogs: { inFlight: false },
+  workerFailureLog: { inFlight: false },
 };
 const samplingRangeState = {
   day: "",
@@ -2668,10 +2687,10 @@ function renderCombinedEnergyFlow(sajFlow, solplanetFlow, teslaInfo = null) {
   });
   const formula =
     `${t("balanceFormulaLabel")}: ` +
-    `${formatSignedKwFromWatts(inverter1W)} + ${formatSignedKwFromWatts(inverter2W)} + ${formatSignedKwFromWatts(gridW)} = ${formatPowerKwFromWatts(totalLoadW)} ` +
+    `${formatSignedKwFromWattsWithDataKind(inverter1W, dataKinds.inverter1)} + ${formatSignedKwFromWattsWithDataKind(inverter2W, dataKinds.inverter2)} + ${formatSignedKwFromWattsWithDataKind(gridW, dataKinds.grid)} = ${formatPowerKwFromWattsWithDataKind(totalLoadW, dataKinds.totalLoad)} ` +
     `(SOC1 ${battery1SocText}, SOC2 ${battery2SocText})` +
-    ` · Solar→Battery1 ${formatPowerKwFromWatts(solarToBattery1W)} / Solar→Inverter1 ${formatPowerKwFromWatts(solarToInverter1W)}` +
-    ` · ${teslaSuffix}`;
+    ` · Solar→Battery1 ${formatPowerKwFromWattsWithDataKind(solarToBattery1W, dataKinds.solarToBattery1)} / Solar→Inverter1 ${formatPowerKwFromWattsWithDataKind(solarToInverter1W, dataKinds.solarToInverter1)}` +
+    ` · ${formatValueWithDataKind(teslaSuffix, dataKinds.homeLoad)}`;
   setText("combined-loadFormulaText", formula);
 }
 
@@ -3232,6 +3251,13 @@ function buildWorkerLogsUrl() {
   return `/api/worker/logs?${params.toString()}`;
 }
 
+function buildWorkerFailureLogUrl(before = 0) {
+  const params = new URLSearchParams();
+  params.set("limit", String(WORKER_FAILURE_LOG_PAGE_SIZE));
+  params.set("before", String(Math.max(0, Number(before) || 0)));
+  return `/api/worker/failure-log?${params.toString()}`;
+}
+
 function renderWorkerLogsRows(items) {
   const body = document.getElementById("workerLogsBody");
   if (!body) return;
@@ -3276,6 +3302,39 @@ function renderWorkerLogsPage(payload) {
 function renderWorkerLogsConfigMeta(configPayload) {
   const host = String(configPayload?.solplanet_dongle_host || "").trim() || "-";
   setText("workerLogsConfigMeta", t("workerLogsConfigMeta", { host }));
+}
+
+function renderWorkerFailureLogPage(payload, { appendOlder = false } = {}) {
+  const currentLines = appendOlder ? stateCache.lastWorkerFailureLog?.lines || [] : [];
+  const mergedLines = appendOlder ? [...(payload.lines || []), ...currentLines] : payload.lines || [];
+  const mergedPayload = {
+    ...payload,
+    lines: mergedLines,
+    from_line: mergedLines[0]?.number ?? null,
+    to_line: mergedLines[mergedLines.length - 1]?.number ?? null,
+  };
+  stateCache.lastWorkerFailureLog = mergedPayload;
+  workerFailureLogState.before = Number(payload.next_before || mergedLines.length || 0);
+  workerFailureLogState.hasMore = Boolean(payload.has_more);
+  setText(
+    "workerFailureLogMeta",
+    t("failureLogMeta", {
+      path: payload.path || "-",
+      fromLine: mergedPayload.from_line ?? "-",
+      toLine: mergedPayload.to_line ?? "-",
+      total: payload.total_lines || 0,
+    }),
+  );
+  setText("workerFailureLogCount", t("failureLogShowing", { count: mergedLines.length, total: payload.total_lines || 0 }));
+  setText("workerFailureLogUpdatedAt", formatUpdatedAt(payload.updated_at || null));
+  const pre = document.getElementById("workerFailureLogPre");
+  if (pre) {
+    pre.textContent = mergedLines.length
+      ? mergedLines.map((item) => `${String(item.number).padStart(6, " ")} | ${item.text}`).join("\n")
+      : t("failureLogEmpty");
+  }
+  const loadMoreBtn = document.getElementById("workerFailureLogLoadMoreBtn");
+  if (loadMoreBtn) loadMoreBtn.disabled = !Boolean(payload.has_more);
 }
 
 function renderSamplingStatus(status) {
@@ -5842,6 +5901,26 @@ async function loadWorkerLogs() {
   }
 }
 
+async function loadWorkerFailureLog({ appendOlder = false } = {}) {
+  try {
+    const before = appendOlder ? workerFailureLogState.before : 0;
+    const payload = await fetchJson(buildWorkerFailureLogUrl(before), { timeoutMs: 10000 });
+    renderWorkerFailureLogPage(payload, { appendOlder });
+  } catch (err) {
+    if (appendOlder) return;
+    stateCache.lastWorkerFailureLog = null;
+    workerFailureLogState.before = 0;
+    workerFailureLogState.hasMore = false;
+    setText("workerFailureLogMeta", t("loadFailed", { error: String(err) }));
+    setText("workerFailureLogCount", t("failureLogShowing", { count: 0, total: 0 }));
+    setText("workerFailureLogUpdatedAt", formatUpdatedAt(null));
+    const pre = document.getElementById("workerFailureLogPre");
+    if (pre) pre.textContent = t("failureLogEmpty");
+    const loadMoreBtn = document.getElementById("workerFailureLogLoadMoreBtn");
+    if (loadMoreBtn) loadMoreBtn.disabled = true;
+  }
+}
+
 async function loadCurrentTab(fromAutoRefresh = false) {
   return loadTabWithGuard(currentTab, fromAutoRefresh);
 }
@@ -5858,6 +5937,7 @@ function tabHasCachedData(tab) {
   if (tab === "solplanetControl") return Boolean(stateCache.lastSolplanetControl);
   if (tab === "sampling") return Boolean(stateCache.lastSamplingPage || stateCache.lastSamplingStatus || stateCache.lastSamplingSeries);
   if (tab === "workerLogs") return Boolean(stateCache.lastWorkerLogsPage);
+  if (tab === "workerFailureLog") return Boolean(stateCache.lastWorkerFailureLog);
   return false;
 }
 
@@ -5902,6 +5982,10 @@ async function loadTabWithGuard(tab, fromAutoRefresh = false) {
       await loadWorkerLogs();
       return true;
     }
+    if (tabKey === "workerFailureLog") {
+      await loadWorkerFailureLog();
+      return true;
+    }
     await loadSummary();
     return true;
   } finally {
@@ -5943,7 +6027,8 @@ function setActiveTab(tab, load = true) {
     tab === "sajControl" ||
     tab === "solplanetControl" ||
     tab === "sampling" ||
-    tab === "workerLogs"
+    tab === "workerLogs" ||
+    tab === "workerFailureLog"
       ? tab
       : "dashboard";
   localStorage.setItem("activeTab", currentTab);
@@ -5956,6 +6041,7 @@ function setActiveTab(tab, load = true) {
   const entitiesView = document.getElementById("entitiesView");
   const samplingView = document.getElementById("samplingView");
   const workerLogsView = document.getElementById("workerLogsView");
+  const workerFailureLogView = document.getElementById("workerFailureLogView");
   const tabDashboard = document.getElementById("tabDashboard");
   const tabSolplanetRaw = document.getElementById("tabSolplanetRaw");
   const tabSajRaw = document.getElementById("tabSajRaw");
@@ -5964,6 +6050,7 @@ function setActiveTab(tab, load = true) {
   const tabEntities = document.getElementById("tabEntities");
   const tabSampling = document.getElementById("tabSampling");
   const tabWorkerLogs = document.getElementById("tabWorkerLogs");
+  const tabWorkerFailureLog = document.getElementById("tabWorkerFailureLog");
 
   const dashboardActive = currentTab === "dashboard";
   const solplanetRawActive = currentTab === "solplanetRaw";
@@ -5972,6 +6059,7 @@ function setActiveTab(tab, load = true) {
   const solplanetControlActive = currentTab === "solplanetControl";
   const samplingActive = currentTab === "sampling";
   const workerLogsActive = currentTab === "workerLogs";
+  const workerFailureLogActive = currentTab === "workerFailureLog";
   const anyRawActive = solplanetRawActive || sajRawActive;
   if (dashboardView) dashboardView.classList.toggle("hidden", !dashboardActive);
   if (solplanetRawView) solplanetRawView.classList.toggle("hidden", !solplanetRawActive);
@@ -5981,11 +6069,18 @@ function setActiveTab(tab, load = true) {
   if (entitiesView) {
     entitiesView.classList.toggle(
       "hidden",
-      dashboardActive || anyRawActive || samplingActive || sajControlActive || solplanetControlActive || workerLogsActive
+      dashboardActive ||
+        anyRawActive ||
+        samplingActive ||
+        sajControlActive ||
+        solplanetControlActive ||
+        workerLogsActive ||
+        workerFailureLogActive
     );
   }
   if (samplingView) samplingView.classList.toggle("hidden", !samplingActive);
   if (workerLogsView) workerLogsView.classList.toggle("hidden", !workerLogsActive);
+  if (workerFailureLogView) workerFailureLogView.classList.toggle("hidden", !workerFailureLogActive);
   if (tabDashboard) tabDashboard.classList.toggle("active", dashboardActive);
   if (tabSolplanetRaw) tabSolplanetRaw.classList.toggle("active", solplanetRawActive);
   if (tabSajRaw) tabSajRaw.classList.toggle("active", sajRawActive);
@@ -5994,6 +6089,7 @@ function setActiveTab(tab, load = true) {
   if (tabEntities) tabEntities.classList.toggle("active", currentTab === "entities");
   if (tabSampling) tabSampling.classList.toggle("active", samplingActive);
   if (tabWorkerLogs) tabWorkerLogs.classList.toggle("active", workerLogsActive);
+  if (tabWorkerFailureLog) tabWorkerFailureLog.classList.toggle("active", workerFailureLogActive);
   if (dashboardActive) {
     window.requestAnimationFrame(() => {
       refreshFlowDiagrams();
@@ -6154,6 +6250,11 @@ bindClickIfPresent("workerLogsNextPageBtn", async () => {
   if (!workerLogsPager.hasNext) return;
   workerLogsPager.page += 1;
   await loadWorkerLogs();
+});
+
+bindClickIfPresent("workerFailureLogLoadMoreBtn", async () => {
+  if (!workerFailureLogState.hasMore) return;
+  await loadWorkerFailureLog({ appendOlder: true });
 });
 
 bindChangeIfPresent("workerLogsSystemSelect", async () => {
