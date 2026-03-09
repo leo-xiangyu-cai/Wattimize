@@ -47,6 +47,10 @@
       .replaceAll("'", "&#39;");
   }
 
+  function hasDataKindBadge(text) {
+    return typeof text === "string" && text.includes("data-kind-badge");
+  }
+
   function iconMarkup(name) {
     if (name === "solar") {
       return (
@@ -918,7 +922,8 @@
         meta.element.classList.remove("active");
         return true;
       }
-      meta.element.textContent = String(text);
+      if (hasDataKindBadge(text)) meta.element.innerHTML = String(text);
+      else meta.element.textContent = String(text);
       meta.element.classList.toggle("active", Boolean(active));
       return true;
     }
