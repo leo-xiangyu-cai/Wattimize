@@ -4231,41 +4231,54 @@ function renderSamplingTotals(usageBySystem, selectedSystem, rangeLabel, options
     return Math.max(0, Math.min(100, (n / maxValue) * 100));
   };
 
-  body.innerHTML = rows
-    .map((row) => {
-      const leftWidth = widthPct(row.leftValue);
-      const rightWidth = widthPct(row.rightValue);
-      const leftValueText = Number(row.leftValue || 0) > 0 ? formatEnergyKwhText(row.leftValue) : "-";
-      const rightValueText = Number(row.rightValue || 0) > 0 ? formatEnergyKwhText(row.rightValue) : "-";
-      return `
-        <div class="sampling-total-row">
-          <div class="sampling-total-head">
-            <span class="sampling-total-scope">${escapeHtml(row.scope)}</span>
-            <span class="sampling-total-title">${escapeHtml(row.title)}</span>
-          </div>
-          <div class="sampling-total-bar">
-            <div class="sampling-total-side is-left">
-              <div class="sampling-total-fill is-${escapeHtml(row.leftKind)}" style="width:${leftWidth}%;"></div>
+  body.innerHTML = `
+    <div class="sampling-total-panel">
+      ${rows
+        .map((row) => {
+          const items = [
+            {
+              label: row.leftLabel,
+              value: Number(row.leftValue || 0),
+              kind: row.leftKind,
+            },
+            {
+              label: row.rightLabel,
+              value: Number(row.rightValue || 0),
+              kind: row.rightKind,
+            },
+          ].filter((item) => item.label);
+          return `
+            <div class="sampling-total-row">
+              <div class="sampling-total-head">
+                <div class="sampling-total-head-main">
+                  <span class="sampling-total-scope">${escapeHtml(row.scope)}</span>
+                  <span class="sampling-total-title">${escapeHtml(row.title)}</span>
+                </div>
+              </div>
+              <div class="sampling-total-bars">
+                ${items
+                  .map((item) => {
+                    const valueText = item.value > 0 ? formatEnergyKwhText(item.value) : "-";
+                    return `
+                      <div class="sampling-total-bar-item">
+                        <div class="sampling-total-bar-meta">
+                          <span class="sampling-total-bar-name">${escapeHtml(item.label || "")}</span>
+                          <span class="sampling-total-bar-value">${escapeHtml(valueText)}</span>
+                        </div>
+                        <div class="sampling-total-bar-track">
+                          <div class="sampling-total-fill is-${escapeHtml(item.kind)}" style="width:${widthPct(item.value)}%;"></div>
+                        </div>
+                      </div>
+                    `;
+                  })
+                  .join("")}
+              </div>
             </div>
-            <div class="sampling-total-axis"></div>
-            <div class="sampling-total-side is-right">
-              <div class="sampling-total-fill is-${escapeHtml(row.rightKind)}" style="width:${rightWidth}%;"></div>
-            </div>
-          </div>
-          <div class="sampling-total-labels">
-            <div class="sampling-total-label">
-              <span class="sampling-total-label-name">${escapeHtml(row.leftLabel || "")}</span>
-              <span class="sampling-total-label-value">${escapeHtml(leftValueText)}</span>
-            </div>
-            <div class="sampling-total-label is-right">
-              <span class="sampling-total-label-name">${escapeHtml(row.rightLabel || "")}</span>
-              <span class="sampling-total-label-value">${escapeHtml(rightValueText)}</span>
-            </div>
-          </div>
-        </div>
-      `;
-    })
-    .join("");
+          `;
+        })
+        .join("")}
+    </div>
+  `;
 }
 
 function getRawCardMode(key) {
