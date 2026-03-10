@@ -10,7 +10,7 @@ import traceback
 from urllib.parse import urlparse
 from collections import Counter
 from contextvars import ContextVar
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from time import monotonic
 from typing import Callable, Literal
@@ -112,7 +112,7 @@ request_round_ctx: ContextVar[str | None] = ContextVar("request_round_ctx", defa
 request_round_started_at_ctx: ContextVar[str | None] = ContextVar("request_round_started_at_ctx", default=None)
 sample_interval_seconds = float(settings.saj_sample_interval_seconds)
 solplanet_sample_interval_seconds = float(settings.solplanet_sample_interval_seconds)
-COLLECTOR_ROUND_SLEEP_SECONDS = 10.0
+COLLECTOR_ROUND_SLEEP_SECONDS = 30.0
 ENDPOINT_BACKOFF_MAX_SKIP_ROUNDS = 8
 SOLPLANET_ENDPOINTS: tuple[str, ...] = (
     "getdevdata_device_2",
@@ -559,9 +559,13 @@ def _combined_assembly_log_payload(
     solplanet_result: dict[str, object],
     combined_result: dict[str, object],
 ) -> dict[str, object]:
+    logged_at = datetime.now(UTC)
     return {
         "round_number": round_number,
         "round_id": round_id,
+        "combined_logged_at_utc": logged_at.isoformat(),
+        "next_worker_round_due_at_utc": (logged_at + timedelta(seconds=COLLECTOR_ROUND_SLEEP_SECONDS)).isoformat(),
+        "collector_round_sleep_seconds": COLLECTOR_ROUND_SLEEP_SECONDS,
         "saj": _compact_round_result_for_status(saj_result),
         "solplanet": _compact_round_result_for_status(solplanet_result),
         "combined": _compact_round_result_for_status(combined_result),
@@ -4195,16 +4199,25 @@ def _worker_control_result_text(
     if service == "combined_assembly":
         combined_result = payload.get("combined")
         combined_map = combined_result if isinstance(combined_result, dict) else {}
+        logged_at_utc = str(payload.get("combined_logged_at_utc") or "").strip()
+        next_due_at_utc = str(payload.get("next_worker_round_due_at_utc") or "").strip()
+        schedule_suffix = ""
+        if logged_at_utc or next_due_at_utc:
+            schedule_suffix = (
+                f"; logged_at_utc={logged_at_utc or '-'}"
+                f"; next_worker_round_due_at_utc={next_due_at_utc or '-'}"
+            )
         if status == "failed":
-            return f"Combined assembly failed: {combined_map.get('reason') or error_text or '-'}"
+            return f"Combined assembly failed: {combined_map.get('reason') or error_text or '-'}{schedule_suffix}"
         if status == "skipped":
-            return f"Combined assembly skipped: {combined_map.get('reason') or error_text or '-'}"
+            return f"Combined assembly skipped: {combined_map.get('reason') or error_text or '-'}{schedule_suffix}"
         return (
             "Combined assembly stored: "
             f"grid {_fmt_result_number(combined_map.get('grid_w'), 0, 'W')}, "
             f"load {_fmt_result_number(combined_map.get('load_w'), 0, 'W')}, "
             f"pv {_fmt_result_number(combined_map.get('pv_w'), 0, 'W')}, "
             f"battery {_fmt_result_number(combined_map.get('battery_w'), 0, 'W')}"
+            f"{schedule_suffix}"
         )
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
 
