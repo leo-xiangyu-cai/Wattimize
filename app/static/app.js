@@ -1679,18 +1679,25 @@ function formatInverterConversion(inverterW, batteryW, solarInputW = null) {
   if (inverterSigned === null || batterySigned === null) return t("inverterConversionUnavailable");
 
   const battery = Math.abs(batterySigned);
-  if (battery < POWER_FLOW_ACTIVE_THRESHOLD_W) return t("inverterConversionUnavailable");
+  const solarInput = Math.max(solarInputSigned || 0, 0);
+
+  if (battery < POWER_FLOW_ACTIVE_THRESHOLD_W) {
+    const inverterOutput = Math.max(inverterSigned, 0);
+    if (solarInput < POWER_FLOW_ACTIVE_THRESHOLD_W || inverterOutput < POWER_FLOW_ACTIVE_THRESHOLD_W) {
+      return t("inverterConversionUnavailable");
+    }
+    return `${Math.round((Math.min(inverterOutput, solarInput) / Math.max(inverterOutput, solarInput)) * 100)}%`;
+  }
 
   if (batterySigned < -POWER_FLOW_ACTIVE_THRESHOLD_W) {
-    const solarInput = Math.max(solarInputSigned || 0, 0);
+    const solarSurplus = Math.max(solarInput - Math.max(inverterSigned, 0), 0);
     const acInput = Math.max(-inverterSigned, 0);
-    const totalInput = solarInput + acInput;
+    const totalInput = solarSurplus + acInput;
     if (totalInput < POWER_FLOW_ACTIVE_THRESHOLD_W) return t("inverterConversionUnavailable");
     return `${Math.round((Math.min(battery, totalInput) / Math.max(battery, totalInput)) * 100)}%`;
   }
 
   if (batterySigned > POWER_FLOW_ACTIVE_THRESHOLD_W && inverterSigned > POWER_FLOW_ACTIVE_THRESHOLD_W) {
-    const solarInput = Math.max(solarInputSigned || 0, 0);
     if (solarInput >= POWER_FLOW_ACTIVE_THRESHOLD_W) return t("inverterConversionUnavailable");
     const inverter = Math.abs(inverterSigned);
     if (inverter < POWER_FLOW_ACTIVE_THRESHOLD_W) return t("inverterConversionUnavailable");
