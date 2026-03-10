@@ -2919,25 +2919,13 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
 }
 
 function renderSummary(payload) {
-  const { health, ha, sajFlow, solplanetFlow, combinedFlow, collectorStatus } = payload;
+  const { combinedFlow, collectorStatus } = payload;
   const tesla = teslaInfoFromCombinedFlow(combinedFlow);
-  setText("healthValue", health.status || "ok");
-  setText("haValue", ha.ok ? t("connected") : t("error"));
-  const sajCount = sajFlow?.metrics?.matched_entities ?? 0;
-  const solplanetCount = solplanetFlow?.metrics?.matched_entities ?? 0;
   const combinedCount = combinedFlow?.metrics?.matched_entities ?? 0;
-  setSystemLoadMeta("saj", { quality: getFlowQuality(sajFlow, Number(sajCount) || 0), count: Number(sajCount) || 0 });
-  setSystemLoadMeta("solplanet", {
-    quality: getFlowQuality(solplanetFlow, Number(solplanetCount) || 0),
-    count: Number(solplanetCount) || 0,
-  });
   setSystemLoadMeta("combined", {
     quality: getFlowQuality(combinedFlow, Number(combinedCount) || 0),
     count: Number(combinedCount) || 0,
   });
-  setText("coreCount", t("coreDualLabel", { saj: sajCount, solplanet: solplanetCount }));
-  renderEnergyFlow("saj", sajFlow);
-  renderEnergyFlow("solplanet", solplanetFlow);
   renderCombinedEnergyFlow(combinedFlow, tesla);
   renderCombinedDebug(combinedFlow, collectorStatus);
 }
@@ -5889,10 +5877,6 @@ async function toggleTeslaCharging() {
 async function loadSummary() {
   const requestId = ++summaryRequestId;
   const summary = stateCache.lastSummary || {
-    health: { status: "ok" },
-    ha: { ok: false },
-    sajFlow: { metrics: {} },
-    solplanetFlow: { metrics: {} },
     combinedFlow: { metrics: {} },
     collectorStatus: null,
     tesla: {
@@ -5905,60 +5889,19 @@ async function loadSummary() {
     },
   };
   stateCache.lastSummary = summary;
-  setSystemLoadMeta("saj", { phase: "loading", updatedAt: null });
-  setSystemLoadMeta("solplanet", { phase: "loading", updatedAt: null });
   setSystemLoadMeta("combined", { phase: "loading", updatedAt: null });
   renderSummary(summary);
 
   const baseResults = await Promise.allSettled([
-    fetchJson("/api/health", { timeoutMs: 4000 }),
-    fetchJson("/api/ha/ping", { timeoutMs: 5000 }),
-    fetchJson("/api/energy-flow/saj", { timeoutMs: 5000 }),
-    fetchJson("/api/saj/control/state", { timeoutMs: 6000 }),
     fetchJson("/api/collector/status", { timeoutMs: 6000 }),
   ]);
   if (requestId !== summaryRequestId) return;
 
-  if (baseResults[0].status === "fulfilled") summary.health = baseResults[0].value;
-  if (baseResults[1].status === "fulfilled") summary.ha = baseResults[1].value;
-  if (baseResults[2].status === "fulfilled") {
-    summary.sajFlow = { ...baseResults[2].value, __load_error: false };
-    setSystemLoadMeta("saj", {
-      phase: "done",
-      updatedAt: baseResults[2].value?.updated_at || new Date().toISOString(),
-    });
-  } else {
-    summary.sajFlow = { metrics: {}, __load_error: true };
-    setSystemLoadMeta("saj", { phase: "failed", updatedAt: null, quality: "failed", count: 0 });
-    setSystemLoadMeta("combined", { phase: "failed", updatedAt: null, quality: "failed", count: 0 });
-  }
-  if (baseResults[3].status === "fulfilled") {
-    stateCache.lastSajControl = baseResults[3].value;
-    if (currentTab === "sajControl") renderSajControlFromCache();
-  }
-  if (baseResults[4].status === "fulfilled") {
-    summary.collectorStatus = baseResults[4].value;
-    stateCache.lastCollectorStatus = baseResults[4].value;
+  if (baseResults[0].status === "fulfilled") {
+    summary.collectorStatus = baseResults[0].value;
+    stateCache.lastCollectorStatus = baseResults[0].value;
   }
   renderSummary(summary);
-
-  // Solplanet loads independently so it cannot block SAJ rendering.
-  void fetchJson("/api/energy-flow/solplanet", { timeoutMs: 30000 })
-    .then((solplanetFlow) => {
-      if (requestId !== summaryRequestId) return;
-      summary.solplanetFlow = { ...solplanetFlow, __load_error: false };
-      setSystemLoadMeta("solplanet", {
-        phase: "done",
-        updatedAt: solplanetFlow?.updated_at || new Date().toISOString(),
-      });
-      renderSummary(summary);
-    })
-    .catch(() => {
-      if (requestId !== summaryRequestId) return;
-      summary.solplanetFlow = { metrics: {}, __load_error: true };
-      setSystemLoadMeta("solplanet", { phase: "failed", updatedAt: null, quality: "failed", count: 0 });
-      renderSummary(summary);
-    });
 
   void fetchJson("/api/energy-flow/combined", { timeoutMs: 30000 })
     .then((combinedFlow) => {
@@ -6376,9 +6319,7 @@ async function loadTabWithGuard(tab, fromAutoRefresh = false) {
 
 function runAutoRefreshRound() {
   if (!configReady) return;
-  for (const tab of ALL_TABS) {
-    void loadTabWithGuard(tab, true);
-  }
+  void loadTabWithGuard(currentTab, true);
 }
 
 function setAutoRefresh(seconds) {
