@@ -345,6 +345,10 @@ select {
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
 }
 
+.worker-log-detail-modal-card {
+  width: min(900px, 100%);
+}
+
 .config-form {
   margin-top: 10px;
   display: flex;
@@ -896,13 +900,106 @@ td {
 
 .worker-result-pre {
   margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: nowrap;
+  word-break: normal;
   max-width: 480px;
-  max-height: 180px;
-  overflow: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 12px;
+}
+
+.worker-log-row {
+  cursor: pointer;
+}
+
+.worker-log-detail-table th,
+.worker-log-detail-table td {
+  vertical-align: top;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.worker-log-detail-table th {
+  width: 180px;
+  text-align: left;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.worker-log-detail-value {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.worker-status-ok {
+  color: #1f7a52;
+  font-weight: 600;
+}
+
+.worker-status-failed {
+  color: #c43f4e;
+  font-weight: 600;
+}
+
+.worker-status-pending {
+  color: #8b5a00;
+  font-weight: 600;
+}
+
+.worker-status-skipped {
+  color: #6c7b70;
+  font-weight: 600;
+}
+
+#workerLogsView tbody tr.worker-round-color-1 {
+  background: #dff4e4;
+}
+
+#workerLogsView tbody tr.worker-round-color-2 {
+  background: #e1e8ff;
+}
+
+#workerLogsView tbody tr.worker-round-color-3 {
+  background: #ffe7cc;
+}
+
+#workerLogsView tbody tr.worker-round-color-4 {
+  background: #eddcff;
+}
+
+#workerLogsView tbody tr.worker-round-color-5 {
+  background: #d9f3f7;
+}
+
+#workerLogsView tbody tr.worker-round-color-6 {
+  background: #ffdfe3;
+}
+
+#workerLogsView tbody tr.worker-round-color-7 {
+  background: #edf4c8;
+}
+
+.worker-service-saj {
+  color: #1d5f3f;
+  font-weight: 600;
+}
+
+.worker-service-solplanet {
+  color: #30445f;
+  font-weight: 600;
+}
+
+.worker-service-combined {
+  color: #5b3f88;
+  font-weight: 600;
+}
+
+.worker-service-tesla {
+  color: #8a4b12;
+  font-weight: 600;
 }
 
 .flow-board {
@@ -1375,7 +1472,8 @@ td {
   border: none;
   border-radius: 14px;
   justify-content: flex-start;
-  padding: 8px 10px 10px;
+  align-items: stretch;
+  padding: 10px 12px 12px;
   background:
     radial-gradient(circle at 50% -8%, rgba(255, 255, 255, 0.96) 0, rgba(255, 255, 255, 0.36) 32%, transparent 58%),
     linear-gradient(180deg, rgba(249, 246, 241, 0.98) 0%, rgba(241, 237, 230, 0.96) 100%);
@@ -1391,16 +1489,28 @@ td {
   font-weight: 800;
   letter-spacing: 0.05em;
   color: #352c25;
+  text-align: center;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 
+.efd-node.efd-node-tesla .node-value,
+.efd-node.efd-node-tesla .node-sub-value,
 .efd-node.efd-node-tesla .node-mini-value {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 18px;
+  position: relative;
   z-index: 3;
-  margin-top: 0;
+  text-align: center;
+  white-space: nowrap;
+  color: #2f382f;
+}
+
+.efd-node.efd-node-tesla .node-sub-value {
+  margin-top: 8px;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.efd-node.efd-node-tesla .node-mini-value {
+  margin-top: 4px;
   padding: 0;
   border-radius: 0;
   font-size: 12px;
@@ -1410,25 +1520,15 @@ td {
   box-shadow: none;
 }
 
-.efd-node.efd-node-tesla .node-sub-value {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 36px;
-  z-index: 3;
-  margin-top: 0;
-  font-size: 18px;
-  font-weight: 800;
-  text-align: center;
-  color: #2f382f;
-}
-
 .efd-node.efd-node-tesla .tesla-control-btn {
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 10px;
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
   z-index: 3;
+  width: 100%;
+  margin-top: 6px;
+  margin-bottom: 4px;
   padding: 7px 10px;
   border-radius: 999px;
   font-size: 12px;
@@ -1443,7 +1543,7 @@ td {
 
 .efd-node.efd-node-tesla .soc-wrap {
   position: absolute;
-  inset: 8px 8px 8px 8px;
+  inset: 54px 8px 8px 8px;
   min-height: 0;
   margin-top: 0;
   border-radius: 11px;
@@ -1453,10 +1553,10 @@ td {
 }
 
 .efd-node.efd-node-tesla .soc-value-inside {
-  justify-content: center;
+  justify-content: flex-start;
   gap: 0;
-  padding: 24px 14px 34px;
-  font-size: 31px;
+  padding: 10px 14px 18px;
+  font-size: 34px;
   font-weight: 800;
   z-index: 2;
 }
@@ -1722,7 +1822,7 @@ td {
   color: var(--soc-text-color, #352c25);
   text-shadow: 0 1px 1px var(--soc-text-shadow, rgba(255, 255, 255, 0.5));
   pointer-events: auto;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .soc-energy-inside {
@@ -1730,7 +1830,9 @@ td {
   font-weight: 800;
   color: inherit;
   opacity: 0.95;
-  white-space: nowrap;
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
 }
 
 .soc-usable-inside {
@@ -1738,6 +1840,9 @@ td {
   font-weight: 700;
   color: inherit;
   opacity: 0.92;
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
 }
 
 .soc-runtime-inside {
@@ -1747,6 +1852,24 @@ td {
   opacity: 0.86;
   text-align: center;
   line-height: 1.3;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.soc-runtime-inside .data-kind-value {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 100%;
+  white-space: normal;
+  column-gap: 4px;
+  row-gap: 1px;
+}
+
+.soc-runtime-inside .data-kind-main {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 @keyframes flowLineRunX {
@@ -1886,6 +2009,14 @@ td {
   white-space: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+.combined-debug-panel {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfdfb;
 }
 
 .raw-grid {

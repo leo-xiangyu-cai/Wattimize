@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from time import monotonic
 from typing import Any, Callable
+from uuid import uuid4
 
 import httpx
 
@@ -26,6 +27,8 @@ class HomeAssistantClient:
     def _emit_log(
         self,
         *,
+        phase: str,
+        request_token: str,
         method: str,
         url: str,
         requested_at_utc: str,
@@ -41,6 +44,8 @@ class HomeAssistantClient:
         try:
             self._request_logger(
                 {
+                    "phase": phase,
+                    "request_token": request_token,
                     "service": "home_assistant",
                     "method": method,
                     "url": url,
@@ -59,13 +64,28 @@ class HomeAssistantClient:
     async def _request_json(self, method: str, path: str, *, payload: dict[str, Any] | None = None) -> Any:
         url = f"{self._base_url}{path}"
         requested_at_utc = datetime.now(UTC).isoformat()
+        request_token = uuid4().hex
         started = monotonic()
+        self._emit_log(
+            phase="start",
+            request_token=request_token,
+            method=method,
+            url=url,
+            requested_at_utc=requested_at_utc,
+            ok=False,
+            status_code=None,
+            duration_ms=None,
+            result_text=None,
+            error_text=None,
+        )
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.request(method=method, url=url, headers=self._headers, json=payload)
             response.raise_for_status()
             payload_json = response.json()
             self._emit_log(
+                phase="finish",
+                request_token=request_token,
                 method=method,
                 url=url,
                 requested_at_utc=requested_at_utc,
@@ -86,6 +106,8 @@ class HomeAssistantClient:
                 except ValueError:
                     payload_json = None
             self._emit_log(
+                phase="finish",
+                request_token=request_token,
                 method=method,
                 url=url,
                 requested_at_utc=requested_at_utc,
@@ -99,6 +121,8 @@ class HomeAssistantClient:
             raise
         except httpx.HTTPError as exc:
             self._emit_log(
+                phase="finish",
+                request_token=request_token,
                 method=method,
                 url=url,
                 requested_at_utc=requested_at_utc,

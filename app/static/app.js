@@ -65,6 +65,9 @@ const I18N = {
     configMustSaveFirst: "Configuration is not complete yet. Please save first.",
     refreshBtn: "Refresh",
     dashboardTab: "Dashboard",
+    combinedDebugTitle: "Combined Debug",
+    combinedDebugMeta: "Source {source} · storage_backed {storageBacked} · stale {stale} · sample age {sampleAge}s · kv items {kvCount}",
+    combinedCollectorMeta: "Collector: SAJ {saj} · Solplanet {solplanet} · Combined {combined}",
     solplanetRawTab: "Solplanet Raw",
     sajRawTab: "SAJ Raw",
     sajControlTab: "SAJ Control",
@@ -216,6 +219,15 @@ const I18N = {
     teslaChargingPowerLabel: "Power",
     teslaChargingCurrentLabel: "Current",
     teslaChargingVoltageLabel: "Voltage",
+    teslaCableStatusConnected: "Charger plugged",
+    teslaCableStatusDisconnected: "Charger unplugged",
+    teslaConnectionStateUnplugged: "Charger unplugged",
+    teslaConnectionStatePluggedNotCharging: "Charger plugged",
+    teslaConnectionStateCharging: "Charging",
+    teslaConnectionStateUnknown: "Connection unknown",
+    teslaControlStateSwitch: "Control: switch",
+    teslaControlStateButtons: "Control: buttons",
+    teslaControlStateUnavailable: "Control: unavailable",
     teslaControlStart: "Start Charging",
     teslaControlStop: "Stop Charging",
     teslaControlBusy: "Updating...",
@@ -225,7 +237,8 @@ const I18N = {
     battery1Title: "Battery 1",
     battery2Title: "Battery 2",
     batteryUsableRemaining: "Usable {value} kWh",
-    batteryRuntimeEstimate: "{hours} h left · until {time}",
+    batteryRuntimeEstimateCharging: "Full {hours}h · {time}",
+    batteryRuntimeEstimateDischarging: "Empty {hours}h · {time}",
     switchboardStateActive: "Bus Active",
     switchboardStateIdle: "Bus Idle",
     socLabel: "SOC",
@@ -306,12 +319,19 @@ const I18N = {
     samplingImportConfirmReplace: "Import will replace all existing sampling records. Continue?",
     samplingImportDone: "Import completed: {count} rows",
     workerLogsTitle: "Worker API Logs",
+    workerLogsCategoryLabel: "Category",
+    workerLogsCategoryAll: "All",
+    workerLogsCategorySaj: "SAJ",
+    workerLogsCategorySolplanet: "SoulPlanet",
+    workerLogsCategoryCombined: "Combined",
+    workerLogsCategoryTesla: "Tesla",
     workerLogsSystemLabel: "System",
     workerLogsSystemAll: "All",
     workerLogsServiceLabel: "Service",
     workerLogsServiceAll: "All",
     workerLogsConfigMeta: "Solplanet config: host {host}",
     workerLogsTableTime: "Time (UTC)",
+    workerLogsTableRound: "Run ID",
     workerLogsTableSystem: "System",
     workerLogsTableService: "Service",
     workerLogsTableMethod: "Method",
@@ -323,6 +343,13 @@ const I18N = {
     workerLogsPageInfo: "Page {page}/{totalPages} (showing {count})",
     workerLogsStatusOk: "OK",
     workerLogsStatusFailed: "Failed",
+    workerLogsStatusPending: "Pending",
+    workerLogsStatusSkipped: "Skipped",
+    workerLogsStatusApplied: "Applied",
+    workerLogsStatusNoop: "Noop",
+    workerLogsStatusTimeout: "Timeout",
+    workerLogDetailTitle: "Worker Log Detail",
+    workerLogDetailMeta: "{service} · {status} · {time}",
     failureLogTitle: "Worker Failure Logs",
     failureLogMeta: "File {path} · lines {fromLine}-{toLine} / {total}",
     failureLogLoadMore: "Load More",
@@ -352,7 +379,7 @@ const I18N = {
     stateDischarging: "Discharging",
     stateBatteryIdle: "Idle",
     batteryRuntimeDischarging: "Est. empty {time}",
-    batteryRuntimeCharging: "Charging now",
+    batteryRuntimeCharging: "Est. full {time}",
     batteryRuntimeIdle: "No discharge at the moment",
     batteryRuntimeNoData: "Runtime unavailable",
     balanceLabel: "Balance",
@@ -479,6 +506,9 @@ const I18N = {
     configMustSaveFirst: "当前还未完成配置，请先保存",
     refreshBtn: "刷新",
     dashboardTab: "总览",
+    combinedDebugTitle: "整合数据调试",
+    combinedDebugMeta: "来源 {source} · storage_backed {storageBacked} · stale {stale} · 样本年龄 {sampleAge}s · KV 条数 {kvCount}",
+    combinedCollectorMeta: "采集器: SAJ {saj} · Solplanet {solplanet} · Combined {combined}",
     solplanetRawTab: "Solplanet 原始",
     sajRawTab: "SAJ 原始",
     sajControlTab: "SAJ 管理",
@@ -630,6 +660,15 @@ const I18N = {
     teslaChargingPowerLabel: "功率",
     teslaChargingCurrentLabel: "电流",
     teslaChargingVoltageLabel: "电压",
+    teslaCableStatusConnected: "已连接",
+    teslaCableStatusDisconnected: "未连接",
+    teslaConnectionStateUnplugged: "未连接",
+    teslaConnectionStatePluggedNotCharging: "已连未充",
+    teslaConnectionStateCharging: "已连充电",
+    teslaConnectionStateUnknown: "连接状态未知",
+    teslaControlStateSwitch: "控制方式：开关",
+    teslaControlStateButtons: "控制方式：按钮",
+    teslaControlStateUnavailable: "控制不可用",
     teslaControlStart: "开始充电",
     teslaControlStop: "停止充电",
     teslaControlBusy: "正在更新...",
@@ -639,7 +678,8 @@ const I18N = {
     battery1Title: "电池 1",
     battery2Title: "电池 2",
     batteryUsableRemaining: "可用余量 {value} kWh",
-    batteryRuntimeEstimate: "按当前功率约 {hours} 小时 · 到 {time}",
+    batteryRuntimeEstimateCharging: "按当前功率约 {hours} 小时充满 · 到 {time}",
+    batteryRuntimeEstimateDischarging: "按当前功率约 {hours} 小时耗空 · 到 {time}",
     switchboardStateActive: "母线工作中",
     switchboardStateIdle: "母线空闲",
     socLabel: "电池电量",
@@ -720,12 +760,19 @@ const I18N = {
     samplingImportConfirmReplace: "导入会覆盖现有采样数据，是否继续？",
     samplingImportDone: "导入完成：{count} 条",
     workerLogsTitle: "Worker API 日志",
+    workerLogsCategoryLabel: "分类",
+    workerLogsCategoryAll: "全部",
+    workerLogsCategorySaj: "SAJ",
+    workerLogsCategorySolplanet: "SoulPlanet",
+    workerLogsCategoryCombined: "整合",
+    workerLogsCategoryTesla: "特斯拉",
     workerLogsSystemLabel: "系统",
     workerLogsSystemAll: "全部",
     workerLogsServiceLabel: "服务",
     workerLogsServiceAll: "全部",
     workerLogsConfigMeta: "Solplanet 配置：host {host}",
     workerLogsTableTime: "时间 (UTC)",
+    workerLogsTableRound: "运行ID",
     workerLogsTableSystem: "系统",
     workerLogsTableService: "服务",
     workerLogsTableMethod: "方法",
@@ -737,6 +784,13 @@ const I18N = {
     workerLogsPageInfo: "第 {page}/{totalPages} 页（当前 {count} 条）",
     workerLogsStatusOk: "成功",
     workerLogsStatusFailed: "失败",
+    workerLogsStatusPending: "等待中",
+    workerLogsStatusSkipped: "跳过",
+    workerLogsStatusApplied: "已执行",
+    workerLogsStatusNoop: "无操作",
+    workerLogsStatusTimeout: "超时",
+    workerLogDetailTitle: "Worker 日志详情",
+    workerLogDetailMeta: "{service} · {status} · {time}",
     failureLogTitle: "Worker 失败日志",
     failureLogMeta: "文件 {path} · 第 {fromLine}-{toLine} 行 / 共 {total} 行",
     failureLogLoadMore: "加载更多",
@@ -766,7 +820,7 @@ const I18N = {
     stateDischarging: "正在放电",
     stateBatteryIdle: "空闲",
     batteryRuntimeDischarging: "预计 {time} 耗空",
-    batteryRuntimeCharging: "当前正在充电",
+    batteryRuntimeCharging: "预计 {time} 充满",
     batteryRuntimeIdle: "当前未在放电",
     batteryRuntimeNoData: "暂时无法估算",
     balanceLabel: "功率平衡",
@@ -1071,6 +1125,7 @@ const SOLPLANET_DASHBOARD_FIELD_MAP = {
 };
 const stateCache = {
   lastSummary: null,
+  lastCollectorStatus: null,
   lastEntities: null,
   lastSolplanetRaw: {},
   lastSolplanetKv: { phase: "idle", items: [], updated_at: null, error: null },
@@ -1496,6 +1551,12 @@ function setConfigModalVisible(visible) {
   modal.classList.toggle("hidden", !visible);
 }
 
+function setWorkerLogDetailModalVisible(visible) {
+  const modal = document.getElementById("workerLogDetailModal");
+  if (!modal) return;
+  modal.classList.toggle("hidden", !visible);
+}
+
 function fillConfigForm(payload = {}) {
   document.getElementById("cfgHaUrl").value = payload.ha_url || "";
   document.getElementById("cfgHaToken").value = payload.ha_token || "";
@@ -1632,44 +1693,63 @@ function formatBatteryUsableKwh(system, batterySoc) {
   return t("batteryUsableRemaining", { value: formatTrimmedDecimal(usableKwh, 1) });
 }
 
-function formatBatteryRuntimeEstimate(system, batterySoc, batteryW) {
+function formatBatteryRuntimeTargetTime(targetAt) {
+  if (!(targetAt instanceof Date) || Number.isNaN(targetAt.getTime())) return null;
+  const now = new Date();
+  const timeText = targetAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const sameDay =
+    targetAt.getFullYear() === now.getFullYear() &&
+    targetAt.getMonth() === now.getMonth() &&
+    targetAt.getDate() === now.getDate();
+  if (sameDay) return timeText;
+  return currentLang === "zh" ? `明天 ${timeText}` : `tomorrow ${timeText}`;
+}
+
+function getBatteryRuntimeProjection(system, batterySoc, batteryW) {
   const capacityKwh = BATTERY_CAPACITY_KWH[system];
   const minDischargeSoc = BATTERY_MIN_DISCHARGE_SOC[system] ?? 0;
   if (!Number.isFinite(capacityKwh) || batterySoc === null || batterySoc === undefined || batteryW === null || batteryW === undefined) {
-    return t("batteryRuntimeNoData");
+    return null;
   }
 
   const powerW = Number(batteryW);
-  if (!Number.isFinite(powerW)) return t("batteryRuntimeNoData");
-  if (powerW <= -POWER_FLOW_ACTIVE_THRESHOLD_W) return t("batteryRuntimeCharging");
-  if (Math.abs(powerW) < POWER_FLOW_ACTIVE_THRESHOLD_W) return t("batteryRuntimeIdle");
+  if (!Number.isFinite(powerW)) return null;
+  if (Math.abs(powerW) < POWER_FLOW_ACTIVE_THRESHOLD_W) return { mode: "idle" };
 
   const clampedSoc = Math.max(0, Math.min(100, Number(batterySoc)));
-  const usableSoc = Math.max(0, clampedSoc - minDischargeSoc);
-  if (usableSoc <= 0) return t("batteryRuntimeNoData");
+  if (powerW <= -POWER_FLOW_ACTIVE_THRESHOLD_W) {
+    const remainingKwh = (capacityKwh * Math.max(0, 100 - clampedSoc)) / 100;
+    if (remainingKwh <= 0) return null;
+    const runtimeHours = remainingKwh / (Math.abs(powerW) / 1000);
+    if (!Number.isFinite(runtimeHours) || runtimeHours < 0) return null;
+    const targetAt = new Date(Date.now() + runtimeHours * 3600 * 1000);
+    const timeText = formatBatteryRuntimeTargetTime(targetAt);
+    if (!timeText) return null;
+    return { mode: "charging", runtimeHours, timeText };
+  }
 
+  const usableSoc = Math.max(0, clampedSoc - minDischargeSoc);
+  if (usableSoc <= 0) return null;
   const usableKwh = (capacityKwh * usableSoc) / 100;
   const runtimeHours = usableKwh / (powerW / 1000);
-  if (!Number.isFinite(runtimeHours) || runtimeHours < 0) return t("batteryRuntimeNoData");
+  if (!Number.isFinite(runtimeHours) || runtimeHours < 0) return null;
+  const targetAt = new Date(Date.now() + runtimeHours * 3600 * 1000);
+  const timeText = formatBatteryRuntimeTargetTime(targetAt);
+  if (!timeText) return null;
+  return { mode: "discharging", runtimeHours, timeText };
+}
 
-  const depletionAt = new Date(Date.now() + runtimeHours * 3600 * 1000);
-  if (Number.isNaN(depletionAt.getTime())) return t("batteryRuntimeNoData");
-
-  const now = new Date();
-  const sameDay =
-    depletionAt.getFullYear() === now.getFullYear() &&
-    depletionAt.getMonth() === now.getMonth() &&
-    depletionAt.getDate() === now.getDate();
-  const timeText = sameDay
-    ? depletionAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : currentLang === "zh"
-      ? `明天 ${depletionAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-      : `tomorrow ${depletionAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-
-  return t("batteryRuntimeEstimate", {
-    hours: formatTrimmedDecimal(runtimeHours, 1),
-    time: timeText,
-  });
+function formatBatteryRuntimeEstimate(system, batterySoc, batteryW) {
+  const projection = getBatteryRuntimeProjection(system, batterySoc, batteryW);
+  if (!projection) return t("batteryRuntimeNoData");
+  if (projection.mode === "idle") return t("batteryRuntimeIdle");
+  return t(
+    projection.mode === "charging" ? "batteryRuntimeEstimateCharging" : "batteryRuntimeEstimateDischarging",
+    {
+      hours: formatTrimmedDecimal(projection.runtimeHours, 1),
+      time: projection.timeText,
+    },
+  );
 }
 
 function formatInverterConversion(inverterW, batteryW, solarInputW = null) {
@@ -1708,38 +1788,13 @@ function formatInverterConversion(inverterW, batteryW, solarInputW = null) {
 }
 
 function formatBatteryRuntimeText(system, batterySoc, batteryW) {
-  const capacityKwh = BATTERY_CAPACITY_KWH[system];
-  const minDischargeSoc = BATTERY_MIN_DISCHARGE_SOC[system] ?? 0;
-  if (!Number.isFinite(capacityKwh) || batterySoc === null || batterySoc === undefined || batteryW === null || batteryW === undefined) {
-    return t("batteryRuntimeNoData");
-  }
-
-  const powerW = Number(batteryW);
-  if (!Number.isFinite(powerW)) return t("batteryRuntimeNoData");
-  if (powerW <= -POWER_FLOW_ACTIVE_THRESHOLD_W) return t("batteryRuntimeCharging");
-  if (Math.abs(powerW) < POWER_FLOW_ACTIVE_THRESHOLD_W) return t("batteryRuntimeIdle");
-
-  const clampedSoc = Math.max(0, Math.min(100, Number(batterySoc)));
-  const usableSoc = Math.max(0, clampedSoc - minDischargeSoc);
-  if (usableSoc <= 0) return t("batteryRuntimeNoData");
-
-  const usableKwh = (capacityKwh * usableSoc) / 100;
-  const runtimeHours = usableKwh / (powerW / 1000);
-  if (!Number.isFinite(runtimeHours) || runtimeHours < 0) return t("batteryRuntimeNoData");
-
-  const depletionAt = new Date(Date.now() + runtimeHours * 3600 * 1000);
-  if (Number.isNaN(depletionAt.getTime())) return t("batteryRuntimeNoData");
-
-  const now = new Date();
-  const sameDay =
-    depletionAt.getFullYear() === now.getFullYear() &&
-    depletionAt.getMonth() === now.getMonth() &&
-    depletionAt.getDate() === now.getDate();
-  const time = sameDay
-    ? depletionAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : `tomorrow ${depletionAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-
-  return t("batteryRuntimeDischarging", { time });
+  const projection = getBatteryRuntimeProjection(system, batterySoc, batteryW);
+  if (!projection) return t("batteryRuntimeNoData");
+  if (projection.mode === "idle") return t("batteryRuntimeIdle");
+  return t(
+    projection.mode === "charging" ? "batteryRuntimeCharging" : "batteryRuntimeDischarging",
+    { time: projection.timeText },
+  );
 }
 
 const flowDiagrams = {
@@ -1895,7 +1950,7 @@ function buildCombinedDiagramSpec() {
         title: "Tesla",
         titleKey: "teslaChargingLabel",
         width: 176,
-        height: 270,
+        height: 314,
         lines: [
           {
             type: "soc",
@@ -1904,6 +1959,7 @@ function buildCombinedDiagramSpec() {
           },
           { id: "combined-teslaChargingPowerValue", className: "node-sub-value", text: "-" },
           { id: "combined-teslaChargingCurrentValue", className: "node-mini-value muted", text: "-" },
+          { id: "combined-teslaConnectionValue", className: "node-mini-value muted", text: "-" },
           { type: "button", id: "combined-teslaChargingToggleBtn", className: "tesla-control-btn btn secondary", text: "-" },
         ],
       },
@@ -2472,19 +2528,94 @@ function formatTeslaPowerValue(watts) {
   return `${t("teslaChargingPowerLabel")} ${formatPowerKwFromWatts(watts)}`;
 }
 
+function formatTeslaConnectionSummary(teslaInfo = null) {
+  const cableConnected = teslaInfo?.teslaCableConnected;
+  const connectionState = String(teslaInfo?.teslaConnectionState || "").trim().toLowerCase();
+  if (connectionState === "charging") return t("teslaConnectionStateCharging");
+  if (connectionState === "plugged_not_charging") return t("teslaConnectionStatePluggedNotCharging");
+  if (connectionState === "unplugged") {
+    if (cableConnected === true) return t("teslaCableStatusConnected");
+    return t("teslaConnectionStateUnplugged");
+  }
+  if (cableConnected === true) return t("teslaCableStatusConnected");
+  if (cableConnected === false) return t("teslaCableStatusDisconnected");
+  return t("teslaConnectionStateUnknown");
+}
+
+function formatTeslaControlSummary(teslaInfo = null) {
+  const controlMode = String(teslaInfo?.controlMode || "unavailable").trim().toLowerCase();
+  if (controlMode === "switch") return t("teslaControlStateSwitch");
+  if (controlMode === "buttons") return t("teslaControlStateButtons");
+  return t("teslaControlStateUnavailable");
+}
+
 function mergeTeslaControlInfo(baseInfo, controlPayload) {
   const controlState = controlPayload?.control_state || controlPayload || {};
+  const observation = controlPayload?.observation || {};
+  const charging = observation?.charging || {};
+  const battery = observation?.battery || {};
+  const fallbackControlMode = observation?.control_mode || "unavailable";
+  const resolvedControlMode = controlState?.control_mode || fallbackControlMode || "unavailable";
+  const resolvedControlAvailable = typeof controlState?.available === "boolean"
+    ? controlState.available
+    : (resolvedControlMode !== "unavailable");
+  const resolvedChargingEnabled = typeof controlState?.charging_enabled === "boolean"
+    ? controlState.charging_enabled
+    : (typeof charging?.enabled === "boolean" ? charging.enabled : null);
+  const resolvedChargeRequestedEnabled = typeof controlState?.charge_requested_enabled === "boolean"
+    ? controlState.charge_requested_enabled
+    : (typeof charging?.requested_enabled === "boolean" ? charging.requested_enabled : null);
   return {
     ...baseInfo,
-    controlAvailable: Boolean(controlState?.available),
-    controlMode: controlState?.control_mode || "unavailable",
-    chargingEnabled: typeof controlState?.charging_enabled === "boolean" ? controlState.charging_enabled : null,
+    chargingW: toFiniteNumber(charging?.power_w),
+    updatedAt: latestIsoTime(baseInfo?.updatedAt, controlPayload?.updated_at, charging?.entity?.last_updated, battery?.entity?.last_updated),
+    currentA: toFiniteNumber(charging?.current_amps),
+    currentUnit: "A",
+    socPercent: toFiniteNumber(battery?.level_percent),
+    teslaConnectionState: observation?.charging?.connection_state || null,
+    teslaCableConnected: typeof charging?.cable_connected === "boolean" ? charging.cable_connected : null,
+    controlAvailable: resolvedControlAvailable,
+    controlMode: resolvedControlMode,
+    chargingEnabled: resolvedChargingEnabled,
+    chargeRequestedEnabled: resolvedChargeRequestedEnabled,
     canStart: Boolean(controlState?.can_start),
     canStop: Boolean(controlState?.can_stop),
     controlSwitchEntityId: controlState?.switch_entity?.entity_id || null,
     controlStartButtonEntityId: controlState?.start_button_entity?.entity_id || null,
     controlStopButtonEntityId: controlState?.stop_button_entity?.entity_id || null,
   };
+}
+
+function teslaInfoFromCombinedFlow(combinedFlow) {
+  const rawTesla = combinedFlow?.raw?.tesla || {};
+  const observation = rawTesla?.observation || {};
+  const charging = observation?.charging || {};
+  const battery = observation?.battery || {};
+  const controlState = rawTesla?.control_state || {};
+  return mergeTeslaControlInfo({
+    chargingW: toFiniteNumber(combinedFlow?.metrics?.tesla_charge_power_w ?? charging?.power_w),
+    entityId: null,
+    friendlyName: null,
+    updatedAt: latestIsoTime(combinedFlow?.updated_at, rawTesla?.executed_at_utc, battery?.entity?.last_updated),
+    currentA: toFiniteNumber(combinedFlow?.metrics?.tesla_charge_current_amps ?? charging?.current_amps),
+    currentEntityId: null,
+    currentUnit: "A",
+    socPercent: toFiniteNumber(combinedFlow?.metrics?.tesla_battery_soc_percent ?? battery?.level_percent),
+    socEntityId: null,
+    teslaConnectionState: combinedFlow?.metrics?.tesla_connection_state || charging?.connection_state || null,
+    teslaCableConnected: typeof combinedFlow?.metrics?.tesla_cable_connected === "boolean"
+      ? combinedFlow.metrics.tesla_cable_connected
+      : (typeof charging?.cable_connected === "boolean" ? charging.cable_connected : null),
+    controlAvailable: false,
+    controlMode: "unavailable",
+    chargingEnabled: null,
+    chargeRequestedEnabled: null,
+    canStart: false,
+    canStop: false,
+    controlSwitchEntityId: null,
+    controlStartButtonEntityId: null,
+    controlStopButtonEntityId: null,
+  }, { control_state: controlState, observation });
 }
 
 function renderTeslaControlButton(teslaInfo = null) {
@@ -2501,6 +2632,22 @@ function renderTeslaControlButton(teslaInfo = null) {
   button.textContent = label;
   button.disabled = teslaControlBusy || !controlAvailable;
   button.classList.toggle("active", controlAvailable && chargingEnabled);
+}
+
+function ensureTeslaCardUnifiedContent() {
+  const socValue = document.getElementById("combined-teslaSocValue");
+  if (!socValue) return;
+  const stack = socValue.parentElement;
+  if (!stack || !stack.classList.contains("soc-value-inside")) return;
+  [
+    "combined-teslaChargingPowerValue",
+    "combined-teslaChargingCurrentValue",
+    "combined-teslaConnectionValue",
+    "combined-teslaChargingToggleBtn",
+  ].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el && el.parentElement !== stack) stack.appendChild(el);
+  });
 }
 
 function buildCombinedFlowMetrics(combinedFlow) {
@@ -2621,6 +2768,7 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
     "combined-teslaChargingCurrentValue",
     formatValueWithDataKindHtml(formatTeslaCurrentValue(teslaCurrentA, teslaInfo?.currentUnit || "A"), dataKinds.teslaCurrent),
   );
+  setText("combined-teslaConnectionValue", formatTeslaConnectionSummary(teslaInfo));
   renderBatterySocDisplay({
     system: null,
     soc: teslaSoc,
@@ -2629,6 +2777,7 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
     socFillId: "combined-teslaSocFill",
     socDataKind: dataKinds.teslaSoc,
   });
+  ensureTeslaCardUnifiedContent();
   renderTeslaControlButton(teslaInfo);
   setText("combined-switchboardValue", "-");
   setText("combined-inverter1State", getSajDashboardModeText() || inverterStateText(inverter1Status));
@@ -2644,6 +2793,12 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   );
   setNodeSourceTip("combined-teslaChargingPowerValue", null);
   setNodeSourceTip("combined-teslaChargingCurrentValue", null);
+  setNodeSourceTip(
+    "combined-teslaConnectionValue",
+    currentLang === "zh"
+      ? "显示特斯拉是否插了充电枪，以及当前连接/充电状态。"
+      : "Shows whether the Tesla is plugged in and its current connection/charging state.",
+  );
   setNodeSourceTip("combined-teslaSocValue", null);
 
   const solarActive = solarW !== null && solarW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
@@ -2764,7 +2919,8 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
 }
 
 function renderSummary(payload) {
-  const { health, ha, sajFlow, solplanetFlow, combinedFlow, tesla } = payload;
+  const { health, ha, sajFlow, solplanetFlow, combinedFlow, collectorStatus } = payload;
+  const tesla = teslaInfoFromCombinedFlow(combinedFlow);
   setText("healthValue", health.status || "ok");
   setText("haValue", ha.ok ? t("connected") : t("error"));
   const sajCount = sajFlow?.metrics?.matched_entities ?? 0;
@@ -2783,6 +2939,63 @@ function renderSummary(payload) {
   renderEnergyFlow("saj", sajFlow);
   renderEnergyFlow("solplanet", solplanetFlow);
   renderCombinedEnergyFlow(combinedFlow, tesla);
+  renderCombinedDebug(combinedFlow, collectorStatus);
+}
+
+function formatCollectorSystemStatus(label, systemState) {
+  const state = systemState || {};
+  const review = state.last_round_review || {};
+  const result = state.last_round_result || {};
+  const successAt = formatDateTimeWithAgo(state.last_success_at || null);
+  const stored = result.stored_sample === true ? "stored" : (result.stored_sample === false ? "not-stored" : "-");
+  const reason = result.reason || result.error || "-";
+  const reviewSummary = `${Number(review.success_count || 0)}/${Number(review.attempted_count || 0)}`;
+  return `${label}: ${successAt}, review ${reviewSummary}, ${stored}, ${reason}`;
+}
+
+function renderCombinedDebug(combinedFlow, collectorStatus) {
+  const sourceType = combinedFlow?.source?.type || "-";
+  const storageBacked = combinedFlow?.storage_backed ? "true" : "false";
+  const stale = combinedFlow?.stale ? `true (${combinedFlow?.stale_reason || "-"})` : "false";
+  const sampleAge = combinedFlow?.sample_age_seconds === null || combinedFlow?.sample_age_seconds === undefined
+    ? "-"
+    : formatMaybeNumber(combinedFlow.sample_age_seconds, 1);
+  const kvCount = combinedFlow?.kv_item_count === null || combinedFlow?.kv_item_count === undefined
+    ? "-"
+    : String(combinedFlow.kv_item_count);
+  setText(
+    "combinedDebugMeta",
+    t("combinedDebugMeta", {
+      source: sourceType,
+      storageBacked,
+      stale,
+      sampleAge,
+      kvCount,
+    }),
+  );
+
+  const systems = collectorStatus?.systems || {};
+  setText(
+    "combinedCollectorMeta",
+    t("combinedCollectorMeta", {
+      saj: formatCollectorSystemStatus("saj", systems.saj),
+      solplanet: formatCollectorSystemStatus("solplanet", systems.solplanet),
+      combined: formatCollectorSystemStatus("combined", systems.combined),
+    }),
+  );
+  setText("combinedDebugUpdatedAt", formatUpdatedAt(combinedFlow?.updated_at || collectorStatus?.updated_at || null));
+
+  const debugPre = document.getElementById("combinedDebugPre");
+  if (debugPre) {
+    debugPre.textContent = JSON.stringify(
+      {
+        collector_status: collectorStatus || null,
+        combined_flow: combinedFlow || null,
+      },
+      null,
+      2,
+    );
+  }
 }
 
 function renderEntities(items) {
@@ -3316,13 +3529,82 @@ function renderSamplingPage(payload) {
 
 function buildWorkerLogsUrl() {
   const params = new URLSearchParams();
-  const system = document.getElementById("workerLogsSystemSelect")?.value || "";
-  const service = document.getElementById("workerLogsServiceSelect")?.value || "";
-  if (system) params.set("system", system);
-  if (service) params.set("service", service);
+  const category = document.getElementById("workerLogsCategorySelect")?.value || "all";
+  if (category && category !== "all") params.set("category", category);
   params.set("page", String(workerLogsPager.page));
   params.set("page_size", "100");
   return `/api/worker/logs?${params.toString()}`;
+}
+
+function compactWorkerLogResultText(value, head = 36, tail = 24) {
+  const text = String(value || "").replaceAll(/\s+/g, " ").trim();
+  if (!text) return "-";
+  if (text.length <= head + tail + 3) return text;
+  return `${text.slice(0, head)}...${text.slice(-tail)}`;
+}
+
+function workerSourcePatternClass(item) {
+  const system = String(item?.system || "").trim().toLowerCase();
+  const service = String(item?.service || "").trim().toLowerCase();
+  if (service === "tesla_home_assistant_collection") return "worker-service-tesla";
+  if (system === "combined" || service === "combined_assembly") return "worker-service-combined";
+  if (system === "saj") return "worker-service-saj";
+  if (system === "solplanet") return "worker-service-solplanet";
+  return "";
+}
+
+function workerLogStatusPresentation(item) {
+  const rawStatus = String(item?.status || "").trim().toLowerCase();
+  if (rawStatus === "pending") return { text: t("workerLogsStatusPending"), className: "worker-status-pending" };
+  if (rawStatus === "skipped") return { text: t("workerLogsStatusSkipped"), className: "worker-status-skipped" };
+  if (rawStatus === "applied") return { text: t("workerLogsStatusApplied"), className: "worker-status-ok" };
+  if (rawStatus === "noop") return { text: t("workerLogsStatusNoop"), className: "worker-status-skipped" };
+  if (rawStatus === "ok") return { text: t("workerLogsStatusOk"), className: "worker-status-ok" };
+  if (rawStatus === "timeout") return { text: t("workerLogsStatusTimeout"), className: "worker-status-failed" };
+  if (rawStatus === "failed") return { text: t("workerLogsStatusFailed"), className: "worker-status-failed" };
+  return item?.ok
+    ? { text: t("workerLogsStatusOk"), className: "worker-status-ok" }
+    : { text: t("workerLogsStatusFailed"), className: "worker-status-failed" };
+}
+
+function openWorkerLogDetailModal(item) {
+  const statusPresentation = workerLogStatusPresentation(item || {});
+  setText(
+    "workerLogDetailMeta",
+    t("workerLogDetailMeta", {
+      service: String(item?.service || "-"),
+      status: statusPresentation.text,
+      time: formatDateTimeWithAgo(item?.requested_at_utc || null),
+    }),
+  );
+  const detailRows = [
+    ["Time (UTC)", String(item?.requested_at_utc || "-")],
+    ["Run ID", String(item?.round_id || "-")],
+    ["System", String(item?.system || "-")],
+    ["Service", String(item?.service || "-")],
+    ["Method", String(item?.method || "-")],
+    ["API Link", String(item?.api_link || "-")],
+    ["Status", statusPresentation.text],
+    ["OK", item?.ok == null ? "-" : String(Boolean(item.ok))],
+    ["Status Code", item?.status_code == null ? "-" : String(item.status_code)],
+    ["Duration (ms)", item?.duration_ms == null ? "-" : String(item.duration_ms)],
+    ["Error", String(item?.error_text || "-")],
+    ["Result", String(item?.result_text || "-")],
+  ];
+  const body = document.getElementById("workerLogDetailBody");
+  if (body) {
+    body.innerHTML = detailRows
+      .map(
+        ([label, value]) => `
+          <tr>
+            <th>${escapeHtml(label)}</th>
+            <td><div class="worker-log-detail-value">${escapeHtml(value)}</div></td>
+          </tr>
+        `,
+      )
+      .join("");
+  }
+  setWorkerLogDetailModalVisible(true);
 }
 
 function buildWorkerFailureLogUrl(before = 0) {
@@ -3336,22 +3618,40 @@ function renderWorkerLogsRows(items) {
   const body = document.getElementById("workerLogsBody");
   if (!body) return;
   body.innerHTML = "";
+  const roundColorMap = new Map();
+  let nextRoundColor = 1;
   for (const item of items || []) {
     const tr = document.createElement("tr");
+    tr.classList.add("worker-log-row");
+    const roundId = String(item.round_id || "").trim();
+    let roundColorClass = "";
+    if (roundId) {
+      if (!roundColorMap.has(roundId)) {
+        roundColorMap.set(roundId, `worker-round-color-${nextRoundColor}`);
+        nextRoundColor = nextRoundColor >= 7 ? 1 : nextRoundColor + 1;
+      }
+      roundColorClass = roundColorMap.get(roundId) || "";
+    }
+    const serviceClass = workerSourcePatternClass(item);
+    if (roundColorClass) tr.classList.add(roundColorClass);
     const sampledAt = formatDateTimeWithAgo(item.requested_at_utc);
-    const statusText = item.ok ? t("workerLogsStatusOk") : t("workerLogsStatusFailed");
-    const statusCode = item.status_code !== null && item.status_code !== undefined ? ` (${item.status_code})` : "";
+    const statusPresentation = workerLogStatusPresentation(item);
     const resultText = item.error_text || item.result_text || "";
+    const resultPreview = compactWorkerLogResultText(resultText);
     tr.innerHTML = `
       <td>${escapeHtml(sampledAt)}</td>
+      <td class="worker-link" title="${escapeHtml(item.round_id || "-")}">${escapeHtml(item.round_id || "-")}</td>
       <td>${escapeHtml(item.system || "-")}</td>
-      <td>${escapeHtml(item.service || "-")}</td>
+      <td class="${escapeHtml(serviceClass)}">${escapeHtml(item.service || "-")}</td>
       <td>${escapeHtml(item.method || "-")}</td>
       <td class="worker-link" title="${escapeHtml(item.api_link || "-")}">${escapeHtml(item.api_link || "-")}</td>
-      <td>${escapeHtml(`${statusText}${statusCode}`)}</td>
+      <td class="${escapeHtml(statusPresentation.className)}">${escapeHtml(statusPresentation.text)}</td>
       <td>${escapeHtml(formatMaybeNumber(item.duration_ms, 1))}</td>
-      <td><pre class="worker-result-pre">${escapeHtml(resultText || "-")}</pre></td>
+      <td><pre class="worker-result-pre" title="${escapeHtml(resultText || "-")}">${escapeHtml(resultPreview)}</pre></td>
     `;
+    tr.addEventListener("click", () => {
+      openWorkerLogDetailModal(item);
+    });
     body.appendChild(tr);
   }
 }
@@ -5562,90 +5862,27 @@ function buildEntityUrl() {
   return `/api/entities?${params.toString()}`;
 }
 
-async function fetchTeslaChargingInfo() {
-  const [entityResult, controlResult] = await Promise.allSettled([
-    fetchJson("/api/entities?domain=sensor&q=tesla&page=1&page_size=500", { timeoutMs: 6000 }),
-    fetchJson("/api/tesla/control/state", { timeoutMs: 6000 }),
-  ]);
-  const entityPayload = entityResult.status === "fulfilled" ? entityResult.value : null;
-  const items = Array.isArray(entityPayload?.items) ? entityPayload.items : [];
-  const powerEntity = pickTeslaChargingEntity(items);
-  const currentEntity = pickTeslaMetricEntity(items, "current");
-  const socEntity = pickTeslaMetricEntity(items, "soc");
-  let result;
-  if (!powerEntity && !currentEntity && !socEntity) {
-    result = {
-      chargingW: null,
-      entityId: null,
-      friendlyName: null,
-      updatedAt: null,
-      currentA: null,
-      currentEntityId: null,
-      currentUnit: "A",
-      socPercent: null,
-      socEntityId: null,
-      controlAvailable: false,
-      controlMode: "unavailable",
-      chargingEnabled: null,
-      canStart: false,
-      canStop: false,
-      controlSwitchEntityId: null,
-      controlStartButtonEntityId: null,
-      controlStopButtonEntityId: null,
-    };
-  } else {
-    const chargingW = powerEntity ? wattsFromStateUnit(powerEntity.state, powerEntity.unit) : null;
-    result = {
-      chargingW: chargingW === null ? null : Math.max(0, chargingW),
-      entityId: powerEntity?.entity_id || null,
-      friendlyName: powerEntity?.friendly_name || null,
-      updatedAt: latestIsoTime(powerEntity?.last_updated, currentEntity?.last_updated, socEntity?.last_updated),
-      currentA: currentEntity ? toFiniteNumber(currentEntity.state) : null,
-      currentEntityId: currentEntity?.entity_id || null,
-      currentUnit: currentEntity?.unit || "A",
-      socPercent: socEntity ? toFiniteNumber(socEntity.state) : null,
-      socEntityId: socEntity?.entity_id || null,
-      controlAvailable: false,
-      controlMode: "unavailable",
-      chargingEnabled: null,
-      canStart: false,
-      canStop: false,
-      controlSwitchEntityId: null,
-      controlStartButtonEntityId: null,
-      controlStopButtonEntityId: null,
-    };
-  }
-  if (controlResult.status === "fulfilled") {
-    result = mergeTeslaControlInfo(result, controlResult.value);
-  }
-  return result;
-}
-
 async function toggleTeslaCharging() {
   if (teslaControlBusy) return;
   const summary = stateCache.lastSummary;
-  const teslaInfo = summary?.tesla || null;
+  const teslaInfo = teslaInfoFromCombinedFlow(summary?.combinedFlow || {});
   if (!teslaInfo?.controlAvailable) return;
   const targetEnabled = teslaInfo?.chargingEnabled === true ? false : true;
   teslaControlBusy = true;
   renderTeslaControlButton(teslaInfo);
   try {
-    const payload = await fetchJson("/api/tesla/control/charging", {
+    await fetchJson("/api/tesla/control/charging", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: targetEnabled }),
       timeoutMs: 10000,
     });
-    if (summary) {
-      summary.tesla = mergeTeslaControlInfo(summary.tesla || {}, payload);
-      renderSummary(summary);
-    }
     await loadSummary();
   } catch (err) {
     window.alert(t("teslaControlApplyFailed", { error: String(err) }));
   } finally {
     teslaControlBusy = false;
-    renderTeslaControlButton(stateCache.lastSummary?.tesla || teslaInfo);
+    renderTeslaControlButton(teslaInfoFromCombinedFlow(stateCache.lastSummary?.combinedFlow || {}));
   }
 }
 
@@ -5657,6 +5894,7 @@ async function loadSummary() {
     sajFlow: { metrics: {} },
     solplanetFlow: { metrics: {} },
     combinedFlow: { metrics: {} },
+    collectorStatus: null,
     tesla: {
       chargingW: null, entityId: null, friendlyName: null, updatedAt: null,
       currentA: null, currentEntityId: null, currentUnit: "A",
@@ -5677,7 +5915,7 @@ async function loadSummary() {
     fetchJson("/api/ha/ping", { timeoutMs: 5000 }),
     fetchJson("/api/energy-flow/saj", { timeoutMs: 5000 }),
     fetchJson("/api/saj/control/state", { timeoutMs: 6000 }),
-    fetchTeslaChargingInfo(),
+    fetchJson("/api/collector/status", { timeoutMs: 6000 }),
   ]);
   if (requestId !== summaryRequestId) return;
 
@@ -5699,16 +5937,8 @@ async function loadSummary() {
     if (currentTab === "sajControl") renderSajControlFromCache();
   }
   if (baseResults[4].status === "fulfilled") {
-    summary.tesla = baseResults[4].value;
-  } else {
-    summary.tesla = {
-      chargingW: null, entityId: null, friendlyName: null, updatedAt: null,
-      currentA: null, currentEntityId: null, currentUnit: "A",
-      socPercent: null, socEntityId: null,
-      controlAvailable: false, controlMode: "unavailable", chargingEnabled: null,
-      canStart: false, canStop: false,
-      controlSwitchEntityId: null, controlStartButtonEntityId: null, controlStopButtonEntityId: null,
-    };
+    summary.collectorStatus = baseResults[4].value;
+    stateCache.lastCollectorStatus = baseResults[4].value;
   }
   renderSummary(summary);
 
@@ -5734,6 +5964,7 @@ async function loadSummary() {
     .then((combinedFlow) => {
       if (requestId !== summaryRequestId) return;
       summary.combinedFlow = { ...combinedFlow, __load_error: false };
+      summary.tesla = teslaInfoFromCombinedFlow(summary.combinedFlow);
       setSystemLoadMeta("combined", {
         phase: "done",
         updatedAt: combinedFlow?.updated_at || new Date().toISOString(),
@@ -6028,10 +6259,8 @@ function rerenderSamplingViewFromCache() {
 
 async function loadWorkerLogs() {
   if (!workerLogsDefaultsApplied) {
-    const systemSelect = document.getElementById("workerLogsSystemSelect");
-    const serviceSelect = document.getElementById("workerLogsServiceSelect");
-    if (systemSelect && !systemSelect.value) systemSelect.value = "solplanet";
-    if (serviceSelect && !serviceSelect.value) serviceSelect.value = "solplanet_cgi";
+    const categorySelect = document.getElementById("workerLogsCategorySelect");
+    if (categorySelect && !categorySelect.value) categorySelect.value = "all";
     workerLogsDefaultsApplied = true;
   }
   try {
@@ -6266,16 +6495,6 @@ bindChangeIfPresent("autoRefreshSelect", (event) => {
   setAutoRefresh(Number(event.target.value));
 });
 
-bindChangeIfPresent("workerLogsSystemSelect", () => {
-  workerLogsPager.page = 1;
-  void loadWorkerLogs();
-});
-
-bindChangeIfPresent("workerLogsServiceSelect", () => {
-  workerLogsPager.page = 1;
-  void loadWorkerLogs();
-});
-
 bindClickIfPresent("refreshBtn", () => {
   void loadCurrentTab();
 });
@@ -6412,12 +6631,26 @@ bindClickIfPresent("workerFailureLogLoadMoreBtn", async () => {
   await loadWorkerFailureLog({ appendOlder: true });
 });
 
-bindChangeIfPresent("workerLogsSystemSelect", async () => {
-  workerLogsPager.page = 1;
-  await loadWorkerLogs();
+bindClickIfPresent("workerLogDetailCloseBtn", () => {
+  setWorkerLogDetailModalVisible(false);
+});
+{
+  const modal = document.getElementById("workerLogDetailModal");
+  if (modal) {
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) setWorkerLogDetailModalVisible(false);
+    });
+  }
+}
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  const modal = document.getElementById("workerLogDetailModal");
+  if (modal && !modal.classList.contains("hidden")) {
+    setWorkerLogDetailModalVisible(false);
+  }
 });
 
-bindChangeIfPresent("workerLogsServiceSelect", async () => {
+bindChangeIfPresent("workerLogsCategorySelect", async () => {
   workerLogsPager.page = 1;
   await loadWorkerLogs();
 });

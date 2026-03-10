@@ -77,6 +77,15 @@
               </div>
               <div id="energyFlowCombined" class="flow-board combined-flow-board diagram-host" data-diagram="combined"></div>
               <p id="combined-loadFormulaText" class="balance-formula muted">-</p>
+              <section class="combined-debug-panel">
+                <div class="section-header">
+                  <h3 data-i18n="combinedDebugTitle">Combined Debug</h3>
+                  <span id="combinedDebugUpdatedAt" class="muted">-</span>
+                </div>
+                <p id="combinedDebugMeta" class="muted">-</p>
+                <p id="combinedCollectorMeta" class="muted">-</p>
+                <pre id="combinedDebugPre" class="raw-pre">-</pre>
+              </section>
             </section>
           </div>
         </section>
@@ -339,20 +348,14 @@
             <span id="workerLogsUpdatedAt" class="muted">-</span>
           </div>
           <div class="sampling-top-filters">
-            <label data-i18n="workerLogsSystemLabel">
-              System
-              <select id="workerLogsSystemSelect">
-                <option value="" data-i18n="workerLogsSystemAll">All</option>
-                <option value="saj">SAJ</option>
-                <option value="solplanet">Solplanet</option>
-              </select>
-            </label>
-            <label data-i18n="workerLogsServiceLabel">
-              Service
-              <select id="workerLogsServiceSelect">
-                <option value="" data-i18n="workerLogsServiceAll">All</option>
-                <option value="solplanet_cgi">Solplanet CGI</option>
-                <option value="home_assistant">Home Assistant</option>
+            <label data-i18n="workerLogsCategoryLabel">
+              Category
+              <select id="workerLogsCategorySelect">
+                <option value="all" data-i18n="workerLogsCategoryAll">All</option>
+                <option value="saj" data-i18n="workerLogsCategorySaj">SAJ</option>
+                <option value="solplanet" data-i18n="workerLogsCategorySolplanet">SoulPlanet</option>
+                <option value="combined" data-i18n="workerLogsCategoryCombined">Combined</option>
+                <option value="tesla" data-i18n="workerLogsCategoryTesla">Tesla</option>
               </select>
             </label>
           </div>
@@ -368,6 +371,7 @@
               <thead>
                 <tr>
                   <th data-i18n="workerLogsTableTime">Time (UTC)</th>
+                  <th data-i18n="workerLogsTableRound">Run ID</th>
                   <th data-i18n="workerLogsTableSystem">System</th>
                   <th data-i18n="workerLogsTableService">Service</th>
                   <th data-i18n="workerLogsTableMethod">Method</th>
@@ -400,6 +404,21 @@
         </section>
       </section>
     </main>
+
+    <div id="workerLogDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="workerLogDetailModalTitle">
+      <div class="modal-card worker-log-detail-modal-card">
+        <div class="section-header">
+          <h2 id="workerLogDetailModalTitle" data-i18n="workerLogDetailTitle">Worker Log Detail</h2>
+          <button id="workerLogDetailCloseBtn" class="btn secondary" type="button" data-i18n="closeBtn">Close</button>
+        </div>
+        <p id="workerLogDetailMeta" class="muted">-</p>
+        <div class="table-wrap">
+          <table class="worker-log-detail-table">
+            <tbody id="workerLogDetailBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
 
     <div id="configModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="configModalTitle">
       <div class="modal-card">

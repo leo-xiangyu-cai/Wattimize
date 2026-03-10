@@ -40,6 +40,7 @@ CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS = 60
 class Settings:
     ha_url: str
     ha_token: str
+    local_timezone: str
     saj_core_entity_ids: tuple[str, ...]
     solplanet_core_entity_ids: tuple[str, ...]
     solplanet_dongle_host: str
@@ -94,6 +95,7 @@ def _env_values() -> dict[str, object]:
     return {
         "ha_url": os.getenv("HA_URL", "").strip(),
         "ha_token": os.getenv("HA_TOKEN", "").strip(),
+        "local_timezone": os.getenv("WATTIMIZE_LOCAL_TIMEZONE", os.getenv("TZ", "")).strip(),
         "solplanet_dongle_host": os.getenv("SOLPLANET_DONGLE_HOST", "").strip(),
         "solplanet_inverter_sn": os.getenv("SOLPLANET_INVERTER_SN", "").strip(),
         "solplanet_battery_sn": os.getenv("SOLPLANET_BATTERY_SN", "").strip(),
@@ -106,6 +108,7 @@ def _build_settings(raw: dict[str, object]) -> Settings:
     return Settings(
         ha_url=str(raw.get("ha_url") or "").strip().rstrip("/"),
         ha_token=str(raw.get("ha_token") or "").strip(),
+        local_timezone=str(raw.get("local_timezone") or "").strip(),
         saj_core_entity_ids=DEFAULT_SAJ_ENTITY_IDS,
         solplanet_core_entity_ids=DEFAULT_SOLPLANET_ENTITY_IDS,
         solplanet_dongle_host=str(raw.get("solplanet_dongle_host") or "").strip(),
@@ -136,6 +139,7 @@ def settings_to_dict(settings: Settings) -> dict[str, object]:
     return {
         "ha_url": settings.ha_url,
         "ha_token": settings.ha_token,
+        "local_timezone": settings.local_timezone,
         "solplanet_dongle_host": settings.solplanet_dongle_host,
         "solplanet_inverter_sn": settings.solplanet_inverter_sn,
         "solplanet_battery_sn": settings.solplanet_battery_sn,

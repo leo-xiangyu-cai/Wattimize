@@ -120,6 +120,7 @@ def init_db(db_path: Path) -> None:
             CREATE TABLE IF NOT EXISTS worker_api_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 request_token TEXT,
+                round_id TEXT,
                 worker TEXT NOT NULL,
                 system TEXT,
                 service TEXT NOT NULL,
@@ -142,6 +143,8 @@ def init_db(db_path: Path) -> None:
         }
         if "request_token" not in worker_api_log_columns:
             conn.execute("ALTER TABLE worker_api_logs ADD COLUMN request_token TEXT;")
+        if "round_id" not in worker_api_log_columns:
+            conn.execute("ALTER TABLE worker_api_logs ADD COLUMN round_id TEXT;")
         if "status" not in worker_api_log_columns:
             conn.execute("ALTER TABLE worker_api_logs ADD COLUMN status TEXT;")
         conn.execute(
@@ -205,6 +208,7 @@ def insert_worker_api_log(
     db_path: Path,
     *,
     request_token: str | None = None,
+    round_id: str | None = None,
     worker: str,
     system: str | None,
     service: str,
@@ -229,6 +233,7 @@ def insert_worker_api_log(
             """
             INSERT INTO worker_api_logs (
                 request_token,
+                round_id,
                 worker,
                 system,
                 service,
@@ -242,10 +247,11 @@ def insert_worker_api_log(
                 duration_ms,
                 result_text,
                 error_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 str(request_token or "") or None,
+                str(round_id or "") or None,
                 str(worker or "worker"),
                 str(system or "") or None,
                 str(service or "unknown"),
@@ -311,6 +317,105 @@ def update_worker_api_log(
         conn.commit()
 
 
+def expire_pending_worker_api_logs(
+    db_path: Path,
+    *,
+    older_than_epoch: float,
+    status: str = "timeout",
+    error_text: str = "worker_log_timeout",
+) -> int:
+    with sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
+        conn.execute(f"PRAGMA busy_timeout={int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)};")
+        cursor = conn.execute(
+            """
+            UPDATE worker_api_logs
+            SET
+                ok = 0,
+                status = ?,
+                error_text = COALESCE(NULLIF(error_text, ''), ?)
+            WHERE status = 'pending'
+              AND requested_at_epoch < ?;
+            """,
+            (
+                str(status or "timeout"),
+                str(error_text or "worker_log_timeout"),
+                float(older_than_epoch),
+            ),
+        )
+        conn.commit()
+        return int(cursor.rowcount or 0)
+
+
+def finalize_pending_worker_api_logs_for_round(
+    db_path: Path,
+    *,
+    round_id: str,
+    services: tuple[str, ...] | None = None,
+    status: str = "timeout",
+    error_text: str = "worker_round_incomplete",
+) -> int:
+    normalized_round_id = str(round_id or "").strip()
+    if not normalized_round_id:
+        return 0
+    where_sql = """
+            WHERE round_id = ?
+              AND status = 'pending'
+    """
+    params: list[object] = [normalized_round_id]
+    normalized_services = tuple(str(service or "").strip() for service in (services or ()) if str(service or "").strip())
+    if normalized_services:
+        placeholders = ", ".join("?" for _ in normalized_services)
+        where_sql += f"\n              AND service IN ({placeholders})"
+        params.extend(normalized_services)
+    with sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
+        conn.execute(f"PRAGMA busy_timeout={int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)};")
+        cursor = conn.execute(
+            f"""
+            UPDATE worker_api_logs
+            SET
+                ok = 0,
+                status = ?,
+                error_text = COALESCE(NULLIF(error_text, ''), ?)
+            {where_sql};
+            """,
+            [str(status or "timeout"), str(error_text or "worker_round_incomplete"), *params],
+        )
+        conn.commit()
+        return int(cursor.rowcount or 0)
+
+
+def count_pending_worker_api_logs(
+    db_path: Path,
+    *,
+    round_id: str,
+    services: tuple[str, ...] | None = None,
+) -> int:
+    normalized_round_id = str(round_id or "").strip()
+    if not normalized_round_id:
+        return 0
+    where_sql = """
+        WHERE round_id = ?
+          AND status = 'pending'
+    """
+    params: list[object] = [normalized_round_id]
+    normalized_services = tuple(str(service or "").strip() for service in (services or ()) if str(service or "").strip())
+    if normalized_services:
+        placeholders = ", ".join("?" for _ in normalized_services)
+        where_sql += f"\n          AND service IN ({placeholders})"
+        params.extend(normalized_services)
+    with sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
+        conn.execute(f"PRAGMA busy_timeout={int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)};")
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM worker_api_logs
+            {where_sql};
+            """,
+            params,
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+
 def list_worker_api_logs(
     db_path: Path,
     *,
@@ -366,6 +471,7 @@ def list_worker_api_logs(
                 SELECT
                     id,
                     request_token,
+                    round_id,
                     worker,
                     system,
                     service,
@@ -393,18 +499,19 @@ def list_worker_api_logs(
         {
             "id": int(row[0]),
             "request_token": str(row[1] or ""),
-            "worker": str(row[2]),
-            "system": str(row[3] or ""),
-            "service": str(row[4]),
-            "method": str(row[5]),
-            "api_link": str(row[6]),
-            "requested_at_utc": row[7],
-            "ok": bool(row[8]),
-            "status": str(row[9] or ""),
-            "status_code": row[10],
-            "duration_ms": row[11],
-            "result_text": str(row[12] or ""),
-            "error_text": str(row[13] or ""),
+            "round_id": str(row[2] or ""),
+            "worker": str(row[3]),
+            "system": str(row[4] or ""),
+            "service": str(row[5]),
+            "method": str(row[6]),
+            "api_link": str(row[7]),
+            "requested_at_utc": row[8],
+            "ok": bool(row[9]),
+            "status": str(row[10] or ""),
+            "status_code": row[11],
+            "duration_ms": row[12],
+            "result_text": str(row[13] or ""),
+            "error_text": str(row[14] or ""),
         }
         for row in rows
     ]

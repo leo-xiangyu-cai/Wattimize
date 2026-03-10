@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -13,6 +14,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from time import monotonic
 from typing import Callable, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
@@ -39,9 +41,12 @@ from app.home_assistant import HomeAssistantClient
 from app.persistence import (
     DEFAULT_DB_PATH,
     EnergySample,
+    count_pending_worker_api_logs,
     compute_daily_usage,
     compute_usage_between,
+    expire_pending_worker_api_logs,
     export_samples_csv,
+    finalize_pending_worker_api_logs_for_round,
     get_latest_raw_request_result,
     get_realtime_kv_by_prefix,
     get_latest_sample,
@@ -74,6 +79,16 @@ SYSTEM_PREFIXES: dict[str, tuple[str, ...]] = {
     "solplanet": ("solplanet", "soulplanet"),
 }
 BALANCE_TOLERANCE_W = 120.0
+TESLA_ASSUMED_CHARGING_VOLTAGE_V = 240.0
+TESLA_GRID_SUPPORT_WINDOW_START_HOUR = 11
+TESLA_GRID_SUPPORT_WINDOW_END_HOUR = 14
+TESLA_GRID_SUPPORT_TARGET_MIN_W = 14_000.0
+TESLA_GRID_SUPPORT_TARGET_MAX_W = 15_000.0
+TESLA_GRID_SUPPORT_HARD_MAX_W = 15_500.0
+TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A: tuple[int, ...] = (10, 15)
+WORKER_PENDING_LOG_TIMEOUT_SECONDS = 60.0
+TESLA_OBSERVATION_SERVICE = "tesla_home_assistant_collection"
+MIDDAY_WINDOW_CHECK_SERVICE = "worker_midday_window_check"
 
 app = FastAPI(title="Wattimize API", version="0.1.0")
 static_dir = Path(__file__).parent / "static"
@@ -94,9 +109,10 @@ worker_failure_log_path = Path(
 request_actor_ctx: ContextVar[str] = ContextVar("request_actor_ctx", default="api")
 request_system_ctx: ContextVar[str | None] = ContextVar("request_system_ctx", default=None)
 request_round_ctx: ContextVar[str | None] = ContextVar("request_round_ctx", default=None)
+request_round_started_at_ctx: ContextVar[str | None] = ContextVar("request_round_started_at_ctx", default=None)
 sample_interval_seconds = float(settings.saj_sample_interval_seconds)
 solplanet_sample_interval_seconds = float(settings.solplanet_sample_interval_seconds)
-COLLECTOR_ROUND_SLEEP_SECONDS = 0.1
+COLLECTOR_ROUND_SLEEP_SECONDS = 10.0
 ENDPOINT_BACKOFF_MAX_SKIP_ROUNDS = 8
 SOLPLANET_ENDPOINTS: tuple[str, ...] = (
     "getdevdata_device_2",
@@ -254,18 +270,114 @@ def _read_worker_failure_log(*, limit: int = 100, before: int = 0) -> dict[str, 
     }
 
 
+def _worker_log_request_token(round_id: str | None, service: str, method: str, api_link: str) -> str:
+    normalized_round_id = str(round_id or "").strip()
+    if not normalized_round_id:
+        return ""
+    raw = f"{normalized_round_id}|{str(service or '').strip().lower()}|{str(method or 'GET').upper()}|{str(api_link or '').strip()}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _worker_round_log_plan(round_number: int, round_id: str, requested_at_utc: str) -> list[dict[str, object]]:
+    plan: list[dict[str, object]] = []
+
+    saj_url = f"{settings.ha_url}/api/states" if settings.ha_url else ""
+    saj_endpoint = "home_assistant_all_states"
+    saj_status = "pending" if _endpoint_is_eligible("saj", saj_endpoint, round_number) else "skipped"
+    plan.append(
+        {
+            "request_token": _worker_log_request_token(round_id, "home_assistant", "GET", saj_url),
+            "round_id": round_id,
+            "worker": "worker",
+            "system": "saj",
+            "service": "home_assistant",
+            "method": "GET",
+            "api_link": saj_url,
+            "requested_at_utc": requested_at_utc,
+            "ok": False,
+            "status": saj_status,
+            "status_code": None,
+            "duration_ms": None,
+            "result_text": None,
+            "error_text": "endpoint_backoff" if saj_status == "skipped" else None,
+        }
+    )
+
+    solplanet_paths = {
+        "getdevdata_device_2": f"getdevdata.cgi?device=2&sn={settings.solplanet_inverter_sn}",
+        "getdevdata_device_3": "getdevdata.cgi?device=3",
+        "getdevdata_device_4": f"getdevdata.cgi?device=4&sn={settings.solplanet_battery_sn}",
+    }
+    for endpoint in SOLPLANET_ENDPOINTS:
+        path = solplanet_paths.get(endpoint, endpoint)
+        api_link = (
+            f"{settings.solplanet_dongle_scheme}://{settings.solplanet_dongle_host}:{settings.solplanet_dongle_port}/{path}"
+            if settings.solplanet_dongle_host
+            else path
+        )
+        endpoint_status = "pending" if _endpoint_is_eligible("solplanet", endpoint, round_number) else "skipped"
+        plan.append(
+            {
+                "request_token": _worker_log_request_token(round_id, "solplanet_cgi", "GET", api_link),
+                "round_id": round_id,
+                "worker": "worker",
+                "system": "solplanet",
+                "service": "solplanet_cgi",
+                "method": "GET",
+                "api_link": api_link,
+                "requested_at_utc": requested_at_utc,
+                "ok": False,
+                "status": endpoint_status,
+                "status_code": None,
+                "duration_ms": None,
+                "result_text": None,
+                "error_text": "endpoint_backoff" if endpoint_status == "skipped" else None,
+            }
+        )
+
+    for service in ("combined_assembly", TESLA_OBSERVATION_SERVICE, MIDDAY_WINDOW_CHECK_SERVICE):
+        api_link = f"worker://combined/{service}"
+        plan.append(
+            {
+                "request_token": _worker_log_request_token(round_id, service, "AUTO", api_link),
+                "round_id": round_id,
+                "worker": "worker",
+                "system": "combined",
+                "service": service,
+                "method": "AUTO",
+                "api_link": api_link,
+                "requested_at_utc": requested_at_utc,
+                "ok": False,
+                "status": "pending",
+                "status_code": None,
+                "duration_ms": None,
+                "result_text": None,
+                "error_text": None,
+            }
+        )
+
+    return plan
+
+
+async def _insert_worker_round_log_plan(round_number: int, round_id: str, requested_at_utc: str) -> None:
+    plan = _worker_round_log_plan(round_number, round_id, requested_at_utc)
+    for item in plan:
+        await asyncio.to_thread(insert_worker_api_log, storage_db_path, **item)
+
+
 def _handle_outbound_request_log(event: dict[str, object]) -> None:
     if request_actor_ctx.get() != "worker":
         return
-    requested_at = str(event.get("requested_at_utc") or datetime.now(UTC).isoformat())
+    actual_requested_at = str(event.get("requested_at_utc") or datetime.now(UTC).isoformat())
     phase = str(event.get("phase") or "finish").strip().lower()
-    request_token = str(event.get("request_token") or "").strip()
     worker = request_actor_ctx.get() or "worker"
     system = request_system_ctx.get()
     round_id = str(request_round_ctx.get() or "").strip()
+    round_started_at = str(request_round_started_at_ctx.get() or "").strip()
     service = str(event.get("service") or "unknown")
     method = str(event.get("method") or "GET").upper()
     api_link = str(event.get("url") or "")
+    request_token = _worker_log_request_token(round_id, service, method, api_link) if round_id else str(event.get("request_token") or "").strip()
     ok = bool(event.get("ok"))
     status_code_value = event.get("status_code")
     status_code = int(status_code_value) if isinstance(status_code_value, (int, float)) else None
@@ -276,26 +388,10 @@ def _handle_outbound_request_log(event: dict[str, object]) -> None:
     response_json = event.get("response_json")
     endpoint = _endpoint_name_from_event(service=service, method=method, url=api_link)
     parsed_url = urlparse(api_link)
-    log_before_request = parsed_url.hostname == settings.solplanet_dongle_host
+    worker_requested_at = round_started_at or actual_requested_at
 
     try:
-        if phase == "start" and log_before_request:
-            insert_worker_api_log(
-                storage_db_path,
-                request_token=request_token or None,
-                worker=worker,
-                system=system,
-                service=service,
-                method=method,
-                api_link=api_link,
-                requested_at_utc=requested_at,
-                ok=False,
-                status="pending",
-                status_code=None,
-                duration_ms=None,
-                result_text=None,
-                error_text=None,
-            )
+        if phase == "start":
             return
         if round_id:
             insert_raw_request_result(
@@ -306,7 +402,7 @@ def _handle_outbound_request_log(event: dict[str, object]) -> None:
                 endpoint=endpoint,
                 method=method,
                 request_url=api_link,
-                requested_at_utc=requested_at,
+                requested_at_utc=actual_requested_at,
                 duration_ms=duration_ms,
                 ok=ok,
                 status_code=status_code,
@@ -314,7 +410,7 @@ def _handle_outbound_request_log(event: dict[str, object]) -> None:
                 response_text=result_text or None,
                 response_json=response_json,
             )
-        if request_token and log_before_request:
+        if request_token:
             update_worker_api_log(
                 storage_db_path,
                 request_token=request_token,
@@ -329,12 +425,13 @@ def _handle_outbound_request_log(event: dict[str, object]) -> None:
             insert_worker_api_log(
                 storage_db_path,
                 request_token=request_token or None,
+                round_id=round_id or None,
                 worker=worker,
                 system=system,
                 service=service,
                 method=method,
                 api_link=api_link,
-                requested_at_utc=requested_at,
+                requested_at_utc=worker_requested_at,
                 ok=ok,
                 status="ok" if ok else "failed",
                 status_code=status_code,
@@ -435,6 +532,79 @@ def _review_round_results(results: dict[str, dict[str, object]]) -> dict[str, ob
             "skipped": skipped,
         }
     return review
+
+
+def _compact_round_result_for_status(payload: dict[str, object]) -> dict[str, object]:
+    flow = payload.get("flow")
+    flow_map = flow if isinstance(flow, dict) else {}
+    return {
+        "stored_sample": bool(payload.get("stored_sample")),
+        "reason": payload.get("reason"),
+        "error": payload.get("error"),
+        "missing_metrics": payload.get("missing_metrics"),
+        "source_details": payload.get("source_details"),
+        "attempted": [str(name) for name in payload.get("attempted", []) if name],
+        "succeeded": [str(name) for name in payload.get("succeeded", []) if name],
+        "failed": [str(name) for name in payload.get("failed", []) if name],
+        "skipped": [str(name) for name in payload.get("skipped", []) if name],
+        "flow_updated_at": flow_map.get("updated_at") if isinstance(flow_map, dict) else None,
+    }
+
+
+def _combined_assembly_log_payload(
+    *,
+    round_number: int,
+    round_id: str,
+    saj_result: dict[str, object],
+    solplanet_result: dict[str, object],
+    combined_result: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "round_number": round_number,
+        "round_id": round_id,
+        "saj": _compact_round_result_for_status(saj_result),
+        "solplanet": _compact_round_result_for_status(solplanet_result),
+        "combined": _compact_round_result_for_status(combined_result),
+    }
+
+
+async def _resolve_combined_source_flow(
+    system: str,
+    round_result: dict[str, object],
+) -> tuple[dict[str, object] | None, dict[str, object]]:
+    flow = round_result.get("flow")
+    if bool(round_result.get("stored_sample")) and isinstance(flow, dict):
+        return flow, {
+            "system": system,
+            "origin": "current_round",
+            "available": True,
+            "reason": "current_round_sample",
+            "updated_at": flow.get("updated_at"),
+            "stored_sample": True,
+        }
+
+    try:
+        cached_flow = await _get_energy_flow_from_realtime_kv(system)
+    except Exception as exc:  # noqa: BLE001
+        return None, {
+            "system": system,
+            "origin": "unavailable",
+            "available": False,
+            "reason": str(round_result.get("reason") or round_result.get("error") or "cache_unavailable"),
+            "cache_error": f"{type(exc).__name__}: {exc}",
+            "stored_sample": bool(round_result.get("stored_sample")),
+        }
+
+    return cached_flow, {
+        "system": system,
+        "origin": "cached_latest",
+        "available": isinstance(cached_flow, dict),
+        "reason": str(round_result.get("reason") or "used_cached_latest"),
+        "updated_at": cached_flow.get("updated_at") if isinstance(cached_flow, dict) else None,
+        "stale": bool(cached_flow.get("stale")) if isinstance(cached_flow, dict) else None,
+        "stale_reason": cached_flow.get("stale_reason") if isinstance(cached_flow, dict) else None,
+        "stored_sample": bool(round_result.get("stored_sample")),
+    }
 
 
 REQUIRED_FLOW_METRICS: dict[str, tuple[str, ...]] = {
@@ -809,6 +979,34 @@ def _pick_tesla_charge_button(states: list[dict[str, object]], action: Literal["
     return _pick_best_state(states, _score)
 
 
+def _pick_tesla_charge_cable_entity(states: list[dict[str, object]]) -> dict[str, object] | None:
+    def _score(state: dict[str, object]) -> int:
+        entity_id = str(state.get("entity_id", ""))
+        domain, _ = _split_entity_id(entity_id)
+        if domain not in ("binary_sensor", "sensor"):
+            return 0
+        haystack = _tesla_haystack(state)
+        if "tesla" not in haystack:
+            return 0
+        score = 0
+        if "charge cable" in haystack:
+            score += 220
+        if "charge_cable" in haystack:
+            score += 210
+        if "charger cable" in haystack:
+            score += 180
+        if "cable" in haystack:
+            score += 120
+        if "charge" in haystack:
+            score += 60
+        state_text = str(state.get("state", "")).strip().lower()
+        if state_text in ("on", "off", "connected", "disconnected"):
+            score += 20
+        return max(score, 0)
+
+    return _pick_best_state(states, _score)
+
+
 def _pick_tesla_charge_status_entity(states: list[dict[str, object]]) -> dict[str, object] | None:
     def _score(state: dict[str, object]) -> int:
         entity_id = str(state.get("entity_id", ""))
@@ -821,15 +1019,21 @@ def _pick_tesla_charge_status_entity(states: list[dict[str, object]]) -> dict[st
         if any(term in haystack for term in ("power", "current", "voltage", "energy")):
             return 0
         score = 0
+        if domain == "sensor":
+            score += 50
         if "charging" in haystack:
             score += 150
         if "charger" in haystack:
             score += 120
         if "charge" in haystack:
             score += 60
+        if any(term in haystack for term in ("scheduled", "pending", "trip")):
+            score -= 260
         state_text = str(state.get("state", "")).lower()
-        if state_text in ("on", "off", "charging", "stopped", "complete", "disconnected", "idle"):
-            score += 30
+        if state_text in ("charging", "stopped", "complete", "disconnected", "idle", "starting", "no_power"):
+            score += 80
+        elif state_text in ("on", "off"):
+            score += 15
         return max(score, 0)
 
     return _pick_best_state(states, _score)
@@ -861,6 +1065,124 @@ def _pick_tesla_charge_power_entity(states: list[dict[str, object]]) -> dict[str
     return _pick_best_state(states, _score)
 
 
+def _pick_tesla_charge_current_number_entity(states: list[dict[str, object]]) -> dict[str, object] | None:
+    def _score(state: dict[str, object]) -> int:
+        entity_id = str(state.get("entity_id", ""))
+        domain, _ = _split_entity_id(entity_id)
+        if domain != "number":
+            return 0
+        haystack = _tesla_haystack(state)
+        if "tesla" not in haystack:
+            return 0
+        score = 0
+        if "charge_current" in haystack:
+            score += 180
+        if "charge current" in haystack:
+            score += 170
+        if "charger_current" in haystack:
+            score += 160
+        if "charger current" in haystack:
+            score += 150
+        if "current" in haystack:
+            score += 80
+        unit = str(state.get("attributes", {}).get("unit_of_measurement") or "").lower()  # type: ignore[union-attr]
+        if unit == "a":
+            score += 40
+        if "limit" in haystack:
+            score -= 80
+        return max(score, 0)
+
+    return _pick_best_state(states, _score)
+
+
+def _pick_tesla_charge_current_sensor_entity(states: list[dict[str, object]]) -> dict[str, object] | None:
+    def _score(state: dict[str, object]) -> int:
+        entity_id = str(state.get("entity_id", ""))
+        domain, _ = _split_entity_id(entity_id)
+        if domain != "sensor":
+            return 0
+        haystack = _tesla_haystack(state)
+        if "tesla" not in haystack:
+            return 0
+        score = 0
+        if "charger_current" in haystack:
+            score += 180
+        if "charger current" in haystack:
+            score += 170
+        if "charge_current" in haystack:
+            score += 160
+        if "charge current" in haystack:
+            score += 150
+        if "current" in haystack:
+            score += 80
+        unit = str(state.get("attributes", {}).get("unit_of_measurement") or "").lower()  # type: ignore[union-attr]
+        if unit == "a":
+            score += 40
+        return max(score, 0)
+
+    return _pick_best_state(states, _score)
+
+
+def _pick_tesla_charge_voltage_entity(states: list[dict[str, object]]) -> dict[str, object] | None:
+    def _score(state: dict[str, object]) -> int:
+        entity_id = str(state.get("entity_id", ""))
+        domain, _ = _split_entity_id(entity_id)
+        if domain != "sensor":
+            return 0
+        haystack = _tesla_haystack(state)
+        if "tesla" not in haystack:
+            return 0
+        score = 0
+        if "charger_voltage" in haystack:
+            score += 180
+        if "charger voltage" in haystack:
+            score += 170
+        if "charge_voltage" in haystack:
+            score += 160
+        if "charge voltage" in haystack:
+            score += 150
+        if "voltage" in haystack:
+            score += 80
+        unit = str(state.get("attributes", {}).get("unit_of_measurement") or "").lower()  # type: ignore[union-attr]
+        if unit == "v":
+            score += 40
+        return max(score, 0)
+
+    return _pick_best_state(states, _score)
+
+
+def _pick_tesla_battery_level_entity(states: list[dict[str, object]]) -> dict[str, object] | None:
+    def _score(state: dict[str, object]) -> int:
+        entity_id = str(state.get("entity_id", ""))
+        domain, _ = _split_entity_id(entity_id)
+        if domain != "sensor":
+            return 0
+        haystack = _tesla_haystack(state)
+        if "tesla" not in haystack:
+            return 0
+        if any(term in haystack for term in ("charger", "charge current", "charge_current", "power", "voltage")):
+            return 0
+        score = 0
+        if "battery_level" in haystack:
+            score += 220
+        if "battery level" in haystack:
+            score += 210
+        if "battery" in haystack and "level" in haystack:
+            score += 180
+        if "usable_battery_level" in haystack:
+            score += 170
+        if "usable battery level" in haystack:
+            score += 160
+        if "soc" in haystack:
+            score += 90
+        unit = str(state.get("attributes", {}).get("unit_of_measurement") or "").lower()  # type: ignore[union-attr]
+        if unit == "%":
+            score += 50
+        return max(score, 0)
+
+    return _pick_best_state(states, _score)
+
+
 def _tesla_charge_enabled_from_status(state: dict[str, object] | None) -> bool | None:
     if not isinstance(state, dict):
         return None
@@ -876,20 +1198,36 @@ def _build_tesla_control_state(states: list[dict[str, object]]) -> dict[str, obj
     switch_state = _pick_tesla_charge_switch(states)
     start_button_state = _pick_tesla_charge_button(states, "start")
     stop_button_state = _pick_tesla_charge_button(states, "stop")
+    charge_cable_state = _pick_tesla_charge_cable_entity(states)
     status_state = _pick_tesla_charge_status_entity(states)
     power_state = _pick_tesla_charge_power_entity(states)
+    charge_current_number_state = _pick_tesla_charge_current_number_entity(states)
+    charge_current_sensor_state = _pick_tesla_charge_current_sensor_entity(states)
+    charge_voltage_state = _pick_tesla_charge_voltage_entity(states)
     power_value = _power_to_watts(
         _to_number(power_state.get("state")) if isinstance(power_state, dict) else None,
         power_state.get("attributes", {}).get("unit_of_measurement") if isinstance(power_state, dict) else None,  # type: ignore[union-attr]
     )
 
-    enabled = None
-    if isinstance(switch_state, dict):
-        enabled = str(switch_state.get("state", "")).lower() == "on"
-    if enabled is None:
-        enabled = _tesla_charge_enabled_from_status(status_state)
-    if enabled is None and power_value is not None:
-        enabled = power_value >= POWER_FLOW_ACTIVE_THRESHOLD_W
+    requested_enabled = str(switch_state.get("state", "")).lower() == "on" if isinstance(switch_state, dict) else None
+    status_enabled = _tesla_charge_enabled_from_status(status_state)
+    current_value = _to_number(charge_current_sensor_state.get("state")) if isinstance(charge_current_sensor_state, dict) else None
+    if current_value is None:
+        current_value = _to_number(charge_current_number_state.get("state")) if isinstance(charge_current_number_state, dict) else None
+    actively_charging = None
+    if status_enabled is not None:
+        actively_charging = status_enabled
+    elif power_value is not None:
+        actively_charging = power_value >= POWER_FLOW_ACTIVE_THRESHOLD_W
+    elif current_value is not None:
+        actively_charging = current_value >= 1.0
+
+    current_number_attrs = (
+        charge_current_number_state.get("attributes")
+        if isinstance(charge_current_number_state, dict)
+        else None
+    )
+    current_number_attrs_map = current_number_attrs if isinstance(current_number_attrs, dict) else {}
 
     control_mode = "unavailable"
     if isinstance(switch_state, dict):
@@ -900,14 +1238,84 @@ def _build_tesla_control_state(states: list[dict[str, object]]) -> dict[str, obj
     return {
         "available": control_mode != "unavailable",
         "control_mode": control_mode,
-        "charging_enabled": enabled,
+        "charging_enabled": actively_charging,
+        "charge_requested_enabled": requested_enabled,
         "can_start": isinstance(switch_state, dict) or isinstance(start_button_state, dict),
         "can_stop": isinstance(switch_state, dict) or isinstance(stop_button_state, dict),
         "switch_entity": _compact_raw_ha_state(switch_state),
         "start_button_entity": _compact_raw_ha_state(start_button_state),
         "stop_button_entity": _compact_raw_ha_state(stop_button_state),
+        "charge_cable_entity": _compact_raw_ha_state(charge_cable_state),
         "status_entity": _compact_raw_ha_state(status_state),
         "power_entity": _compact_raw_ha_state(power_state),
+        "charge_current_number_entity": _compact_raw_ha_state(charge_current_number_state),
+        "charge_current_number_min": _to_number(current_number_attrs_map.get("min")),
+        "charge_current_number_max": _to_number(current_number_attrs_map.get("max")),
+        "charge_current_number_step": _to_number(current_number_attrs_map.get("step")),
+        "charge_current_sensor_entity": _compact_raw_ha_state(charge_current_sensor_state),
+        "charge_voltage_entity": _compact_raw_ha_state(charge_voltage_state),
+    }
+
+
+def _build_tesla_observation_payload(states: list[dict[str, object]]) -> dict[str, object]:
+    control_state = _build_tesla_control_state(states)
+    battery_level_state = _pick_tesla_battery_level_entity(states)
+    charge_current_sensor = control_state.get("charge_current_sensor_entity")
+    charge_current_number = control_state.get("charge_current_number_entity")
+    charge_voltage_entity = control_state.get("charge_voltage_entity")
+    current_a = _to_number((charge_current_sensor or {}).get("state")) if isinstance(charge_current_sensor, dict) else None
+    if current_a is None:
+        current_a = _to_number((charge_current_number or {}).get("state")) if isinstance(charge_current_number, dict) else None
+    voltage_v = _to_number((charge_voltage_entity or {}).get("state")) if isinstance(charge_voltage_entity, dict) else None
+    charge_power_w = _tesla_control_state_charge_power_w(control_state)
+    status_entity = control_state.get("status_entity")
+    status_text = str((status_entity or {}).get("state") or "").strip().lower()
+    charging_enabled = control_state.get("charging_enabled")
+    requested_enabled = control_state.get("charge_requested_enabled")
+    charge_cable_entity = control_state.get("charge_cable_entity")
+    charge_cable_state = str((charge_cable_entity or {}).get("state") or "").strip().lower()
+    cable_connected = charge_cable_state in ("on", "connected", "plugged", "true")
+    battery_level_percent = _to_number((battery_level_state or {}).get("state")) if isinstance(battery_level_state, dict) else None
+
+    connection_state = "unplugged"
+    if cable_connected and charging_enabled:
+        connection_state = "charging"
+    elif cable_connected:
+        connection_state = "plugged_not_charging"
+
+    observed_entities = {
+        "battery_level_entity": _compact_raw_ha_state(battery_level_state),
+        "charge_cable_entity": charge_cable_entity,
+        "status_entity": control_state.get("status_entity"),
+        "charge_current_sensor_entity": charge_current_sensor,
+        "charge_current_number_entity": charge_current_number,
+        "charge_voltage_entity": charge_voltage_entity,
+        "power_entity": control_state.get("power_entity"),
+    }
+    observed_count = sum(1 for item in observed_entities.values() if isinstance(item, dict) and item.get("entity_id"))
+
+    return {
+        "battery": {
+            "level_percent": battery_level_percent,
+            "entity": observed_entities["battery_level_entity"],
+        },
+        "charging": {
+            "enabled": charging_enabled,
+            "requested_enabled": requested_enabled,
+            "cable_connected": cable_connected,
+            "connection_state": connection_state,
+            "status_text": status_text or None,
+            "current_amps": current_a,
+            "configured_current_amps": _to_number((charge_current_number or {}).get("state")) if isinstance(charge_current_number, dict) else None,
+            "min_current_amps": _to_number(control_state.get("charge_current_number_min")),
+            "max_current_amps": _to_number(control_state.get("charge_current_number_max")),
+            "current_step_amps": _to_number(control_state.get("charge_current_number_step")),
+            "voltage_v": voltage_v,
+            "power_w": round(charge_power_w, 1),
+        },
+        "control_mode": control_state.get("control_mode"),
+        "observed_entity_count": observed_count,
+        "entities": observed_entities,
     }
 
 
@@ -947,6 +1355,430 @@ async def _tesla_set_charging(enabled: bool) -> dict[str, object]:
         "requested_enabled": enabled,
         "control_state": refreshed_control_state,
     }
+
+
+async def _tesla_restart_charging() -> dict[str, object]:
+    states = await _tesla_control_states()
+    control_state = _build_tesla_control_state(states)
+    switch_entity = control_state.get("switch_entity")
+    entity_id = str((switch_entity or {}).get("entity_id") or "")
+    control_mode = str(control_state.get("control_mode") or "unavailable")
+    if control_mode != "switch" or not entity_id:
+        return await _tesla_set_charging(True)
+    await ha_client.call_service("switch", "turn_off", {"entity_id": entity_id})
+    await asyncio.sleep(1.0)
+    await ha_client.call_service("switch", "turn_on", {"entity_id": entity_id})
+    refreshed_states = await _tesla_control_states()
+    refreshed_control_state = _build_tesla_control_state(refreshed_states)
+    return {
+        "ok": True,
+        "requested_enabled": True,
+        "restart": True,
+        "control_state": refreshed_control_state,
+    }
+
+
+async def _tesla_set_charge_current(amps: int) -> dict[str, object]:
+    states = await _tesla_control_states()
+    control_state = _build_tesla_control_state(states)
+    current_entity = control_state.get("charge_current_number_entity")
+    entity_id = str((current_entity or {}).get("entity_id") or "")
+    if not entity_id:
+        raise HTTPException(status_code=400, detail="Tesla charge current number entity unavailable")
+    await ha_client.call_service("number", "set_value", {"entity_id": entity_id, "value": int(amps)})
+    refreshed_states = await _tesla_control_states()
+    refreshed_control_state = _build_tesla_control_state(refreshed_states)
+    return {
+        "ok": True,
+        "requested_charge_current_amps": int(amps),
+        "control_state": refreshed_control_state,
+    }
+
+
+def _tesla_control_state_charge_power_w(control_state: dict[str, object]) -> float:
+    power_entity = control_state.get("power_entity")
+    power_w = _power_to_watts(
+        _to_number(power_entity.get("state")) if isinstance(power_entity, dict) else None,
+        (
+            power_entity.get("unit")
+            if isinstance(power_entity, dict)
+            else None
+        )
+        or (
+            power_entity.get("attributes", {}).get("unit_of_measurement")
+            if isinstance(power_entity, dict)
+            else None
+        ),  # type: ignore[union-attr]
+    )
+    if power_w is not None and power_w >= 0:
+        return power_w
+
+    current_entity = control_state.get("charge_current_sensor_entity")
+    current_a = _to_number(current_entity.get("state")) if isinstance(current_entity, dict) else None
+    voltage_entity = control_state.get("charge_voltage_entity")
+    voltage_v = _to_number(voltage_entity.get("state")) if isinstance(voltage_entity, dict) else None
+    if current_a is None:
+        current_number_entity = control_state.get("charge_current_number_entity")
+        current_a = _to_number(current_number_entity.get("state")) if isinstance(current_number_entity, dict) else None
+    if current_a is None or current_a <= 0:
+        return 0.0
+    if voltage_v is None or voltage_v < 100:
+        voltage_v = TESLA_ASSUMED_CHARGING_VOLTAGE_V
+    return max(current_a * voltage_v, 0.0)
+
+
+def _is_within_tesla_grid_support_window(now_local: datetime) -> bool:
+    hour = now_local.hour
+    return TESLA_GRID_SUPPORT_WINDOW_START_HOUR <= hour < TESLA_GRID_SUPPORT_WINDOW_END_HOUR
+
+
+def _tesla_grid_support_now_local() -> tuple[datetime, str]:
+    configured_timezone = str(getattr(settings, "local_timezone", "") or "").strip()
+    if configured_timezone:
+        try:
+            zone = ZoneInfo(configured_timezone)
+            return datetime.now(zone), configured_timezone
+        except ZoneInfoNotFoundError:
+            logger.warning("Invalid local timezone configured for Tesla grid support: %s", configured_timezone)
+    fallback = datetime.now().astimezone()
+    tz_name = getattr(fallback.tzinfo, "key", None) or fallback.tzname() or "system_local"
+    return fallback, str(tz_name)
+
+
+def _choose_tesla_grid_support_target(base_grid_w: float) -> dict[str, object]:
+    candidates: list[dict[str, object]] = [
+        {"mode": "off", "charge_current_amps": 0, "tesla_power_w": 0.0, "predicted_grid_w": base_grid_w},
+        *[
+            {
+                "mode": "charge",
+                "charge_current_amps": amps,
+                "tesla_power_w": float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V,
+                "predicted_grid_w": base_grid_w + (float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V),
+            }
+            for amps in TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
+        ],
+    ]
+    valid_candidates = [
+        candidate
+        for candidate in candidates
+        if float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_HARD_MAX_W
+    ]
+    if not valid_candidates:
+        return candidates[0]
+
+    in_band = [
+        candidate
+        for candidate in valid_candidates
+        if TESLA_GRID_SUPPORT_TARGET_MIN_W <= float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_TARGET_MAX_W
+    ]
+    if in_band:
+        return max(in_band, key=lambda candidate: float(candidate["predicted_grid_w"]))
+
+    below_band = [
+        candidate
+        for candidate in valid_candidates
+        if float(candidate["predicted_grid_w"]) < TESLA_GRID_SUPPORT_TARGET_MIN_W
+    ]
+    if below_band:
+        return max(below_band, key=lambda candidate: float(candidate["predicted_grid_w"]))
+
+    return min(valid_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
+
+
+def _choose_tesla_grid_support_target_from_options(
+    base_grid_w: float,
+    charge_current_options_a: tuple[int, ...],
+) -> dict[str, object]:
+    candidates: list[dict[str, object]] = [
+        {"mode": "off", "charge_current_amps": 0, "tesla_power_w": 0.0, "predicted_grid_w": base_grid_w},
+        *[
+            {
+                "mode": "charge",
+                "charge_current_amps": int(amps),
+                "tesla_power_w": float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V,
+                "predicted_grid_w": base_grid_w + (float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V),
+            }
+            for amps in charge_current_options_a
+        ],
+    ]
+    valid_candidates = [
+        candidate
+        for candidate in candidates
+        if float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_HARD_MAX_W
+    ]
+    if not valid_candidates:
+        return candidates[0]
+
+    in_band = [
+        candidate
+        for candidate in valid_candidates
+        if TESLA_GRID_SUPPORT_TARGET_MIN_W <= float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_TARGET_MAX_W
+    ]
+    if in_band:
+        return max(in_band, key=lambda candidate: float(candidate["predicted_grid_w"]))
+
+    below_band = [
+        candidate
+        for candidate in valid_candidates
+        if float(candidate["predicted_grid_w"]) < TESLA_GRID_SUPPORT_TARGET_MIN_W
+    ]
+    if below_band:
+        return max(below_band, key=lambda candidate: float(candidate["predicted_grid_w"]))
+
+    return min(valid_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
+
+
+def _tesla_observation_charge_state(observation: dict[str, object]) -> dict[str, object]:
+    charging = observation.get("charging")
+    charging_map = charging if isinstance(charging, dict) else {}
+    return {
+        "enabled": charging_map.get("enabled"),
+        "requested_enabled": charging_map.get("requested_enabled"),
+        "cable_connected": charging_map.get("cable_connected"),
+        "connection_state": charging_map.get("connection_state"),
+        "status_text": charging_map.get("status_text"),
+        "current_amps": _to_number(charging_map.get("current_amps")),
+        "configured_current_amps": _to_number(charging_map.get("configured_current_amps")),
+        "min_current_amps": _to_number(charging_map.get("min_current_amps")),
+        "max_current_amps": _to_number(charging_map.get("max_current_amps")),
+        "current_step_amps": _to_number(charging_map.get("current_step_amps")),
+        "voltage_v": _to_number(charging_map.get("voltage_v")),
+        "power_w": _to_number(charging_map.get("power_w")) or 0.0,
+    }
+
+
+def _tesla_available_charge_current_options(charge_state: dict[str, object]) -> tuple[int, ...]:
+    min_a = _to_number(charge_state.get("min_current_amps"))
+    max_a = _to_number(charge_state.get("max_current_amps"))
+    step_a = _to_number(charge_state.get("current_step_amps"))
+    if min_a is None or max_a is None:
+        return TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
+    min_i = int(round(min_a))
+    max_i = int(round(max_a))
+    if min_i <= 0 or max_i < min_i:
+        return TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
+    step_i = int(round(step_a or 1))
+    step_i = max(step_i, 1)
+    values = tuple(range(min_i, max_i + 1, step_i))
+    return values or TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
+
+
+async def _run_midday_window_check(
+    combined_flow: dict[str, object] | None,
+    tesla_observation_result: dict[str, object] | None,
+    *,
+    round_id: str | None = None,
+    requested_at_utc: str | None = None,
+) -> dict[str, object]:
+    requested_at_utc = str(requested_at_utc or "").strip() or datetime.now(UTC).isoformat()
+    started_monotonic = monotonic()
+    now_local, timezone_name = _tesla_grid_support_now_local()
+    result: dict[str, object] = {
+        "executed_at_utc": datetime.now(UTC).isoformat(),
+        "evaluated_at_local": now_local.isoformat(),
+        "timezone": timezone_name,
+        "window_active": _is_within_tesla_grid_support_window(now_local),
+        "target_grid_min_w": TESLA_GRID_SUPPORT_TARGET_MIN_W,
+        "target_grid_max_w": TESLA_GRID_SUPPORT_TARGET_MAX_W,
+        "hard_grid_max_w": TESLA_GRID_SUPPORT_HARD_MAX_W,
+        "assumed_voltage_v": TESLA_ASSUMED_CHARGING_VOLTAGE_V,
+    }
+    status = "ok"
+    ok = True
+    error_text: str | None = None
+    try:
+        observation = (
+            tesla_observation_result.get("observation")
+            if isinstance(tesla_observation_result, dict)
+            else None
+        )
+        observation_map = observation if isinstance(observation, dict) else {}
+        observed_entity_count = int(observation_map.get("observed_entity_count") or 0)
+        if observed_entity_count <= 0:
+            result["skipped"] = "tesla_observation_unavailable"
+            status = "skipped"
+            return result
+
+        charge_state = _tesla_observation_charge_state(observation_map)
+        result["tesla_state_before"] = charge_state
+        charging_enabled = bool(charge_state.get("enabled"))
+        charge_requested_enabled = bool(charge_state.get("requested_enabled"))
+
+        if not result["window_active"]:
+            result["decision"] = {
+                "mode": "off",
+                "charge_current_amps": 0,
+                "predicted_grid_w": None,
+            }
+            result["decision_reason"] = "outside_window_force_stop"
+            if charge_requested_enabled or charging_enabled:
+                await _tesla_set_charging(False)
+                result["action"] = {"type": "stop_charging", "reason": "outside_window"}
+                status = "applied"
+            else:
+                result["action"] = {"type": "noop", "reason": "outside_window_already_stopped"}
+                status = "noop"
+            return result
+
+        metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
+        metrics_map = metrics if isinstance(metrics, dict) else {}
+        grid_w = _to_number(metrics_map.get("grid_w"))
+        if grid_w is None:
+            result["skipped"] = "combined_grid_unavailable"
+            status = "skipped"
+            return result
+
+        result["current_grid_import_w"] = max(grid_w, 0.0)
+
+        tesla_charge_power_w = max(float(charge_state.get("power_w") or 0.0), 0.0)
+        base_grid_w = max(float(result["current_grid_import_w"]) - tesla_charge_power_w, 0.0)
+        result["base_grid_without_tesla_w"] = round(base_grid_w, 1)
+
+        available_current_options = _tesla_available_charge_current_options(charge_state)
+        result["available_current_options_amps"] = list(available_current_options)
+        desired = _choose_tesla_grid_support_target_from_options(base_grid_w, available_current_options)
+        result["decision"] = desired
+        result["decision_reason"] = (
+            "selected_highest_candidate_within_target_band"
+            if TESLA_GRID_SUPPORT_TARGET_MIN_W <= float(desired["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_TARGET_MAX_W
+            else "selected_best_safe_candidate"
+        )
+
+        current_configured_amps = _to_number(charge_state.get("configured_current_amps"))
+        connection_state = str(charge_state.get("connection_state") or "").strip().lower()
+        status_text = str(charge_state.get("status_text") or "").strip().lower()
+        desired_amps = int(desired["charge_current_amps"])
+        current_grid_import_w = float(result["current_grid_import_w"])
+        current_in_target_band = TESLA_GRID_SUPPORT_TARGET_MIN_W <= current_grid_import_w <= TESLA_GRID_SUPPORT_TARGET_MAX_W
+        effective_current_amps = current_configured_amps or _to_number(charge_state.get("current_amps")) or 0.0
+
+        result["candidates"] = [
+            {
+                "mode": "off" if amps == 0 else "charge",
+                "charge_current_amps": amps,
+                "predicted_grid_w": round(base_grid_w + (float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V), 1),
+                "safe": (base_grid_w + (float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V)) <= TESLA_GRID_SUPPORT_HARD_MAX_W,
+            }
+            for amps in (0, *available_current_options)
+        ]
+
+        if connection_state == "unplugged":
+            result["skipped"] = "tesla_unplugged"
+            status = "skipped"
+            return result
+
+        if current_in_target_band and charging_enabled:
+            result["decision"] = {
+                "mode": "hold_current_state",
+                "charge_current_amps": int(round(effective_current_amps)) if effective_current_amps > 0 else desired_amps,
+                "predicted_grid_w": round(current_grid_import_w, 1),
+            }
+            result["decision_reason"] = "current_grid_already_in_target_with_tesla_active"
+            result["action"] = {"type": "noop", "reason": "keep_current_state"}
+            status = "noop"
+            return result
+
+        if desired["mode"] == "off":
+            if charge_requested_enabled or charging_enabled:
+                await _tesla_set_charging(False)
+                result["action"] = {"type": "stop_charging"}
+                status = "applied"
+            else:
+                result["action"] = {"type": "noop", "reason": "already_stopped"}
+                status = "noop"
+            return result
+
+        if status_text in ("disconnected", "unknown", "unavailable"):
+            result["skipped"] = "tesla_not_ready"
+            result["tesla_status"] = status_text
+            status = "skipped"
+            return result
+
+        actions: list[str] = []
+        if current_configured_amps is None or int(round(current_configured_amps)) != desired_amps:
+            await _tesla_set_charge_current(desired_amps)
+            actions.append(f"set_current_{desired_amps}a")
+        if not charging_enabled:
+            if charge_requested_enabled:
+                await _tesla_restart_charging()
+                actions.append("restart_charging")
+            else:
+                await _tesla_set_charging(True)
+                actions.append("start_charging")
+
+        if actions:
+            result["action"] = {"type": "apply", "steps": actions}
+            status = "applied"
+        else:
+            result["action"] = {"type": "noop", "reason": "already_at_target"}
+            status = "noop"
+        return result
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        status = "failed"
+        error_text = f"{type(exc).__name__}: {exc}"
+        result["error"] = error_text
+        raise
+    finally:
+        await _persist_worker_control_log(
+            round_id=round_id,
+            system="combined",
+            service=MIDDAY_WINDOW_CHECK_SERVICE,
+            requested_at_utc=requested_at_utc,
+            started_monotonic=started_monotonic,
+            ok=ok,
+            status=status,
+            payload=result,
+            error_text=error_text,
+        )
+
+
+async def _run_tesla_home_assistant_collection(
+    combined_flow: dict[str, object] | None = None,
+    *,
+    round_id: str | None = None,
+    requested_at_utc: str | None = None,
+) -> dict[str, object]:
+    requested_at_utc = str(requested_at_utc or "").strip() or datetime.now(UTC).isoformat()
+    started_monotonic = monotonic()
+    now_local, timezone_name = _tesla_grid_support_now_local()
+    result: dict[str, object] = {
+        "executed_at_utc": datetime.now(UTC).isoformat(),
+        "evaluated_at_local": now_local.isoformat(),
+        "timezone": timezone_name,
+        "window_active": _is_within_tesla_grid_support_window(now_local),
+        "task_mode": "observe_only",
+    }
+    status = "ok"
+    ok = True
+    error_text: str | None = None
+    try:
+        states = await _tesla_control_states()
+        observation = _build_tesla_observation_payload(states)
+        result["observation"] = observation
+        if int(observation.get("observed_entity_count") or 0) <= 0:
+            result["skipped"] = "tesla_entities_unavailable"
+            status = "skipped"
+            return result
+        return result
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        status = "failed"
+        error_text = f"{type(exc).__name__}: {exc}"
+        result["error"] = error_text
+        raise
+    finally:
+        await _persist_worker_control_log(
+            round_id=round_id,
+            system="combined",
+            service=TESLA_OBSERVATION_SERVICE,
+            requested_at_utc=requested_at_utc,
+            started_monotonic=started_monotonic,
+            ok=ok,
+            status=status,
+            payload=result,
+            error_text=error_text,
+        )
 
 
 def _is_saj_offnet_mode(*, mode_sensor: object, inverter_status: object) -> bool:
@@ -1253,20 +2085,35 @@ async def _save_solplanet_endpoint_snapshot(
             response_json=payload,
         )
         if request_actor_ctx.get() == "worker":
+            request_token = _worker_log_request_token(round_id, "solplanet_cgi", "GET", request_url)
             await asyncio.to_thread(
-                insert_worker_api_log,
+                update_worker_api_log if request_token else insert_worker_api_log,
                 storage_db_path,
-                worker=str(request_actor_ctx.get() or "worker"),
-                system=str(request_system_ctx.get() or "solplanet"),
-                service="solplanet_cgi",
-                method="GET",
-                api_link=request_url,
-                requested_at_utc=requested_at_utc or datetime.now(UTC).isoformat(),
-                ok=ok,
-                status_code=None,
-                duration_ms=fetch_ms,
-                result_text=json.dumps(payload, ensure_ascii=False) if payload is not None else None,
-                error_text=error,
+                **(
+                    {
+                        "request_token": request_token,
+                        "ok": ok,
+                        "status": "ok" if ok else "failed",
+                        "status_code": None,
+                        "duration_ms": fetch_ms,
+                        "result_text": json.dumps(payload, ensure_ascii=False) if payload is not None else None,
+                        "error_text": error,
+                    }
+                    if request_token
+                    else {
+                        "worker": str(request_actor_ctx.get() or "worker"),
+                        "system": str(request_system_ctx.get() or "solplanet"),
+                        "service": "solplanet_cgi",
+                        "method": "GET",
+                        "api_link": request_url,
+                        "requested_at_utc": requested_at_utc or datetime.now(UTC).isoformat(),
+                        "ok": ok,
+                        "status_code": None,
+                        "duration_ms": fetch_ms,
+                        "result_text": json.dumps(payload, ensure_ascii=False) if payload is not None else None,
+                        "error_text": error,
+                    }
+                ),
             )
     except Exception as exc:
         logger.warning("Failed to persist raw Solplanet result for %s (%s): %s", endpoint, path, exc)
@@ -1704,6 +2551,7 @@ def _combined_pseudo_entity(
 def _build_combined_flow_payload(
     saj_flow: dict[str, object],
     solplanet_flow: dict[str, object],
+    tesla_observation_result: dict[str, object] | None = None,
 ) -> dict[str, object]:
     saj_metrics = saj_flow.get("metrics")
     saj_metrics_map = saj_metrics if isinstance(saj_metrics, dict) else {}
@@ -1725,6 +2573,23 @@ def _build_combined_flow_payload(
         if solplanet_metrics_map.get("inverter_status") is not None
         else None
     )
+    tesla_observation = (
+        tesla_observation_result.get("observation")
+        if isinstance(tesla_observation_result, dict)
+        else None
+    )
+    tesla_observation_map = tesla_observation if isinstance(tesla_observation, dict) else {}
+    tesla_charging = tesla_observation_map.get("charging")
+    tesla_charging_map = tesla_charging if isinstance(tesla_charging, dict) else {}
+    tesla_battery = tesla_observation_map.get("battery")
+    tesla_battery_map = tesla_battery if isinstance(tesla_battery, dict) else {}
+    tesla_charge_power_w = _to_number(tesla_charging_map.get("power_w"))
+    tesla_current_amps = _to_number(tesla_charging_map.get("current_amps"))
+    tesla_configured_current_amps = _to_number(tesla_charging_map.get("configured_current_amps"))
+    tesla_soc_percent = _to_number(tesla_battery_map.get("level_percent"))
+    tesla_connection_state = str(tesla_charging_map.get("connection_state") or "").strip() or None
+    tesla_requested_enabled = tesla_charging_map.get("requested_enabled")
+    tesla_cable_connected = tesla_charging_map.get("cable_connected")
 
     total_load_w: float | None = None
     if inverter1_w is not None and inverter2_w is not None and grid_w is not None:
@@ -1757,6 +2622,13 @@ def _build_combined_flow_payload(
         "battery_soc_percent": None,
         "battery1_soc_percent": battery1_soc,
         "battery2_soc_percent": battery2_soc,
+        "tesla_charge_power_w": tesla_charge_power_w,
+        "tesla_charge_current_amps": tesla_current_amps,
+        "tesla_configured_current_amps": tesla_configured_current_amps,
+        "tesla_battery_soc_percent": tesla_soc_percent,
+        "tesla_connection_state": tesla_connection_state,
+        "tesla_charge_requested_enabled": tesla_requested_enabled,
+        "tesla_cable_connected": tesla_cable_connected,
         "inverter_status": "combined",
         "inverter1_status": inverter1_status,
         "inverter2_status": inverter2_status,
@@ -1785,6 +2657,7 @@ def _build_combined_flow_payload(
             "combined_flow_requires_full_round_success",
             "combined_grid_uses_saj_grid_w",
             "combined_total_load_uses_saj_inverter_power + solplanet_inverter_power + saj_grid",
+            "combined_tesla_observation_embedded",
         ],
     }
     return {
@@ -1822,6 +2695,27 @@ def _build_combined_flow_payload(
                 updated_at,
             ),
             "load": _combined_pseudo_entity("combined.total_load_power", total_load_w, "W", "Combined Total Load", updated_at),
+            "tesla_charge_power": _combined_pseudo_entity(
+                "combined.tesla_charge_power",
+                tesla_charge_power_w,
+                "W",
+                "Combined Tesla Charge Power",
+                updated_at,
+            ),
+            "tesla_charge_current": _combined_pseudo_entity(
+                "combined.tesla_charge_current",
+                tesla_current_amps,
+                "A",
+                "Combined Tesla Charge Current",
+                updated_at,
+            ),
+            "tesla_battery_soc": _combined_pseudo_entity(
+                "combined.tesla_battery_soc",
+                tesla_soc_percent,
+                "%",
+                "Combined Tesla Battery SOC",
+                updated_at,
+            ),
             "inverter1": _combined_pseudo_entity(
                 "combined.inverter1_power",
                 inverter1_w,
@@ -1842,11 +2736,13 @@ def _build_combined_flow_payload(
             "components": {
                 "saj_updated_at": saj_flow.get("updated_at"),
                 "solplanet_updated_at": solplanet_flow.get("updated_at"),
+                "tesla_updated_at": tesla_observation_result.get("executed_at_utc") if isinstance(tesla_observation_result, dict) else None,
             },
         },
         "raw": {
             "saj": saj_flow,
             "solplanet": solplanet_flow,
+            "tesla": tesla_observation_result,
         },
         "metrics": metrics,
     }
@@ -2856,6 +3752,21 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
                 "battery2_source": _kv_value(kv_map, system=system, key="metrics.battery2_source"),
                 "inverter1_power_source": _kv_value(kv_map, system=system, key="metrics.inverter1_power_source"),
                 "inverter2_power_source": _kv_value(kv_map, system=system, key="metrics.inverter2_power_source"),
+                "tesla_charge_power_w": _to_number(_kv_value(kv_map, system=system, key="metrics.tesla_charge_power_w")),
+                "tesla_charge_current_amps": _to_number(
+                    _kv_value(kv_map, system=system, key="metrics.tesla_charge_current_amps")
+                ),
+                "tesla_configured_current_amps": _to_number(
+                    _kv_value(kv_map, system=system, key="metrics.tesla_configured_current_amps")
+                ),
+                "tesla_battery_soc_percent": _to_number(
+                    _kv_value(kv_map, system=system, key="metrics.tesla_battery_soc_percent")
+                ),
+                "tesla_connection_state": _kv_value(kv_map, system=system, key="metrics.tesla_connection_state"),
+                "tesla_charge_requested_enabled": _kv_value(
+                    kv_map, system=system, key="metrics.tesla_charge_requested_enabled"
+                ),
+                "tesla_cable_connected": _kv_value(kv_map, system=system, key="metrics.tesla_cable_connected"),
             }
         )
 
@@ -2867,6 +3778,95 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
         "storage_backed": True,
         "kv_item_count": len(kv_map),
     }
+    if system == "combined":
+        tesla_updated_at = _kv_value(kv_map, system=system, key="source.components.tesla_updated_at")
+        flow["source"] = {
+            "type": "realtime_kv",
+            "components": {
+                "saj_updated_at": _kv_value(kv_map, system=system, key="source.components.saj_updated_at"),
+                "solplanet_updated_at": _kv_value(kv_map, system=system, key="source.components.solplanet_updated_at"),
+                "tesla_updated_at": tesla_updated_at,
+            },
+        }
+        flow["entities"] = {
+            "tesla_charge_power": {
+                "entity_id": _kv_value(kv_map, system=system, key="entities.tesla_charge_power.entity_id"),
+                "domain": _kv_value(kv_map, system=system, key="entities.tesla_charge_power.domain"),
+                "brand_guess": _kv_value(kv_map, system=system, key="entities.tesla_charge_power.brand_guess"),
+                "state": _kv_value(kv_map, system=system, key="entities.tesla_charge_power.state"),
+                "unit": _kv_value(kv_map, system=system, key="entities.tesla_charge_power.unit"),
+                "friendly_name": _kv_value(kv_map, system=system, key="entities.tesla_charge_power.friendly_name"),
+                "last_updated": _kv_value(kv_map, system=system, key="entities.tesla_charge_power.last_updated"),
+            },
+            "tesla_charge_current": {
+                "entity_id": _kv_value(kv_map, system=system, key="entities.tesla_charge_current.entity_id"),
+                "domain": _kv_value(kv_map, system=system, key="entities.tesla_charge_current.domain"),
+                "brand_guess": _kv_value(kv_map, system=system, key="entities.tesla_charge_current.brand_guess"),
+                "state": _kv_value(kv_map, system=system, key="entities.tesla_charge_current.state"),
+                "unit": _kv_value(kv_map, system=system, key="entities.tesla_charge_current.unit"),
+                "friendly_name": _kv_value(kv_map, system=system, key="entities.tesla_charge_current.friendly_name"),
+                "last_updated": _kv_value(kv_map, system=system, key="entities.tesla_charge_current.last_updated"),
+            },
+            "tesla_battery_soc": {
+                "entity_id": _kv_value(kv_map, system=system, key="entities.tesla_battery_soc.entity_id"),
+                "domain": _kv_value(kv_map, system=system, key="entities.tesla_battery_soc.domain"),
+                "brand_guess": _kv_value(kv_map, system=system, key="entities.tesla_battery_soc.brand_guess"),
+                "state": _kv_value(kv_map, system=system, key="entities.tesla_battery_soc.state"),
+                "unit": _kv_value(kv_map, system=system, key="entities.tesla_battery_soc.unit"),
+                "friendly_name": _kv_value(kv_map, system=system, key="entities.tesla_battery_soc.friendly_name"),
+                "last_updated": _kv_value(kv_map, system=system, key="entities.tesla_battery_soc.last_updated"),
+            },
+        }
+        flow["raw"] = {
+            "tesla": {
+                "executed_at_utc": tesla_updated_at,
+                "evaluated_at_local": _kv_value(kv_map, system=system, key="raw.tesla.evaluated_at_local"),
+                "timezone": _kv_value(kv_map, system=system, key="raw.tesla.timezone"),
+                "window_active": _kv_value(kv_map, system=system, key="raw.tesla.window_active"),
+                "task_mode": _kv_value(kv_map, system=system, key="raw.tesla.task_mode"),
+                "observation": {
+                    "battery": {
+                        "level_percent": metrics.get("tesla_battery_soc_percent"),
+                        "entity": {
+                            "entity_id": _kv_value(
+                                kv_map, system=system, key="raw.tesla.observation.battery.entity.entity_id"
+                            ),
+                            "friendly_name": _kv_value(
+                                kv_map, system=system, key="raw.tesla.observation.battery.entity.friendly_name"
+                            ),
+                            "state": _kv_value(kv_map, system=system, key="raw.tesla.observation.battery.entity.state"),
+                            "unit": _kv_value(kv_map, system=system, key="raw.tesla.observation.battery.entity.unit"),
+                            "last_updated": _kv_value(
+                                kv_map, system=system, key="raw.tesla.observation.battery.entity.last_updated"
+                            ),
+                        },
+                    },
+                    "charging": {
+                        "enabled": _kv_value(kv_map, system=system, key="raw.tesla.observation.charging.enabled"),
+                        "power_w": metrics.get("tesla_charge_power_w"),
+                        "current_amps": metrics.get("tesla_charge_current_amps"),
+                        "configured_current_amps": metrics.get("tesla_configured_current_amps"),
+                        "min_current_amps": _to_number(
+                            _kv_value(kv_map, system=system, key="raw.tesla.observation.charging.min_current_amps")
+                        ),
+                        "max_current_amps": _to_number(
+                            _kv_value(kv_map, system=system, key="raw.tesla.observation.charging.max_current_amps")
+                        ),
+                        "current_step_amps": _to_number(
+                            _kv_value(kv_map, system=system, key="raw.tesla.observation.charging.current_step_amps")
+                        ),
+                        "requested_enabled": metrics.get("tesla_charge_requested_enabled"),
+                        "cable_connected": metrics.get("tesla_cable_connected"),
+                        "connection_state": metrics.get("tesla_connection_state"),
+                        "status_text": _kv_value(kv_map, system=system, key="raw.tesla.observation.charging.status_text"),
+                        "voltage_v": _to_number(
+                            _kv_value(kv_map, system=system, key="raw.tesla.observation.charging.voltage_v")
+                        ),
+                    },
+                    "control_mode": _kv_value(kv_map, system=system, key="raw.tesla.observation.control_mode"),
+                },
+            }
+        }
     if age_seconds is not None:
         flow["sample_age_seconds"] = round(age_seconds, 1)
         if age_seconds > stale_after_seconds:
@@ -2954,10 +3954,11 @@ async def _store_flow_sample(system: str, flow: dict[str, object], *, round_id: 
     await _store_realtime_kv_snapshot(system, flow)
 
 
-async def _collect_for_system(system: str, *, round_number: int, round_id: str) -> dict[str, object]:
+async def _collect_for_system(system: str, *, round_number: int, round_id: str, round_started_at_utc: str) -> dict[str, object]:
     actor_token = request_actor_ctx.set("worker")
     system_token = request_system_ctx.set(system)
     round_token = request_round_ctx.set(round_id)
+    round_started_token = request_round_started_at_ctx.set(round_started_at_utc)
     try:
         if system == "saj":
             if _missing_required_config():
@@ -3057,6 +4058,7 @@ async def _collect_for_system(system: str, *, round_number: int, round_id: str) 
             }
         raise ValueError(f"Unsupported system: {system}")
     finally:
+        request_round_started_at_ctx.reset(round_started_token)
         request_round_ctx.reset(round_token)
         request_system_ctx.reset(system_token)
         request_actor_ctx.reset(actor_token)
@@ -3087,13 +4089,176 @@ def _collector_mark_finish(system: str, started_monotonic: float, *, error: Exce
 
 
 def _collector_sleep_seconds(now_monotonic: float) -> float:
-    due_in_values = [
-        max(0.0, collector_next_due_monotonic.get(system, 0.0) - now_monotonic)
-        for system in POLLED_SYSTEMS
-    ]
-    if not due_in_values:
-        return COLLECTOR_ROUND_SLEEP_SECONDS
-    return max(COLLECTOR_ROUND_SLEEP_SECONDS, min(due_in_values))
+    return COLLECTOR_ROUND_SLEEP_SECONDS
+
+
+async def _await_round_request_log_settlement(
+    round_id: str,
+    *,
+    services: tuple[str, ...],
+    settle_timeout_seconds: float = 2.0,
+    poll_interval_seconds: float = 0.05,
+    timeout_error_text: str,
+) -> int:
+    deadline = monotonic() + max(0.0, settle_timeout_seconds)
+    while monotonic() < deadline:
+        pending_count = await asyncio.to_thread(
+            count_pending_worker_api_logs,
+            storage_db_path,
+            round_id=round_id,
+            services=services,
+        )
+        if pending_count <= 0:
+            return 0
+        await asyncio.sleep(poll_interval_seconds)
+    return await asyncio.to_thread(
+        finalize_pending_worker_api_logs_for_round,
+        storage_db_path,
+        round_id=round_id,
+        services=services,
+        status="timeout",
+        error_text=timeout_error_text,
+    )
+
+
+def _fmt_result_number(value: object, digits: int = 1, unit: str | None = None) -> str:
+    num = _to_number(value)
+    if num is None:
+        return "-"
+    if float(num).is_integer() and digits <= 0:
+        out = str(int(num))
+    else:
+        out = f"{num:.{digits}f}".rstrip("0").rstrip(".")
+    return f"{out}{unit or ''}"
+
+
+def _worker_control_result_text(
+    *,
+    service: str,
+    status: str,
+    payload: dict[str, object],
+    error_text: str | None,
+) -> str:
+    if service == TESLA_OBSERVATION_SERVICE:
+        observation = payload.get("observation")
+        observation_map = observation if isinstance(observation, dict) else {}
+        battery = observation_map.get("battery")
+        battery_map = battery if isinstance(battery, dict) else {}
+        charging = observation_map.get("charging")
+        charging_map = charging if isinstance(charging, dict) else {}
+        if status == "skipped":
+            return f"Tesla HA data collection skipped: {payload.get('skipped') or error_text or 'unavailable'}"
+        return (
+            "Tesla HA data collected: "
+            f"battery {_fmt_result_number(battery_map.get('level_percent'), 0, '%')}, "
+            f"tesla {charging_map.get('connection_state') or '-'} "
+            f"(request {'on' if charging_map.get('requested_enabled') else 'off'}), "
+            f"status {charging_map.get('status_text') or '-'}, "
+            f"current {_fmt_result_number(charging_map.get('current_amps'), 0, 'A')}, "
+            f"configured {_fmt_result_number(charging_map.get('configured_current_amps'), 0, 'A')}, "
+            f"voltage {_fmt_result_number(charging_map.get('voltage_v'), 0, 'V')}, "
+            f"power {_fmt_result_number(charging_map.get('power_w'), 1, 'W')}"
+        )
+    if service == MIDDAY_WINDOW_CHECK_SERVICE:
+        action = payload.get("action")
+        action_map = action if isinstance(action, dict) else {}
+        decision = payload.get("decision")
+        decision_map = decision if isinstance(decision, dict) else {}
+        if status == "skipped":
+            return f"Midday window check skipped: {payload.get('skipped') or error_text or 'unavailable'}"
+        action_type = str(action_map.get("type") or "-")
+        steps = action_map.get("steps")
+        steps_text = ", ".join(str(item) for item in steps) if isinstance(steps, list) and steps else str(action_map.get("reason") or "-")
+        decision_mode = str(decision_map.get("mode") or "-")
+        decision_amps = _fmt_result_number(decision_map.get("charge_current_amps"), 0, "A")
+        tesla_before = payload.get("tesla_state_before")
+        tesla_before_map = tesla_before if isinstance(tesla_before, dict) else {}
+        tesla_before_text = str(tesla_before_map.get("connection_state") or ("charging" if tesla_before_map.get("enabled") else "unplugged"))
+        tesla_before_request = "on" if tesla_before_map.get("requested_enabled") else "off"
+        tesla_after_text = tesla_before_text
+        if action_type == "stop_charging":
+            tesla_after_text = "plugged_not_charging" if tesla_before_map.get("cable_connected") else "unplugged"
+        elif action_type == "apply":
+            steps_set = {str(item) for item in steps} if isinstance(steps, list) else set()
+            if "start_charging" in steps_set or "restart_charging" in steps_set:
+                tesla_after_text = "charging"
+        return (
+            "Midday window check: "
+            f"grid {_fmt_result_number(payload.get('current_grid_import_w'), 0, 'W')}, "
+            f"base {_fmt_result_number(payload.get('base_grid_without_tesla_w'), 0, 'W')}, "
+            f"tesla {tesla_before_text}->{tesla_after_text} "
+            f"(request {tesla_before_request}), "
+            f"decision {decision_mode} {decision_amps}, "
+            f"predicted {_fmt_result_number(decision_map.get('predicted_grid_w'), 0, 'W')}, "
+            f"action {action_type} ({steps_text})"
+        )
+    if service == "combined_assembly":
+        combined_result = payload.get("combined")
+        combined_map = combined_result if isinstance(combined_result, dict) else {}
+        if status == "failed":
+            return f"Combined assembly failed: {combined_map.get('reason') or error_text or '-'}"
+        if status == "skipped":
+            return f"Combined assembly skipped: {combined_map.get('reason') or error_text or '-'}"
+        return (
+            "Combined assembly stored: "
+            f"grid {_fmt_result_number(combined_map.get('grid_w'), 0, 'W')}, "
+            f"load {_fmt_result_number(combined_map.get('load_w'), 0, 'W')}, "
+            f"pv {_fmt_result_number(combined_map.get('pv_w'), 0, 'W')}, "
+            f"battery {_fmt_result_number(combined_map.get('battery_w'), 0, 'W')}"
+        )
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
+
+
+async def _persist_worker_control_log(
+    *,
+    round_id: str | None = None,
+    system: str,
+    service: str,
+    requested_at_utc: str,
+    started_monotonic: float,
+    ok: bool,
+    status: str,
+    payload: dict[str, object],
+    error_text: str | None = None,
+) -> None:
+    normalized_round_id = str(round_id or "").strip() or str(request_round_ctx.get() or "").strip()
+    api_link = f"worker://{system}/{service}"
+    request_token = _worker_log_request_token(normalized_round_id, service, "AUTO", api_link)
+    result_text = _worker_control_result_text(service=service, status=status, payload=payload, error_text=error_text)
+    try:
+        if request_token:
+            await asyncio.to_thread(
+                update_worker_api_log,
+                storage_db_path,
+                request_token=request_token,
+                ok=ok,
+                status=status,
+                status_code=None,
+                duration_ms=round((monotonic() - started_monotonic) * 1000, 1),
+                result_text=result_text,
+                error_text=error_text,
+            )
+            return
+        await asyncio.to_thread(
+            insert_worker_api_log,
+            storage_db_path,
+            request_token=request_token or None,
+            round_id=normalized_round_id or None,
+            worker="worker",
+            system=system,
+            service=service,
+            method="AUTO",
+            api_link=api_link,
+            requested_at_utc=requested_at_utc,
+            ok=ok,
+            status=status,
+            status_code=None,
+            duration_ms=round((monotonic() - started_monotonic) * 1000, 1),
+            result_text=result_text,
+            error_text=error_text,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to persist worker control log for %s/%s: %s", system, service, exc)
 
 
 async def _collector_loop() -> None:
@@ -3101,38 +4266,27 @@ async def _collector_loop() -> None:
     while not collector_stop_event.is_set():
         collector_round_number += 1
         round_number = collector_round_number
-        round_id = f"round-{round_number}-{int(datetime.now(UTC).timestamp() * 1000)}"
+        round_started_at_utc = datetime.now(UTC).isoformat()
+        round_id = f"round-{round_number}-{int(datetime.fromisoformat(round_started_at_utc).timestamp() * 1000)}"
+        await _insert_worker_round_log_plan(round_number, round_id, round_started_at_utc)
         round_tasks: dict[str, asyncio.Task[dict[str, object]]] = {}
         started_monotonic_by_system: dict[str, float] = {}
-        loop_started_monotonic = monotonic()
         for system in POLLED_SYSTEMS:
-            if loop_started_monotonic < collector_next_due_monotonic.get(system, 0.0):
-                status = collector_status.setdefault(system, {})
-                status["in_progress"] = False
-                status["round_number"] = round_number
-                status["round_id"] = round_id
-                continue
             started_monotonic = _collector_mark_start(system)
             collector_status.setdefault(system, {})["round_number"] = round_number
             collector_status.setdefault(system, {})["round_id"] = round_id
             started_monotonic_by_system[system] = started_monotonic
             round_tasks[system] = asyncio.create_task(
-                _collect_for_system(system, round_number=round_number, round_id=round_id)
+                _collect_for_system(
+                    system,
+                    round_number=round_number,
+                    round_id=round_id,
+                    round_started_at_utc=round_started_at_utc,
+                )
             )
 
         round_results: dict[str, dict[str, object]] = {}
         for system in POLLED_SYSTEMS:
-            if system not in round_tasks:
-                round_results[system] = {
-                    "attempted": [],
-                    "succeeded": [],
-                    "failed": [],
-                    "skipped": [],
-                    "stored_sample": False,
-                    "flow": None,
-                    "reason": "interval_wait",
-                }
-                continue
             started_monotonic = started_monotonic_by_system[system]
             try:
                 result = await round_tasks[system]
@@ -3166,20 +4320,52 @@ async def _collector_loop() -> None:
                         status = collector_status.setdefault("solplanet", {})
                         status["client_recreate_error_at"] = datetime.now(UTC).isoformat()
                         status["client_recreate_error"] = f"{type(recreate_exc).__name__}: {recreate_exc}"
-            collector_next_due_monotonic[system] = monotonic() + _sample_interval_for_system(system)
+
+        source_pending_timeouts = await _await_round_request_log_settlement(
+            round_id,
+            services=("home_assistant", "solplanet_cgi"),
+            timeout_error_text="worker_source_request_timeout",
+        )
+        if source_pending_timeouts:
+            collector_status.setdefault("combined", {})["last_source_pending_timeout_count"] = source_pending_timeouts
 
         combined_started_monotonic = _collector_mark_start("combined")
+        combined_requested_at_utc = round_started_at_utc
         collector_status.setdefault("combined", {})["round_number"] = round_number
         collector_status.setdefault("combined", {})["round_id"] = round_id
+        saj_result: dict[str, object] = {}
+        solplanet_result: dict[str, object] = {}
+        tesla_observation_result: dict[str, object] | None = None
+        try:
+            tesla_observation_result = await _run_tesla_home_assistant_collection(
+                round_id=round_id,
+                requested_at_utc=round_started_at_utc,
+            )
+            collector_status.setdefault("combined", {})["last_tesla_grid_support"] = tesla_observation_result
+        except Exception as control_exc:  # noqa: BLE001
+            _append_worker_failure_log(
+                "combined",
+                stage=TESLA_OBSERVATION_SERVICE,
+                error=control_exc,
+            )
+            collector_status.setdefault("combined", {})["last_tesla_grid_support"] = {
+                "error": f"{type(control_exc).__name__}: {control_exc}",
+                "executed_at": datetime.now(UTC).isoformat(),
+            }
         try:
             saj_result = round_results.get("saj") or {}
             solplanet_result = round_results.get("solplanet") or {}
-            saj_flow = saj_result.get("flow") if isinstance(saj_result.get("flow"), dict) else None
-            solplanet_flow = (
-                solplanet_result.get("flow") if isinstance(solplanet_result.get("flow"), dict) else None
-            )
-            if saj_result.get("stored_sample") and solplanet_result.get("stored_sample") and saj_flow and solplanet_flow:
-                combined_flow = _build_combined_flow_payload(saj_flow, solplanet_flow)
+            saj_flow, saj_source_detail = await _resolve_combined_source_flow("saj", saj_result)
+            solplanet_flow, solplanet_source_detail = await _resolve_combined_source_flow("solplanet", solplanet_result)
+            if saj_flow and solplanet_flow:
+                combined_flow = _build_combined_flow_payload(saj_flow, solplanet_flow, tesla_observation_result)
+                combined_source = combined_flow.get("source")
+                combined_source_map = combined_source if isinstance(combined_source, dict) else {}
+                combined_source_map["source_details"] = {
+                    "saj": saj_source_detail,
+                    "solplanet": solplanet_source_detail,
+                }
+                combined_flow["source"] = combined_source_map
                 missing_metrics = _missing_required_flow_metrics("combined", combined_flow)
                 if missing_metrics:
                     round_results["combined"] = {
@@ -3191,7 +4377,28 @@ async def _collector_loop() -> None:
                         "flow": None,
                         "reason": "incomplete_flow",
                         "missing_metrics": missing_metrics,
+                        "source_details": {
+                            "saj": saj_source_detail,
+                            "solplanet": solplanet_source_detail,
+                        },
                     }
+                    await _persist_worker_control_log(
+                        round_id=round_id,
+                        system="combined",
+                        service="combined_assembly",
+                        requested_at_utc=combined_requested_at_utc,
+                        started_monotonic=combined_started_monotonic,
+                        ok=False,
+                        status="failed",
+                        payload=_combined_assembly_log_payload(
+                            round_number=round_number,
+                            round_id=round_id,
+                            saj_result=saj_result,
+                            solplanet_result=solplanet_result,
+                            combined_result=round_results["combined"],
+                        ),
+                        error_text=f"missing_metrics: {', '.join(str(item) for item in missing_metrics)}",
+                    )
                 else:
                     await _store_flow_sample("combined", combined_flow, round_id=round_id)
                     round_results["combined"] = {
@@ -3201,8 +4408,32 @@ async def _collector_loop() -> None:
                         "skipped": [],
                         "stored_sample": True,
                         "flow": combined_flow,
+                        "source_details": {
+                            "saj": saj_source_detail,
+                            "solplanet": solplanet_source_detail,
+                        },
                     }
+                    await _persist_worker_control_log(
+                        round_id=round_id,
+                        system="combined",
+                        service="combined_assembly",
+                        requested_at_utc=combined_requested_at_utc,
+                        started_monotonic=combined_started_monotonic,
+                        ok=True,
+                        status="applied",
+                        payload=_combined_assembly_log_payload(
+                            round_number=round_number,
+                            round_id=round_id,
+                            saj_result=saj_result,
+                            solplanet_result=solplanet_result,
+                            combined_result=round_results["combined"],
+                        ),
+                    )
             else:
+                combined_reason = (
+                    f"saj={saj_source_detail.get('origin')}:{saj_source_detail.get('reason')}; "
+                    f"solplanet={solplanet_source_detail.get('origin')}:{solplanet_source_detail.get('reason')}"
+                )
                 round_results["combined"] = {
                     "attempted": ["combined_assembly"],
                     "succeeded": [],
@@ -3211,7 +4442,28 @@ async def _collector_loop() -> None:
                     "stored_sample": False,
                     "flow": None,
                     "reason": "source_flow_unavailable",
+                    "source_details": {
+                        "saj": saj_source_detail,
+                        "solplanet": solplanet_source_detail,
+                    },
                 }
+                await _persist_worker_control_log(
+                    round_id=round_id,
+                    system="combined",
+                    service="combined_assembly",
+                    requested_at_utc=combined_requested_at_utc,
+                    started_monotonic=combined_started_monotonic,
+                    ok=False,
+                    status="skipped",
+                    payload=_combined_assembly_log_payload(
+                        round_number=round_number,
+                        round_id=round_id,
+                        saj_result=saj_result,
+                        solplanet_result=solplanet_result,
+                        combined_result=round_results["combined"],
+                    ),
+                    error_text=combined_reason,
+                )
             _collector_mark_finish("combined", combined_started_monotonic)
         except Exception as exc:  # noqa: BLE001
             _append_worker_failure_log(
@@ -3230,6 +4482,41 @@ async def _collector_loop() -> None:
                 "flow": None,
                 "error": f"{type(exc).__name__}: {exc}",
             }
+            await _persist_worker_control_log(
+                round_id=round_id,
+                system="combined",
+                service="combined_assembly",
+                requested_at_utc=combined_requested_at_utc,
+                started_monotonic=combined_started_monotonic,
+                ok=False,
+                status="failed",
+                payload=_combined_assembly_log_payload(
+                    round_number=round_number,
+                    round_id=round_id,
+                    saj_result=saj_result if isinstance(saj_result, dict) else {},
+                    solplanet_result=solplanet_result if isinstance(solplanet_result, dict) else {},
+                    combined_result=round_results["combined"],
+                ),
+                error_text=f"{type(exc).__name__}: {exc}",
+            )
+        try:
+            midday_window_result = await _run_midday_window_check(
+                round_results.get("combined", {}).get("flow") if isinstance(round_results.get("combined"), dict) else None,
+                tesla_observation_result,
+                round_id=round_id,
+                requested_at_utc=round_started_at_utc,
+            )
+            collector_status.setdefault("combined", {})["last_midday_window_check"] = midday_window_result
+        except Exception as window_exc:  # noqa: BLE001
+            _append_worker_failure_log(
+                "combined",
+                stage=MIDDAY_WINDOW_CHECK_SERVICE,
+                error=window_exc,
+            )
+            collector_status.setdefault("combined", {})["last_midday_window_check"] = {
+                "error": f"{type(window_exc).__name__}: {window_exc}",
+                "executed_at": datetime.now(UTC).isoformat(),
+            }
 
         review = _review_round_results(round_results)
         for system in SUPPORTED_SYSTEMS:
@@ -3239,6 +4526,17 @@ async def _collector_loop() -> None:
             system_review = review.get(system)
             if system_review is not None:
                 status["last_round_review"] = system_review
+            system_result = round_results.get(system)
+            if isinstance(system_result, dict):
+                status["last_round_result"] = _compact_round_result_for_status(system_result)
+
+        timed_out_pending = await _await_round_request_log_settlement(
+            round_id,
+            services=("combined_assembly", TESLA_OBSERVATION_SERVICE, MIDDAY_WINDOW_CHECK_SERVICE),
+            timeout_error_text="worker_round_incomplete",
+        )
+        if timed_out_pending:
+            collector_status.setdefault("combined", {})["last_round_timeout_count"] = timed_out_pending
 
         try:
             await asyncio.wait_for(
@@ -3397,10 +4695,41 @@ async def worker_logs(
     page_size: int = Query(default=100, ge=1, le=500),
     system: str | None = Query(default=None, description="saj or solplanet"),
     service: str | None = Query(default=None, description="home_assistant or solplanet_cgi"),
+    category: str | None = Query(default=None, description="all/saj/solplanet/combined/tesla"),
 ) -> dict[str, object]:
     normalized_system: str | None = None
-    if system:
+    normalized_service = str(service or "").strip() or None
+    normalized_category = str(category or "").strip().lower()
+    if normalized_category in ("all", ""):
+        normalized_category = ""
+    if normalized_category == "saj":
+        normalized_system = "saj"
+        normalized_service = None
+    elif normalized_category == "solplanet":
+        normalized_system = "solplanet"
+        normalized_service = None
+    elif normalized_category == "combined":
+        normalized_system = "combined"
+        normalized_service = "combined_assembly"
+    elif normalized_category == "tesla":
+        normalized_system = None
+        normalized_service = TESLA_OBSERVATION_SERVICE
+    elif system:
         normalized_system = _normalize_system_name(system)
+    elif normalized_category:
+        raise HTTPException(
+            status_code=400,
+            detail="category must be one of: all, saj, solplanet, combined, tesla",
+        )
+    elif system:
+        normalized_system = _normalize_system_name(system)
+    await asyncio.to_thread(
+        expire_pending_worker_api_logs,
+        storage_db_path,
+        older_than_epoch=datetime.now(UTC).timestamp() - WORKER_PENDING_LOG_TIMEOUT_SECONDS,
+        status="timeout",
+        error_text="worker_log_timeout",
+    )
     payload = await asyncio.to_thread(
         list_worker_api_logs,
         storage_db_path,
@@ -3408,7 +4737,7 @@ async def worker_logs(
         page_size=page_size,
         worker="worker",
         system=normalized_system,
-        service=str(service or "").strip() or None,
+        service=normalized_service,
     )
     payload["updated_at"] = datetime.now(UTC).isoformat()
     return payload
@@ -3778,7 +5107,11 @@ async def get_tesla_control_state() -> dict[str, object]:
     _ensure_ha_configured()
     try:
         states = await _tesla_control_states()
-        return {"system": "tesla", "control_state": _build_tesla_control_state(states)}
+        return {
+            "system": "tesla",
+            "control_state": _build_tesla_control_state(states),
+            "observation": _build_tesla_observation_payload(states),
+        }
     except httpx.HTTPStatusError as exc:
         detail = {
             "message": "Home Assistant API returned an error",
