@@ -272,8 +272,14 @@ const I18N = {
     battery1Title: "Battery 1",
     battery2Title: "Battery 2",
     batteryUsableRemaining: "Usable {value} kWh",
-    batteryRuntimeEstimateCharging: "Full {hours}h · {time}",
-    batteryRuntimeEstimateDischarging: "Empty {hours}h · {time}",
+    batteryRuntimeEstimateCharging: "{hours}h left",
+    batteryRuntimeEstimateDischarging: "{hours}h left",
+    batteryRuntimeTargetCharging: "{time} Full",
+    batteryRuntimeTargetDischarging: "{time} Empty",
+    batteryRateCharging: "Charge rate {value}%/h",
+    batteryRateDischarging: "Discharge rate {value}%/h",
+    batteryRateIdle: "No active charge/discharge",
+    batteryRateNoData: "Rate unavailable",
     switchboardStateActive: "Bus Active",
     switchboardStateIdle: "Bus Idle",
     socLabel: "SOC",
@@ -360,6 +366,7 @@ const I18N = {
     workerLogsCategorySolplanet: "SoulPlanet",
     workerLogsCategoryCombined: "Combined",
     workerLogsCategoryTesla: "Tesla",
+    workerLogsCategoryAlert: "Alert",
     workerLogsSystemLabel: "System",
     workerLogsSystemAll: "All",
     workerLogsServiceLabel: "Service",
@@ -367,7 +374,7 @@ const I18N = {
     workerLogsServiceTeslaControl: "Tesla Control",
     workerLogsServiceTeslaObserve: "Tesla Observe",
     workerLogsServiceCombinedAssembly: "Combined Assembly",
-    workerLogsHideNoop: "Hide No Ops",
+    workerLogsHidePassive: "Hide No Ops / Skipped",
     workerLogsConfigMeta: "Solplanet config: host {host}",
     workerLogsTableTime: "Time (UTC)",
     workerLogsTableRound: "Run ID",
@@ -752,8 +759,14 @@ const I18N = {
     battery1Title: "电池 1",
     battery2Title: "电池 2",
     batteryUsableRemaining: "可用余量 {value} kWh",
-    batteryRuntimeEstimateCharging: "按当前功率约 {hours} 小时充满 · 到 {time}",
-    batteryRuntimeEstimateDischarging: "按当前功率约 {hours} 小时耗空 · 到 {time}",
+    batteryRuntimeEstimateCharging: "还有 {hours} 小时",
+    batteryRuntimeEstimateDischarging: "还有 {hours} 小时",
+    batteryRuntimeTargetCharging: "{time} 充满",
+    batteryRuntimeTargetDischarging: "{time} 用完",
+    batteryRateCharging: "充电速率 {value}%/小时",
+    batteryRateDischarging: "放电速率 {value}%/小时",
+    batteryRateIdle: "当前未在充放电",
+    batteryRateNoData: "暂时无法估算速率",
     switchboardStateActive: "母线工作中",
     switchboardStateIdle: "母线空闲",
     socLabel: "电池电量",
@@ -840,6 +853,7 @@ const I18N = {
     workerLogsCategorySolplanet: "SoulPlanet",
     workerLogsCategoryCombined: "整合",
     workerLogsCategoryTesla: "特斯拉",
+    workerLogsCategoryAlert: "提醒",
     workerLogsSystemLabel: "系统",
     workerLogsSystemAll: "全部",
     workerLogsServiceLabel: "服务",
@@ -847,7 +861,7 @@ const I18N = {
     workerLogsServiceTeslaControl: "特斯拉控制",
     workerLogsServiceTeslaObserve: "特斯拉观测",
     workerLogsServiceCombinedAssembly: "整合组装",
-    workerLogsHideNoop: "隐藏 No Ops",
+    workerLogsHidePassive: "隐藏 No Ops / Skipped",
     workerLogsConfigMeta: "Solplanet 配置：host {host}",
     workerLogsTableTime: "时间 (UTC)",
     workerLogsTableRound: "运行ID",
@@ -1023,7 +1037,7 @@ const SAJ_ACTION_DEBUG_MODE_KEY = "sajActionDebugMode";
 const AUTO_REFRESH_OPTIONS = [0, 5, 10];
 const SAJ_CONTROL_EDIT_GRACE_MS = 15000;
 const CONFIG_SAMPLE_INTERVAL_OPTIONS = [5, 10, 30, 60, 300];
-const BALANCE_TOLERANCE_W = 120;
+const BALANCE_TOLERANCE_W = 100;
 const SOLPLANET_REALTIME_KV_URL = "/api/solplanet/realtime-kv";
 const SOLPLANET_RAW_APIS = [
   { key: "getdevdata_device_2", titleKey: "rawApiGetdevdata2", url: "/api/solplanet/cgi/getdevdata-device-2" },
@@ -1449,7 +1463,7 @@ function syncDataKindBadgeTooltip(el) {
 
 function formatValueWithDataKindHtml(text, kind) {
   const normalized = String(text ?? "-");
-  if (!kind || normalized.trim() === "-") return escapeHtml(normalized);
+  if (!kind || normalized.trim() === "-" || normalized.trim() === "") return escapeHtml(normalized);
   const letter = dataKindBadgeLetter(kind);
   const tooltip = dataKindTooltipText(kind);
   return (
@@ -1785,7 +1799,7 @@ function formatBatteryRuntimeTargetTime(targetAt) {
     targetAt.getMonth() === now.getMonth() &&
     targetAt.getDate() === now.getDate();
   if (sameDay) return timeText;
-  return currentLang === "zh" ? `明天 ${timeText}` : `tomorrow ${timeText}`;
+  return currentLang === "zh" ? `明天 ${timeText}` : `tmr ${timeText}`;
 }
 
 function getBatteryRuntimeProjection(system, batterySoc, batteryW) {
@@ -1824,14 +1838,63 @@ function getBatteryRuntimeProjection(system, batterySoc, batteryW) {
 
 function formatBatteryRuntimeEstimate(system, batterySoc, batteryW) {
   const projection = getBatteryRuntimeProjection(system, batterySoc, batteryW);
-  if (!projection) return t("batteryRuntimeNoData");
-  if (projection.mode === "idle") return t("batteryRuntimeIdle");
+  if (!projection) return "";
+  if (projection.mode === "idle") return "";
   return t(
     projection.mode === "charging" ? "batteryRuntimeEstimateCharging" : "batteryRuntimeEstimateDischarging",
     {
       hours: formatTrimmedDecimal(projection.runtimeHours, 1),
+    },
+  );
+}
+
+function formatBatteryRuntimeTarget(system, batterySoc, batteryW) {
+  const projection = getBatteryRuntimeProjection(system, batterySoc, batteryW);
+  if (!projection) return "";
+  if (projection.mode === "idle") return "";
+  return t(
+    projection.mode === "charging" ? "batteryRuntimeTargetCharging" : "batteryRuntimeTargetDischarging",
+    {
       time: projection.timeText,
     },
+  );
+}
+
+function formatBatteryRuntimeEstimateHtml(system, batterySoc, batteryW) {
+  const estimateText = formatBatteryRuntimeEstimate(system, batterySoc, batteryW);
+  const targetText = formatBatteryRuntimeTarget(system, batterySoc, batteryW);
+  if (!estimateText && !targetText) return "";
+  return [
+    estimateText ? `<span class="battery-runtime-line">${escapeHtml(estimateText)}</span>` : "",
+    targetText ? `<span class="battery-runtime-line">${escapeHtml(targetText)}</span>` : "",
+  ].join("");
+}
+
+function getBatterySocRateProjection(system, batteryW) {
+  const capacityKwh = BATTERY_CAPACITY_KWH[system];
+  if (!Number.isFinite(capacityKwh) || batteryW === null || batteryW === undefined) {
+    return null;
+  }
+
+  const powerW = Number(batteryW);
+  if (!Number.isFinite(powerW)) return null;
+  if (Math.abs(powerW) < POWER_FLOW_ACTIVE_THRESHOLD_W) return { mode: "idle" };
+
+  const percentPerHour = (Math.abs(powerW) * 100) / (capacityKwh * 1000);
+  if (!Number.isFinite(percentPerHour) || percentPerHour < 0) return null;
+  return {
+    mode: powerW < 0 ? "charging" : "discharging",
+    percentPerHour,
+  };
+}
+
+function formatBatterySocRateEstimate(system, batteryW) {
+  const projection = getBatterySocRateProjection(system, batteryW);
+  if (!projection) return "";
+  if (projection.mode === "idle") return "";
+  return t(
+    projection.mode === "charging" ? "batteryRateCharging" : "batteryRateDischarging",
+    { value: formatTrimmedDecimal(projection.percentPerHour, 1) },
   );
 }
 
@@ -1886,8 +1949,25 @@ const flowDiagrams = {
   byLabelId: new Map(),
 };
 
+const SAJ_BATTERY_CARD_SCALE = 1.5;
+const SAJ_SYSTEM_BATTERY_NODE_SIZE = {
+  width: Math.round(196 * SAJ_BATTERY_CARD_SCALE),
+  height: Math.round(168 * SAJ_BATTERY_CARD_SCALE),
+};
+const SAJ_COMBINED_BATTERY_NODE_SIZE = {
+  width: 230,
+  height: Math.round(176 * SAJ_BATTERY_CARD_SCALE),
+};
+const SOLPLANET_COMBINED_BATTERY_NODE_SIZE = {
+  width: 230,
+  height: Math.round(176 * SAJ_BATTERY_CARD_SCALE),
+};
+
 function buildSystemDiagramSpec(system) {
   const prefix = String(system);
+  const batteryNodeSize = system === "saj"
+    ? SAJ_SYSTEM_BATTERY_NODE_SIZE
+    : { width: 196, height: 168 };
   return {
     layout: "hub",
     viewport: { width: 760, height: 520 },
@@ -1949,8 +2029,8 @@ function buildSystemDiagramSpec(system) {
         kind: "battery",
         icon: "battery",
         title: "battery",
-        width: 196,
-        height: 154,
+        width: batteryNodeSize.width,
+        height: batteryNodeSize.height,
         lines: [
           {
             type: "soc",
@@ -1959,6 +2039,7 @@ function buildSystemDiagramSpec(system) {
             energyId: `${prefix}-batteryEnergyValue`,
             usableId: `${prefix}-batteryUsableValue`,
             runtimeId: `${prefix}-batteryRuntimeValue`,
+            rateId: `${prefix}-batteryRateValue`,
           },
         ],
       },
@@ -2052,8 +2133,8 @@ function buildCombinedDiagramSpec() {
         side: "left",
         icon: "battery",
         title: "SAJ Battery",
-        width: 198,
-        height: 160,
+        width: SAJ_COMBINED_BATTERY_NODE_SIZE.width,
+        height: SAJ_COMBINED_BATTERY_NODE_SIZE.height,
         lines: [
           {
             type: "soc",
@@ -2062,6 +2143,7 @@ function buildCombinedDiagramSpec() {
             energyId: "combined-battery1EnergyValue",
             usableId: "combined-battery1UsableValue",
             runtimeId: "combined-battery1RuntimeValue",
+            rateId: "combined-battery1RateValue",
           },
         ],
       },
@@ -2071,8 +2153,8 @@ function buildCombinedDiagramSpec() {
         side: "left",
         icon: "inverter",
         title: "SAJ Inverter",
-        width: 248,
-        height: 120,
+        width: 180,
+        height: 108,
         lines: [
           { id: "combined-inverter1RatioValue", className: "node-value", text: "-" },
           { id: "combined-inverter1State", className: "node-state muted", text: "-" },
@@ -2097,8 +2179,8 @@ function buildCombinedDiagramSpec() {
         side: "right",
         icon: "battery",
         title: "Solplanet Battery",
-        width: 198,
-        height: 160,
+        width: SOLPLANET_COMBINED_BATTERY_NODE_SIZE.width,
+        height: SOLPLANET_COMBINED_BATTERY_NODE_SIZE.height,
         lines: [
           {
             type: "soc",
@@ -2107,6 +2189,7 @@ function buildCombinedDiagramSpec() {
             energyId: "combined-battery2EnergyValue",
             usableId: "combined-battery2UsableValue",
             runtimeId: "combined-battery2RuntimeValue",
+            rateId: "combined-battery2RateValue",
           },
         ],
       },
@@ -2167,7 +2250,7 @@ function setFlowLine(id, active, reverse = false, theme = "default") {
 
 function getFlowQuality(flowPayload, matchedEntities) {
   if (flowPayload && flowPayload.__load_error) return "failed";
-  if (flowPayload && flowPayload.stale) return "stale";
+  if (flowPayload && (flowPayload.stale || flowPayload?.meta?.stale)) return "stale";
   if (matchedEntities >= 6) return "ok";
   return "partial";
 }
@@ -2228,16 +2311,19 @@ function renderBatterySocDisplay({
   energyValueId,
   usableValueId,
   runtimeValueId,
+  rateValueId,
   socDataKind = "real",
   energyDataKind = "estimate",
   usableDataKind = "estimate",
   runtimeDataKind = "estimate",
+  rateDataKind = "estimate",
 }) {
   if (soc === null || soc === undefined) {
     setText(socValueId, "-");
     if (energyValueId) setHtml(energyValueId, formatValueWithDataKindHtml(formatBatteryEnergyKwh(system, null), energyDataKind));
     if (usableValueId) setHtml(usableValueId, formatValueWithDataKindHtml(formatBatteryUsableKwh(system, null), usableDataKind));
-    if (runtimeValueId) setHtml(runtimeValueId, formatValueWithDataKindHtml(formatBatteryRuntimeEstimate(system, null, batteryW), runtimeDataKind));
+    if (runtimeValueId) setHtml(runtimeValueId, formatBatteryRuntimeEstimateHtml(system, null, batteryW));
+    if (rateValueId) setText(rateValueId, formatBatterySocRateEstimate(system, batteryW));
     setSocFillLevel(socFillId, 0);
     setSocTextContrastBySocValueId(socValueId, 0);
     return;
@@ -2247,7 +2333,8 @@ function renderBatterySocDisplay({
   setHtml(socValueId, formatValueWithDataKindHtml(`${clampedSoc.toFixed(0)}%`, socDataKind));
   if (energyValueId) setHtml(energyValueId, formatValueWithDataKindHtml(formatBatteryEnergyKwh(system, clampedSoc), energyDataKind));
   if (usableValueId) setHtml(usableValueId, formatValueWithDataKindHtml(formatBatteryUsableKwh(system, clampedSoc), usableDataKind));
-  if (runtimeValueId) setHtml(runtimeValueId, formatValueWithDataKindHtml(formatBatteryRuntimeEstimate(system, clampedSoc, batteryW), runtimeDataKind));
+  if (runtimeValueId) setHtml(runtimeValueId, formatBatteryRuntimeEstimateHtml(system, clampedSoc, batteryW));
+  if (rateValueId) setText(rateValueId, formatBatterySocRateEstimate(system, batteryW));
   setSocFillLevel(socFillId, clampedSoc);
   setSocTextContrastBySocValueId(socValueId, clampedSoc);
 }
@@ -2560,10 +2647,12 @@ function renderEnergyFlow(system, flowPayload) {
     energyValueId: flowId(system, "batteryEnergyValue"),
     usableValueId: flowId(system, "batteryUsableValue"),
     runtimeValueId: flowId(system, "batteryRuntimeValue"),
+    rateValueId: flowId(system, "batteryRateValue"),
     socDataKind: "real",
     energyDataKind: "estimate",
     usableDataKind: "estimate",
     runtimeDataKind: "estimate",
+    rateDataKind: "estimate",
   });
   if (balanceW === null || balanceW === undefined) {
     setText(flowId(system, "systemBalance"), `${t("balanceLabel")} -`);
@@ -2822,36 +2911,34 @@ function mergeTeslaControlInfo(baseInfo, controlPayload) {
 }
 
 function teslaInfoFromCombinedFlow(combinedFlow) {
-  const rawTesla = combinedFlow?.raw?.tesla || {};
-  const observation = rawTesla?.observation || {};
-  const charging = observation?.charging || {};
-  const battery = observation?.battery || {};
-  const controlState = rawTesla?.control_state || {};
-  return mergeTeslaControlInfo({
-    chargingW: toFiniteNumber(combinedFlow?.metrics?.tesla_charge_power_w ?? charging?.power_w),
+  const displayItems = combinedFlow?.display?.items || {};
+  const tesla = combinedFlow?.tesla || {};
+  const charging = tesla?.charging || {};
+  const battery = tesla?.battery || {};
+  const control = tesla?.control || {};
+  return {
+    chargingW: toFiniteNumber(displayItems.tesla_charge_power?.value ?? charging?.power_w),
     entityId: null,
     friendlyName: null,
-    updatedAt: latestIsoTime(combinedFlow?.updated_at, rawTesla?.executed_at_utc, battery?.entity?.last_updated),
-    currentA: toFiniteNumber(combinedFlow?.metrics?.tesla_charge_current_amps ?? charging?.current_amps),
-    configuredCurrentA: toFiniteNumber(combinedFlow?.metrics?.tesla_configured_current_amps ?? charging?.configured_current_amps),
+    updatedAt: combinedFlow?.updated_at || null,
+    currentA: toFiniteNumber(displayItems.tesla_charge_current?.value ?? charging?.current_amps),
+    configuredCurrentA: toFiniteNumber(displayItems.tesla_configured_current?.value ?? charging?.configured_current_amps),
     currentEntityId: null,
     currentUnit: "A",
-    socPercent: toFiniteNumber(combinedFlow?.metrics?.tesla_battery_soc_percent ?? battery?.level_percent),
+    socPercent: toFiniteNumber(displayItems.tesla_soc?.value ?? battery?.level_percent),
     socEntityId: null,
-    teslaConnectionState: combinedFlow?.metrics?.tesla_connection_state || charging?.connection_state || null,
-    teslaCableConnected: typeof combinedFlow?.metrics?.tesla_cable_connected === "boolean"
-      ? combinedFlow.metrics.tesla_cable_connected
-      : (typeof charging?.cable_connected === "boolean" ? charging.cable_connected : null),
-    controlAvailable: false,
-    controlMode: "unavailable",
-    chargingEnabled: null,
-    chargeRequestedEnabled: null,
-    canStart: false,
-    canStop: false,
+    teslaConnectionState: displayItems.tesla_connection_state?.value || charging?.connection_state || null,
+    teslaCableConnected: typeof charging?.cable_connected === "boolean" ? charging.cable_connected : null,
+    controlAvailable: Boolean(control?.available),
+    controlMode: control?.control_mode || "unavailable",
+    chargingEnabled: typeof control?.charging_enabled === "boolean" ? control.charging_enabled : null,
+    chargeRequestedEnabled: typeof control?.charge_requested_enabled === "boolean" ? control.charge_requested_enabled : null,
+    canStart: Boolean(control?.can_start),
+    canStop: Boolean(control?.can_stop),
     controlSwitchEntityId: null,
     controlStartButtonEntityId: null,
     controlStopButtonEntityId: null,
-  }, { control_state: controlState, observation });
+  };
 }
 
 function renderTeslaControlButton(teslaInfo = null) {
@@ -2886,30 +2973,46 @@ function ensureTeslaCardUnifiedContent() {
   });
 }
 
+function combinedDisplayItem(combinedFlow, key) {
+  const items = combinedFlow?.display?.items || {};
+  const item = items[key];
+  return item && typeof item === "object" ? item : null;
+}
+
 function buildCombinedFlowMetrics(combinedFlow) {
-  const metrics = combinedFlow?.metrics || {};
-  const solarW = toFiniteNumber(metrics.solar_primary_w);
-  const solar2W = toFiniteNumber(metrics.solar_secondary_w);
-  const gridW = toFiniteNumber(metrics.grid_w);
-  const battery1W = toFiniteNumber(metrics.battery1_w);
-  const battery2W = toFiniteNumber(metrics.battery2_w);
-  const inverter1W = toFiniteNumber(metrics.inverter1_w);
-  const inverter2W = toFiniteNumber(metrics.inverter2_w);
-  const inverter1Status = metrics.inverter1_status ?? null;
-  const inverter2Status = metrics.inverter2_status ?? null;
-  const solarKind = dataKindFromSource(metrics.pv_source, "real");
-  const gridKind = dataKindFromSource(metrics.grid_source, "real");
-  const battery1Kind = dataKindFromSource(metrics.battery1_source, "real");
-  const battery2Kind = dataKindFromSource(metrics.battery2_source, "real");
-  const inverter1Kind = dataKindFromSource(metrics.inverter1_power_source, "real");
-  const inverter2Kind = dataKindFromSource(metrics.inverter2_power_source, "real");
-  const totalLoadW = toFiniteNumber(metrics.load_w);
+  const displayItems = combinedFlow?.display?.items || {};
+  const pvW = toFiniteNumber(displayItems.solar?.value);
+  const solarW = toFiniteNumber(displayItems.solar_primary?.value);
+  const solar2W = toFiniteNumber(displayItems.solar_secondary?.value);
+  const gridW = toFiniteNumber(displayItems.grid?.value);
+  const batteryW = toFiniteNumber(displayItems.battery_total?.value);
+  const battery1W = toFiniteNumber(displayItems.battery1_power?.value);
+  const battery2W = toFiniteNumber(displayItems.battery2_power?.value);
+  const inverter1W = toFiniteNumber(displayItems.inverter1_power?.value);
+  const inverter2W = toFiniteNumber(displayItems.inverter2_power?.value);
+  const inverter1Status = displayItems.inverter1_status?.value ?? null;
+  const inverter2Status = displayItems.inverter2_status?.value ?? null;
+  const solarKind = displayItems.solar?.kind || "real";
+  const gridKind = displayItems.grid?.kind || "real";
+  const battery1Kind = displayItems.battery1_power?.kind || "real";
+  const battery2Kind = displayItems.battery2_power?.kind || "real";
+  const inverter1Kind = displayItems.inverter1_power?.kind || "real";
+  const inverter2Kind = displayItems.inverter2_power?.kind || "real";
+  const totalLoadW = toFiniteNumber(displayItems.total_load?.value);
+  const homeLoadW = toFiniteNumber(displayItems.home_load?.value ?? totalLoadW);
+  const balanceW = toFiniteNumber(displayItems.balance?.value);
+  const balanceStatus = displayItems.balance_status?.value ?? null;
+  const balanceKind = displayItems.balance?.kind || "calculated";
   const solarToInverter1W = solarW !== null ? Math.max(solarW, 0) : 0;
-  const availableCount = [solarW, gridW, inverter1W, inverter2W, totalLoadW].filter((v) => v !== null).length;
+  const availableCount = Array.isArray(combinedFlow?.display?.order)
+    ? combinedFlow.display.order.length
+    : [solarW, gridW, inverter1W, inverter2W, totalLoadW].filter((v) => v !== null).length;
   return {
+    pvW,
     solarW,
     solar2W,
     gridW,
+    batteryW,
     battery1W,
     battery2W,
     inverter1W,
@@ -2917,9 +3020,11 @@ function buildCombinedFlowMetrics(combinedFlow) {
     inverter1Status,
     inverter2Status,
     totalLoadW,
-    homeLoadW: totalLoadW,
-    battery1Soc: toFiniteNumber(metrics.battery1_soc_percent),
-    battery2Soc: toFiniteNumber(metrics.battery2_soc_percent),
+    homeLoadW,
+    balanceW,
+    balanceStatus,
+    battery1Soc: toFiniteNumber(displayItems.battery1_soc?.value),
+    battery2Soc: toFiniteNumber(displayItems.battery2_soc?.value),
     solarToInverter1W,
     availableCount,
     dataKinds: {
@@ -2929,19 +3034,21 @@ function buildCombinedFlowMetrics(combinedFlow) {
       battery2: battery2Kind,
       inverter1: inverter1Kind,
       inverter2: inverter2Kind,
-      totalLoad: "calculated",
-      homeLoad: "calculated",
-      teslaCurrent: "real",
-      teslaSoc: "real",
+      totalLoad: displayItems.total_load?.kind || "calculated",
+      homeLoad: displayItems.home_load?.kind || "calculated",
+      teslaCurrent: displayItems.tesla_charge_current?.kind || "real",
+      teslaSoc: displayItems.tesla_soc?.kind || "real",
+      balance: balanceKind,
       inverterRatio: "calculated",
       solarToInverter1: "estimate",
     },
     sources: {
-      solar: metrics.pv_source || "unavailable",
-      grid: metrics.grid_source || "unavailable",
-      battery1: metrics.battery1_source || "unavailable",
-      battery2: metrics.battery2_source || "unavailable",
-      load: metrics.load_source || "unavailable",
+      solar: displayItems.solar?.source || "unavailable",
+      grid: displayItems.grid?.source || "unavailable",
+      battery1: displayItems.battery1_power?.source || "unavailable",
+      battery2: displayItems.battery2_power?.source || "unavailable",
+      load: displayItems.total_load?.source || "unavailable",
+      balance: displayItems.balance?.source || "unavailable",
     },
   };
 }
@@ -3083,7 +3190,7 @@ function renderMobileCombinedFlow({
     renderMobileEnergyLine("line-battery1-inverter1", battery1Active, !battery1W || battery1W < 0) +
     renderMobileEnergyLine("line-inverter1-home", inverter1Active, !inverter1W || inverter1W < 0) +
     renderMobileEnergyLine("line-inverter2-home", inverter2Active, !inverter2W || inverter2W < 0) +
-    renderMobileEnergyLine("line-battery2-inverter2", battery2Active, !battery2W || battery2W < 0) +
+    renderMobileEnergyLine("line-battery2-inverter2", battery2Active, Boolean(battery2W && battery2W > 0)) +
     renderMobileEnergyLine("line-home-load", homeLoadActive, false) +
     renderMobileEnergyLine("line-home-tesla", teslaChargingActive, false) +
     renderMobileEnergyNode({
@@ -3177,9 +3284,11 @@ function renderMobileCombinedFlow({
 function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   const combined = buildCombinedFlowMetrics(combinedFlow);
   const {
+    pvW,
     solarW,
     solar2W,
     gridW,
+    batteryW,
     battery1W,
     battery2W,
     inverter1W,
@@ -3187,6 +3296,9 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
     inverter1Status,
     inverter2Status,
     totalLoadW,
+    homeLoadW: displayHomeLoadW,
+    balanceW: displayBalanceW,
+    balanceStatus: displayBalanceStatus,
     battery1Soc,
     battery2Soc,
     solarToInverter1W,
@@ -3197,10 +3309,10 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   const teslaCurrentA = toFiniteNumber(teslaInfo?.currentA);
   const teslaConfiguredCurrentA = toFiniteNumber(teslaInfo?.configuredCurrentA);
   const teslaSoc = toFiniteNumber(teslaInfo?.socPercent);
-  let homeLoadW = totalLoadW;
-  if (homeLoadW !== null) {
+  let homeLoadW = displayHomeLoadW;
+  if (homeLoadW === null && totalLoadW !== null) {
     const teslaW = teslaChargingW === null ? 0 : teslaChargingW;
-    homeLoadW = Math.max(0, homeLoadW - teslaW);
+    homeLoadW = Math.max(0, totalLoadW - teslaW);
     if (Math.abs(homeLoadW) <= BALANCE_TOLERANCE_W) homeLoadW = 0;
   }
 
@@ -3210,7 +3322,7 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   setSystemLoadMeta("combined", {
     phase: combinedPending ? "loading" : (hasCombinedBase ? "done" : "failed"),
     updatedAt: latestIsoTime(combinedFlow?.updated_at, teslaInfo?.updatedAt),
-    quality: hasCombinedBase ? getFlowQuality(combinedFlow, Number(combinedFlow?.metrics?.matched_entities) || 0) : "failed",
+    quality: hasCombinedBase ? getFlowQuality(combinedFlow, combined.availableCount) : "failed",
     count: combined.availableCount,
   });
 
@@ -3300,7 +3412,7 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   setFlowLine(
     "combined-lineBattery2ToInverter2",
     battery2Active,
-    !battery2Discharging,
+    battery2Discharging,
     battery2Discharging ? "batteryDischarge" : "batteryCharge",
   );
 
@@ -3329,10 +3441,12 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
     energyValueId: "combined-battery1EnergyValue",
     usableValueId: "combined-battery1UsableValue",
     runtimeValueId: "combined-battery1RuntimeValue",
+    rateValueId: "combined-battery1RateValue",
     socDataKind: "real",
     energyDataKind: "estimate",
     usableDataKind: "estimate",
     runtimeDataKind: "estimate",
+    rateDataKind: "estimate",
   });
   renderBatterySocDisplay({
     system: "solplanet",
@@ -3343,10 +3457,12 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
     energyValueId: "combined-battery2EnergyValue",
     usableValueId: "combined-battery2UsableValue",
     runtimeValueId: "combined-battery2RuntimeValue",
+    rateValueId: "combined-battery2RateValue",
     socDataKind: "real",
     energyDataKind: "estimate",
     usableDataKind: "estimate",
     runtimeDataKind: "estimate",
+    rateDataKind: "estimate",
   });
 
   const gridHigh = gridW !== null && Math.abs(gridW) > 15000;
@@ -3372,19 +3488,35 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
     const rightDistancePx = Math.round((switchboardMetrics.viewportWidth - guideInset) - switchboardMetrics.centerX);
   }
 
-  const battery1SocText = battery1Soc === null ? "-" : formatValueWithDataKindHtml(`${Math.max(0, Math.min(100, battery1Soc)).toFixed(0)}%`, "real");
-  const battery2SocText = battery2Soc === null ? "-" : formatValueWithDataKindHtml(`${Math.max(0, Math.min(100, battery2Soc)).toFixed(0)}%`, "real");
-  const teslaSuffix = t("teslaChargingFormulaNote", {
-    total: formatPowerKwFromWatts(totalLoadW),
-    home: formatPowerKwFromWatts(homeLoadW),
-    tesla: formatPowerKwFromWatts(teslaChargingW),
-  });
-  const formula =
-    `${escapeHtml(t("balanceFormulaLabel"))}: ` +
-    `${formatValueWithDataKindHtml(formatSignedKwFromWatts(inverter1W), dataKinds.inverter1)} + ${formatValueWithDataKindHtml(formatSignedKwFromWatts(inverter2W), dataKinds.inverter2)} + ${formatValueWithDataKindHtml(formatSignedKwFromWatts(gridW), dataKinds.grid)} = ${formatValueWithDataKindHtml(formatPowerKwFromWatts(totalLoadW), dataKinds.totalLoad)} ` +
-    `(SOC1 ${battery1SocText}, SOC2 ${battery2SocText})` +
-    ` · Solar→Inverter1 ${formatValueWithDataKindHtml(formatPowerKwFromWatts(solarToInverter1W), dataKinds.solarToInverter1)}` +
-    ` · ${formatValueWithDataKindHtml(teslaSuffix, dataKinds.homeLoad)}`;
+  let formula = `${t("balanceFormulaLabel")}: -`;
+  if (
+    pvW !== null &&
+    gridW !== null &&
+    batteryW !== null &&
+    totalLoadW !== null
+  ) {
+    const batteryDischargeW = Math.max(batteryW, 0);
+    const batteryChargeW = Math.max(-batteryW, 0);
+    const gridImportW = Math.max(gridW, 0);
+    const gridExportW = Math.max(-gridW, 0);
+    const computedBalanceW = pvW + batteryDischargeW + gridImportW - totalLoadW - batteryChargeW - gridExportW;
+    const balanceW = displayBalanceW ?? computedBalanceW;
+    const balanceState = displayBalanceStatus === "cleared"
+      ? t("balanceStatusBalanced")
+      : displayBalanceStatus === "not_cleared"
+        ? t("balanceStatusUnbalanced")
+        : (Math.abs(Number(balanceW) || 0) <= BALANCE_TOLERANCE_W ? t("balanceStatusBalanced") : t("balanceStatusUnbalanced"));
+    formula =
+      `${escapeHtml(t("balanceFormulaLabel"))}: ` +
+      `(${formatValueWithDataKindHtml(formatPowerKwFromWatts(pvW), dataKinds.solar)}) + ` +
+      `(${formatValueWithDataKindHtml(formatPowerKwFromWatts(batteryDischargeW), dataKinds.balance)}) + ` +
+      `(${formatValueWithDataKindHtml(formatPowerKwFromWatts(gridImportW), dataKinds.grid)}) - ` +
+      `(${formatValueWithDataKindHtml(formatPowerKwFromWatts(totalLoadW), dataKinds.totalLoad)}) - ` +
+      `(${formatValueWithDataKindHtml(formatPowerKwFromWatts(batteryChargeW), dataKinds.balance)}) - ` +
+      `(${formatValueWithDataKindHtml(formatPowerKwFromWatts(gridExportW), dataKinds.grid)}) = ` +
+      `${formatValueWithDataKindHtml(formatSignedKwFromWatts(balanceW), dataKinds.balance)} ` +
+      `(${escapeHtml(balanceState)})`;
+  }
   setHtml("combined-loadFormulaText", formula);
   renderMobileCombinedFlow({
     combined,
@@ -3403,7 +3535,9 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
 function renderSummary(payload) {
   const { combinedFlow, collectorStatus } = payload;
   const tesla = teslaInfoFromCombinedFlow(combinedFlow);
-  const combinedCount = combinedFlow?.metrics?.matched_entities ?? 0;
+  const combinedCount = Array.isArray(combinedFlow?.display?.order)
+    ? combinedFlow.display.order.length
+    : 0;
   setSystemLoadMeta("combined", {
     quality: getFlowQuality(combinedFlow, Number(combinedCount) || 0),
     count: Number(combinedCount) || 0,
@@ -3424,15 +3558,16 @@ function formatCollectorSystemStatus(label, systemState) {
 }
 
 function renderCombinedDebug(combinedFlow, collectorStatus) {
-  const sourceType = combinedFlow?.source?.type || "-";
-  const storageBacked = combinedFlow?.storage_backed ? "true" : "false";
-  const stale = combinedFlow?.stale ? `true (${combinedFlow?.stale_reason || "-"})` : "false";
-  const sampleAge = combinedFlow?.sample_age_seconds === null || combinedFlow?.sample_age_seconds === undefined
+  const meta = combinedFlow?.meta || {};
+  const sourceType = meta?.source_type || "-";
+  const storageBacked = meta?.storage_backed ? "true" : "false";
+  const stale = meta?.stale ? `true (${meta?.stale_reason || "-"})` : "false";
+  const sampleAge = meta?.sample_age_seconds === null || meta?.sample_age_seconds === undefined
     ? "-"
-    : formatMaybeNumber(combinedFlow.sample_age_seconds, 1);
-  const kvCount = combinedFlow?.kv_item_count === null || combinedFlow?.kv_item_count === undefined
+    : formatMaybeNumber(meta.sample_age_seconds, 1);
+  const kvCount = meta?.kv_item_count === null || meta?.kv_item_count === undefined
     ? "-"
-    : String(combinedFlow.kv_item_count);
+    : String(meta.kv_item_count);
   setText(
     "combinedDebugMeta",
     t("combinedDebugMeta", {
@@ -4001,10 +4136,12 @@ function buildWorkerLogsUrl() {
   const params = new URLSearchParams();
   const category = document.getElementById("workerLogsCategorySelect")?.value || "all";
   const service = document.getElementById("workerLogsServiceSelect")?.value || "all";
-  const hideNoop = Boolean(document.getElementById("workerLogsHideNoopCheckbox")?.checked);
+  const hidePassive = Boolean(document.getElementById("workerLogsHidePassiveCheckbox")?.checked);
   if (service && service !== "all") params.set("service", service);
-  else if (category && category !== "all") params.set("category", category);
-  if (hideNoop) params.set("exclude_status", "noop");
+  else if (category && category !== "all" && category !== "alert") params.set("category", category);
+  const excludedStatuses = [];
+  if (hidePassive) excludedStatuses.push("noop", "skipped");
+  if (excludedStatuses.length) params.set("exclude_status", excludedStatuses.join(","));
   params.set("page", String(workerLogsPager.page));
   params.set("page_size", "100");
   return `/api/worker/logs?${params.toString()}`;
@@ -4013,14 +4150,16 @@ function buildWorkerLogsUrl() {
 function syncWorkerLogsFilters() {
   const categorySelect = document.getElementById("workerLogsCategorySelect");
   const serviceSelect = document.getElementById("workerLogsServiceSelect");
-  const hideNoopLabel = document.getElementById("workerLogsHideNoopLabel");
-  const hideNoopCheckbox = document.getElementById("workerLogsHideNoopCheckbox");
+  const hidePassiveLabel = document.getElementById("workerLogsHidePassiveLabel");
+  const hidePassiveCheckbox = document.getElementById("workerLogsHidePassiveCheckbox");
   const category = categorySelect?.value || "all";
   if (serviceSelect) {
     const selectedService = serviceSelect.value || "all";
     const allowedServices =
       category === "tesla"
         ? new Set(["all", TESLA_CONTROL_WORKER_SERVICE, TESLA_OBSERVATION_WORKER_SERVICE])
+        : category === "alert"
+          ? new Set(["all", TESLA_CONTROL_WORKER_SERVICE, TESLA_OBSERVATION_WORKER_SERVICE, COMBINED_ASSEMBLY_WORKER_SERVICE])
         : category === "combined"
           ? new Set(["all", COMBINED_ASSEMBLY_WORKER_SERVICE, TESLA_CONTROL_WORKER_SERVICE, TESLA_OBSERVATION_WORKER_SERVICE])
           : new Set(["all", TESLA_CONTROL_WORKER_SERVICE, TESLA_OBSERVATION_WORKER_SERVICE, COMBINED_ASSEMBLY_WORKER_SERVICE]);
@@ -4032,8 +4171,21 @@ function syncWorkerLogsFilters() {
     }
   }
   const showHideNoop = (serviceSelect?.value || "all") === TESLA_CONTROL_WORKER_SERVICE;
-  if (hideNoopLabel) hideNoopLabel.classList.toggle("hidden", !showHideNoop);
-  if (!showHideNoop && hideNoopCheckbox) hideNoopCheckbox.checked = false;
+  if (hidePassiveLabel) hidePassiveLabel.classList.toggle("hidden", !showHideNoop);
+  if (!showHideNoop && hidePassiveCheckbox) hidePassiveCheckbox.checked = false;
+}
+
+function workerLogMatchesAlertFilter(item, filterValue) {
+  if (!item || filterValue !== "warning") return true;
+  const resultText = String(item.error_text || item.result_text || "").toLowerCase();
+  return (
+    resultText.includes("notification ") ||
+    resultText.includes("warning") ||
+    resultText.includes("alarm") ||
+    resultText.includes("solplanet_low_battery") ||
+    resultText.includes("grid_import_started") ||
+    resultText.includes("solar_surplus_export_energy_reached")
+  );
 }
 
 function compactWorkerLogResultText(value, head = 36, tail = 24) {
@@ -4157,20 +4309,29 @@ function renderWorkerLogsRows(items) {
 }
 
 function renderWorkerLogsPage(payload) {
+  const category = document.getElementById("workerLogsCategorySelect")?.value || "all";
+  const alertFilter = category === "alert" ? "warning" : "all";
+  const filteredItems = Array.isArray(payload.items)
+    ? payload.items.filter((item) => workerLogMatchesAlertFilter(item, alertFilter))
+    : [];
   const totalPages = Math.max(1, Math.ceil((payload.total || 0) / (payload.page_size || 100)));
-  setText("workerLogsCount", t("workerLogsTotal", { total: payload.total || 0 }));
+  const countText =
+    alertFilter === "warning"
+      ? `${t("workerLogsTotal", { total: payload.total || 0 })} · ${filteredItems.length} alerts on this page`
+      : t("workerLogsTotal", { total: payload.total || 0 });
+  setText("workerLogsCount", countText);
   setText(
     "workerLogsPageInfo",
     t("workerLogsPageInfo", {
       page: payload.page || 1,
       totalPages,
-      count: payload.count || 0,
+      count: filteredItems.length,
     }),
   );
   setText("workerLogsUpdatedAt", formatUpdatedAt(payload.updated_at || null));
   document.getElementById("workerLogsPrevPageBtn").disabled = !Boolean(payload.has_prev);
   document.getElementById("workerLogsNextPageBtn").disabled = !Boolean(payload.has_next);
-  renderWorkerLogsRows(payload.items || []);
+  renderWorkerLogsRows(filteredItems);
 }
 
 function renderWorkerLogsConfigMeta(configPayload) {
@@ -7148,7 +7309,7 @@ bindChangeIfPresent("workerLogsServiceSelect", async () => {
   await loadWorkerLogs();
 });
 
-bindChangeIfPresent("workerLogsHideNoopCheckbox", async () => {
+bindChangeIfPresent("workerLogsHidePassiveCheckbox", async () => {
   workerLogsPager.page = 1;
   await loadWorkerLogs();
 });

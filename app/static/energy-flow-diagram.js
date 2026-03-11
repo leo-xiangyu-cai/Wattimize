@@ -37,6 +37,7 @@
   const DEFAULT_PADDING = 28;
   const FLOW_MARKER_SPACING = 84;
   const FLOW_MARKER_SPEED = 46;
+  const COMBINED_LEFT_COLUMN_SHIFT_X = -72;
 
   function escapeHtml(value) {
     return String(value)
@@ -45,6 +46,12 @@
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#39;");
+  }
+
+  function tokenToClassName(value) {
+    return String(value || "")
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]+/g, "-");
   }
 
   function hasDataKindBadge(text) {
@@ -134,6 +141,9 @@
       const runtimeMarkup = line.runtimeId
         ? `<span id='${escapeHtml(line.runtimeId)}' class='soc-runtime-inside'>-</span>`
         : "";
+      const rateMarkup = line.rateId
+        ? `<span id='${escapeHtml(line.rateId)}' class='soc-rate-inside'>-</span>`
+        : "";
       return (
         "<div class='soc-wrap'>" +
         `<div id='${escapeHtml(line.fillId)}' class='soc-fill'></div>` +
@@ -142,6 +152,7 @@
         energyMarkup +
         usableMarkup +
         runtimeMarkup +
+        rateMarkup +
         "</div></div>"
       );
     }
@@ -163,8 +174,9 @@
     const lines = Array.isArray(data.lines) ? data.lines : [];
     const body = lines.map((line) => renderLine(line)).join("");
     const titleKey = data.titleKey ? ` data-i18n="${escapeHtml(data.titleKey)}"` : "";
+    const nodeIdClass = data.nodeId ? ` efd-node-id-${escapeHtml(tokenToClassName(data.nodeId))}` : "";
     return (
-      `<article class="efd-node efd-node-${escapeHtml(data.kind || "generic")}">` +
+      `<article class="efd-node efd-node-${escapeHtml(data.kind || "generic")}${nodeIdClass}">` +
       "<p class='node-title'>" +
       `<span class='inline-icon' aria-hidden='true'>${iconMarkup(data.icon || data.kind)}</span>` +
       `<span${titleKey}>${escapeHtml(data.title || "")}</span>` +
@@ -308,6 +320,7 @@
     const batteryRight = groups.batteryRight[0];
     const inverterLeft = groups.inverterLeft[0];
     const inverterRight = groups.inverterRight[0];
+    const isCombinedBoard = switchboard?.id === "combined-switchboardNode";
 
     const outerX = -10;
     const solarX = -174;
@@ -320,6 +333,110 @@
     const topY = 20;
     const switchboardY = Math.round(height * 0.33);
     const batteryY = height - Math.max(maxHeight(groups.batteryLeft), maxHeight(groups.batteryRight)) - 44;
+
+    if (isCombinedBoard && solar && batteryLeft && inverterLeft && switchboard) {
+      const leftColumnCenterX = 170;
+      const leftColumnShiftX = COMBINED_LEFT_COLUMN_SHIFT_X;
+      const leftVerticalGap = 44;
+      const inverterToSwitchboardGap = 52;
+      const combinedInverterY = Math.round(height * 0.38);
+      const combinedSwitchboardY = combinedInverterY + Math.round((inverterLeft.height - switchboard.height) / 2);
+      const combinedSolarY = topY;
+      const centerColumnOffsetX = 34;
+      const rightBatteryBottomGap = 8;
+      const rightColumnGap = 36;
+      const rightBatteryInset = 155;
+
+      result[inverterLeft.id] = {
+        x: Math.round(leftColumnCenterX - (inverterLeft.width / 2) + leftColumnShiftX),
+        y: combinedInverterY,
+        width: inverterLeft.width,
+        height: inverterLeft.height,
+      };
+
+      result[solar.id] = {
+        x: Math.round(leftColumnCenterX - (solar.width / 2) + leftColumnShiftX),
+        y: combinedSolarY,
+        width: solar.width,
+        height: solar.height,
+      };
+
+      result[batteryLeft.id] = {
+        x: Math.round(leftColumnCenterX - (batteryLeft.width / 2) + leftColumnShiftX),
+        y: combinedInverterY + inverterLeft.height + leftVerticalGap,
+        width: batteryLeft.width,
+        height: batteryLeft.height,
+      };
+
+      result[switchboard.id] = {
+        x: result[inverterLeft.id].x + inverterLeft.width + inverterToSwitchboardGap + centerColumnOffsetX,
+        y: combinedSwitchboardY,
+        width: switchboard.width,
+        height: switchboard.height,
+      };
+
+      if (grid) {
+        const switchboardCenterX = result[switchboard.id].x + (switchboard.width / 2);
+        result[grid.id] = {
+          x: switchboardCenterX - (grid.width / 2),
+          y: topY,
+          width: grid.width,
+          height: grid.height,
+        };
+      }
+
+      if (batteryRight) {
+        result[batteryRight.id] = {
+          x: width - outerX - batteryRight.width - rightBatteryInset,
+          y: height - batteryRight.height - rightBatteryBottomGap,
+          width: batteryRight.width,
+          height: batteryRight.height,
+        };
+      }
+
+      if (inverterRight && batteryRight) {
+        result[inverterRight.id] = {
+          x: Math.round(result[switchboard.id].x + (switchboard.width / 2) - (inverterRight.width / 2)),
+          y: Math.round(result[batteryRight.id].y + ((batteryRight.height - inverterRight.height) / 2)),
+          width: inverterRight.width,
+          height: inverterRight.height,
+        };
+      }
+
+      if (ev && load) {
+        const teslaLineOffsetY = 30;
+        result[ev.id] = {
+          x: width - outerX - ev.width,
+          y: (result[switchboard.id].y + (result[switchboard.id].height / 2) + teslaLineOffsetY) - (ev.height / 2),
+          width: ev.width,
+          height: ev.height,
+        };
+      }
+
+      if (load) {
+        const loadOffsetLeftOfTesla = 228;
+        const loadGapAboveTesla = 78;
+        const teslaX = ev ? result[ev.id].x : width - outerX - load.width;
+        const teslaY = ev ? result[ev.id].y : (result[switchboard.id].y + 40);
+        result[load.id] = {
+          x: teslaX - loadOffsetLeftOfTesla,
+          y: Math.max(topY + 8, teslaY - load.height - loadGapAboveTesla),
+          width: load.width,
+          height: load.height,
+        };
+      }
+
+      groups.fallback.forEach((node, index) => {
+        result[node.id] = {
+          x: 32 + ((index % 2) * (node.width + 24)),
+          y: 32 + (Math.floor(index / 2) * (node.height + 24)),
+          width: node.width,
+          height: node.height,
+        };
+      });
+
+      return result;
+    }
 
     if (solar) {
       result[solar.id] = {
@@ -439,11 +556,7 @@
     const trunkStart = pointOnBox(switchboard, "right", 30);
     const loadTarget = pointOnBox(load, "bottom", 0);
     const teslaTarget = pointOnBox(tesla, "left", 0);
-    const branchX = Math.min(
-      teslaTarget.x - 64,
-      Math.max(trunkStart.x + 52, loadTarget.x + 18),
-    );
-    const branchPoint = { x: branchX, y: trunkStart.y };
+    const branchPoint = { x: loadTarget.x, y: trunkStart.y };
 
     return {
       trunkStart,
@@ -452,8 +565,6 @@
       loadTarget,
       loadPoints: [
         branchPoint,
-        { x: branchX, y: loadTarget.y + 26 },
-        { x: loadTarget.x, y: loadTarget.y + 26 },
         loadTarget,
       ],
       teslaPoints: [
@@ -525,33 +636,19 @@
       return [{ x: switchboardCenter.x, y: switchboardCenter.y }, { x: viewport.width - guideInset, y: switchboardCenter.y }];
     }
     if (edgeId === "combined-lineSolarToInverter1B") {
-      const source = pointOnBox(solar, "right");
-      const target = pointOnBox(inverter1, "top", -18);
-      return [source, { x: target.x, y: source.y }, target];
+      return [pointOnBox(solar, "bottom"), pointOnBox(inverter1, "top")];
     }
     if (edgeId === "combined-lineBattery1ToInverter1") {
-      return [pointOnBox(battery1, "right"), pointOnBox(inverter1, "left")];
+      return [pointOnBox(battery1, "top"), pointOnBox(inverter1, "bottom")];
     }
     if (edgeId === "combined-lineBattery2ToInverter2") {
-      return [pointOnBox(battery2, "left"), pointOnBox(inverter2, "right")];
+      return [pointOnBox(inverter2, "right"), pointOnBox(battery2, "left")];
     }
     if (edgeId === "combined-lineInverter1ToSwitchboardB") {
-      const source = pointOnBox(inverter1, "top", 24);
-      const busPoint = { x: source.x, y: inverterBusY };
-      const pairedSource = { x: center(inverter2).x - 24, y: inverterBusY };
-      const sharedMidX = (busPoint.x + pairedSource.x) / 2;
-      const bridgeGap = 64;
-      const target = { x: sharedMidX - (bridgeGap / 2), y: switchboard.y + switchboard.height };
-      return [source, busPoint, { x: target.x, y: inverterBusY }, target];
+      return [pointOnBox(inverter1, "right"), pointOnBox(switchboard, "left")];
     }
     if (edgeId === "combined-lineInverter2ToSwitchboardB") {
-      const source = pointOnBox(inverter2, "top", -24);
-      const busPoint = { x: source.x, y: inverterBusY };
-      const pairedSource = { x: center(inverter1).x + 24, y: inverterBusY };
-      const sharedMidX = (busPoint.x + pairedSource.x) / 2;
-      const bridgeGap = 64;
-      const target = { x: sharedMidX + (bridgeGap / 2), y: switchboard.y + switchboard.height };
-      return [source, busPoint, { x: target.x, y: inverterBusY }, target];
+      return [pointOnBox(switchboard, "bottom"), pointOnBox(inverter2, "top")];
     }
     const loadBranch = combinedLoadBranchGeometry(positions);
     if (edgeId === "combined-lineSwitchboardToTotalLoad") {
@@ -599,13 +696,120 @@
     return points[points.length - 1];
   }
 
-  function edgeLabelPoint(edgeId, points) {
+  function labelPointOnPolyline(points) {
+    if (!Array.isArray(points) || !points.length) {
+      return {
+        point: { x: 0, y: 0 },
+        segment: { dx: 1, dy: 0 },
+      };
+    }
+    if (points.length === 1) {
+      return {
+        point: points[0],
+        segment: { dx: 1, dy: 0 },
+      };
+    }
+    let total = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      total += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+    }
+    let walked = 0;
+    const target = total / 2;
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1];
+      const b = points[i];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const seg = Math.hypot(dx, dy);
+      if (walked + seg >= target) {
+        const ratio = seg === 0 ? 0 : (target - walked) / seg;
+        return {
+          point: {
+            x: a.x + (dx * ratio),
+            y: a.y + (dy * ratio),
+          },
+          segment: { dx, dy },
+        };
+      }
+      walked += seg;
+    }
+    const last = points[points.length - 1];
+    const prev = points[points.length - 2];
+    return {
+      point: last,
+      segment: { dx: last.x - prev.x, dy: last.y - prev.y },
+    };
+  }
+
+  function offsetLabelPoint(basePoint, segment, viewport) {
+    const HORIZONTAL_OFFSET_Y = 32;
+    const VERTICAL_OFFSET_X = 36;
+    const dx = Number(segment?.dx || 0);
+    const dy = Number(segment?.dy || 0);
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      return { x: basePoint.x, y: basePoint.y - HORIZONTAL_OFFSET_Y };
+    }
+    const viewportMidX = viewport ? viewport.width / 2 : basePoint.x;
+    return {
+      x: basePoint.x + (basePoint.x < viewportMidX ? -VERTICAL_OFFSET_X : VERTICAL_OFFSET_X),
+      y: basePoint.y,
+    };
+  }
+
+  function adjustCombinedLabelPoint(edgeId, point) {
+    const offsetByEdgeId = {
+      "combined-lineGridToSwitchboard": { x: 0, y: 0 },
+      "combined-lineSolarToInverter1B": { x: -34, y: 0 },
+      "combined-lineBattery1ToInverter1": { x: -34, y: 0 },
+      "combined-lineInverter1ToSwitchboardB": { x: -34, y: 0 },
+      "combined-lineSwitchboardToHomeLoad": { x: 34, y: 0 },
+      "combined-lineSwitchboardToTeslaB": { x: 34, y: 0 },
+      "combined-lineBattery2ToInverter2": { x: 34, y: 0 },
+      "combined-lineInverter2ToSwitchboardB": { x: 0, y: 0 },
+    };
+    const offset = offsetByEdgeId[edgeId];
+    if (!offset) return point;
+    return {
+      x: point.x + offset.x,
+      y: point.y + offset.y,
+    };
+  }
+
+  function edgeLabelPoint(edgeId, points, viewport) {
     if (edgeId === "combined-lineSwitchboardToTotalLoad") {
-      return polylineMidpoint(points);
+      const anchor = labelPointOnPolyline(points);
+      return adjustCombinedLabelPoint(edgeId, offsetLabelPoint(anchor.point, anchor.segment, viewport));
+    }
+    if (edgeId === "combined-lineGridToSwitchboard" && Array.isArray(points) && points.length >= 2) {
+      const start = points[0];
+      const end = points[points.length - 1];
+      return {
+        x: ((start.x + end.x) / 2) + 12,
+        y: ((start.y + end.y) / 2) - 8,
+      };
+    }
+    if (edgeId === "combined-lineInverter1ToSwitchboardB" && Array.isArray(points) && points.length >= 2) {
+      const start = points[0];
+      const end = points[points.length - 1];
+      return {
+        x: ((start.x + end.x) / 2) - 34,
+        y: ((start.y + end.y) / 2) - 32,
+      };
+    }
+    if (edgeId === "combined-lineInverter2ToSwitchboardB" && Array.isArray(points) && points.length >= 2) {
+      const start = points[0];
+      const end = points[points.length - 1];
+      return {
+        x: ((start.x + end.x) / 2) + 12,
+        y: ((start.y + end.y) / 2),
+      };
     }
     if (edgeId === "combined-lineSwitchboardToHomeLoad" && Array.isArray(points) && points.length >= 3) {
-      const verticalMidY = (points[0].y + points[1].y) / 2;
-      return { x: points[0].x - 10, y: verticalMidY };
+      return adjustCombinedLabelPoint(edgeId, offsetLabelPoint(
+        { x: points[0].x, y: (points[0].y + points[1].y) / 2 },
+        { dx: 0, dy: points[1].y - points[0].y },
+        viewport,
+      ));
     }
     if (edgeId === "combined-lineSwitchboardToTeslaB" && Array.isArray(points) && points.length >= 2) {
       const target = points[points.length - 1];
@@ -613,13 +817,14 @@
       const seg = Math.hypot(target.x - prev.x, target.y - prev.y);
       const inset = Math.min(56, Math.max(24, seg * 0.28));
       if (seg > 0) {
-        return {
+        return adjustCombinedLabelPoint(edgeId, offsetLabelPoint({
           x: target.x - (((target.x - prev.x) / seg) * inset),
           y: target.y - (((target.y - prev.y) / seg) * inset),
-        };
+        }, { dx: target.x - prev.x, dy: target.y - prev.y }, viewport));
       }
     }
-    return polylineMidpoint(points);
+    const anchor = labelPointOnPolyline(points);
+    return adjustCombinedLabelPoint(edgeId, offsetLabelPoint(anchor.point, anchor.segment, viewport));
   }
 
   function expandBounds(bounds, x, y) {
@@ -629,7 +834,7 @@
     bounds.maxY = Math.max(bounds.maxY, y);
   }
 
-  function computeContentBounds(nodes, edgesById) {
+  function computeContentBounds(nodes, edgesById, spec = null) {
     const bounds = {
       minX: Number.POSITIVE_INFINITY,
       minY: Number.POSITIVE_INFINITY,
@@ -650,6 +855,10 @@
 
     if (!Number.isFinite(bounds.minX)) {
       return { minX: 0, minY: 0, maxX: 1, maxY: 1, width: 1, height: 1 };
+    }
+
+    if (spec?.layout === "power") {
+      bounds.minX -= COMBINED_LEFT_COLUMN_SHIFT_X;
     }
 
     bounds.width = Math.max(1, bounds.maxX - bounds.minX);
@@ -830,7 +1039,7 @@
 
       this.renderNodes(nodes, positions);
       this.buildEdges(positions, layoutInput.viewport);
-      this.contentBounds = computeContentBounds(Object.values(positions), this.edgeMetaById);
+      this.contentBounds = computeContentBounds(Object.values(positions), this.edgeMetaById, this.spec);
       this.fit();
       this.updateAnimationState();
     }
@@ -846,6 +1055,7 @@
         nodeEl.style.width = `${node.width}px`;
         nodeEl.style.height = `${node.height}px`;
         nodeEl.innerHTML = renderNodeBody({
+          nodeId: node.id,
           kind: node.kind,
           icon: node.icon,
           title: node.title,
@@ -864,7 +1074,7 @@
         const points = this.spec.layout === "power"
           ? (combinedEdgeGeometry(edge.id, positions, viewport) || buildOrthogonalPoints(sourceBox, targetBox))
           : buildOrthogonalPoints(sourceBox, targetBox);
-        const labelPoint = edgeLabelPoint(edge.id, points);
+        const labelPoint = edgeLabelPoint(edge.id, points, viewport);
         this.edgeMetaById.set(edge.id, {
           id: edge.id,
           points,
@@ -881,6 +1091,9 @@
           const labelEl = document.createElement("div");
           labelEl.id = edge.labelId;
           labelEl.className = "flow-line-value";
+          if (edge.id === "combined-lineGridToSwitchboard" || edge.id === "combined-lineInverter2ToSwitchboardB") {
+            labelEl.classList.add("flow-line-value-anchor-left");
+          }
           labelEl.textContent = "-";
           labelEl.style.left = `${labelPoint.x}px`;
           labelEl.style.top = `${labelPoint.y}px`;
@@ -977,6 +1190,11 @@
         reverse: Boolean(reverse),
         theme: String(theme || "default"),
       });
+      this.labelMetaById.forEach((meta) => {
+        if (meta.edgeId !== edgeId) return;
+        meta.element.dataset.theme = String(theme || "default");
+        meta.element.classList.toggle("active", Boolean(active));
+      });
       this.updateAnimationState();
       this.redraw(global.devicePixelRatio || 1);
       return true;
@@ -988,11 +1206,14 @@
       if (text === null || text === undefined || text === "-") {
         meta.element.textContent = "-";
         meta.element.classList.remove("active");
+        meta.element.dataset.theme = "default";
         return true;
       }
       if (hasDataKindBadge(text)) meta.element.innerHTML = String(text);
       else meta.element.textContent = String(text);
       meta.element.classList.toggle("active", Boolean(active));
+      const edgeState = this.edgeStateById.get(meta.edgeId);
+      meta.element.dataset.theme = String(edgeState?.theme || "default");
       return true;
     }
 

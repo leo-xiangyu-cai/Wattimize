@@ -163,6 +163,14 @@ Important mapping note:
   - `3 = passive mode`
 - Treat `mode_code -> label` as deployment-specific; always verify against the target SAJ app UI.
 
+Dashboard mapping rule:
+- When the user refers to a metric/value shown on the dashboard, treat the dashboard's current displayed mapping as the source of truth unless the user explicitly reports the dashboard is wrong.
+- Do not remap user terms by guessing from raw entity ids, backend variable names, or brand assumptions if that would conflict with dashboard semantics.
+- For combined flow semantics, align control logic with the dashboard labels. Current dashboard mapping is:
+  - `battery1_*` / `inverter1_*` = SAJ side
+  - `battery2_*` / `inverter2_*` = Solplanet/SoulPlanet side
+- If a future dashboard change alters these labels, update backend control matching to follow the dashboard after confirmation.
+
 ## 11) Next Suggested Steps
 
 1. Add write-control APIs with safety guardrails:

@@ -2036,20 +2036,44 @@ td {
   opacity: 0.45;
 }
 
+.flow-line-value.flow-line-value-anchor-left {
+  transform: translate(0, -50%);
+}
+
 .flow-line-value.active {
   opacity: 1;
   border-color: #7ea790;
 }
 
-.combined-flow-board .line-label-grid-switchboard { left: 53.5%; top: 20%; }
+.flow-line-value.active[data-theme="default"] {
+  color: #245d68;
+  border-color: #245d68;
+  background: rgba(223, 244, 234, 0.95);
+}
+
+.flow-line-value.active[data-theme="gridImport"],
+.flow-line-value.active[data-theme="batteryDischarge"] {
+  color: #7d2431;
+  border-color: #7d2431;
+  background: rgba(255, 224, 228, 0.95);
+}
+
+.flow-line-value.active[data-theme="gridExport"],
+.flow-line-value.active[data-theme="batteryCharge"] {
+  color: #1f4f8a;
+  border-color: #1f4f8a;
+  background: rgba(218, 235, 255, 0.95);
+}
+
+.combined-flow-board .line-label-grid-switchboard { left: 61.5%; top: 17.5%; }
 .combined-flow-board .line-label-solar-battery1 { left: calc(4% + 86px); top: 52%; }
-.combined-flow-board .line-label-solar-inverter1 { left: 19.5%; top: 32%; }
-.combined-flow-board .line-label-switchboard-home-load { left: 79%; top: 32%; }
-.combined-flow-board .line-label-switchboard-tesla { left: 79%; top: 46%; }
-.combined-flow-board .line-label-battery1-inverter1 { left: 20.5%; top: 69.5%; }
-.combined-flow-board .line-label-battery2-inverter2 { left: 78.5%; top: 69.5%; }
-.combined-flow-board .line-label-inverter1-switchboard { left: 40%; top: 61.5%; }
-.combined-flow-board .line-label-inverter2-switchboard { left: 60%; top: 61.5%; }
+.combined-flow-board .line-label-solar-inverter1 { left: 12.5%; top: 32%; }
+.combined-flow-board .line-label-switchboard-home-load { left: 86%; top: 32%; }
+.combined-flow-board .line-label-switchboard-tesla { left: 86%; top: 46%; }
+.combined-flow-board .line-label-battery1-inverter1 { left: 13.5%; top: 69.5%; }
+.combined-flow-board .line-label-battery2-inverter2 { left: 85.5%; top: 69.5%; }
+.combined-flow-board .line-label-inverter1-switchboard { left: 32.5%; top: 61.5%; }
+.combined-flow-board .line-label-inverter2-switchboard { left: 67.5%; top: 61.5%; }
 
 .alert-high {
   color: #c43f4e !important;
@@ -2273,7 +2297,7 @@ td {
   justify-content: flex-start;
   gap: 0;
   padding: 10px 14px 18px;
-  font-size: 34px;
+  font-size: 24px;
   font-weight: 800;
   z-index: 2;
 }
@@ -2574,6 +2598,22 @@ td {
   overflow-wrap: anywhere;
 }
 
+.battery-runtime-line {
+  display: block;
+}
+
+.soc-rate-inside {
+  font-size: 10px;
+  font-weight: 700;
+  color: inherit;
+  opacity: 0.86;
+  text-align: center;
+  line-height: 1.3;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .soc-runtime-inside .data-kind-value {
   display: inline-flex;
   flex-wrap: wrap;
@@ -2587,6 +2627,83 @@ td {
 .soc-runtime-inside .data-kind-main {
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.soc-rate-inside .data-kind-value {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 100%;
+  white-space: normal;
+  column-gap: 4px;
+  row-gap: 1px;
+}
+
+.soc-rate-inside .data-kind-main {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.efd-node.efd-node-id-saj-batteryNode,
+.efd-node.efd-node-id-combined-battery1Node,
+.efd-node.efd-node-id-combined-battery2Node {
+  padding: 15px 18px 18px;
+  border-radius: 20px;
+}
+
+.efd-node.efd-node-id-saj-batteryNode .node-title,
+.efd-node.efd-node-id-combined-battery1Node .node-title,
+.efd-node.efd-node-id-combined-battery2Node .node-title {
+  font-size: 21px;
+}
+
+.efd-node.efd-node-id-combined-battery1Node .node-title,
+.efd-node.efd-node-id-combined-battery2Node .node-title {
+  font-size: 14px;
+}
+
+.efd-node.efd-node-id-saj-batteryNode .soc-wrap,
+.efd-node.efd-node-id-combined-battery1Node .soc-wrap,
+.efd-node.efd-node-id-combined-battery2Node .soc-wrap {
+  min-height: 138px;
+  margin-top: 12px;
+}
+
+.efd-node.efd-node-id-saj-batteryNode .soc-value-inside,
+.efd-node.efd-node-id-combined-battery1Node .soc-value-inside,
+.efd-node.efd-node-id-combined-battery2Node .soc-value-inside {
+  gap: 6px;
+  padding: 66px 14px 14px;
+  font-size: 30px;
+}
+
+.efd-node.efd-node-id-combined-battery1Node .soc-value-inside,
+.efd-node.efd-node-id-combined-battery2Node .soc-value-inside {
+  font-size: 24px;
+}
+
+.efd-node.efd-node-id-saj-batteryNode .soc-energy-inside,
+.efd-node.efd-node-id-combined-battery1Node .soc-energy-inside,
+.efd-node.efd-node-id-combined-battery2Node .soc-energy-inside {
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.efd-node.efd-node-id-saj-batteryNode .soc-usable-inside,
+.efd-node.efd-node-id-combined-battery1Node .soc-usable-inside,
+.efd-node.efd-node-id-combined-battery2Node .soc-usable-inside {
+  font-size: 16px;
+  line-height: 1.1;
+}
+
+.efd-node.efd-node-id-saj-batteryNode .soc-runtime-inside,
+.efd-node.efd-node-id-combined-battery1Node .soc-runtime-inside,
+.efd-node.efd-node-id-combined-battery2Node .soc-runtime-inside,
+.efd-node.efd-node-id-saj-batteryNode .soc-rate-inside,
+.efd-node.efd-node-id-combined-battery1Node .soc-rate-inside,
+.efd-node.efd-node-id-combined-battery2Node .soc-rate-inside {
+  font-size: 15px;
+  line-height: 1.15;
 }
 
 @keyframes flowLineRunX {

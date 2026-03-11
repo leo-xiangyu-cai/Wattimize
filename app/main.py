@@ -78,14 +78,21 @@ SYSTEM_PREFIXES: dict[str, tuple[str, ...]] = {
     "saj": ("saj",),
     "solplanet": ("solplanet", "soulplanet"),
 }
-BALANCE_TOLERANCE_W = 120.0
+BALANCE_TOLERANCE_W = 100.0
 TESLA_ASSUMED_CHARGING_VOLTAGE_V = 240.0
 TESLA_GRID_SUPPORT_WINDOW_START_HOUR = 11
 TESLA_GRID_SUPPORT_WINDOW_END_HOUR = 14
+TESLA_SOLAR_SURPLUS_WINDOW_START_HOUR = 18
+TESLA_SOLAR_SURPLUS_WINDOW_END_HOUR = 20
 TESLA_GRID_SUPPORT_TARGET_MIN_W = 14_000.0
 TESLA_GRID_SUPPORT_TARGET_MAX_W = 15_000.0
 TESLA_GRID_SUPPORT_HARD_MAX_W = 15_000.0
 TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A: tuple[int, ...] = (10, 15)
+TESLA_SOLAR_SURPLUS_START_SOLPLANET_SOC_PERCENT = 95.0
+TESLA_SOLAR_SURPLUS_STOP_SOLPLANET_SOC_PERCENT = 90.0
+TESLA_SOLAR_SURPLUS_MIN_EXPORT_W = 150.0
+SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT = 20.0
+SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH = 9_000.0
 TESLA_CURRENT_MISMATCH_RESTART_MIN_DELTA_A = 2.0
 TESLA_CURRENT_MISMATCH_RESTART_COOLDOWN_SECONDS = 300.0
 WORKER_PENDING_LOG_TIMEOUT_SECONDS = 60.0
@@ -713,6 +720,7 @@ SAJ_PROFILE_IDS: tuple[str, ...] = ("self_consumption", "time_of_use", "microgri
 SAJ_PROFILE_MODE_CODES: dict[str, int] = {
     "self_consumption": 0,
     "time_of_use": 1,
+    "microgrid": 8,
 }
 SOLPLANET_SLOT_MIN = 1
 SOLPLANET_SLOT_MAX = 6
@@ -857,6 +865,281 @@ def _to_number(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return number
+
+
+def _data_kind_from_source(source_value: object, fallback_kind: str = "real") -> str:
+    source_text = str(source_value or "").strip()
+    if not source_text or source_text == "unavailable":
+        return fallback_kind
+    if "estimate" in source_text.lower():
+        return "estimate"
+    if source_text.startswith("calc:"):
+        return "calculated"
+    return "real"
+
+
+def _display_item(
+    *,
+    label: str,
+    value: object,
+    unit: str | None = None,
+    kind: str = "real",
+    source: str | None = None,
+) -> dict[str, object]:
+    item: dict[str, object] = {"label": label, "value": value, "kind": kind}
+    if unit is not None:
+        item["unit"] = unit
+    if source is not None:
+        item["source"] = source
+    return item
+
+
+def _combined_balance_from_metrics(metrics: dict[str, object]) -> tuple[float | None, bool | None]:
+    pv_w = _to_number(metrics.get("pv_w"))
+    grid_w = _to_number(metrics.get("grid_w"))
+    battery_w = _to_number(metrics.get("battery_w"))
+    load_w = _to_number(metrics.get("load_w"))
+    if pv_w is None or grid_w is None or battery_w is None or load_w is None:
+        return None, None
+
+    battery_discharge_w = max(battery_w, 0.0)
+    battery_charge_w = max(-battery_w, 0.0)
+    grid_import_w = max(grid_w, 0.0)
+    grid_export_w = max(-grid_w, 0.0)
+    balance_w = pv_w + battery_discharge_w + grid_import_w - load_w - battery_charge_w - grid_export_w
+    return balance_w, abs(balance_w) <= BALANCE_TOLERANCE_W
+
+
+def _build_combined_display(metrics: dict[str, object]) -> dict[str, object]:
+    tesla_charge_power_w = _to_number(metrics.get("tesla_charge_power_w"))
+    total_load_w = _to_number(metrics.get("load_w"))
+    home_load_w = total_load_w
+    if home_load_w is not None:
+        home_load_w = max(home_load_w - (tesla_charge_power_w or 0.0), 0.0)
+        if abs(home_load_w) <= BALANCE_TOLERANCE_W:
+            home_load_w = 0.0
+
+    balance_w, balanced = _combined_balance_from_metrics(metrics)
+    solar_source = str(metrics.get("pv_source") or "unavailable")
+    grid_source = str(metrics.get("grid_source") or "unavailable")
+    total_load_source = str(metrics.get("load_source") or "unavailable")
+    battery_total_source = str(metrics.get("battery_source") or "unavailable")
+    battery1_source = str(metrics.get("battery1_source") or "unavailable")
+    battery2_source = str(metrics.get("battery2_source") or "unavailable")
+    inverter1_source = str(metrics.get("inverter1_power_source") or "unavailable")
+    inverter2_source = str(metrics.get("inverter2_power_source") or "unavailable")
+
+    items = {
+        "solar": _display_item(
+            label="Solar",
+            value=_to_number(metrics.get("pv_w")),
+            unit="W",
+            kind=_data_kind_from_source(solar_source, "real"),
+            source=solar_source,
+        ),
+        "solar_primary": _display_item(
+            label="SAJ Solar",
+            value=_to_number(metrics.get("solar_primary_w")),
+            unit="W",
+            kind=_data_kind_from_source(solar_source, "real"),
+            source=solar_source,
+        ),
+        "solar_secondary": _display_item(
+            label="Solplanet Solar",
+            value=_to_number(metrics.get("solar_secondary_w")),
+            unit="W",
+            kind=_data_kind_from_source(solar_source, "real"),
+            source=solar_source,
+        ),
+        "grid": _display_item(
+            label="Grid",
+            value=_to_number(metrics.get("grid_w")),
+            unit="W",
+            kind=_data_kind_from_source(grid_source, "real"),
+            source=grid_source,
+        ),
+        "total_load": _display_item(
+            label="Total Load",
+            value=total_load_w,
+            unit="W",
+            kind=_data_kind_from_source(total_load_source, "calculated"),
+            source=total_load_source,
+        ),
+        "home_load": _display_item(
+            label="Home Load",
+            value=home_load_w,
+            unit="W",
+            kind="calculated",
+            source="calc:combined.total_load - tesla_charge_power",
+        ),
+        "battery_total": _display_item(
+            label="Battery Total",
+            value=_to_number(metrics.get("battery_w")),
+            unit="W",
+            kind=_data_kind_from_source(battery_total_source, "calculated"),
+            source=battery_total_source,
+        ),
+        "battery1_power": _display_item(
+            label="SAJ Battery Power",
+            value=_to_number(metrics.get("battery1_w")),
+            unit="W",
+            kind=_data_kind_from_source(battery1_source, "real"),
+            source=battery1_source,
+        ),
+        "battery2_power": _display_item(
+            label="Solplanet Battery Power",
+            value=_to_number(metrics.get("battery2_w")),
+            unit="W",
+            kind=_data_kind_from_source(battery2_source, "real"),
+            source=battery2_source,
+        ),
+        "battery1_soc": _display_item(
+            label="SAJ Battery SOC",
+            value=_to_number(metrics.get("battery1_soc_percent")),
+            unit="%",
+            kind="real",
+            source="saj.battery_soc_percent",
+        ),
+        "battery2_soc": _display_item(
+            label="Solplanet Battery SOC",
+            value=_to_number(metrics.get("battery2_soc_percent")),
+            unit="%",
+            kind="real",
+            source="solplanet.battery_soc_percent",
+        ),
+        "inverter1_power": _display_item(
+            label="SAJ Inverter Power",
+            value=_to_number(metrics.get("inverter1_w")),
+            unit="W",
+            kind=_data_kind_from_source(inverter1_source, "real"),
+            source=inverter1_source,
+        ),
+        "inverter2_power": _display_item(
+            label="Solplanet Inverter Power",
+            value=_to_number(metrics.get("inverter2_w")),
+            unit="W",
+            kind=_data_kind_from_source(inverter2_source, "real"),
+            source=inverter2_source,
+        ),
+        "inverter1_status": _display_item(
+            label="SAJ Inverter Status",
+            value=metrics.get("inverter1_status"),
+            kind="real",
+            source="saj.inverter_status",
+        ),
+        "inverter2_status": _display_item(
+            label="Solplanet Inverter Status",
+            value=metrics.get("inverter2_status"),
+            kind="real",
+            source="solplanet.inverter_status",
+        ),
+        "tesla_charge_power": _display_item(
+            label="Tesla Charging Power",
+            value=tesla_charge_power_w,
+            unit="W",
+            kind="real",
+            source="tesla.charging.power_w",
+        ),
+        "tesla_charge_current": _display_item(
+            label="Tesla Charging Current",
+            value=_to_number(metrics.get("tesla_charge_current_amps")),
+            unit="A",
+            kind="real",
+            source="tesla.charging.current_amps",
+        ),
+        "tesla_configured_current": _display_item(
+            label="Tesla Configured Current",
+            value=_to_number(metrics.get("tesla_configured_current_amps")),
+            unit="A",
+            kind="real",
+            source="tesla.charging.configured_current_amps",
+        ),
+        "tesla_soc": _display_item(
+            label="Tesla Battery SOC",
+            value=_to_number(metrics.get("tesla_battery_soc_percent")),
+            unit="%",
+            kind="real",
+            source="tesla.battery.level_percent",
+        ),
+        "tesla_connection_state": _display_item(
+            label="Tesla Connection State",
+            value=metrics.get("tesla_connection_state"),
+            kind="real",
+            source="tesla.charging.connection_state",
+        ),
+        "balance": _display_item(
+            label="Balance",
+            value=balance_w,
+            unit="W",
+            kind="calculated",
+            source="calc:pv + battery_discharge + grid_import - load - battery_charge - grid_export",
+        ),
+        "balance_status": _display_item(
+            label="Balance Status",
+            value="cleared" if balanced else ("not_cleared" if balanced is False else None),
+            kind="calculated",
+            source=f"calc:abs(balance) <= {int(BALANCE_TOLERANCE_W)}W",
+        ),
+    }
+    return {"version": 1, "order": list(items.keys()), "items": items}
+
+
+def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
+    metrics_obj = flow.get("metrics")
+    metrics = metrics_obj if isinstance(metrics_obj, dict) else {}
+    display_obj = flow.get("display")
+    display = display_obj if isinstance(display_obj, dict) else _build_combined_display(metrics)
+    raw_obj = flow.get("raw")
+    raw_map = raw_obj if isinstance(raw_obj, dict) else {}
+    tesla_raw_obj = raw_map.get("tesla")
+    tesla_raw = tesla_raw_obj if isinstance(tesla_raw_obj, dict) else {}
+    tesla_observation = tesla_raw.get("observation")
+    tesla_observation_map = tesla_observation if isinstance(tesla_observation, dict) else {}
+    tesla_charging_obj = tesla_observation_map.get("charging")
+    tesla_charging_map = tesla_charging_obj if isinstance(tesla_charging_obj, dict) else {}
+    tesla_control_state = tesla_raw.get("control_state")
+    tesla_control_state_map = tesla_control_state if isinstance(tesla_control_state, dict) else {}
+
+    return {
+        "system": "combined",
+        "updated_at": flow.get("updated_at"),
+        "display": display,
+        "tesla": {
+            "charging": {
+                "power_w": _to_number(metrics.get("tesla_charge_power_w")),
+                "current_amps": _to_number(metrics.get("tesla_charge_current_amps")),
+                "configured_current_amps": _to_number(metrics.get("tesla_configured_current_amps")),
+                "connection_state": metrics.get("tesla_connection_state"),
+                "cable_connected": metrics.get("tesla_cable_connected"),
+                "requested_enabled": metrics.get("tesla_charge_requested_enabled"),
+                "enabled": (
+                    tesla_control_state_map.get("charging_enabled")
+                    if tesla_control_state_map
+                    else tesla_charging_map.get("enabled")
+                ),
+            },
+            "battery": {
+                "level_percent": _to_number(metrics.get("tesla_battery_soc_percent")),
+            },
+            "control": {
+                "available": tesla_control_state_map.get("available"),
+                "control_mode": tesla_control_state_map.get("control_mode"),
+                "charging_enabled": tesla_control_state_map.get("charging_enabled"),
+                "charge_requested_enabled": tesla_control_state_map.get("charge_requested_enabled"),
+                "can_start": tesla_control_state_map.get("can_start"),
+                "can_stop": tesla_control_state_map.get("can_stop"),
+            },
+        },
+        "meta": {
+            "source_type": ((flow.get("source") if isinstance(flow.get("source"), dict) else {}).get("type")),
+            "storage_backed": bool(flow.get("storage_backed")),
+            "stale": bool(flow.get("stale")),
+            "stale_reason": flow.get("stale_reason"),
+            "sample_age_seconds": _to_number(flow.get("sample_age_seconds")),
+            "kv_item_count": _to_number(flow.get("kv_item_count")),
+            "item_count": len(display.get("order") or []),
+        },
+    }
 
 
 def _parse_iso_utc_datetime(text: str, *, field_name: str) -> datetime:
@@ -1447,6 +1730,95 @@ def _is_within_tesla_grid_support_window(now_local: datetime) -> bool:
     return TESLA_GRID_SUPPORT_WINDOW_START_HOUR <= hour < TESLA_GRID_SUPPORT_WINDOW_END_HOUR
 
 
+def _is_within_tesla_solar_surplus_window(now_local: datetime) -> bool:
+    hour = now_local.hour
+    return TESLA_SOLAR_SURPLUS_WINDOW_START_HOUR <= hour < TESLA_SOLAR_SURPLUS_WINDOW_END_HOUR
+
+
+def _tesla_midday_window_mode(now_local: datetime) -> Literal["grid_support", "solar_surplus", "off"]:
+    if _is_within_tesla_grid_support_window(now_local):
+        return "grid_support"
+    if _is_within_tesla_solar_surplus_window(now_local):
+        return "solar_surplus"
+    return "off"
+
+
+def _window_schedule_text(window_mode: str) -> str:
+    if window_mode == "grid_support":
+        return (
+            f"{TESLA_GRID_SUPPORT_WINDOW_START_HOUR:02d}:00-"
+            f"{TESLA_GRID_SUPPORT_WINDOW_END_HOUR:02d}:00"
+        )
+    if window_mode == "solar_surplus":
+        return (
+            f"{TESLA_SOLAR_SURPLUS_WINDOW_START_HOUR:02d}:00-"
+            f"{TESLA_SOLAR_SURPLUS_WINDOW_END_HOUR:02d}:00"
+        )
+    return "outside_configured_windows"
+
+
+def _append_worker_notification(payload: dict[str, object], notification: dict[str, object]) -> None:
+    notifications = payload.get("notifications")
+    if isinstance(notifications, list):
+        notifications.append(notification)
+    else:
+        payload["notifications"] = [notification]
+    payload["notification"] = notification
+
+
+def _update_solar_surplus_export_energy_tracking(
+    *,
+    combined_status: dict[str, object],
+    now_local: datetime,
+    current_grid_export_w: float,
+) -> dict[str, object]:
+    window_key = now_local.strftime("%Y-%m-%d")
+    last_window_key = str(combined_status.get("solar_surplus_export_window_key") or "").strip()
+    last_tracked_at_text = str(combined_status.get("solar_surplus_export_last_tracked_at") or "").strip()
+    total_export_wh = float(combined_status.get("solar_surplus_export_total_wh") or 0.0)
+    threshold_notified = bool(combined_status.get("solar_surplus_export_threshold_notified"))
+    added_export_wh = 0.0
+
+    if last_window_key != window_key:
+        total_export_wh = 0.0
+        threshold_notified = False
+        last_tracked_at_text = ""
+
+    current_utc = datetime.now(UTC)
+    if last_tracked_at_text:
+        try:
+            last_tracked_at = datetime.fromisoformat(last_tracked_at_text.replace("Z", "+00:00"))
+            if last_tracked_at.tzinfo is None:
+                last_tracked_at = last_tracked_at.replace(tzinfo=UTC)
+            dt_seconds = max((current_utc - last_tracked_at.astimezone(UTC)).total_seconds(), 0.0)
+        except ValueError:
+            dt_seconds = 0.0
+    else:
+        dt_seconds = 0.0
+
+    max_dt_seconds = COLLECTOR_ROUND_SLEEP_SECONDS * 2.5
+    if dt_seconds > max_dt_seconds:
+        dt_seconds = max_dt_seconds
+    if current_grid_export_w > 0.0 and dt_seconds > 0.0:
+        added_export_wh = current_grid_export_w * dt_seconds / 3600.0
+        total_export_wh += added_export_wh
+
+    combined_status["solar_surplus_export_window_key"] = window_key
+    combined_status["solar_surplus_export_last_tracked_at"] = current_utc.isoformat()
+    combined_status["solar_surplus_export_total_wh"] = round(total_export_wh, 3)
+    combined_status["solar_surplus_export_threshold_notified"] = threshold_notified
+    return {
+        "window_key": window_key,
+        "interval_seconds": round(dt_seconds, 1),
+        "added_export_wh": round(added_export_wh, 3),
+        "total_export_wh": round(total_export_wh, 3),
+        "total_export_kwh": round(total_export_wh / 1000.0, 4),
+        "threshold_wh": SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH,
+        "threshold_kwh": round(SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH / 1000.0, 3),
+        "threshold_notified": threshold_notified,
+    }
+
+
 def _tesla_grid_support_now_local() -> tuple[datetime, str]:
     configured_timezone = str(getattr(settings, "local_timezone", "") or "").strip()
     if configured_timezone:
@@ -1509,6 +1881,37 @@ def _choose_tesla_grid_support_target_from_options(
     return max(valid_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
 
 
+def _choose_tesla_solar_surplus_target_from_options(
+    base_grid_without_tesla_w: float,
+    charge_current_options_a: tuple[int, ...],
+) -> dict[str, object]:
+    candidates: list[dict[str, object]] = [
+        {
+            "mode": "off",
+            "charge_current_amps": 0,
+            "tesla_power_w": 0.0,
+            "predicted_grid_w": base_grid_without_tesla_w,
+        },
+        *[
+            {
+                "mode": "charge",
+                "charge_current_amps": int(amps),
+                "tesla_power_w": float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V,
+                "predicted_grid_w": base_grid_without_tesla_w + (float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V),
+            }
+            for amps in charge_current_options_a
+        ],
+    ]
+    valid_candidates = [
+        candidate
+        for candidate in candidates
+        if float(candidate["predicted_grid_w"]) <= 0.0
+    ]
+    if not valid_candidates:
+        return candidates[0]
+    return max(valid_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
+
+
 def _tesla_observation_charge_state(observation: dict[str, object]) -> dict[str, object]:
     charging = observation.get("charging")
     charging_map = charging if isinstance(charging, dict) else {}
@@ -1565,11 +1968,16 @@ async def _run_midday_window_check(
     requested_at_utc = str(requested_at_utc or "").strip() or datetime.now(UTC).isoformat()
     started_monotonic = monotonic()
     now_local, timezone_name = _tesla_grid_support_now_local()
+    window_mode = _tesla_midday_window_mode(now_local)
     result: dict[str, object] = {
         "executed_at_utc": datetime.now(UTC).isoformat(),
         "evaluated_at_local": now_local.isoformat(),
         "timezone": timezone_name,
-        "window_active": _is_within_tesla_grid_support_window(now_local),
+        "window_active": window_mode != "off",
+        "window_mode": window_mode,
+        "window_schedule": _window_schedule_text(window_mode),
+        "grid_support_window_active": window_mode == "grid_support",
+        "solar_surplus_window_active": window_mode == "solar_surplus",
         "target_grid_min_w": TESLA_GRID_SUPPORT_TARGET_MIN_W,
         "target_grid_max_w": TESLA_GRID_SUPPORT_TARGET_MAX_W,
         "hard_grid_max_w": TESLA_GRID_SUPPORT_HARD_MAX_W,
@@ -1596,7 +2004,10 @@ async def _run_midday_window_check(
         charging_enabled = bool(charge_state.get("enabled"))
         charge_requested_enabled = bool(charge_state.get("requested_enabled"))
 
-        if not result["window_active"]:
+        if window_mode == "off":
+            combined_status = collector_status.setdefault("combined", {})
+            combined_status["grid_import_active"] = False
+            combined_status["solar_surplus_export_last_tracked_at"] = None
             result["decision"] = {
                 "mode": "off",
                 "charge_current_amps": 0,
@@ -1619,23 +2030,301 @@ async def _run_midday_window_check(
             result["skipped"] = "combined_grid_unavailable"
             status = "skipped"
             return result
-
-        result["current_grid_import_w"] = max(grid_w, 0.0)
+        current_grid_import_w = max(float(grid_w), 0.0)
+        result["current_grid_import_w"] = round(current_grid_import_w, 1)
 
         tesla_charge_power_w = max(float(charge_state.get("power_w") or 0.0), 0.0)
-        base_grid_w = max(float(result["current_grid_import_w"]) - tesla_charge_power_w, 0.0)
-        result["base_grid_without_tesla_w"] = round(base_grid_w, 1)
-
         available_current_options = _tesla_available_charge_current_options(charge_state)
         result["available_current_options_amps"] = list(available_current_options)
-        desired = _choose_tesla_grid_support_target_from_options(base_grid_w, available_current_options)
-        result["decision"] = desired
-        result["decision_reason"] = "selected_max_safe_candidate_under_grid_cap"
-
         current_configured_amps = _to_number(charge_state.get("configured_current_amps"))
         current_actual_amps = _to_number(charge_state.get("current_amps"))
         connection_state = str(charge_state.get("connection_state") or "").strip().lower()
         status_text = str(charge_state.get("status_text") or "").strip().lower()
+
+        if connection_state == "unplugged":
+            result["skipped"] = "tesla_unplugged"
+            status = "skipped"
+            return result
+
+        if status_text in ("disconnected", "unknown", "unavailable"):
+            result["skipped"] = "tesla_not_ready"
+            result["tesla_status"] = status_text
+            status = "skipped"
+            return result
+
+        if window_mode == "solar_surplus":
+            pv_w = _to_number(metrics_map.get("pv_w"))
+            load_w = _to_number(metrics_map.get("load_w"))
+            saj_soc_percent = _to_number(metrics_map.get("battery1_soc_percent"))
+            solplanet_soc_percent = _to_number(metrics_map.get("battery2_soc_percent"))
+            if solplanet_soc_percent is None:
+                result["skipped"] = "combined_solplanet_soc_unavailable"
+                status = "skipped"
+                return result
+
+            current_grid_export_w = max(-float(grid_w), 0.0)
+            base_grid_without_tesla_w = float(grid_w) - tesla_charge_power_w
+            export_without_tesla_w = max(-base_grid_without_tesla_w, 0.0)
+            solar_excess_vs_load_w = (
+                max(float(pv_w) - float(load_w), 0.0)
+                if pv_w is not None and load_w is not None
+                else None
+            )
+            can_start_from_soc = solplanet_soc_percent >= TESLA_SOLAR_SURPLUS_START_SOLPLANET_SOC_PERCENT
+            can_continue_from_soc = solplanet_soc_percent >= TESLA_SOLAR_SURPLUS_STOP_SOLPLANET_SOC_PERCENT
+            export_signal_active = (
+                current_grid_export_w >= TESLA_SOLAR_SURPLUS_MIN_EXPORT_W
+                or export_without_tesla_w >= TESLA_SOLAR_SURPLUS_MIN_EXPORT_W
+            )
+            solar_signal_active = (
+                solar_excess_vs_load_w is not None
+                and solar_excess_vs_load_w >= TESLA_SOLAR_SURPLUS_MIN_EXPORT_W
+            )
+
+            result["current_grid_export_w"] = round(current_grid_export_w, 1)
+            result["base_grid_without_tesla_w"] = round(base_grid_without_tesla_w, 1)
+            result["base_export_without_tesla_w"] = round(export_without_tesla_w, 1)
+            result["solar_surplus"] = {
+                "pv_w": pv_w,
+                "load_w": load_w,
+                "solar_excess_vs_load_w": round(solar_excess_vs_load_w, 1) if solar_excess_vs_load_w is not None else None,
+                "saj_soc_percent": saj_soc_percent,
+                "solplanet_soc_percent": solplanet_soc_percent,
+                "start_soc_percent": TESLA_SOLAR_SURPLUS_START_SOLPLANET_SOC_PERCENT,
+                "stop_soc_percent": TESLA_SOLAR_SURPLUS_STOP_SOLPLANET_SOC_PERCENT,
+                "min_export_signal_w": TESLA_SOLAR_SURPLUS_MIN_EXPORT_W,
+                "export_signal_active": export_signal_active,
+                "solar_signal_active": solar_signal_active,
+                "soc_start_allowed": can_start_from_soc,
+                "soc_continue_allowed": can_continue_from_soc,
+                "dashboard_mapping": {
+                    "battery1_soc_percent": "saj_battery_soc",
+                    "battery2_soc_percent": "solplanet_battery_soc",
+                },
+            }
+            if solplanet_soc_percent < SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT:
+                _append_worker_notification(result, {
+                    "level": "warning",
+                    "code": "solplanet_low_battery",
+                    "target": "solplanet_battery",
+                    "threshold_soc_percent": SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT,
+                    "current_soc_percent": round(solplanet_soc_percent, 1),
+                    "message": (
+                        "Solplanet battery SOC is below 20%; keep one reminder in worklog "
+                        "until notification handling is implemented."
+                    ),
+                })
+            combined_status = collector_status.setdefault("combined", {})
+            was_importing = bool(combined_status.get("grid_import_active"))
+            is_importing = current_grid_import_w > 0.0
+            if is_importing and not was_importing:
+                _append_worker_notification(result, {
+                    "level": "alarm",
+                    "code": "grid_import_started",
+                    "target": "grid",
+                    "current_grid_import_w": round(current_grid_import_w, 1),
+                    "message": (
+                        "Grid import started during the third worker window; add one alarm "
+                        "reminder to worklog."
+                    ),
+                })
+            combined_status["grid_import_active"] = is_importing
+            export_tracking = _update_solar_surplus_export_energy_tracking(
+                combined_status=combined_status,
+                now_local=now_local,
+                current_grid_export_w=current_grid_export_w,
+            )
+            result["solar_surplus_export_tracking"] = export_tracking
+            previous_total_export_wh = float(export_tracking["total_export_wh"]) - float(export_tracking["added_export_wh"])
+            if (
+                previous_total_export_wh < SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH
+                and float(export_tracking["total_export_wh"]) >= SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH
+                and not bool(combined_status.get("solar_surplus_export_threshold_notified"))
+            ):
+                _append_worker_notification(result, {
+                    "level": "alarm",
+                    "code": "solar_surplus_export_energy_reached",
+                    "target": "grid_export_energy",
+                    "window": _window_schedule_text("solar_surplus"),
+                    "current_export_total_wh": round(float(export_tracking["total_export_wh"]), 1),
+                    "current_export_total_kwh": round(float(export_tracking["total_export_wh"]) / 1000.0, 4),
+                    "threshold_wh": SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH,
+                    "threshold_kwh": round(SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH / 1000.0, 3),
+                    "message": (
+                        "Exported energy during the third worker window reached the configured "
+                        "threshold; add one alarm reminder to worklog."
+                    ),
+                })
+                combined_status["solar_surplus_export_threshold_notified"] = True
+
+            desired = _choose_tesla_solar_surplus_target_from_options(
+                base_grid_without_tesla_w,
+                available_current_options,
+            )
+            desired_reason = "use_exported_solar_without_importing_grid_when_available"
+            active_or_requested = charging_enabled or charge_requested_enabled
+            should_start = can_start_from_soc
+            should_continue = active_or_requested and can_continue_from_soc
+            preferred_solar_surplus_amps = (
+                int(max(available_current_options))
+                if available_current_options
+                else 0
+            )
+            if (should_start or should_continue) and preferred_solar_surplus_amps > 0:
+                desired = {
+                    "mode": "charge",
+                    "charge_current_amps": preferred_solar_surplus_amps,
+                    "tesla_power_w": float(preferred_solar_surplus_amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V,
+                    "predicted_grid_w": round(
+                        base_grid_without_tesla_w + (float(preferred_solar_surplus_amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V),
+                        1,
+                    ),
+                }
+                desired_reason = (
+                    "start_from_solplanet_soc_threshold_with_maximum_current"
+                    if should_start and not active_or_requested
+                    else "keep_maximum_current_until_solplanet_soc_below_stop_threshold"
+                )
+            elif not should_continue and not should_start:
+                desired = {
+                    "mode": "off",
+                    "charge_current_amps": 0,
+                    "tesla_power_w": 0.0,
+                    "predicted_grid_w": round(base_grid_without_tesla_w, 1),
+                }
+                desired_reason = (
+                    "wait_for_solplanet_soc_start_threshold"
+                    if not active_or_requested
+                    else "solplanet_soc_below_stop_threshold"
+                )
+
+            result["decision"] = desired
+            result["decision_reason"] = desired_reason
+            result["candidates"] = [
+                {
+                    "mode": "off" if amps == 0 else "charge",
+                    "charge_current_amps": amps,
+                    "predicted_grid_w": round(
+                        base_grid_without_tesla_w + (float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V),
+                        1,
+                    ),
+                    "uses_only_surplus_solar": (
+                        base_grid_without_tesla_w + (float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V)
+                    ) <= 0.0,
+                }
+                for amps in (0, *available_current_options)
+            ]
+
+            desired_amps = int(desired["charge_current_amps"])
+            configured_matches_desired = (
+                current_configured_amps is not None
+                and int(round(current_configured_amps)) == desired_amps
+            )
+            actual_matches_desired = (
+                current_actual_amps is not None
+                and int(round(current_actual_amps)) == desired_amps
+            )
+            effective_current_amps = current_actual_amps or current_configured_amps or 0.0
+            current_gap_to_desired_amps = (
+                float(desired_amps) - float(current_actual_amps)
+                if current_actual_amps is not None
+                else None
+            )
+            current_mismatch_restart_needed = bool(
+                desired["mode"] != "off"
+                and charging_enabled
+                and charge_requested_enabled
+                and configured_matches_desired
+                and current_gap_to_desired_amps is not None
+                and current_gap_to_desired_amps >= TESLA_CURRENT_MISMATCH_RESTART_MIN_DELTA_A
+            )
+            current_mismatch_restart_allowed = current_mismatch_restart_needed
+            current_mismatch_restart_cooldown_remaining_s: float | None = None
+            if current_mismatch_restart_needed:
+                combined_status = collector_status.setdefault("combined", {})
+                last_restart_at_text = str(
+                    combined_status.get("last_tesla_current_mismatch_restart_at") or ""
+                ).strip()
+                if last_restart_at_text:
+                    try:
+                        last_restart_at = datetime.fromisoformat(last_restart_at_text.replace("Z", "+00:00"))
+                        if last_restart_at.tzinfo is None:
+                            last_restart_at = last_restart_at.replace(tzinfo=UTC)
+                        elapsed_s = max((datetime.now(UTC) - last_restart_at.astimezone(UTC)).total_seconds(), 0.0)
+                        if elapsed_s < TESLA_CURRENT_MISMATCH_RESTART_COOLDOWN_SECONDS:
+                            current_mismatch_restart_allowed = False
+                            current_mismatch_restart_cooldown_remaining_s = round(
+                                TESLA_CURRENT_MISMATCH_RESTART_COOLDOWN_SECONDS - elapsed_s,
+                                1,
+                            )
+                    except ValueError:
+                        current_mismatch_restart_allowed = current_mismatch_restart_needed
+
+            if (
+                desired["mode"] != "off"
+                and charging_enabled
+                and configured_matches_desired
+                and (current_actual_amps is None or actual_matches_desired)
+            ):
+                result["decision"] = {
+                    "mode": "hold_current_state",
+                    "charge_current_amps": int(round(effective_current_amps)) if effective_current_amps > 0 else desired_amps,
+                    "predicted_grid_w": round(float(grid_w), 1),
+                }
+                result["decision_reason"] = "already_running_with_allowed_current"
+                result["action"] = {"type": "noop", "reason": "keep_current_state"}
+                status = "noop"
+                return result
+
+            if desired["mode"] == "off":
+                if active_or_requested:
+                    await _tesla_set_charging(False)
+                    result["action"] = {"type": "stop_charging", "reason": desired_reason}
+                    status = "applied"
+                else:
+                    result["action"] = {"type": "noop", "reason": "already_stopped"}
+                    status = "noop"
+                return result
+
+            actions: list[str] = []
+            if current_configured_amps is None or int(round(current_configured_amps)) != desired_amps:
+                await _tesla_set_charge_current(desired_amps)
+                actions.append(f"set_current_{desired_amps}a")
+            if current_mismatch_restart_needed:
+                result["current_mismatch"] = {
+                    "configured_current_amps": current_configured_amps,
+                    "actual_current_amps": current_actual_amps,
+                    "desired_current_amps": desired_amps,
+                    "gap_to_desired_amps": round(current_gap_to_desired_amps or 0.0, 1),
+                    "restart_allowed": current_mismatch_restart_allowed,
+                    "restart_cooldown_remaining_s": current_mismatch_restart_cooldown_remaining_s,
+                }
+            if current_mismatch_restart_allowed:
+                await _tesla_restart_charging()
+                collector_status.setdefault("combined", {})["last_tesla_current_mismatch_restart_at"] = datetime.now(UTC).isoformat()
+                actions.append("restart_charging_for_current_mismatch")
+            if not charging_enabled:
+                if charge_requested_enabled:
+                    await _tesla_restart_charging()
+                    actions.append("restart_charging")
+                else:
+                    await _tesla_set_charging(True)
+                    actions.append("start_charging")
+
+            if actions:
+                result["action"] = {"type": "apply", "steps": actions}
+                status = "applied"
+            else:
+                result["action"] = {"type": "noop", "reason": "already_at_target"}
+                status = "noop"
+            return result
+
+        base_grid_w = max(float(result["current_grid_import_w"]) - tesla_charge_power_w, 0.0)
+        result["base_grid_without_tesla_w"] = round(base_grid_w, 1)
+        desired = _choose_tesla_grid_support_target_from_options(base_grid_w, available_current_options)
+        result["decision"] = desired
+        result["decision_reason"] = "selected_max_safe_candidate_under_grid_cap"
+
         desired_amps = int(desired["charge_current_amps"])
         current_grid_import_w = float(result["current_grid_import_w"])
         effective_current_amps = current_actual_amps or current_configured_amps or 0.0
@@ -1692,11 +2381,6 @@ async def _run_midday_window_check(
             for amps in (0, *available_current_options)
         ]
 
-        if connection_state == "unplugged":
-            result["skipped"] = "tesla_unplugged"
-            status = "skipped"
-            return result
-
         if (
             charging_enabled
             and configured_matches_desired
@@ -1720,12 +2404,6 @@ async def _run_midday_window_check(
             else:
                 result["action"] = {"type": "noop", "reason": "already_stopped"}
                 status = "noop"
-            return result
-
-        if status_text in ("disconnected", "unknown", "unavailable"):
-            result["skipped"] = "tesla_not_ready"
-            result["tesla_status"] = status_text
-            status = "skipped"
             return result
 
         actions: list[str] = []
@@ -1796,11 +2474,13 @@ async def _run_tesla_home_assistant_collection(
     requested_at_utc = str(requested_at_utc or "").strip() or datetime.now(UTC).isoformat()
     started_monotonic = monotonic()
     now_local, timezone_name = _tesla_grid_support_now_local()
+    window_mode = _tesla_midday_window_mode(now_local)
     result: dict[str, object] = {
         "executed_at_utc": datetime.now(UTC).isoformat(),
         "evaluated_at_local": now_local.isoformat(),
         "timezone": timezone_name,
-        "window_active": _is_within_tesla_grid_support_window(now_local),
+        "window_active": window_mode != "off",
+        "window_mode": window_mode,
         "task_mode": "observe_only",
     }
     status = "ok"
@@ -2755,6 +3435,7 @@ def _build_combined_flow_payload(
         "system": "combined",
         "updated_at": updated_at,
         "prefixes": ["combined"],
+        "display": _build_combined_display(metrics),
         "entities": {
             "solar_primary": _combined_pseudo_entity(
                 "combined.solar_primary_power",
@@ -3429,18 +4110,6 @@ def _infer_saj_actual_profile(
     working_mode_map = working_mode if isinstance(working_mode, dict) else {}
     inverter = control_state.get("inverter")
     inverter_map = inverter if isinstance(inverter, dict) else {}
-    limits = control_state.get("limits")
-    limits_map = limits if isinstance(limits, dict) else {}
-
-    grid_max_charge_power = _to_number(limits_map.get("grid_max_charge_power"))
-    mode_sensor_code = _to_number(working_mode_map.get("mode_sensor"))
-    mode_input_code = _to_number(working_mode_map.get("mode_input"))
-    if grid_max_charge_power is not None and int(grid_max_charge_power) == 0:
-        if (mode_sensor_code is not None and int(mode_sensor_code) == 0) or (
-            mode_input_code is not None and int(mode_input_code) == 0
-        ):
-            return "microgrid", "limits.grid_max_charge_power + app_mode"
-
     inferred_from_mode = _infer_saj_profile_from_mode_code(working_mode_map.get("mode_sensor"))
     if inferred_from_mode:
         return inferred_from_mode, "mode_sensor"
@@ -3465,15 +4134,6 @@ def _infer_saj_input_profile(
 ) -> tuple[str, str]:
     working_mode = control_state.get("working_mode")
     working_mode_map = working_mode if isinstance(working_mode, dict) else {}
-    limits = control_state.get("limits")
-    limits_map = limits if isinstance(limits, dict) else {}
-
-    grid_max_charge_power = _to_number(limits_map.get("grid_max_charge_power"))
-    mode_input_code = _to_number(working_mode_map.get("mode_input"))
-    if grid_max_charge_power is not None and int(grid_max_charge_power) == 0:
-        if mode_input_code is None or int(mode_input_code) == 0:
-            return "microgrid", "limits.grid_max_charge_power + mode_input"
-
     inferred = _infer_saj_profile_from_mode_code(working_mode_map.get("mode_input"))
     return inferred, "mode_input" if inferred else ""
 
@@ -3578,17 +4238,9 @@ async def _saj_apply_profile(profile_id: str) -> dict[str, object]:
         raise HTTPException(status_code=400, detail=f"Unsupported SAJ profile: {profile_id}")
 
     changed: list[dict[str, object]] = []
-    if normalized_profile == "microgrid":
-        # User-intended meaning: prevent grid charging while keeping normal automatic behavior.
-        # Writing app_mode_input=8 is not supported on this HA/SAJ setup and returns HA 500.
-        await _saj_set_number("number.saj_app_mode_input", 0)
-        changed.append({"entity_id": "number.saj_app_mode_input", "value": 0})
-        await _saj_set_number("number.saj_grid_max_charge_power_input", 0)
-        changed.append({"entity_id": "number.saj_grid_max_charge_power_input", "value": 0})
-    else:
-        mode_code = SAJ_PROFILE_MODE_CODES[normalized_profile]
-        await _saj_set_number("number.saj_app_mode_input", mode_code)
-        changed.append({"entity_id": "number.saj_app_mode_input", "value": mode_code})
+    mode_code = SAJ_PROFILE_MODE_CODES[normalized_profile]
+    await _saj_set_number("number.saj_app_mode_input", mode_code)
+    changed.append({"entity_id": "number.saj_app_mode_input", "value": mode_code})
 
     await _persist_saj_target_profile(normalized_profile)
     _, states_by_id = await _saj_control_states()
@@ -4016,6 +4668,7 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
         "kv_item_count": len(kv_map),
     }
     if system == "combined":
+        flow["display"] = _build_combined_display(metrics)
         tesla_updated_at = _kv_value(kv_map, system=system, key="source.components.tesla_updated_at")
         flow["source"] = {
             "type": "realtime_kv",
@@ -4144,6 +4797,8 @@ def _build_storage_backed_flow(system: str, sample: dict[str, object]) -> dict[s
     flow["system"] = system
     flow["updated_at"] = sampled_at_utc
     flow["metrics"] = metrics
+    if system == "combined":
+        flow["display"] = _build_combined_display(metrics)
     flow["source"] = {
         "type": "storage_latest_sample",
         "sample_source": str(sample.get("source") or ""),
@@ -4401,8 +5056,22 @@ def _worker_control_result_text(
         action_map = action if isinstance(action, dict) else {}
         decision = payload.get("decision")
         decision_map = decision if isinstance(decision, dict) else {}
-        if status == "skipped":
-            return f"Midday window check skipped: {payload.get('skipped') or error_text or 'unavailable'}"
+        tesla_before = payload.get("tesla_state_before")
+        tesla_before_map = tesla_before if isinstance(tesla_before, dict) else {}
+        solar_surplus = payload.get("solar_surplus")
+        solar_surplus_map = solar_surplus if isinstance(solar_surplus, dict) else {}
+        notifications = payload.get("notifications")
+        notification_list = [item for item in notifications if isinstance(item, dict)] if isinstance(notifications, list) else []
+        if not notification_list:
+            notification = payload.get("notification")
+            if isinstance(notification, dict):
+                notification_list = [notification]
+        window_mode = str(payload.get("window_mode") or "off")
+        window_logic = {
+            "grid_support": "grid_support",
+            "solar_surplus": "solar_surplus",
+            "off": "outside_window",
+        }.get(window_mode, window_mode or "unknown")
         action_type = str(action_map.get("type") or "-")
         steps = action_map.get("steps")
         steps_text = ", ".join(str(item) for item in steps) if isinstance(steps, list) and steps else str(action_map.get("reason") or "-")
@@ -4420,12 +5089,12 @@ def _worker_control_result_text(
             action_label = "noop"
         decision_mode = str(decision_map.get("mode") or "-")
         decision_amps = _fmt_result_number(decision_map.get("charge_current_amps"), 0, "A")
-        tesla_before = payload.get("tesla_state_before")
-        tesla_before_map = tesla_before if isinstance(tesla_before, dict) else {}
         tesla_before_text = str(tesla_before_map.get("connection_state") or ("charging" if tesla_before_map.get("enabled") else "unplugged"))
         tesla_before_request = "on" if tesla_before_map.get("requested_enabled") else "off"
         tesla_before_current = _fmt_result_number(tesla_before_map.get("current_amps"), 0, "A")
         tesla_before_configured = _fmt_result_number(tesla_before_map.get("configured_current_amps"), 0, "A")
+        tesla_before_power = _fmt_result_number(tesla_before_map.get("power_w"), 0, "W")
+        tesla_before_status = str(tesla_before_map.get("status_text") or "-")
         tesla_after_text = tesla_before_text
         tesla_after_request = tesla_before_request
         tesla_after_current = decision_amps if decision_mode != "off" else "0A"
@@ -4453,18 +5122,98 @@ def _worker_control_result_text(
                 0,
                 "A",
             )
+        time_window_text = (
+            "time_window "
+            f"mode={window_mode}, schedule={payload.get('window_schedule') or '-'}, "
+            f"logic={window_logic}, active={'yes' if payload.get('window_active') else 'no'}"
+        )
+        tesla_text = (
+            f"tesla now state={tesla_before_text}, request={tesla_before_request}, status={tesla_before_status}, "
+            f"actual_current={tesla_before_current}, configured_current={tesla_before_configured}, power={tesla_before_power}"
+        )
+        battery_text = (
+            "batteries "
+            f"saj_soc={_fmt_result_number(solar_surplus_map.get('saj_soc_percent'), 0, '%')}, "
+            f"solplanet_soc={_fmt_result_number(solar_surplus_map.get('solplanet_soc_percent'), 0, '%')}, "
+            f"start_threshold={_fmt_result_number(solar_surplus_map.get('start_soc_percent'), 0, '%')}, "
+            f"stop_threshold={_fmt_result_number(solar_surplus_map.get('stop_soc_percent'), 0, '%')}"
+        )
+        if not solar_surplus_map:
+            battery_text = (
+                "batteries "
+                f"saj_soc={_fmt_result_number(payload.get('battery1_soc_percent'), 0, '%')}, "
+                f"solplanet_soc={_fmt_result_number(payload.get('battery2_soc_percent'), 0, '%')}"
+            )
+        decision_text = (
+            f"decision mode={decision_mode}, target_current={decision_amps}, action={action_label}, "
+            f"reason={payload.get('decision_reason') or '-'}, predicted_grid={_fmt_result_number(decision_map.get('predicted_grid_w'), 0, 'W')}"
+        )
+        extra_parts = []
+        if payload.get("current_grid_import_w") is not None or payload.get("current_grid_export_w") is not None:
+            extra_parts.append(
+                f"grid import={_fmt_result_number(payload.get('current_grid_import_w'), 0, 'W')}, "
+                f"export={_fmt_result_number(payload.get('current_grid_export_w'), 0, 'W')}, "
+                f"base={_fmt_result_number(payload.get('base_grid_without_tesla_w'), 0, 'W')}"
+            )
+        if solar_surplus_map:
+            extra_parts.append(
+                f"solar pv={_fmt_result_number(solar_surplus_map.get('pv_w'), 0, 'W')}, "
+                f"load={_fmt_result_number(solar_surplus_map.get('load_w'), 0, 'W')}, "
+                f"excess={_fmt_result_number(solar_surplus_map.get('solar_excess_vs_load_w'), 0, 'W')}, "
+                f"export_signal={'yes' if solar_surplus_map.get('export_signal_active') else 'no'}, "
+                f"solar_signal={'yes' if solar_surplus_map.get('solar_signal_active') else 'no'}"
+            )
+        export_tracking = payload.get("solar_surplus_export_tracking")
+        export_tracking_map = export_tracking if isinstance(export_tracking, dict) else {}
+        if export_tracking_map:
+            extra_parts.append(
+                "window_export "
+                f"total={_fmt_result_number(export_tracking_map.get('total_export_kwh'), 3, 'kWh')}, "
+                f"added={_fmt_result_number(export_tracking_map.get('added_export_wh'), 0, 'Wh')}, "
+                f"threshold={_fmt_result_number(export_tracking_map.get('threshold_kwh'), 3, 'kWh')}"
+            )
+        if steps_text and steps_text != "-":
+            extra_parts.append(f"detail {action_type} ({steps_text})")
+        for notification_map in notification_list:
+            code = str(notification_map.get("code") or "warning")
+            if code == "solplanet_low_battery":
+                extra_parts.append(
+                    "notification "
+                    f"{code}: "
+                    f"solplanet_soc={_fmt_result_number(notification_map.get('current_soc_percent'), 0, '%')}, "
+                    f"threshold={_fmt_result_number(notification_map.get('threshold_soc_percent'), 0, '%')}"
+                )
+                continue
+            if code == "grid_import_started":
+                extra_parts.append(
+                    "notification "
+                    f"{code}: "
+                    f"grid_import={_fmt_result_number(notification_map.get('current_grid_import_w'), 0, 'W')}"
+                )
+                continue
+            if code == "solar_surplus_export_energy_reached":
+                extra_parts.append(
+                    "notification "
+                    f"{code}: "
+                    f"window_export={_fmt_result_number(notification_map.get('current_export_total_kwh'), 3, 'kWh')}, "
+                    f"threshold={_fmt_result_number(notification_map.get('threshold_kwh'), 3, 'kWh')}"
+                )
+                continue
+            extra_parts.append(f"notification {code}")
         return (
-            "Midday window check: "
-            f"action={action_label}, "
-            f"grid {_fmt_result_number(payload.get('current_grid_import_w'), 0, 'W')}, "
-            f"base {_fmt_result_number(payload.get('base_grid_without_tesla_w'), 0, 'W')}, "
-            f"before state={tesla_before_text}, request={tesla_before_request}, "
-            f"actual_current={tesla_before_current}, configured_current={tesla_before_configured}; "
+            f"Worker window check {'skipped' if status == 'skipped' else status}: "
+            f"{time_window_text}; "
+            f"{tesla_text}; "
+            f"{battery_text}; "
+            f"{decision_text}; "
             f"expected state={tesla_after_text}, request={tesla_after_request}, "
-            f"actual_current={tesla_after_current}, configured_current={tesla_after_configured}; "
-            f"decision {decision_mode} {decision_amps}, "
-            f"predicted {_fmt_result_number(decision_map.get('predicted_grid_w'), 0, 'W')}, "
-            f"detail {action_type} ({steps_text})"
+            f"actual_current={tesla_after_current}, configured_current={tesla_after_configured}"
+            + (f"; {'; '.join(extra_parts)}" if extra_parts else "")
+            + (
+                f"; skipped={payload.get('skipped') or error_text or 'unavailable'}"
+                if status == "skipped"
+                else ""
+            )
         )
     if service == "combined_assembly":
         combined_result = payload.get("combined")
@@ -5279,7 +6028,10 @@ async def get_core_entities_by_system(system: str) -> dict[str, object]:
 @app.get("/api/energy-flow/{system}")
 async def get_energy_flow(system: str) -> dict[str, object]:
     normalized = _normalize_system_name(system)
-    return await _get_energy_flow_from_realtime_kv(normalized)
+    flow = await _get_energy_flow_from_realtime_kv(normalized)
+    if normalized == "combined":
+        return _build_public_combined_flow(flow)
+    return flow
 
 
 @app.get("/api/saj/energy-flow")
