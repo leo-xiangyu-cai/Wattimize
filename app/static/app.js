@@ -1995,12 +1995,16 @@ const COMBINED_LAYOUT = {
       labelPosition: { x: 720, y: 230 },
       lineCap: "butt",
       lineJoin: "miter",
+      tailUpperGapLength: 9,
+      tailRoundedCorner: true,
     },
     switchboardToHomeLoad: {
       points: [{ x: 670, y: 198 }, { x: 556, y: 198 }],
       labelPosition: { x: 613, y: 230 },
       lineCap: "butt",
       lineJoin: "miter",
+      tailUpperGapLength: 9,
+      tailRoundedCorner: true,
     },
     battery1ToInverter1: {
       points: [{ x: 114, y: 296 }, { x: 114, y: 360 }],
@@ -2128,6 +2132,7 @@ function buildCombinedDiagramSpec() {
         titleKey: "gridTitle",
         width: 176,
         height: 102,
+        position: layout.nodes.grid,
         lines: [
           { id: "combined-gridPowerValue", className: "node-value", text: "-" },
           { id: "combined-gridState", className: "node-state muted", text: "idle" },
@@ -2141,6 +2146,7 @@ function buildCombinedDiagramSpec() {
         titleKey: "solarTitle",
         width: 176,
         height: 102,
+        position: layout.nodes.solar,
         lines: [
           { id: "combined-solarPowerValue", className: "node-value", text: "-" },
           { id: "combined-solarState", className: "node-state muted", text: "idle" },
@@ -2154,6 +2160,7 @@ function buildCombinedDiagramSpec() {
         titleKey: "switchboardTitle",
         width: 224,
         height: 152,
+        position: layout.nodes.switchboard,
         lines: [],
       },
       {
@@ -2164,6 +2171,7 @@ function buildCombinedDiagramSpec() {
         titleKey: "loadTitle",
         width: 184,
         height: 110,
+        position: layout.nodes.load,
         lines: [
           { id: "combined-loadPowerValue", className: "node-value", text: "-" },
           { id: "combined-loadState", className: "node-state muted", text: "idle" },
@@ -2177,6 +2185,7 @@ function buildCombinedDiagramSpec() {
         titleKey: "teslaChargingLabel",
         width: 176,
         height: 314,
+        position: layout.nodes.tesla,
         lines: [
           {
             type: "soc",
@@ -2197,6 +2206,7 @@ function buildCombinedDiagramSpec() {
         title: "SAJ Battery",
         width: SAJ_COMBINED_BATTERY_NODE_SIZE.width,
         height: SAJ_COMBINED_BATTERY_NODE_SIZE.height,
+        position: layout.nodes.battery1,
         lines: [
           {
             type: "soc",
@@ -2217,6 +2227,7 @@ function buildCombinedDiagramSpec() {
         title: "SAJ Inverter",
         width: 180,
         height: 108,
+        position: layout.nodes.inverter1,
         lines: [
           { id: "combined-inverter1RatioValue", className: "node-value", text: "-" },
           { id: "combined-inverter1State", className: "node-state muted", text: "-" },
@@ -2230,6 +2241,7 @@ function buildCombinedDiagramSpec() {
         title: "Solplanet Inverter",
         width: 176,
         height: 120,
+        position: layout.nodes.inverter2,
         lines: [
           { id: "combined-inverter2RatioValue", className: "node-value", text: "-" },
           { id: "combined-inverter2State", className: "node-state muted", text: "-" },
@@ -2243,6 +2255,7 @@ function buildCombinedDiagramSpec() {
         title: "Solplanet Battery",
         width: SOLPLANET_COMBINED_BATTERY_NODE_SIZE.width,
         height: SOLPLANET_COMBINED_BATTERY_NODE_SIZE.height,
+        position: layout.nodes.battery2,
         lines: [
           {
             type: "soc",
@@ -2257,8 +2270,46 @@ function buildCombinedDiagramSpec() {
       },
     ],
     edges: [
-      { id: "combined-lineGridToSwitchboard", source: "combined-gridNode", target: "combined-switchboardNode", labelId: "combined-flowLabelGridToSwitchboard" },
-      { id: "combined-lineSolarToInverter1B", source: "combined-solarNode", target: "combined-inverter1Node", labelId: "combined-flowLabelSolarToInverter1" },
+      {
+        id: "combined-lineGridToSwitchboard",
+        source: "combined-gridNode",
+        target: "combined-switchboardNode",
+        labelId: "combined-flowLabelGridToSwitchboard",
+        points: layout.edges.gridToSwitchboard.points,
+        labelPosition: layout.edges.gridToSwitchboard.labelPosition,
+      },
+      {
+        id: "combined-lineSolarToInverter1B",
+        source: "combined-solarNode",
+        target: "combined-inverter1Node",
+        labelId: "combined-flowLabelSolarToInverter1",
+        points: layout.edges.solarToInverter1.points,
+        labelPosition: layout.edges.solarToInverter1.labelPosition,
+      },
+      {
+        id: "combined-lineSwitchboardToTeslaB",
+        source: "combined-switchboardNode",
+        target: "combined-teslaNode",
+        labelId: "combined-flowLabelSwitchboardToTesla",
+        points: layout.edges.switchboardToTesla.points,
+        labelPosition: layout.edges.switchboardToTesla.labelPosition,
+        lineCap: layout.edges.switchboardToTesla.lineCap,
+        lineJoin: layout.edges.switchboardToTesla.lineJoin,
+        tailUpperGapLength: layout.edges.switchboardToTesla.tailUpperGapLength,
+        tailRoundedCorner: layout.edges.switchboardToTesla.tailRoundedCorner,
+      },
+      {
+        id: "combined-lineSwitchboardToHomeLoad",
+        source: "combined-switchboardNode",
+        target: "combined-loadNode",
+        labelId: "combined-flowLabelSwitchboardToHomeLoad",
+        points: layout.edges.switchboardToHomeLoad.points,
+        labelPosition: layout.edges.switchboardToHomeLoad.labelPosition,
+        lineCap: layout.edges.switchboardToHomeLoad.lineCap,
+        lineJoin: layout.edges.switchboardToHomeLoad.lineJoin,
+        tailUpperGapLength: layout.edges.switchboardToHomeLoad.tailUpperGapLength,
+        tailRoundedCorner: layout.edges.switchboardToHomeLoad.tailRoundedCorner,
+      },
       {
         id: "combined-lineSwitchboardToTotalLoad",
         source: "combined-switchboardNode",
@@ -2267,13 +2318,43 @@ function buildCombinedDiagramSpec() {
         glowWidth: 28,
         lineWidth: 18,
         coreWidth: 6,
+        points: layout.edges.switchboardToTotalLoad.points,
+        labelPosition: layout.edges.switchboardToTotalLoad.labelPosition,
+        lineCap: layout.edges.switchboardToTotalLoad.lineCap,
+        lineJoin: layout.edges.switchboardToTotalLoad.lineJoin,
       },
-      { id: "combined-lineSwitchboardToHomeLoad", source: "combined-switchboardNode", target: "combined-loadNode", labelId: "combined-flowLabelSwitchboardToHomeLoad" },
-      { id: "combined-lineSwitchboardToTeslaB", source: "combined-switchboardNode", target: "combined-teslaNode", labelId: "combined-flowLabelSwitchboardToTesla" },
-      { id: "combined-lineBattery1ToInverter1", source: "combined-battery1Node", target: "combined-inverter1Node", labelId: "combined-flowLabelBattery1ToInverter1" },
-      { id: "combined-lineBattery2ToInverter2", source: "combined-battery2Node", target: "combined-inverter2Node", labelId: "combined-flowLabelBattery2ToInverter2" },
-      { id: "combined-lineInverter1ToSwitchboardB", source: "combined-inverter1Node", target: "combined-switchboardNode", labelId: "combined-flowLabelInverter1ToSwitchboard" },
-      { id: "combined-lineInverter2ToSwitchboardB", source: "combined-inverter2Node", target: "combined-switchboardNode", labelId: "combined-flowLabelInverter2ToSwitchboard" },
+      {
+        id: "combined-lineBattery1ToInverter1",
+        source: "combined-battery1Node",
+        target: "combined-inverter1Node",
+        labelId: "combined-flowLabelBattery1ToInverter1",
+        points: layout.edges.battery1ToInverter1.points,
+        labelPosition: layout.edges.battery1ToInverter1.labelPosition,
+      },
+      {
+        id: "combined-lineBattery2ToInverter2",
+        source: "combined-battery2Node",
+        target: "combined-inverter2Node",
+        labelId: "combined-flowLabelBattery2ToInverter2",
+        points: layout.edges.battery2ToInverter2.points,
+        labelPosition: layout.edges.battery2ToInverter2.labelPosition,
+      },
+      {
+        id: "combined-lineInverter1ToSwitchboardB",
+        source: "combined-inverter1Node",
+        target: "combined-switchboardNode",
+        labelId: "combined-flowLabelInverter1ToSwitchboard",
+        points: layout.edges.inverter1ToSwitchboard.points,
+        labelPosition: layout.edges.inverter1ToSwitchboard.labelPosition,
+      },
+      {
+        id: "combined-lineInverter2ToSwitchboardB",
+        source: "combined-inverter2Node",
+        target: "combined-switchboardNode",
+        labelId: "combined-flowLabelInverter2ToSwitchboard",
+        points: layout.edges.inverter2ToSwitchboard.points,
+        labelPosition: layout.edges.inverter2ToSwitchboard.labelPosition,
+      },
     ],
   };
 }

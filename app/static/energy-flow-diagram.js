@@ -884,6 +884,45 @@
     }
   }
 
+  function clearTailUpperGap(ctx, points, lineWidth, gapLength) {
+    if (!Array.isArray(points) || points.length < 2) return;
+    const start = points[0];
+    const next = points[1];
+    const dx = next.x - start.x;
+    const dy = next.y - start.y;
+    if (Math.abs(dx) < 0.001 || Math.abs(dy) > 0.001) return;
+
+    const length = Math.min(Math.abs(dx), Math.max(0, gapLength));
+    if (!length) return;
+
+    const minX = dx > 0 ? start.x : (start.x - length);
+    const maxX = dx > 0 ? (start.x + length) : start.x;
+    const minY = start.y - (lineWidth / 2) - 1;
+    const maxY = start.y + 1;
+
+    ctx.save();
+    ctx.clearRect(minX - 1, minY, (maxX - minX) + 2, maxY - minY);
+    ctx.restore();
+  }
+
+  function drawTailSquarePatch(ctx, points, size, fillStyle) {
+    if (!Array.isArray(points) || points.length < 2 || size <= 0) return;
+    const start = points[0];
+    const next = points[1];
+    const dx = next.x - start.x;
+    const dy = next.y - start.y;
+    if (Math.abs(dx) < 0.001 || Math.abs(dy) > 0.001) return;
+
+    ctx.save();
+    ctx.fillStyle = fillStyle;
+    const overlap = Math.max(1, Math.round(size * 0.42));
+    const x = dx > 0 ? (start.x + overlap) : (start.x - size - overlap);
+    const y = (start.y - size - Math.max(1, Math.round(size * 0.34))) + 1;
+    const height = Math.max(1, size - 2);
+    ctx.fillRect(x, y, size, height);
+    ctx.restore();
+  }
+
   class EnergyFlowDiagram {
     constructor(options) {
       this.container = options.container;
@@ -1075,6 +1114,8 @@
         const coreWidth = Number.isFinite(edge.coreWidth) ? edge.coreWidth : 5;
         const lineCap = typeof edge.lineCap === "string" ? edge.lineCap : "round";
         const lineJoin = typeof edge.lineJoin === "string" ? edge.lineJoin : "round";
+        const tailUpperGapLength = Number.isFinite(edge.tailUpperGapLength) ? edge.tailUpperGapLength : 0;
+        const tailRoundedCorner = Boolean(edge.tailRoundedCorner);
 
         if (meta.measurement) {
           drawPolyline(ctx, meta.points, "#6b7d74", 1.5, true, lineCap, lineJoin);
@@ -1101,6 +1142,13 @@
           drawFlowMarkers(ctx, meta.points, state.reverse, now, theme);
         } else {
           drawPolyline(ctx, meta.points, EDGE_INACTIVE_CORE, coreWidth, false, lineCap, lineJoin);
+        }
+
+        if (tailUpperGapLength > 0) {
+          clearTailUpperGap(ctx, meta.points, glowWidth, tailUpperGapLength);
+        }
+        if (tailRoundedCorner) {
+          drawTailSquarePatch(ctx, meta.points, lineWidth / 2, state.active ? theme.color : EDGE_INACTIVE_COLOR);
         }
       });
     }
