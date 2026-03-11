@@ -535,6 +535,39 @@
     return result;
   }
 
+  function layoutExplicit(spec, options = {}) {
+    const viewportHeight = spec.viewport?.height || 0;
+    const coordinateSystem = String(options.coordinateSystem || "top-left");
+    const result = {};
+
+    spec.nodes.forEach((node) => {
+      const explicit = node.position || {};
+      const x = Number.isFinite(explicit.x) ? explicit.x : 0;
+      const rawY = Number.isFinite(explicit.y) ? explicit.y : 0;
+      const y = coordinateSystem === "bottom-left"
+        ? (viewportHeight - rawY - node.height)
+        : rawY;
+
+      result[node.id] = {
+        x,
+        y,
+        width: node.width,
+        height: node.height,
+      };
+    });
+
+    return result;
+  }
+
+  function normalizePoint(point, viewport, coordinateSystem = "top-left") {
+    const x = Number.isFinite(point?.x) ? point.x : 0;
+    const rawY = Number.isFinite(point?.y) ? point.y : 0;
+    if (coordinateSystem === "bottom-left") {
+      return { x, y: (viewport?.height || 0) - rawY };
+    }
+    return { x, y: rawY };
+  }
+
   function center(box) {
     return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   }
@@ -545,37 +578,6 @@
     if (side === "right") return { x: box.x + box.width, y: box.y + box.height / 2 + offset };
     if (side === "top") return { x: box.x + box.width / 2 + offset, y: box.y };
     return { x: box.x + box.width / 2 + offset, y: box.y + box.height };
-  }
-
-  function combinedLoadBranchGeometry(positions) {
-    const switchboard = positions["combined-switchboardNode"];
-    const load = positions["combined-loadNode"];
-    const tesla = positions["combined-teslaNode"];
-    if (!switchboard || !load || !tesla) return null;
-
-    const trunkStart = pointOnBox(switchboard, "right", 30);
-    const loadTarget = pointOnBox(load, "bottom", 0);
-    const teslaTarget = pointOnBox(tesla, "left", 0);
-    const branchPoint = { x: loadTarget.x, y: trunkStart.y };
-
-    return {
-      trunkStart,
-      branchPoint,
-      teslaTarget,
-      loadTarget,
-      loadPoints: [
-        branchPoint,
-        loadTarget,
-      ],
-      teslaPoints: [
-        branchPoint,
-        teslaTarget,
-      ],
-      trunkPoints: [
-        trunkStart,
-        branchPoint,
-      ],
-    };
   }
 
   function anchorForPair(sourceBox, targetBox) {
@@ -609,58 +611,6 @@
 
     const midY = (source.y + target.y) / 2;
     return [source, { x: source.x, y: midY }, { x: target.x, y: midY }, target];
-  }
-
-  function combinedEdgeGeometry(edgeId, positions, viewport) {
-    const solar = positions["combined-solarNode"];
-    const battery1 = positions["combined-battery1Node"];
-    const inverter1 = positions["combined-inverter1Node"];
-    const inverter2 = positions["combined-inverter2Node"];
-    const battery2 = positions["combined-battery2Node"];
-    const switchboard = positions["combined-switchboardNode"];
-    const grid = positions["combined-gridNode"];
-    const load = positions["combined-loadNode"];
-    const tesla = positions["combined-teslaNode"];
-    const switchboardBottomY = switchboard ? switchboard.y + switchboard.height : 0;
-    const inverterBusY = switchboardBottomY + 34;
-    const switchboardCenter = switchboard ? center(switchboard) : { x: 0, y: 0 };
-    const guideInset = 12;
-
-    if (edgeId === "combined-lineGridToSwitchboard") {
-      return [pointOnBox(grid, "bottom"), pointOnBox(switchboard, "top")];
-    }
-    if (edgeId === "combined-lineSwitchboardMeasureLeft") {
-      return [{ x: switchboardCenter.x, y: switchboardCenter.y }, { x: guideInset, y: switchboardCenter.y }];
-    }
-    if (edgeId === "combined-lineSwitchboardMeasureRight") {
-      return [{ x: switchboardCenter.x, y: switchboardCenter.y }, { x: viewport.width - guideInset, y: switchboardCenter.y }];
-    }
-    if (edgeId === "combined-lineSolarToInverter1B") {
-      return [pointOnBox(solar, "bottom"), pointOnBox(inverter1, "top")];
-    }
-    if (edgeId === "combined-lineBattery1ToInverter1") {
-      return [pointOnBox(battery1, "top"), pointOnBox(inverter1, "bottom")];
-    }
-    if (edgeId === "combined-lineBattery2ToInverter2") {
-      return [pointOnBox(inverter2, "right"), pointOnBox(battery2, "left")];
-    }
-    if (edgeId === "combined-lineInverter1ToSwitchboardB") {
-      return [pointOnBox(inverter1, "right"), pointOnBox(switchboard, "left")];
-    }
-    if (edgeId === "combined-lineInverter2ToSwitchboardB") {
-      return [pointOnBox(switchboard, "bottom"), pointOnBox(inverter2, "top")];
-    }
-    const loadBranch = combinedLoadBranchGeometry(positions);
-    if (edgeId === "combined-lineSwitchboardToTotalLoad") {
-      return loadBranch ? loadBranch.trunkPoints : null;
-    }
-    if (edgeId === "combined-lineSwitchboardToHomeLoad") {
-      return loadBranch ? loadBranch.loadPoints : null;
-    }
-    if (edgeId === "combined-lineSwitchboardToTeslaB") {
-      return loadBranch ? loadBranch.teslaPoints : null;
-    }
-    return null;
   }
 
   function flattenPoints(points) {
@@ -756,75 +706,26 @@
     };
   }
 
-  function adjustCombinedLabelPoint(edgeId, point) {
-    const offsetByEdgeId = {
-      "combined-lineGridToSwitchboard": { x: 0, y: 0 },
-      "combined-lineSolarToInverter1B": { x: -34, y: 0 },
-      "combined-lineBattery1ToInverter1": { x: -34, y: 0 },
-      "combined-lineInverter1ToSwitchboardB": { x: -34, y: 0 },
-      "combined-lineSwitchboardToHomeLoad": { x: 34, y: 0 },
-      "combined-lineSwitchboardToTeslaB": { x: 34, y: 0 },
-      "combined-lineBattery2ToInverter2": { x: 34, y: 0 },
-      "combined-lineInverter2ToSwitchboardB": { x: 0, y: 0 },
-    };
-    const offset = offsetByEdgeId[edgeId];
-    if (!offset) return point;
-    return {
-      x: point.x + offset.x,
-      y: point.y + offset.y,
-    };
+  function edgeLabelPoint(points, viewport) {
+    const anchor = labelPointOnPolyline(points);
+    return offsetLabelPoint(anchor.point, anchor.segment, viewport);
   }
 
-  function edgeLabelPoint(edgeId, points, viewport) {
-    if (edgeId === "combined-lineSwitchboardToTotalLoad") {
-      const anchor = labelPointOnPolyline(points);
-      return adjustCombinedLabelPoint(edgeId, offsetLabelPoint(anchor.point, anchor.segment, viewport));
+  function resolveEdgePoints(edge, positions, spec, viewport) {
+    if (Array.isArray(edge.points) && edge.points.length >= 2) {
+      return edge.points.map((point) => normalizePoint(point, viewport, spec?.coordinateSystem || "top-left"));
     }
-    if (edgeId === "combined-lineGridToSwitchboard" && Array.isArray(points) && points.length >= 2) {
-      const start = points[0];
-      const end = points[points.length - 1];
-      return {
-        x: ((start.x + end.x) / 2) + 12,
-        y: ((start.y + end.y) / 2) - 8,
-      };
+
+    const sourceBox = positions[edge.source];
+    const targetBox = positions[edge.target];
+    return buildOrthogonalPoints(sourceBox, targetBox);
+  }
+
+  function resolveEdgeLabelPoint(edge, points, spec, viewport) {
+    if (edge.labelPosition) {
+      return normalizePoint(edge.labelPosition, viewport, spec?.coordinateSystem || "top-left");
     }
-    if (edgeId === "combined-lineInverter1ToSwitchboardB" && Array.isArray(points) && points.length >= 2) {
-      const start = points[0];
-      const end = points[points.length - 1];
-      return {
-        x: ((start.x + end.x) / 2) - 34,
-        y: ((start.y + end.y) / 2) - 32,
-      };
-    }
-    if (edgeId === "combined-lineInverter2ToSwitchboardB" && Array.isArray(points) && points.length >= 2) {
-      const start = points[0];
-      const end = points[points.length - 1];
-      return {
-        x: ((start.x + end.x) / 2) + 12,
-        y: ((start.y + end.y) / 2),
-      };
-    }
-    if (edgeId === "combined-lineSwitchboardToHomeLoad" && Array.isArray(points) && points.length >= 3) {
-      return adjustCombinedLabelPoint(edgeId, offsetLabelPoint(
-        { x: points[0].x, y: (points[0].y + points[1].y) / 2 },
-        { dx: 0, dy: points[1].y - points[0].y },
-        viewport,
-      ));
-    }
-    if (edgeId === "combined-lineSwitchboardToTeslaB" && Array.isArray(points) && points.length >= 2) {
-      const target = points[points.length - 1];
-      const prev = points[points.length - 2];
-      const seg = Math.hypot(target.x - prev.x, target.y - prev.y);
-      const inset = Math.min(56, Math.max(24, seg * 0.28));
-      if (seg > 0) {
-        return adjustCombinedLabelPoint(edgeId, offsetLabelPoint({
-          x: target.x - (((target.x - prev.x) / seg) * inset),
-          y: target.y - (((target.y - prev.y) / seg) * inset),
-        }, { dx: target.x - prev.x, dy: target.y - prev.y }, viewport));
-      }
-    }
-    const anchor = labelPointOnPolyline(points);
-    return adjustCombinedLabelPoint(edgeId, offsetLabelPoint(anchor.point, anchor.segment, viewport));
+    return edgeLabelPoint(points, viewport);
   }
 
   function expandBounds(bounds, x, y) {
@@ -835,6 +736,17 @@
   }
 
   function computeContentBounds(nodes, edgesById, spec = null) {
+    if (spec?.fixedViewport && spec?.viewport?.width && spec?.viewport?.height) {
+      return {
+        minX: 0,
+        minY: 0,
+        maxX: spec.viewport.width,
+        maxY: spec.viewport.height,
+        width: spec.viewport.width,
+        height: spec.viewport.height,
+      };
+    }
+
     const bounds = {
       minX: Number.POSITIVE_INFINITY,
       minY: Number.POSITIVE_INFINITY,
@@ -866,12 +778,12 @@
     return bounds;
   }
 
-  function drawPolyline(ctx, points, stroke, lineWidth, dashed) {
+  function drawPolyline(ctx, points, stroke, lineWidth, dashed, lineCap = "round", lineJoin = "round") {
     if (!Array.isArray(points) || points.length < 2) return;
     ctx.beginPath();
     ctx.setLineDash(Array.isArray(dashed) ? dashed : dashed ? [6, 6] : []);
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
+    ctx.lineJoin = lineJoin;
+    ctx.lineCap = lineCap;
     ctx.lineWidth = lineWidth;
     ctx.strokeStyle = stroke;
     ctx.moveTo(points[0].x, points[0].y);
@@ -1008,9 +920,13 @@
       this.labelLayer = document.createElement("div");
       this.labelLayer.className = "efd-label-layer";
 
+      this.viewportFrame = document.createElement("div");
+      this.viewportFrame.className = "efd-viewport-frame";
+
       this.nodeLayer = document.createElement("div");
       this.nodeLayer.className = "efd-node-layer";
 
+      this.overlay.appendChild(this.viewportFrame);
       this.overlay.appendChild(this.labelLayer);
       this.overlay.appendChild(this.nodeLayer);
       this.scene.appendChild(this.canvas);
@@ -1033,9 +949,14 @@
         edges: this.spec.edges,
         viewport: this.spec.viewport || { width: 1040, height: 700 },
       };
-      const positions = this.spec.layout === "hub" ? layoutHub(layoutInput) : layoutPower(layoutInput);
+      const positions = this.spec.layout === "explicit"
+        ? layoutExplicit(layoutInput, this.spec)
+        : (this.spec.layout === "hub" ? layoutHub(layoutInput) : layoutPower(layoutInput));
       this.lastPositions = positions;
       this.lastViewport = layoutInput.viewport;
+      this.viewportFrame.classList.toggle("is-visible", Boolean(this.spec.showViewportFrame));
+      this.viewportFrame.style.width = `${layoutInput.viewport.width}px`;
+      this.viewportFrame.style.height = `${layoutInput.viewport.height}px`;
 
       this.renderNodes(nodes, positions);
       this.buildEdges(positions, layoutInput.viewport);
@@ -1069,12 +990,8 @@
     buildEdges(positions, viewport) {
       this.labelLayer.innerHTML = "";
       this.spec.edges.forEach((edge) => {
-        const sourceBox = positions[edge.source];
-        const targetBox = positions[edge.target];
-        const points = this.spec.layout === "power"
-          ? (combinedEdgeGeometry(edge.id, positions, viewport) || buildOrthogonalPoints(sourceBox, targetBox))
-          : buildOrthogonalPoints(sourceBox, targetBox);
-        const labelPoint = edgeLabelPoint(edge.id, points, viewport);
+        const points = resolveEdgePoints(edge, positions, this.spec, viewport);
+        const labelPoint = resolveEdgeLabelPoint(edge, points, this.spec, viewport);
         this.edgeMetaById.set(edge.id, {
           id: edge.id,
           points,
@@ -1117,8 +1034,9 @@
       this.canvas.style.width = `${rect.width}px`;
       this.canvas.style.height = `${rect.height}px`;
 
-      const paddedWidth = this.contentBounds.width + (DEFAULT_PADDING * 2);
-      const paddedHeight = this.contentBounds.height + (DEFAULT_PADDING * 2);
+      const fitPadding = this.spec.fixedViewport ? 0 : DEFAULT_PADDING;
+      const paddedWidth = this.contentBounds.width + (fitPadding * 2);
+      const paddedHeight = this.contentBounds.height + (fitPadding * 2);
       this.scale = Math.min(rect.width / paddedWidth, rect.height / paddedHeight);
       if (!Number.isFinite(this.scale) || this.scale <= 0) this.scale = 1;
 
@@ -1127,8 +1045,8 @@
       const outerOffsetX = (rect.width - scaledWidth) / 2;
       const outerOffsetY = (rect.height - scaledHeight) / 2;
 
-      this.translateX = outerOffsetX + (DEFAULT_PADDING * this.scale) - (this.contentBounds.minX * this.scale);
-      this.translateY = outerOffsetY + (DEFAULT_PADDING * this.scale) - (this.contentBounds.minY * this.scale);
+      this.translateX = outerOffsetX + (fitPadding * this.scale) - (this.contentBounds.minX * this.scale);
+      this.translateY = outerOffsetY + (fitPadding * this.scale) - (this.contentBounds.minY * this.scale);
 
       this.overlay.style.transform = `translate(${this.translateX}px, ${this.translateY}px) scale(${this.scale})`;
       this.redraw(dpr);
@@ -1155,16 +1073,18 @@
         const glowWidth = Number.isFinite(edge.glowWidth) ? edge.glowWidth : 24;
         const lineWidth = Number.isFinite(edge.lineWidth) ? edge.lineWidth : 14;
         const coreWidth = Number.isFinite(edge.coreWidth) ? edge.coreWidth : 5;
+        const lineCap = typeof edge.lineCap === "string" ? edge.lineCap : "round";
+        const lineJoin = typeof edge.lineJoin === "string" ? edge.lineJoin : "round";
 
         if (meta.measurement) {
-          drawPolyline(ctx, meta.points, "#6b7d74", 1.5, true);
+          drawPolyline(ctx, meta.points, "#6b7d74", 1.5, true, lineCap, lineJoin);
           return;
         }
 
         if (state.active) {
-          drawPolyline(ctx, meta.points, theme.glow, glowWidth, false);
+          drawPolyline(ctx, meta.points, theme.glow, glowWidth, false, lineCap, lineJoin);
         } else {
-          drawPolyline(ctx, meta.points, EDGE_INACTIVE_GLOW, glowWidth, false);
+          drawPolyline(ctx, meta.points, EDGE_INACTIVE_GLOW, glowWidth, false, lineCap, lineJoin);
         }
         drawPolyline(
           ctx,
@@ -1172,13 +1092,15 @@
           state.active ? theme.color : EDGE_INACTIVE_COLOR,
           lineWidth,
           false,
+          lineCap,
+          lineJoin,
         );
 
         if (state.active) {
-          drawPolyline(ctx, meta.points, theme.core, coreWidth, false);
+          drawPolyline(ctx, meta.points, theme.core, coreWidth, false, lineCap, lineJoin);
           drawFlowMarkers(ctx, meta.points, state.reverse, now, theme);
         } else {
-          drawPolyline(ctx, meta.points, EDGE_INACTIVE_CORE, coreWidth, false);
+          drawPolyline(ctx, meta.points, EDGE_INACTIVE_CORE, coreWidth, false, lineCap, lineJoin);
         }
       });
     }

@@ -1962,6 +1962,64 @@ const SOLPLANET_COMBINED_BATTERY_NODE_SIZE = {
   width: 230,
   height: Math.round(176 * SAJ_BATTERY_CARD_SCALE),
 };
+const COMBINED_DIAGRAM_VIEWPORT = { width: 1340, height: 720 };
+const COMBINED_LAYOUT = {
+  nodes: {
+    grid: { x: 582, y: 594 },
+    solar: { x: 8, y: 594 },
+    switchboard: { x: 558, y: 318 },
+    load: { x: 372, y: 136 },
+    tesla: { x: 770, y: 0 },
+    battery1: { x: 24, y: 32 },
+    inverter1: { x: 24, y: 360 },
+    inverter2: { x: 1113, y: 354 },
+    battery2: { x: 1086, y: 32 },
+  },
+  edges: {
+    gridToSwitchboard: {
+      points: [{ x: 670, y: 594 }, { x: 670, y: 470 }],
+      labelPosition: { x: 704, y: 532 },
+    },
+    solarToInverter1: {
+      points: [{ x: 96, y: 594 }, { x: 96, y: 468 }],
+      labelPosition: { x: 130, y: 531 },
+    },
+    switchboardToTotalLoad: {
+      points: [{ x: 670, y: 318 }, { x: 670, y: 205 }],
+      labelPosition: { x: 704, y: 262 },
+      lineCap: "butt",
+      lineJoin: "miter",
+    },
+    switchboardToTesla: {
+      points: [{ x: 670, y: 198 }, { x: 770, y: 198 }],
+      labelPosition: { x: 720, y: 230 },
+      lineCap: "butt",
+      lineJoin: "miter",
+    },
+    switchboardToHomeLoad: {
+      points: [{ x: 670, y: 198 }, { x: 556, y: 198 }],
+      labelPosition: { x: 613, y: 230 },
+      lineCap: "butt",
+      lineJoin: "miter",
+    },
+    battery1ToInverter1: {
+      points: [{ x: 114, y: 296 }, { x: 114, y: 360 }],
+      labelPosition: { x: 148, y: 328 },
+    },
+    battery2ToInverter2: {
+      points: [{ x: 1201, y: 296 }, { x: 1201, y: 354 }],
+      labelPosition: { x: 1235, y: 325 },
+    },
+    inverter1ToSwitchboard: {
+      points: [{ x: 204, y: 414 }, { x: 558, y: 414 }],
+      labelPosition: { x: 381, y: 446 },
+    },
+    inverter2ToSwitchboard: {
+      points: [{ x: 782, y: 414 }, { x: 1113, y: 414 }],
+      labelPosition: { x: 948, y: 446 },
+    },
+  },
+};
 
 function buildSystemDiagramSpec(system) {
   const prefix = String(system);
@@ -2054,9 +2112,13 @@ function buildSystemDiagramSpec(system) {
 }
 
 function buildCombinedDiagramSpec() {
+  const layout = COMBINED_LAYOUT;
   return {
-    layout: "power",
-    viewport: { width: 1100, height: 720 },
+    layout: "explicit",
+    coordinateSystem: "bottom-left",
+    fixedViewport: true,
+    showViewportFrame: true,
+    viewport: COMBINED_DIAGRAM_VIEWPORT,
     nodes: [
       {
         id: "combined-gridNode",
