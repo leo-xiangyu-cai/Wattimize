@@ -86,6 +86,8 @@ TESLA_GRID_SUPPORT_TARGET_MIN_W = 14_000.0
 TESLA_GRID_SUPPORT_TARGET_MAX_W = 15_000.0
 TESLA_GRID_SUPPORT_HARD_MAX_W = 15_000.0
 TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A: tuple[int, ...] = (10, 15)
+TESLA_CURRENT_MISMATCH_RESTART_MIN_DELTA_A = 2.0
+TESLA_CURRENT_MISMATCH_RESTART_COOLDOWN_SECONDS = 300.0
 WORKER_PENDING_LOG_TIMEOUT_SECONDS = 60.0
 TESLA_OBSERVATION_SERVICE = "tesla_home_assistant_collection"
 MIDDAY_WINDOW_CHECK_SERVICE = "worker_midday_window_check"
@@ -1636,6 +1638,40 @@ async def _run_midday_window_check(
             current_actual_amps is not None
             and int(round(current_actual_amps)) == desired_amps
         )
+        current_gap_to_desired_amps = (
+            float(desired_amps) - float(current_actual_amps)
+            if current_actual_amps is not None
+            else None
+        )
+        current_mismatch_restart_needed = bool(
+            desired["mode"] != "off"
+            and charging_enabled
+            and charge_requested_enabled
+            and configured_matches_desired
+            and current_gap_to_desired_amps is not None
+            and current_gap_to_desired_amps >= TESLA_CURRENT_MISMATCH_RESTART_MIN_DELTA_A
+        )
+        current_mismatch_restart_allowed = current_mismatch_restart_needed
+        current_mismatch_restart_cooldown_remaining_s: float | None = None
+        if current_mismatch_restart_needed:
+            combined_status = collector_status.setdefault("combined", {})
+            last_restart_at_text = str(
+                combined_status.get("last_tesla_current_mismatch_restart_at") or ""
+            ).strip()
+            if last_restart_at_text:
+                try:
+                    last_restart_at = datetime.fromisoformat(last_restart_at_text.replace("Z", "+00:00"))
+                    if last_restart_at.tzinfo is None:
+                        last_restart_at = last_restart_at.replace(tzinfo=UTC)
+                    elapsed_s = max((datetime.now(UTC) - last_restart_at.astimezone(UTC)).total_seconds(), 0.0)
+                    if elapsed_s < TESLA_CURRENT_MISMATCH_RESTART_COOLDOWN_SECONDS:
+                        current_mismatch_restart_allowed = False
+                        current_mismatch_restart_cooldown_remaining_s = round(
+                            TESLA_CURRENT_MISMATCH_RESTART_COOLDOWN_SECONDS - elapsed_s,
+                            1,
+                        )
+                except ValueError:
+                    current_mismatch_restart_allowed = current_mismatch_restart_needed
 
         result["candidates"] = [
             {
@@ -1687,6 +1723,19 @@ async def _run_midday_window_check(
         if current_configured_amps is None or int(round(current_configured_amps)) != desired_amps:
             await _tesla_set_charge_current(desired_amps)
             actions.append(f"set_current_{desired_amps}a")
+        if current_mismatch_restart_needed:
+            result["current_mismatch"] = {
+                "configured_current_amps": current_configured_amps,
+                "actual_current_amps": current_actual_amps,
+                "desired_current_amps": desired_amps,
+                "gap_to_desired_amps": round(current_gap_to_desired_amps or 0.0, 1),
+                "restart_allowed": current_mismatch_restart_allowed,
+                "restart_cooldown_remaining_s": current_mismatch_restart_cooldown_remaining_s,
+            }
+        if current_mismatch_restart_allowed:
+            await _tesla_restart_charging()
+            collector_status.setdefault("combined", {})["last_tesla_current_mismatch_restart_at"] = datetime.now(UTC).isoformat()
+            actions.append("restart_charging_for_current_mismatch")
         if not charging_enabled:
             if charge_requested_enabled:
                 await _tesla_restart_charging()
@@ -4202,28 +4251,65 @@ def _worker_control_result_text(
         action_type = str(action_map.get("type") or "-")
         steps = action_map.get("steps")
         steps_text = ", ".join(str(item) for item in steps) if isinstance(steps, list) and steps else str(action_map.get("reason") or "-")
+        steps_set = {str(item) for item in steps} if isinstance(steps, list) else set()
+        action_label = action_type
+        if "restart_charging_for_current_mismatch" in steps_set or "restart_charging" in steps_set:
+            action_label = "restart"
+        elif "start_charging" in steps_set:
+            action_label = "start"
+        elif action_type == "stop_charging":
+            action_label = "stop"
+        elif any(str(item).startswith("set_current_") for item in steps_set):
+            action_label = "set_current"
+        elif action_type == "noop":
+            action_label = "noop"
         decision_mode = str(decision_map.get("mode") or "-")
         decision_amps = _fmt_result_number(decision_map.get("charge_current_amps"), 0, "A")
         tesla_before = payload.get("tesla_state_before")
         tesla_before_map = tesla_before if isinstance(tesla_before, dict) else {}
         tesla_before_text = str(tesla_before_map.get("connection_state") or ("charging" if tesla_before_map.get("enabled") else "unplugged"))
         tesla_before_request = "on" if tesla_before_map.get("requested_enabled") else "off"
+        tesla_before_current = _fmt_result_number(tesla_before_map.get("current_amps"), 0, "A")
+        tesla_before_configured = _fmt_result_number(tesla_before_map.get("configured_current_amps"), 0, "A")
         tesla_after_text = tesla_before_text
+        tesla_after_request = tesla_before_request
+        tesla_after_current = decision_amps if decision_mode != "off" else "0A"
+        tesla_after_configured = decision_amps if decision_mode != "off" else tesla_before_configured
         if action_type == "stop_charging":
             tesla_after_text = "plugged_not_charging" if tesla_before_map.get("cable_connected") else "unplugged"
+            tesla_after_request = "off"
         elif action_type == "apply":
-            steps_set = {str(item) for item in steps} if isinstance(steps, list) else set()
             if "start_charging" in steps_set or "restart_charging" in steps_set:
                 tesla_after_text = "charging"
+                tesla_after_request = "on"
+            if "restart_charging_for_current_mismatch" in steps_set:
+                tesla_after_text = "charging"
+                tesla_after_request = "on"
+            if any(str(item).startswith("set_current_") for item in steps_set):
+                tesla_after_configured = decision_amps
+        elif action_type == "noop" and decision_mode == "hold_current_state":
+            tesla_after_current = _fmt_result_number(
+                tesla_before_map.get("current_amps") if tesla_before_map.get("current_amps") is not None else decision_map.get("charge_current_amps"),
+                0,
+                "A",
+            )
+            tesla_after_configured = _fmt_result_number(
+                tesla_before_map.get("configured_current_amps") if tesla_before_map.get("configured_current_amps") is not None else decision_map.get("charge_current_amps"),
+                0,
+                "A",
+            )
         return (
             "Midday window check: "
+            f"action={action_label}, "
             f"grid {_fmt_result_number(payload.get('current_grid_import_w'), 0, 'W')}, "
             f"base {_fmt_result_number(payload.get('base_grid_without_tesla_w'), 0, 'W')}, "
-            f"tesla {tesla_before_text}->{tesla_after_text} "
-            f"(request {tesla_before_request}), "
+            f"before state={tesla_before_text}, request={tesla_before_request}, "
+            f"actual_current={tesla_before_current}, configured_current={tesla_before_configured}; "
+            f"expected state={tesla_after_text}, request={tesla_after_request}, "
+            f"actual_current={tesla_after_current}, configured_current={tesla_after_configured}; "
             f"decision {decision_mode} {decision_amps}, "
             f"predicted {_fmt_result_number(decision_map.get('predicted_grid_w'), 0, 'W')}, "
-            f"action {action_type} ({steps_text})"
+            f"detail {action_type} ({steps_text})"
         )
     if service == "combined_assembly":
         combined_result = payload.get("combined")
