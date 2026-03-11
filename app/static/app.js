@@ -161,6 +161,7 @@ const I18N = {
     sajControlPassiveAlert: "Warning: SAJ is in Passive Mode (sensor app_mode={modeSensor}). Slot schedules may be ignored and battery may charge/discharge unexpectedly.",
     sajControlDebugModeLabel: "Debug Mode",
     sajControlPopupSuccessTitle: "Success",
+    sajControlPopupErrorTitle: "Error",
     sajControlPopupCloseBtn: "Close",
     sajControlPopupWorkingModeSummary: "Working mode has been applied (mode_code={modeCode}).",
     sajControlPopupInverterModeSummary: "Inverter target mode apply sent (mode_code={modeCode}, via app_mode_input).",
@@ -168,9 +169,25 @@ const I18N = {
     sajControlDebugApiTitle: "API Calls",
     sajControlDebugNoApi: "No API calls recorded.",
     sajDebugPurposeSetMode: "Update SAJ app mode input with selected mode code.",
+    sajDebugPurposeSetProfile: "Apply a simplified SAJ profile made of one or more low-level settings.",
     sajDebugPurposeSetInverterModeTarget: "Apply target inverter mode by writing SAJ app mode input.",
     sajDebugPurposeSetTogglesMask: "Update charge/discharge enable masks.",
     sajDebugPurposeSetSlot: "Update {kind} slot {slot} fields that changed.",
+    sajProfilePanelKicker: "SAJ Profile",
+    sajProfileSelectedLabel: "Selected",
+    sajProfileOptionSelfConsumption: "Self Consumption",
+    sajProfileOptionTimeOfUse: "Time of Use",
+    sajProfileOptionMicrogrid: "Microgrid",
+    sajProfileDesiredText: "Selected profile: {profile}",
+    sajProfileActualText: "Remote profile: {profile}",
+    sajProfileStatusPending: "Status: waiting for HA readback to match the selected profile",
+    sajProfileStatusSynced: "Status: selected profile matches remote state",
+    sajProfileStatusCustom: "Status: remote SAJ state is custom or unsupported by the simple profile set",
+    sajProfileStatusUnknown: "Status: remote SAJ state unavailable",
+    sajProfileApplyBtn: "Apply",
+    sajProfileApplyFailed: "SAJ profile apply failed: {error}",
+    sajProfileLoadFailed: "SAJ profile load failed: {error}",
+    sajProfileApplySummary: "SAJ profile applied: {profile}.",
     sajControlCurrentStateTitle: "Current Slot State",
     sajControlEnableCol: "Enable",
     sajControlTypeCol: "Type",
@@ -624,6 +641,7 @@ const I18N = {
     sajControlPassiveAlert: "警告：当前 SAJ 处于 Passive Mode（sensor app_mode={modeSensor}）。时段配置可能被忽略，电池可能出现非预期充/放电。",
     sajControlDebugModeLabel: "Debug 模式",
     sajControlPopupSuccessTitle: "操作成功",
+    sajControlPopupErrorTitle: "操作失败",
     sajControlPopupCloseBtn: "关闭",
     sajControlPopupWorkingModeSummary: "工作模式已应用（mode_code={modeCode}）。",
     sajControlPopupInverterModeSummary: "已发送逆变器目标模式下发（mode_code={modeCode}，通过 app_mode_input）。",
@@ -631,9 +649,25 @@ const I18N = {
     sajControlDebugApiTitle: "API 调用明细",
     sajControlDebugNoApi: "本次没有记录到 API 调用。",
     sajDebugPurposeSetMode: "将所选 mode code 写入 SAJ App 模式输入值。",
+    sajDebugPurposeSetProfile: "应用一个由多个底层配置组成的简化 SAJ 档位。",
     sajDebugPurposeSetInverterModeTarget: "通过写入 SAJ App 模式输入值来触发逆变器目标模式。",
     sajDebugPurposeSetTogglesMask: "更新充/放电启用掩码。",
     sajDebugPurposeSetSlot: "更新 {kind} 第 {slot} 段发生变化的字段。",
+    sajProfilePanelKicker: "SAJ 档位",
+    sajProfileSelectedLabel: "已选择",
+    sajProfileOptionSelfConsumption: "自发自用",
+    sajProfileOptionTimeOfUse: "分时电价",
+    sajProfileOptionMicrogrid: "微电网",
+    sajProfileDesiredText: "已选择档位：{profile}",
+    sajProfileActualText: "远端实际档位：{profile}",
+    sajProfileStatusPending: "状态：等待 Home Assistant 读回与已选档位一致",
+    sajProfileStatusSynced: "状态：已选档位与远端状态一致",
+    sajProfileStatusCustom: "状态：远端 SAJ 处于自定义或当前简化档位未覆盖的状态",
+    sajProfileStatusUnknown: "状态：暂时无法判断远端 SAJ 状态",
+    sajProfileApplyBtn: "应用",
+    sajProfileApplyFailed: "SAJ 档位应用失败：{error}",
+    sajProfileLoadFailed: "SAJ 档位加载失败：{error}",
+    sajProfileApplySummary: "已应用 SAJ 档位：{profile}。",
     sajControlCurrentStateTitle: "当前时段状态",
     sajControlEnableCol: "启用",
     sajControlTypeCol: "类型",
@@ -1178,6 +1212,7 @@ const stateCache = {
   lastSolplanetKv: { phase: "idle", items: [], updated_at: null, error: null },
   lastSajRaw: {},
   lastSajControl: null,
+  lastSajProfile: null,
   lastSolplanetControl: null,
   lastSolplanetControlLive: null,
   lastSolplanetControlFetch: null,
@@ -1581,6 +1616,7 @@ function applyTranslations() {
   renderSolplanetKvFromCache();
   renderSajRawFromCache();
   renderSajControlFromCache();
+  renderSajProfilePanel();
   renderSolplanetControlFromCache();
   rerenderSamplingViewFromCache();
   if (stateCache.lastEntities) renderEntitiesPage(stateCache.lastEntities);
@@ -2035,7 +2071,7 @@ function buildCombinedDiagramSpec() {
         side: "left",
         icon: "inverter",
         title: "SAJ Inverter",
-        width: 176,
+        width: 248,
         height: 120,
         lines: [
           { id: "combined-inverter1RatioValue", className: "node-value", text: "-" },
@@ -2237,7 +2273,65 @@ function _sajModeTextByCode(modeCode) {
   return _stripModeCodePrefix(t(`sajModeOption${code}`));
 }
 
+function sajProfileLabel(profileId) {
+  if (profileId === "self_consumption") return t("sajProfileOptionSelfConsumption");
+  if (profileId === "time_of_use") return t("sajProfileOptionTimeOfUse");
+  if (profileId === "microgrid") return t("sajProfileOptionMicrogrid");
+  return "-";
+}
+
+function setSajDashboardProfilePopoverVisible(visible) {
+  const popover = document.getElementById("sajDashboardProfilePopover");
+  if (!popover) return;
+  if (!visible) {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && popover.contains(active)) active.blur();
+  }
+  popover.classList.toggle("hidden", !visible);
+  popover.setAttribute("aria-hidden", visible ? "false" : "true");
+}
+
+function toggleSajDashboardProfilePopover() {
+  const popover = document.getElementById("sajDashboardProfilePopover");
+  if (!popover) return;
+  setSajDashboardProfilePopoverVisible(popover.classList.contains("hidden"));
+}
+
+function renderSajProfileFields(payload, ids) {
+  const select = document.getElementById(ids.selectId);
+  if (!payload) {
+    if (select) select.value = "self_consumption";
+    setText(ids.desiredId, "-");
+    setText(ids.actualId, "-");
+    setText(ids.statusId, "-");
+    return;
+  }
+
+  const selectedProfile = payload.selected_profile || payload.effective_profile || "self_consumption";
+  const actualProfile = payload.actual_profile || null;
+  if (select) select.value = selectedProfile;
+  setText(ids.desiredId, t("sajProfileDesiredText", { profile: sajProfileLabel(selectedProfile) }));
+  setText(ids.actualId, t("sajProfileActualText", { profile: sajProfileLabel(actualProfile) }));
+
+  let statusKey = "sajProfileStatusUnknown";
+  if (payload.pending_remote_sync) statusKey = "sajProfileStatusPending";
+  else if (actualProfile && selectedProfile && actualProfile === selectedProfile) statusKey = "sajProfileStatusSynced";
+  else if (payload.is_custom_remote_state) statusKey = "sajProfileStatusCustom";
+  setText(ids.statusId, t(statusKey));
+}
+
 function getSajDashboardModeText() {
+  const profileState = stateCache.lastSajProfile?.profile_state || stateCache.lastSajProfile || null;
+  const actualProfile = profileState?.actual_profile;
+  const selectedProfile = profileState?.selected_profile || profileState?.effective_profile || null;
+  const actualLabel = actualProfile ? sajProfileLabel(actualProfile) : "";
+  const selectedLabel = selectedProfile ? sajProfileLabel(selectedProfile) : "";
+  if (actualLabel && selectedLabel) {
+    return actualProfile === selectedProfile ? actualLabel : `${actualLabel} -> ${selectedLabel}`;
+  }
+  if (actualLabel) return actualLabel;
+  if (selectedLabel) return selectedLabel;
+
   const state = stateCache.lastSajControl?.control_state || stateCache.lastSajControl?.state || null;
   if (!state) return "";
   const working = state?.working_mode || {};
@@ -2263,6 +2357,76 @@ function getSajDashboardModeText() {
     if (mapped) return mapped;
   }
   return "";
+}
+
+function renderSajProfilePanel() {
+  const payload = stateCache.lastSajProfile?.profile_state || stateCache.lastSajProfile || null;
+  renderSajProfileFields(payload, {
+    selectId: "sajProfileSelect",
+    desiredId: "sajProfileDesiredText",
+    actualId: "sajProfileActualText",
+    statusId: "sajProfileStatusText",
+  });
+  renderSajProfileFields(payload, {
+    selectId: "sajDashboardProfileSelect",
+    desiredId: "sajDashboardProfileDesiredText",
+    actualId: "sajDashboardProfileActualText",
+    statusId: "sajDashboardProfileStatusText",
+  });
+}
+
+async function loadSajProfile() {
+  try {
+    const payload = await fetchJson("/api/saj/control/profile", { timeoutMs: 8000 });
+    stateCache.lastSajProfile = payload;
+    renderSajProfilePanel();
+    renderSummary(stateCache.lastSummary || { combinedFlow: { metrics: {} } });
+  } catch (err) {
+    setText("sajProfileStatusText", t("sajProfileLoadFailed", { error: String(err) }));
+  }
+}
+
+async function applySajProfile(selectId = "sajProfileSelect") {
+  const primarySelect = document.getElementById(selectId);
+  const fallbackSelect = document.getElementById(selectId === "sajProfileSelect" ? "sajDashboardProfileSelect" : "sajProfileSelect");
+  const profileId = primarySelect?.value || fallbackSelect?.value || "self_consumption";
+  const fromDashboardPopover = selectId === "sajDashboardProfileSelect";
+  try {
+    if (fromDashboardPopover) setSajDashboardProfilePopoverVisible(false);
+    const payload = await fetchJson("/api/saj/control/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile_id: profileId }),
+      timeoutMs: 12000,
+    });
+    showSajActionSuccess(t("sajProfileApplySummary", { profile: sajProfileLabel(profileId) }), [
+      {
+        method: "PUT",
+        path: "/api/saj/control/profile",
+        purposeKey: "sajDebugPurposeSetProfile",
+      },
+    ]);
+    stateCache.lastSajProfile = payload.profile_state || payload;
+    stateCache.lastSajControl = payload;
+    try {
+      renderSajProfilePanel();
+      renderSajControlFromCache();
+      renderSummary(stateCache.lastSummary || { combinedFlow: { metrics: {} } });
+    } catch (renderErr) {
+      console.error("SAJ profile apply render failed", renderErr);
+    }
+  } catch (err) {
+    const errorText = t("sajProfileApplyFailed", { error: String(err) });
+    setText("sajProfileStatusText", errorText);
+    setText("sajDashboardProfileStatusText", errorText);
+    showSajActionError(errorText, [
+      {
+        method: "PUT",
+        path: "/api/saj/control/profile",
+        purposeKey: "sajDebugPurposeSetProfile",
+      },
+    ]);
+  }
 }
 
 function setBalanceStatus(system, balanceW) {
@@ -3083,6 +3247,11 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   setText("combined-switchboardValue", "-");
   setText("combined-inverter1State", getSajDashboardModeText() || inverterStateText(inverter1Status));
   setText("combined-inverter2State", inverterStateText(inverter2Status));
+  const sajModeTrigger = document.getElementById("combined-inverter1State");
+  if (sajModeTrigger) {
+    sajModeTrigger.classList.add("is-clickable");
+    sajModeTrigger.setAttribute("title", t("sajProfilePanelKicker"));
+  }
 
   setNodeSourceTip("combined-solarPowerValue", formatMetricSourceText("saj", "solar", sources.solar));
   setNodeSourceTip("combined-gridPowerValue", formatMetricSourceText("saj", "grid", sources.grid));
@@ -5157,7 +5326,8 @@ function _apiCallDebugLine(call) {
   return `${method} ${path}: ${purpose}`;
 }
 
-function showSajActionSuccess(summaryText, apiCalls = []) {
+function showSajActionMessage(titleText, summaryText, apiCalls = []) {
+  setText("sajActionModalTitle", titleText || t("sajControlPopupSuccessTitle"));
   setText("sajActionModalSummary", summaryText || t("sajControlApplyDone"));
   const debugBlock = document.getElementById("sajActionDebugBlock");
   if (debugBlock) debugBlock.classList.toggle("hidden", !sajActionDebugMode);
@@ -5172,6 +5342,14 @@ function showSajActionSuccess(summaryText, apiCalls = []) {
     }
   }
   setSajActionModalVisible(true);
+}
+
+function showSajActionSuccess(summaryText, apiCalls = []) {
+  showSajActionMessage(t("sajControlPopupSuccessTitle"), summaryText, apiCalls);
+}
+
+function showSajActionError(summaryText, apiCalls = []) {
+  showSajActionMessage(t("sajControlPopupErrorTitle"), summaryText, apiCalls);
 }
 
 function _getSajDayMaskPopupMask() {
@@ -6247,15 +6425,23 @@ async function loadSummary() {
   stateCache.lastSummary = summary;
   setSystemLoadMeta("combined", { phase: "loading", updatedAt: null });
   renderSummary(summary);
+  renderSajProfilePanel();
 
   const baseResults = await Promise.allSettled([
     fetchJson("/api/collector/status", { timeoutMs: 6000 }),
+    fetchJson("/api/saj/control/profile", { timeoutMs: 8000 }),
   ]);
   if (requestId !== summaryRequestId) return;
 
   if (baseResults[0].status === "fulfilled") {
     summary.collectorStatus = baseResults[0].value;
     stateCache.lastCollectorStatus = baseResults[0].value;
+  }
+  if (baseResults[1].status === "fulfilled") {
+    stateCache.lastSajProfile = baseResults[1].value;
+    renderSajProfilePanel();
+  } else {
+    setText("sajProfileStatusText", t("sajProfileLoadFailed", { error: String(baseResults[1].reason) }));
   }
   renderSummary(summary);
 
@@ -6985,6 +7171,14 @@ function bindChangeIfPresent(id, handler) {
 bindClickIfPresent("sajModeApplyBtn", () => {
   void applySajWorkingMode();
 });
+bindClickIfPresent("sajProfileApplyBtn", (event) => {
+  event?.stopPropagation?.();
+  void applySajProfile("sajProfileSelect");
+});
+bindClickIfPresent("sajDashboardProfileApplyBtn", (event) => {
+  event?.stopPropagation?.();
+  void applySajProfile("sajDashboardProfileSelect");
+});
 bindClickIfPresent("sajInverterModeApplyBtn", () => {
   void applySajInverterModeTarget();
 });
@@ -7168,6 +7362,17 @@ bindClickIfPresent("configCloseBtn", () => {
 window.addEventListener("resize", () => {
   if (samplingChart) samplingChart.resize();
   refreshFlowDiagrams();
+});
+
+document.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  if (target.closest("#combined-inverter1State")) {
+    toggleSajDashboardProfilePopover();
+    return;
+  }
+  const insidePopover = target.closest("#sajDashboardProfilePopover");
+  if (!insidePopover) setSajDashboardProfilePopoverVisible(false);
 });
 
 initFlowDiagrams();

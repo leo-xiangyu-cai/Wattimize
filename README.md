@@ -54,7 +54,9 @@ curl -s http://<wattimize-host>:18000/api/ha/ping | jq
 curl -s http://<wattimize-host>:18000/api/energy-flow/saj | jq
 curl -s http://<wattimize-host>:18000/api/energy-flow/solplanet | jq
 curl -s http://<wattimize-host>:18000/api/saj/control/state | jq
+curl -s http://<wattimize-host>:18000/api/saj/control/profile | jq
 curl -s http://<wattimize-host>:18000/api/saj/control/capabilities | jq
+curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/profile -H 'Content-Type: application/json' -d '{"profile_id":"time_of_use"}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/working-mode -H 'Content-Type: application/json' -d '{"mode_code":1}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/toggles -H 'Content-Type: application/json' -d '{"charging_control":true,"discharging_control":false,"charge_time_enable_mask":127,"discharge_time_enable_mask":127}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/limits -H 'Content-Type: application/json' -d '{"battery_charge_power_limit":1100,"battery_discharge_power_limit":1100,"grid_max_charge_power":1100,"grid_max_discharge_power":1100}' | jq

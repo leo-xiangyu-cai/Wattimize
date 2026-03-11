@@ -76,6 +76,23 @@
                 <span id="combined-updatedAt" class="muted">-</span>
               </div>
               <div id="energyFlowCombined" class="flow-board combined-flow-board diagram-host" data-diagram="combined"></div>
+              <section id="sajDashboardProfilePopover" class="saj-profile-popover hidden" aria-hidden="true">
+                <p class="saj-profile-kicker" data-i18n="sajProfilePanelKicker">SAJ Profile</p>
+                <label class="saj-profile-field">
+                  <span data-i18n="sajProfileSelectedLabel">Selected</span>
+                  <select id="sajDashboardProfileSelect">
+                    <option value="self_consumption" data-i18n="sajProfileOptionSelfConsumption">Self Consumption</option>
+                    <option value="time_of_use" data-i18n="sajProfileOptionTimeOfUse">Time of Use</option>
+                    <option value="microgrid" data-i18n="sajProfileOptionMicrogrid">Microgrid</option>
+                  </select>
+                </label>
+                <div class="saj-profile-actions">
+                  <button id="sajDashboardProfileApplyBtn" class="btn" type="button" data-i18n="sajProfileApplyBtn">Apply</button>
+                </div>
+                <p id="sajDashboardProfileDesiredText" class="muted">-</p>
+                <p id="sajDashboardProfileActualText" class="muted">-</p>
+                <p id="sajDashboardProfileStatusText" class="muted">-</p>
+              </section>
               <div id="energyFlowCombinedMobile" class="mobile-flow-board" aria-live="polite"></div>
               <p id="combined-loadFormulaText" class="balance-formula muted">-</p>
               <section class="combined-debug-panel">
@@ -147,6 +164,23 @@
           </div>
           <p id="sajPassiveModeAlert" class="saj-passive-alert hidden">-</p>
           <p id="sajControlMeta" class="muted">-</p>
+          <article id="sajProfilePanel" class="saj-control-panel saj-profile-panel">
+            <h3 data-i18n="sajProfilePanelKicker">SAJ Profile</h3>
+            <div class="saj-control-row">
+              <label class="saj-profile-field">
+                <span data-i18n="sajProfileSelectedLabel">Selected</span>
+                <select id="sajProfileSelect">
+                  <option value="self_consumption" data-i18n="sajProfileOptionSelfConsumption">Self Consumption</option>
+                  <option value="time_of_use" data-i18n="sajProfileOptionTimeOfUse">Time of Use</option>
+                  <option value="microgrid" data-i18n="sajProfileOptionMicrogrid">Microgrid</option>
+                </select>
+              </label>
+              <button id="sajProfileApplyBtn" class="btn" type="button" data-i18n="sajProfileApplyBtn">Apply</button>
+            </div>
+            <p id="sajProfileDesiredText" class="muted">-</p>
+            <p id="sajProfileActualText" class="muted">-</p>
+            <p id="sajProfileStatusText" class="muted">-</p>
+          </article>
 
           <div class="saj-control-grid">
             <article class="saj-control-panel">

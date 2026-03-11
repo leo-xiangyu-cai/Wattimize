@@ -1051,6 +1051,73 @@ td {
   min-height: 640px;
 }
 
+.flow-system-card-combined {
+  position: relative;
+}
+
+.saj-profile-panel {
+  margin-bottom: 12px;
+}
+
+.saj-profile-popover {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  width: 460px;
+  max-width: calc(100vw - 32px);
+  padding: 16px 18px;
+  border: 1px solid #afc3b7;
+  border-radius: 18px;
+  background: #f9fcfa;
+  box-shadow: 0 20px 40px rgba(63, 90, 73, 0.18);
+}
+
+.saj-profile-popover.hidden {
+  display: none;
+}
+
+.saj-profile-kicker {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #47614f;
+}
+
+.saj-profile-field {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: 13px;
+  color: #31453a;
+  min-width: 280px;
+}
+
+.saj-profile-field select {
+  width: 100%;
+}
+
+.saj-profile-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.saj-profile-actions .btn {
+  min-width: 88px;
+}
+
+.saj-profile-panel p.muted,
+.saj-profile-popover p.muted {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
 .mobile-flow-board {
   display: none;
   margin-top: 14px;
@@ -1859,7 +1926,7 @@ td {
 .combined-flow-board .combined-node-inverter1 {
   left: calc(24% + 28px);
   top: 62%;
-  width: 176px;
+  width: 248px;
 }
 
 .combined-flow-board .combined-node-inverter2 {
@@ -2095,6 +2162,12 @@ td {
   font-size: 15px;
   text-align: center;
   white-space: nowrap;
+}
+
+.node-state.is-clickable {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
 
 .efd-node.efd-node-tesla {
@@ -2675,6 +2748,10 @@ td {
 
   .mobile-flow-board {
     display: block;
+  }
+
+  .saj-profile-popover {
+    display: none !important;
   }
 
   .combined-debug-panel {

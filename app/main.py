@@ -709,6 +709,11 @@ SAJ_MODE_MIN = 0
 SAJ_MODE_MAX = 8
 SAJ_RATED_POWER_W = 5000
 SAJ_TIME_REGEX = re.compile(r"^(0[0-9]|1[0-9]|2[0-3]):([0-5][0-9])$")
+SAJ_PROFILE_IDS: tuple[str, ...] = ("self_consumption", "time_of_use", "microgrid")
+SAJ_PROFILE_MODE_CODES: dict[str, int] = {
+    "self_consumption": 0,
+    "time_of_use": 1,
+}
 SOLPLANET_SLOT_MIN = 1
 SOLPLANET_SLOT_MAX = 6
 SOLPLANET_LIMIT_MIN = 0
@@ -729,6 +734,10 @@ SOLPLANET_DAY_ALIAS = {
 
 class SajWorkingModePayload(BaseModel):
     mode_code: int = Field(..., ge=SAJ_MODE_MIN, le=SAJ_MODE_MAX)
+
+
+class SajProfilePayload(BaseModel):
+    profile_id: str = Field(...)
 
 
 class SajSlotPayload(BaseModel):
@@ -3382,7 +3391,118 @@ def _build_saj_control_state(
         },
         "inverter": {
             "rated_power_w": SAJ_RATED_POWER_W,
+            "status_text": _entity_text_value(states_by_id, "sensor.saj_inverter_status"),
         },
+    }
+
+
+def _normalize_saj_profile_id(profile_id: object) -> str:
+    value = str(profile_id or "").strip().lower()
+    return value if value in SAJ_PROFILE_IDS else ""
+
+
+def _saj_profile_option_list() -> list[dict[str, object]]:
+    return [
+        {
+            "id": profile_id,
+            "mode_code": SAJ_PROFILE_MODE_CODES.get(profile_id),
+        }
+        for profile_id in SAJ_PROFILE_IDS
+    ]
+
+
+def _infer_saj_profile_from_mode_code(mode_code: object) -> str:
+    code = _to_number(mode_code)
+    if code is None:
+        return ""
+    normalized = int(code)
+    for profile_id, profile_mode_code in SAJ_PROFILE_MODE_CODES.items():
+        if normalized == profile_mode_code:
+            return profile_id
+    return ""
+
+
+def _infer_saj_actual_profile(
+    control_state: dict[str, object],
+) -> tuple[str, str]:
+    working_mode = control_state.get("working_mode")
+    working_mode_map = working_mode if isinstance(working_mode, dict) else {}
+    inverter = control_state.get("inverter")
+    inverter_map = inverter if isinstance(inverter, dict) else {}
+    limits = control_state.get("limits")
+    limits_map = limits if isinstance(limits, dict) else {}
+
+    grid_max_charge_power = _to_number(limits_map.get("grid_max_charge_power"))
+    mode_sensor_code = _to_number(working_mode_map.get("mode_sensor"))
+    mode_input_code = _to_number(working_mode_map.get("mode_input"))
+    if grid_max_charge_power is not None and int(grid_max_charge_power) == 0:
+        if (mode_sensor_code is not None and int(mode_sensor_code) == 0) or (
+            mode_input_code is not None and int(mode_input_code) == 0
+        ):
+            return "microgrid", "limits.grid_max_charge_power + app_mode"
+
+    inferred_from_mode = _infer_saj_profile_from_mode_code(working_mode_map.get("mode_sensor"))
+    if inferred_from_mode:
+        return inferred_from_mode, "mode_sensor"
+
+    inverter_mode = str(working_mode_map.get("inverter_working_mode_sensor") or "").strip().lower()
+    if inverter_mode:
+        if any(token in inverter_mode for token in ("microgrid", "off-grid", "offnet")):
+            return "microgrid", "inverter_working_mode_sensor"
+        inferred_from_inverter_mode = _infer_saj_profile_from_mode_code(inverter_mode)
+        if inferred_from_inverter_mode:
+            return inferred_from_inverter_mode, "inverter_working_mode_sensor"
+
+    inverter_status = str(inverter_map.get("status_text") or "").strip().lower()
+    if any(token in inverter_status for token in ("microgrid", "off-grid", "offnet")):
+        return "microgrid", "inverter_status"
+
+    return "", ""
+
+
+def _infer_saj_input_profile(
+    control_state: dict[str, object],
+) -> tuple[str, str]:
+    working_mode = control_state.get("working_mode")
+    working_mode_map = working_mode if isinstance(working_mode, dict) else {}
+    limits = control_state.get("limits")
+    limits_map = limits if isinstance(limits, dict) else {}
+
+    grid_max_charge_power = _to_number(limits_map.get("grid_max_charge_power"))
+    mode_input_code = _to_number(working_mode_map.get("mode_input"))
+    if grid_max_charge_power is not None and int(grid_max_charge_power) == 0:
+        if mode_input_code is None or int(mode_input_code) == 0:
+            return "microgrid", "limits.grid_max_charge_power + mode_input"
+
+    inferred = _infer_saj_profile_from_mode_code(working_mode_map.get("mode_input"))
+    return inferred, "mode_input" if inferred else ""
+
+
+def _build_saj_profile_state(
+    control_state: dict[str, object],
+) -> dict[str, object]:
+    selected_profile = _normalize_saj_profile_id(settings.saj_target_profile)
+    actual_profile, actual_source = _infer_saj_actual_profile(control_state)
+    input_profile, input_source = _infer_saj_input_profile(control_state)
+    effective_profile = selected_profile or actual_profile or input_profile or ""
+    pending_remote_sync = bool(
+        selected_profile
+        and input_profile == selected_profile
+        and actual_profile != selected_profile
+    )
+    is_custom_remote_state = not pending_remote_sync and not actual_profile and bool(control_state)
+    return {
+        "updated_at": datetime.now(UTC).isoformat(),
+        "selected_profile": selected_profile or None,
+        "actual_profile": actual_profile or None,
+        "actual_profile_source": actual_source or None,
+        "input_profile": input_profile or None,
+        "input_profile_source": input_source or None,
+        "effective_profile": effective_profile or None,
+        "pending_remote_sync": pending_remote_sync,
+        "is_custom_remote_state": is_custom_remote_state,
+        "available_profiles": _saj_profile_option_list(),
+        "control_state": control_state,
     }
 
 
@@ -3445,6 +3565,41 @@ async def _saj_touch_switch(entity_id: str) -> bool:
     await _saj_set_switch(entity_id, not current)
     await _saj_set_switch(entity_id, current)
     return current
+
+
+async def _persist_saj_target_profile(profile_id: str) -> None:
+    persisted = await asyncio.to_thread(save_settings, {"saj_target_profile": profile_id})
+    await _replace_runtime(persisted)
+
+
+async def _saj_apply_profile(profile_id: str) -> dict[str, object]:
+    normalized_profile = _normalize_saj_profile_id(profile_id)
+    if not normalized_profile:
+        raise HTTPException(status_code=400, detail=f"Unsupported SAJ profile: {profile_id}")
+
+    changed: list[dict[str, object]] = []
+    if normalized_profile == "microgrid":
+        # User-intended meaning: prevent grid charging while keeping normal automatic behavior.
+        # Writing app_mode_input=8 is not supported on this HA/SAJ setup and returns HA 500.
+        await _saj_set_number("number.saj_app_mode_input", 0)
+        changed.append({"entity_id": "number.saj_app_mode_input", "value": 0})
+        await _saj_set_number("number.saj_grid_max_charge_power_input", 0)
+        changed.append({"entity_id": "number.saj_grid_max_charge_power_input", "value": 0})
+    else:
+        mode_code = SAJ_PROFILE_MODE_CODES[normalized_profile]
+        await _saj_set_number("number.saj_app_mode_input", mode_code)
+        changed.append({"entity_id": "number.saj_app_mode_input", "value": mode_code})
+
+    await _persist_saj_target_profile(normalized_profile)
+    _, states_by_id = await _saj_control_states()
+    control_state = _build_saj_control_state(states_by_id)
+    return {
+        "ok": True,
+        "profile_id": normalized_profile,
+        "changed": changed,
+        "profile_state": _build_saj_profile_state(control_state),
+        "state": control_state,
+    }
 
 
 async def _saj_apply_slot(
@@ -5243,6 +5398,24 @@ async def get_saj_control_state() -> dict[str, object]:
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
+@app.get("/api/saj/control/profile")
+async def get_saj_control_profile() -> dict[str, object]:
+    _ensure_ha_configured()
+    try:
+        _, states_by_id = await _saj_control_states()
+        control_state = _build_saj_control_state(states_by_id)
+        return {"system": "saj", "profile_state": _build_saj_profile_state(control_state)}
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
 @app.get("/api/tesla/control/state")
 async def get_tesla_control_state() -> dict[str, object]:
     _ensure_ha_configured()
@@ -5308,6 +5481,22 @@ async def put_saj_working_mode(payload: SajWorkingModePayload) -> dict[str, obje
             "changed": [{"entity_id": "number.saj_app_mode_input", "value": payload.mode_code}],
             "state": _build_saj_control_state(states_by_id),
         }
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+@app.put("/api/saj/control/profile")
+async def put_saj_control_profile(payload: SajProfilePayload) -> dict[str, object]:
+    _ensure_ha_configured()
+    try:
+        return await _saj_apply_profile(payload.profile_id)
     except httpx.HTTPStatusError as exc:
         detail = {
             "message": "Home Assistant API returned an error",
