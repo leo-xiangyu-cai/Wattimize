@@ -3,10 +3,15 @@ from __future__ import annotations
 import csv
 import io
 import json
-import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
+from typing import Any, Optional
+
+from sqlalchemy import Column, Float, Integer, String, create_engine, desc, func, inspect, select, text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "energy_samples.sqlite3"
@@ -74,129 +79,179 @@ class AssembledFlowSnapshot:
 
 
 EnergySample = AssembledFlowSnapshot
+DatabaseTarget = Path | str
 
 
-def init_db(db_path: Path) -> None:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS assembled_flow_snapshots (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                round_id TEXT NOT NULL,
-                system TEXT NOT NULL,
-                assembled_at_utc TEXT NOT NULL,
-                assembled_at_epoch REAL NOT NULL,
-                source TEXT NOT NULL,
-                pv_w REAL,
-                grid_w REAL,
-                battery_w REAL,
-                load_w REAL,
-                battery_soc_percent REAL,
-                inverter_status TEXT,
-                balance_w REAL,
-                flow_json TEXT NOT NULL
-            );
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_assembled_flow_snapshots_system_epoch
-            ON assembled_flow_snapshots(system, assembled_at_epoch);
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS realtime_kv (
-                attribute TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                source TEXT NOT NULL
-            );
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS worker_api_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                request_token TEXT,
-                round_id TEXT,
-                worker TEXT NOT NULL,
-                system TEXT,
-                service TEXT NOT NULL,
-                method TEXT NOT NULL,
-                api_link TEXT NOT NULL,
-                requested_at_utc TEXT NOT NULL,
-                requested_at_epoch REAL NOT NULL,
-                ok INTEGER NOT NULL,
-                status TEXT,
-                status_code INTEGER,
-                duration_ms REAL,
-                result_text TEXT,
-                error_text TEXT
-            );
-            """
-        )
-        worker_api_log_columns = {
-            str(row[1])
-            for row in conn.execute("PRAGMA table_info(worker_api_logs);").fetchall()
+class Base(DeclarativeBase):
+    pass
+
+
+class AssembledFlowSnapshotRow(Base):
+    __tablename__ = "assembled_flow_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    round_id = Column(String, nullable=False)
+    system = Column(String, nullable=False, index=True)
+    assembled_at_utc = Column(String, nullable=False)
+    assembled_at_epoch = Column(Float, nullable=False, index=True)
+    source = Column(String, nullable=False)
+    pv_w = Column(Float)
+    grid_w = Column(Float)
+    battery_w = Column(Float)
+    load_w = Column(Float)
+    battery_soc_percent = Column(Float)
+    inverter_status = Column(String)
+    balance_w = Column(Float)
+    flow_json = Column(String, nullable=False)
+
+
+class RealtimeKvRow(Base):
+    __tablename__ = "realtime_kv"
+
+    attribute = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+    source = Column(String, nullable=False)
+
+
+class WorkerApiLogRow(Base):
+    __tablename__ = "worker_api_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    request_token = Column(String, index=True)
+    round_id = Column(String)
+    worker = Column(String, nullable=False)
+    system = Column(String)
+    service = Column(String, nullable=False)
+    method = Column(String, nullable=False)
+    api_link = Column(String, nullable=False)
+    requested_at_utc = Column(String, nullable=False)
+    requested_at_epoch = Column(Float, nullable=False, index=True)
+    ok = Column(Integer, nullable=False)
+    status = Column(String)
+    status_code = Column(Integer)
+    duration_ms = Column(Float)
+    result_text = Column(String)
+    error_text = Column(String)
+
+
+class RawRequestResultRow(Base):
+    __tablename__ = "raw_request_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    round_id = Column(String, nullable=False, index=True)
+    system = Column(String)
+    source = Column(String, nullable=False, index=True)
+    endpoint = Column(String, nullable=False, index=True)
+    method = Column(String, nullable=False)
+    request_url = Column(String, nullable=False)
+    requested_at_utc = Column(String, nullable=False)
+    requested_at_epoch = Column(Float, nullable=False, index=True)
+    duration_ms = Column(Float)
+    ok = Column(Integer, nullable=False)
+    status_code = Column(Integer)
+    error_text = Column(String)
+    response_text = Column(String)
+    response_json = Column(String)
+
+
+_ENGINE_CACHE: dict[str, Any] = {}
+_SESSION_FACTORY_CACHE: dict[str, sessionmaker[Session]] = {}
+
+
+def _normalize_target(db_path: DatabaseTarget) -> str:
+    if isinstance(db_path, Path):
+        return str(db_path)
+    return str(db_path)
+
+
+def _sqlite_file_path(db_path: DatabaseTarget) -> Path | None:
+    if isinstance(db_path, Path):
+        return db_path
+    raw = str(db_path)
+    if raw.startswith("sqlite:///"):
+        return Path(raw.removeprefix("sqlite:///"))
+    return None
+
+
+def _database_url(db_path: DatabaseTarget) -> str:
+    if isinstance(db_path, Path):
+        return f"sqlite:///{db_path}"
+    raw = str(db_path).strip()
+    if "://" in raw:
+        return raw
+    return f"sqlite:///{raw}"
+
+
+def _is_sqlite(db_path: DatabaseTarget) -> bool:
+    return _database_url(db_path).startswith("sqlite:///")
+
+
+def _db_exists(db_path: DatabaseTarget) -> bool:
+    sqlite_path = _sqlite_file_path(db_path)
+    if sqlite_path is None:
+        return True
+    return sqlite_path.exists()
+
+
+def _create_engine_for_target(db_path: DatabaseTarget):
+    key = _normalize_target(db_path)
+    engine = _ENGINE_CACHE.get(key)
+    if engine is not None:
+        return engine
+
+    url = _database_url(db_path)
+    connect_args: dict[str, object] = {}
+    if url.startswith("sqlite:///"):
+        connect_args = {
+            "check_same_thread": False,
+            "timeout": SQLITE_BUSY_TIMEOUT_SECONDS,
         }
-        if "request_token" not in worker_api_log_columns:
-            conn.execute("ALTER TABLE worker_api_logs ADD COLUMN request_token TEXT;")
-        if "round_id" not in worker_api_log_columns:
-            conn.execute("ALTER TABLE worker_api_logs ADD COLUMN round_id TEXT;")
-        if "status" not in worker_api_log_columns:
-            conn.execute("ALTER TABLE worker_api_logs ADD COLUMN status TEXT;")
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_worker_api_logs_time
-            ON worker_api_logs(requested_at_epoch DESC);
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_worker_api_logs_request_token
-            ON worker_api_logs(request_token);
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS raw_request_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                round_id TEXT NOT NULL,
-                system TEXT,
-                source TEXT NOT NULL,
-                endpoint TEXT NOT NULL,
-                method TEXT NOT NULL,
-                request_url TEXT NOT NULL,
-                requested_at_utc TEXT NOT NULL,
-                requested_at_epoch REAL NOT NULL,
-                duration_ms REAL,
-                ok INTEGER NOT NULL,
-                status_code INTEGER,
-                error_text TEXT,
-                response_text TEXT,
-                response_json TEXT
-            );
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_raw_request_results_round
-            ON raw_request_results(round_id, requested_at_epoch);
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_raw_request_results_endpoint_time
-            ON raw_request_results(source, endpoint, requested_at_epoch DESC);
-            """
-        )
-        conn.commit()
+    engine = create_engine(url, future=True, connect_args=connect_args)
+    _ENGINE_CACHE[key] = engine
+    return engine
 
 
-def _truncate_result_text(text: str | None) -> str:
-    raw = str(text or "")
+def _session_factory(db_path: DatabaseTarget) -> sessionmaker[Session]:
+    key = _normalize_target(db_path)
+    factory = _SESSION_FACTORY_CACHE.get(key)
+    if factory is not None:
+        return factory
+    factory = sessionmaker(bind=_create_engine_for_target(db_path), autoflush=False, expire_on_commit=False)
+    _SESSION_FACTORY_CACHE[key] = factory
+    return factory
+
+
+@contextmanager
+def _session_scope(db_path: DatabaseTarget) -> Any:
+    session = _session_factory(db_path)()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def _parse_iso_to_utc(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _json_loads(value: str | None, *, default: object) -> object:
+    if not isinstance(value, str) or not value.strip():
+        return default
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return default
+
+
+def _truncate_result_text(text_value: str | None) -> str:
+    raw = str(text_value or "")
     if len(raw) <= WORKER_API_LOG_RESULT_MAX_CHARS:
         return raw
     tail = f"\n...[truncated {len(raw) - WORKER_API_LOG_RESULT_MAX_CHARS} chars]"
@@ -204,8 +259,47 @@ def _truncate_result_text(text: str | None) -> str:
     return f"{raw[:keep]}{tail}"
 
 
+def _paginate(page: int, page_size: int) -> tuple[int, int]:
+    safe_page = max(1, page)
+    safe_page_size = min(500, max(1, page_size))
+    return safe_page, safe_page_size
+
+
+def _empty_page(page: int, page_size: int) -> dict[str, object]:
+    return {
+        "count": 0,
+        "total": 0,
+        "page": page,
+        "page_size": page_size,
+        "has_next": False,
+        "has_prev": False,
+        "items": [],
+    }
+
+
+def init_db(db_path: DatabaseTarget) -> None:
+    sqlite_path = _sqlite_file_path(db_path)
+    if sqlite_path is not None:
+        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+
+    engine = _create_engine_for_target(db_path)
+    Base.metadata.create_all(engine)
+
+    inspector = inspect(engine)
+    worker_columns = {column["name"] for column in inspector.get_columns("worker_api_logs")}
+    with engine.begin() as conn:
+        if _is_sqlite(db_path):
+            conn.execute(text("PRAGMA journal_mode=WAL;"))
+        if "request_token" not in worker_columns:
+            conn.execute(text("ALTER TABLE worker_api_logs ADD COLUMN request_token VARCHAR"))
+        if "round_id" not in worker_columns:
+            conn.execute(text("ALTER TABLE worker_api_logs ADD COLUMN round_id VARCHAR"))
+        if "status" not in worker_columns:
+            conn.execute(text("ALTER TABLE worker_api_logs ADD COLUMN status VARCHAR"))
+
+
 def insert_worker_api_log(
-    db_path: Path,
+    db_path: DatabaseTarget,
     *,
     request_token: str | None = None,
     round_id: str | None = None,
@@ -222,57 +316,32 @@ def insert_worker_api_log(
     result_text: str | None,
     error_text: str | None,
 ) -> int:
-    parsed_requested = datetime.fromisoformat(requested_at_utc.replace("Z", "+00:00"))
-    if parsed_requested.tzinfo is None:
-        parsed_requested = parsed_requested.replace(tzinfo=UTC)
-    requested_norm = parsed_requested.astimezone(UTC).isoformat()
-    requested_epoch = parsed_requested.astimezone(UTC).timestamp()
-    with sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
-        conn.execute(f"PRAGMA busy_timeout={int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)};")
-        cursor = conn.execute(
-            """
-            INSERT INTO worker_api_logs (
-                request_token,
-                round_id,
-                worker,
-                system,
-                service,
-                method,
-                api_link,
-                requested_at_utc,
-                requested_at_epoch,
-                ok,
-                status,
-                status_code,
-                duration_ms,
-                result_text,
-                error_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """,
-            (
-                str(request_token or "") or None,
-                str(round_id or "") or None,
-                str(worker or "worker"),
-                str(system or "") or None,
-                str(service or "unknown"),
-                str(method or "GET").upper(),
-                str(api_link or ""),
-                requested_norm,
-                requested_epoch,
-                1 if ok else 0,
-                str(status or "") or None,
-                status_code,
-                duration_ms,
-                _truncate_result_text(result_text),
-                str(error_text or "") or None,
-            ),
+    requested = _parse_iso_to_utc(requested_at_utc)
+    with _session_scope(db_path) as session:
+        row = WorkerApiLogRow(
+            request_token=str(request_token or "") or None,
+            round_id=str(round_id or "") or None,
+            worker=str(worker or "worker"),
+            system=str(system or "") or None,
+            service=str(service or "unknown"),
+            method=str(method or "GET").upper(),
+            api_link=str(api_link or ""),
+            requested_at_utc=requested.isoformat(),
+            requested_at_epoch=requested.timestamp(),
+            ok=1 if ok else 0,
+            status=str(status or "") or None,
+            status_code=status_code,
+            duration_ms=duration_ms,
+            result_text=_truncate_result_text(result_text),
+            error_text=str(error_text or "") or None,
         )
-        conn.commit()
-        return int(cursor.lastrowid)
+        session.add(row)
+        session.flush()
+        return int(row.id)
 
 
 def update_worker_api_log(
-    db_path: Path,
+    db_path: DatabaseTarget,
     *,
     request_token: str,
     ok: bool,
@@ -284,70 +353,46 @@ def update_worker_api_log(
 ) -> None:
     if not request_token:
         return
-    with sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
-        conn.execute(f"PRAGMA busy_timeout={int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)};")
-        conn.execute(
-            """
-            UPDATE worker_api_logs
-            SET
-                ok = ?,
-                status = ?,
-                status_code = ?,
-                duration_ms = ?,
-                result_text = ?,
-                error_text = ?
-            WHERE id = (
-                SELECT id
-                FROM worker_api_logs
-                WHERE request_token = ?
-                ORDER BY id DESC
-                LIMIT 1
-            );
-            """,
-            (
-                1 if ok else 0,
-                str(status or "") or None,
-                status_code,
-                duration_ms,
-                _truncate_result_text(result_text),
-                str(error_text or "") or None,
-                request_token,
-            ),
+    with _session_scope(db_path) as session:
+        row = session.scalar(
+            select(WorkerApiLogRow)
+            .where(WorkerApiLogRow.request_token == request_token)
+            .order_by(desc(WorkerApiLogRow.id))
+            .limit(1)
         )
-        conn.commit()
+        if row is None:
+            return
+        row.ok = 1 if ok else 0
+        row.status = str(status or "") or None
+        row.status_code = status_code
+        row.duration_ms = duration_ms
+        row.result_text = _truncate_result_text(result_text)
+        row.error_text = str(error_text or "") or None
 
 
 def expire_pending_worker_api_logs(
-    db_path: Path,
+    db_path: DatabaseTarget,
     *,
     older_than_epoch: float,
     status: str = "timeout",
     error_text: str = "worker_log_timeout",
 ) -> int:
-    with sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
-        conn.execute(f"PRAGMA busy_timeout={int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)};")
-        cursor = conn.execute(
-            """
-            UPDATE worker_api_logs
-            SET
-                ok = 0,
-                status = ?,
-                error_text = COALESCE(NULLIF(error_text, ''), ?)
-            WHERE status = 'pending'
-              AND requested_at_epoch < ?;
-            """,
-            (
-                str(status or "timeout"),
-                str(error_text or "worker_log_timeout"),
-                float(older_than_epoch),
-            ),
-        )
-        conn.commit()
-        return int(cursor.rowcount or 0)
+    with _session_scope(db_path) as session:
+        rows = session.scalars(
+            select(WorkerApiLogRow).where(
+                WorkerApiLogRow.status == "pending",
+                WorkerApiLogRow.requested_at_epoch < float(older_than_epoch),
+            )
+        ).all()
+        for row in rows:
+            row.ok = 0
+            row.status = str(status or "timeout")
+            row.error_text = row.error_text or str(error_text or "worker_log_timeout")
+        return len(rows)
 
 
 def finalize_pending_worker_api_logs_for_round(
-    db_path: Path,
+    db_path: DatabaseTarget,
     *,
     round_id: str,
     services: tuple[str, ...] | None = None,
@@ -357,35 +402,26 @@ def finalize_pending_worker_api_logs_for_round(
     normalized_round_id = str(round_id or "").strip()
     if not normalized_round_id:
         return 0
-    where_sql = """
-            WHERE round_id = ?
-              AND status = 'pending'
-    """
-    params: list[object] = [normalized_round_id]
-    normalized_services = tuple(str(service or "").strip() for service in (services or ()) if str(service or "").strip())
-    if normalized_services:
-        placeholders = ", ".join("?" for _ in normalized_services)
-        where_sql += f"\n              AND service IN ({placeholders})"
-        params.extend(normalized_services)
-    with sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
-        conn.execute(f"PRAGMA busy_timeout={int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)};")
-        cursor = conn.execute(
-            f"""
-            UPDATE worker_api_logs
-            SET
-                ok = 0,
-                status = ?,
-                error_text = COALESCE(NULLIF(error_text, ''), ?)
-            {where_sql};
-            """,
-            [str(status or "timeout"), str(error_text or "worker_round_incomplete"), *params],
+    normalized_services = tuple(
+        str(service or "").strip() for service in (services or ()) if str(service or "").strip()
+    )
+    with _session_scope(db_path) as session:
+        stmt = select(WorkerApiLogRow).where(
+            WorkerApiLogRow.round_id == normalized_round_id,
+            WorkerApiLogRow.status == "pending",
         )
-        conn.commit()
-        return int(cursor.rowcount or 0)
+        if normalized_services:
+            stmt = stmt.where(WorkerApiLogRow.service.in_(normalized_services))
+        rows = session.scalars(stmt).all()
+        for row in rows:
+            row.ok = 0
+            row.status = str(status or "timeout")
+            row.error_text = row.error_text or str(error_text or "worker_round_incomplete")
+        return len(rows)
 
 
 def count_pending_worker_api_logs(
-    db_path: Path,
+    db_path: DatabaseTarget,
     *,
     round_id: str,
     services: tuple[str, ...] | None = None,
@@ -393,31 +429,25 @@ def count_pending_worker_api_logs(
     normalized_round_id = str(round_id or "").strip()
     if not normalized_round_id:
         return 0
-    where_sql = """
-        WHERE round_id = ?
-          AND status = 'pending'
-    """
-    params: list[object] = [normalized_round_id]
-    normalized_services = tuple(str(service or "").strip() for service in (services or ()) if str(service or "").strip())
-    if normalized_services:
-        placeholders = ", ".join("?" for _ in normalized_services)
-        where_sql += f"\n          AND service IN ({placeholders})"
-        params.extend(normalized_services)
-    with sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
-        conn.execute(f"PRAGMA busy_timeout={int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)};")
-        row = conn.execute(
-            f"""
-            SELECT COUNT(*)
-            FROM worker_api_logs
-            {where_sql};
-            """,
-            params,
-        ).fetchone()
-        return int(row[0]) if row and row[0] is not None else 0
+    normalized_services = tuple(
+        str(service or "").strip() for service in (services or ()) if str(service or "").strip()
+    )
+    try:
+        with _session_scope(db_path) as session:
+            stmt = select(func.count()).select_from(WorkerApiLogRow).where(
+                WorkerApiLogRow.round_id == normalized_round_id,
+                WorkerApiLogRow.status == "pending",
+            )
+            if normalized_services:
+                stmt = stmt.where(WorkerApiLogRow.service.in_(normalized_services))
+            value = session.scalar(stmt)
+            return int(value or 0)
+    except SQLAlchemyError:
+        return 0
 
 
 def list_worker_api_logs(
-    db_path: Path,
+    db_path: DatabaseTarget,
     *,
     page: int,
     page_size: int,
@@ -427,207 +457,125 @@ def list_worker_api_logs(
     status: str | None = None,
     exclude_statuses: tuple[str, ...] | None = None,
 ) -> dict[str, object]:
-    if page < 1:
-        page = 1
-    if page_size < 1:
-        page_size = 1
-    if page_size > 500:
-        page_size = 500
+    safe_page, safe_page_size = _paginate(page, page_size)
+    if not _db_exists(db_path):
+        return _empty_page(safe_page, safe_page_size)
 
-    where_conditions: list[str] = []
-    params: list[object] = []
-    if worker:
-        where_conditions.append("worker = ?")
-        params.append(worker)
-    if system:
-        where_conditions.append("system = ?")
-        params.append(system)
-    if service:
-        where_conditions.append("service = ?")
-        params.append(service)
-    if status:
-        where_conditions.append("status = ?")
-        params.append(status)
     normalized_excluded_statuses = tuple(
-        str(item or "").strip()
-        for item in (exclude_statuses or ())
-        if str(item or "").strip()
+        str(item or "").strip() for item in (exclude_statuses or ()) if str(item or "").strip()
     )
-    if normalized_excluded_statuses:
-        placeholders = ", ".join("?" for _ in normalized_excluded_statuses)
-        where_conditions.append(f"COALESCE(status, '') NOT IN ({placeholders})")
-        params.extend(normalized_excluded_statuses)
-    where_sql = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
-
-    if not db_path.exists():
-        return {
-            "count": 0,
-            "total": 0,
-            "page": page,
-            "page_size": page_size,
-            "has_next": False,
-            "has_prev": False,
-            "items": [],
-        }
-
     try:
-        with sqlite3.connect(db_path) as conn:
-            total = int(
-                conn.execute(
-                    f"SELECT COUNT(*) FROM worker_api_logs {where_sql};",
-                    params,
-                ).fetchone()[0]
-            )
-            start = (page - 1) * page_size
-            query_params = [*params, page_size, start]
-            rows = conn.execute(
-                f"""
-                SELECT
-                    id,
-                    request_token,
-                    round_id,
-                    worker,
-                    system,
-                    service,
-                    method,
-                    api_link,
-                    requested_at_utc,
-                    ok,
-                    status,
-                    status_code,
-                    duration_ms,
-                    result_text,
-                    error_text
-                FROM worker_api_logs
-                {where_sql}
-                ORDER BY requested_at_epoch DESC
-                LIMIT ? OFFSET ?;
-                """,
-                query_params,
-            ).fetchall()
-    except sqlite3.OperationalError:
-        total = 0
-        rows = []
+        with _session_scope(db_path) as session:
+            stmt = select(WorkerApiLogRow)
+            count_stmt = select(func.count()).select_from(WorkerApiLogRow)
+            filters = []
+            if worker:
+                filters.append(WorkerApiLogRow.worker == worker)
+            if system:
+                filters.append(WorkerApiLogRow.system == system)
+            if service:
+                filters.append(WorkerApiLogRow.service == service)
+            if status:
+                filters.append(WorkerApiLogRow.status == status)
+            if normalized_excluded_statuses:
+                filters.append(func.coalesce(WorkerApiLogRow.status, "").not_in(normalized_excluded_statuses))
+            if filters:
+                stmt = stmt.where(*filters)
+                count_stmt = count_stmt.where(*filters)
+            total = int(session.scalar(count_stmt) or 0)
+            rows = session.scalars(
+                stmt.order_by(desc(WorkerApiLogRow.requested_at_epoch))
+                .offset((safe_page - 1) * safe_page_size)
+                .limit(safe_page_size)
+            ).all()
+    except SQLAlchemyError:
+        return _empty_page(safe_page, safe_page_size)
 
     items = [
         {
-            "id": int(row[0]),
-            "request_token": str(row[1] or ""),
-            "round_id": str(row[2] or ""),
-            "worker": str(row[3]),
-            "system": str(row[4] or ""),
-            "service": str(row[5]),
-            "method": str(row[6]),
-            "api_link": str(row[7]),
-            "requested_at_utc": row[8],
-            "ok": bool(row[9]),
-            "status": str(row[10] or ""),
-            "status_code": row[11],
-            "duration_ms": row[12],
-            "result_text": str(row[13] or ""),
-            "error_text": str(row[14] or ""),
+            "id": int(row.id),
+            "request_token": str(row.request_token or ""),
+            "round_id": str(row.round_id or ""),
+            "worker": str(row.worker),
+            "system": str(row.system or ""),
+            "service": str(row.service),
+            "method": str(row.method),
+            "api_link": str(row.api_link),
+            "requested_at_utc": row.requested_at_utc,
+            "ok": bool(row.ok),
+            "status": str(row.status or ""),
+            "status_code": row.status_code,
+            "duration_ms": row.duration_ms,
+            "result_text": str(row.result_text or ""),
+            "error_text": str(row.error_text or ""),
         }
         for row in rows
     ]
-    end = page * page_size
+    end = safe_page * safe_page_size
     return {
         "count": len(items),
         "total": total,
-        "page": page,
-        "page_size": page_size,
+        "page": safe_page,
+        "page_size": safe_page_size,
         "has_next": end < total,
-        "has_prev": page > 1,
+        "has_prev": safe_page > 1,
         "items": items,
     }
 
 
-def insert_sample(db_path: Path, sample: EnergySample) -> None:
+def insert_sample(db_path: DatabaseTarget, sample: EnergySample) -> None:
     assembled_at_utc = sample.assembled_at_utc.astimezone(UTC)
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            INSERT INTO assembled_flow_snapshots (
-                round_id,
-                system,
-                assembled_at_utc,
-                assembled_at_epoch,
-                source,
-                pv_w,
-                grid_w,
-                battery_w,
-                load_w,
-                battery_soc_percent,
-                inverter_status,
-                balance_w,
-                flow_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """,
-            (
-                sample.round_id,
-                sample.system,
-                assembled_at_utc.isoformat(),
-                assembled_at_utc.timestamp(),
-                sample.source,
-                sample.pv_w,
-                sample.grid_w,
-                sample.battery_w,
-                sample.load_w,
-                sample.battery_soc_percent,
-                sample.inverter_status,
-                sample.balance_w,
-                json.dumps(sample.flow, ensure_ascii=False),
-            ),
+    with _session_scope(db_path) as session:
+        session.add(
+            AssembledFlowSnapshotRow(
+                round_id=sample.round_id,
+                system=sample.system,
+                assembled_at_utc=assembled_at_utc.isoformat(),
+                assembled_at_epoch=assembled_at_utc.timestamp(),
+                source=sample.source,
+                pv_w=sample.pv_w,
+                grid_w=sample.grid_w,
+                battery_w=sample.battery_w,
+                load_w=sample.load_w,
+                battery_soc_percent=sample.battery_soc_percent,
+                inverter_status=sample.inverter_status,
+                balance_w=sample.balance_w,
+                flow_json=json.dumps(sample.flow, ensure_ascii=False),
+            )
         )
-        conn.commit()
 
 
-def export_samples_csv(db_path: Path) -> str:
+def export_samples_csv(db_path: DatabaseTarget) -> str:
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=list(CSV_HEADERS))
     writer.writeheader()
 
-    if not db_path.exists():
+    if not _db_exists(db_path):
         return output.getvalue()
 
     try:
-        with sqlite3.connect(db_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT
-                    system,
-                    assembled_at_utc,
-                    assembled_at_epoch,
-                    source,
-                    pv_w,
-                    grid_w,
-                    battery_w,
-                    load_w,
-                    battery_soc_percent,
-                    inverter_status,
-                    balance_w,
-                    flow_json
-                FROM assembled_flow_snapshots
-                ORDER BY assembled_at_epoch ASC;
-                """
-            ).fetchall()
-    except sqlite3.OperationalError:
+        with _session_scope(db_path) as session:
+            rows = session.scalars(
+                select(AssembledFlowSnapshotRow).order_by(AssembledFlowSnapshotRow.assembled_at_epoch.asc())
+            ).all()
+    except SQLAlchemyError:
         rows = []
 
     for row in rows:
         writer.writerow(
             {
-                "system": row[0],
-                "sampled_at_utc": row[1],
-                "sampled_at_epoch": row[2],
-                "source": row[3],
-                "pv_w": row[4],
-                "grid_w": row[5],
-                "battery_w": row[6],
-                "load_w": row[7],
-                "battery_soc_percent": row[8],
-                "inverter_status": row[9],
-                "balance_w": row[10],
-                "payload_json": row[11],
+                "system": row.system,
+                "sampled_at_utc": row.assembled_at_utc,
+                "sampled_at_epoch": row.assembled_at_epoch,
+                "source": row.source,
+                "pv_w": row.pv_w,
+                "grid_w": row.grid_w,
+                "battery_w": row.battery_w,
+                "load_w": row.load_w,
+                "battery_soc_percent": row.battery_soc_percent,
+                "inverter_status": row.inverter_status,
+                "balance_w": row.balance_w,
+                "payload_json": row.flow_json,
             }
         )
     return output.getvalue()
@@ -636,13 +584,18 @@ def export_samples_csv(db_path: Path) -> str:
 def _csv_nullable_float(value: str | None) -> float | None:
     if value is None:
         return None
-    text = value.strip()
-    if not text:
+    text_value = value.strip()
+    if not text_value:
         return None
-    return float(text)
+    return float(text_value)
 
 
-def import_samples_csv(db_path: Path, csv_text: str, *, replace_existing: bool = False) -> dict[str, object]:
+def import_samples_csv(
+    db_path: DatabaseTarget,
+    csv_text: str,
+    *,
+    replace_existing: bool = False,
+) -> dict[str, object]:
     init_db(db_path)
     reader = csv.DictReader(io.StringIO(csv_text))
     fieldnames = tuple(reader.fieldnames or ())
@@ -651,9 +604,9 @@ def import_samples_csv(db_path: Path, csv_text: str, *, replace_existing: bool =
         raise ValueError(f"CSV missing required columns: {', '.join(missing)}")
 
     imported = 0
-    with sqlite3.connect(db_path) as conn:
+    with _session_scope(db_path) as session:
         if replace_existing:
-            conn.execute("DELETE FROM assembled_flow_snapshots;")
+            session.query(AssembledFlowSnapshotRow).delete()
         for row in reader:
             system = str(row.get("system") or "").strip().lower()
             if not system:
@@ -661,63 +614,39 @@ def import_samples_csv(db_path: Path, csv_text: str, *, replace_existing: bool =
             sampled_at_utc_text = str(row.get("sampled_at_utc") or "").strip()
             if not sampled_at_utc_text:
                 raise ValueError("CSV row missing sampled_at_utc")
-            sampled_at = datetime.fromisoformat(sampled_at_utc_text.replace("Z", "+00:00"))
-            if sampled_at.tzinfo is None:
-                sampled_at = sampled_at.replace(tzinfo=UTC)
-            sampled_at = sampled_at.astimezone(UTC)
+            sampled_at = _parse_iso_to_utc(sampled_at_utc_text)
             sampled_at_epoch = _csv_nullable_float(row.get("sampled_at_epoch"))
             if sampled_at_epoch is None:
                 sampled_at_epoch = sampled_at.timestamp()
             source = str(row.get("source") or "").strip() or "imported_csv"
             payload_json = str(row.get("payload_json") or "").strip() or "{}"
-            try:
-                payload_obj = json.loads(payload_json)
-                if not isinstance(payload_obj, dict):
-                    payload_json = "{}"
-            except json.JSONDecodeError:
+            payload_obj = _json_loads(payload_json, default={})
+            if not isinstance(payload_obj, dict):
                 payload_json = "{}"
 
-            conn.execute(
-                """
-                INSERT INTO assembled_flow_snapshots (
-                    round_id,
-                    system,
-                    assembled_at_utc,
-                    assembled_at_epoch,
-                    source,
-                    pv_w,
-                    grid_w,
-                    battery_w,
-                    load_w,
-                    battery_soc_percent,
-                    inverter_status,
-                    balance_w,
-                    flow_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                (
-                    f"import-{int(sampled_at_epoch)}-{system}",
-                    system,
-                    sampled_at.isoformat(),
-                    sampled_at_epoch,
-                    source,
-                    _csv_nullable_float(row.get("pv_w")),
-                    _csv_nullable_float(row.get("grid_w")),
-                    _csv_nullable_float(row.get("battery_w")),
-                    _csv_nullable_float(row.get("load_w")),
-                    _csv_nullable_float(row.get("battery_soc_percent")),
-                    (str(row.get("inverter_status") or "").strip() or None),
-                    _csv_nullable_float(row.get("balance_w")),
-                    payload_json,
-                ),
+            session.add(
+                AssembledFlowSnapshotRow(
+                    round_id=f"import-{int(sampled_at_epoch)}-{system}",
+                    system=system,
+                    assembled_at_utc=sampled_at.isoformat(),
+                    assembled_at_epoch=sampled_at_epoch,
+                    source=source,
+                    pv_w=_csv_nullable_float(row.get("pv_w")),
+                    grid_w=_csv_nullable_float(row.get("grid_w")),
+                    battery_w=_csv_nullable_float(row.get("battery_w")),
+                    load_w=_csv_nullable_float(row.get("load_w")),
+                    battery_soc_percent=_csv_nullable_float(row.get("battery_soc_percent")),
+                    inverter_status=str(row.get("inverter_status") or "").strip() or None,
+                    balance_w=_csv_nullable_float(row.get("balance_w")),
+                    flow_json=payload_json,
+                )
             )
             imported += 1
-        conn.commit()
     return {"imported_rows": imported, "replaced": replace_existing}
 
 
-def get_storage_status(db_path: Path, sample_interval_seconds: float) -> dict[str, object]:
-    if not db_path.exists():
+def get_storage_status(db_path: DatabaseTarget, sample_interval_seconds: float) -> dict[str, object]:
+    if not _db_exists(db_path):
         return {
             "db_path": str(db_path),
             "db_exists": False,
@@ -735,26 +664,29 @@ def get_storage_status(db_path: Path, sample_interval_seconds: float) -> dict[st
         }
 
     try:
-        with sqlite3.connect(db_path) as conn:
-            total_rows = int(conn.execute("SELECT COUNT(*) FROM assembled_flow_snapshots;").fetchone()[0])
-            rows_by_system_rows = conn.execute(
-                """
-                SELECT system, COUNT(*) AS c
-                FROM assembled_flow_snapshots
-                GROUP BY system
-                ORDER BY system ASC;
-                """
-            ).fetchall()
+        with _session_scope(db_path) as session:
+            total_rows = int(session.scalar(select(func.count()).select_from(AssembledFlowSnapshotRow)) or 0)
+            rows_by_system_rows = session.execute(
+                select(
+                    AssembledFlowSnapshotRow.system,
+                    func.count().label("row_count"),
+                )
+                .group_by(AssembledFlowSnapshotRow.system)
+                .order_by(AssembledFlowSnapshotRow.system.asc())
+            ).all()
             rows_by_system = {str(row[0]): int(row[1]) for row in rows_by_system_rows}
-            last_sample_utc = conn.execute(
-                "SELECT assembled_at_utc FROM assembled_flow_snapshots ORDER BY assembled_at_epoch DESC LIMIT 1;"
-            ).fetchone()
-    except sqlite3.OperationalError:
+            last_sample_utc = session.scalar(
+                select(AssembledFlowSnapshotRow.assembled_at_utc)
+                .order_by(desc(AssembledFlowSnapshotRow.assembled_at_epoch))
+                .limit(1)
+            )
+    except SQLAlchemyError:
         total_rows = 0
         rows_by_system = {}
         last_sample_utc = None
 
-    db_size_bytes = db_path.stat().st_size
+    sqlite_path = _sqlite_file_path(db_path)
+    db_size_bytes = sqlite_path.stat().st_size if sqlite_path and sqlite_path.exists() else 0
     bytes_per_row = (db_size_bytes / total_rows) if total_rows > 0 else 0
     samples_per_day_per_system = 86400.0 / sample_interval_seconds
     estimated_bytes_per_day_per_system = int(bytes_per_row * samples_per_day_per_system)
@@ -766,7 +698,7 @@ def get_storage_status(db_path: Path, sample_interval_seconds: float) -> dict[st
         "db_size_bytes": db_size_bytes,
         "rows": total_rows,
         "rows_by_system": rows_by_system,
-        "last_sample_utc": last_sample_utc[0] if last_sample_utc else None,
+        "last_sample_utc": last_sample_utc,
         "sample_interval_seconds": sample_interval_seconds,
         "samples_per_hour": round(3600.0 / sample_interval_seconds, 3),
         "samples_per_day_per_system": round(samples_per_day_per_system, 3),
@@ -777,8 +709,41 @@ def get_storage_status(db_path: Path, sample_interval_seconds: float) -> dict[st
     }
 
 
+def _load_power_rows(
+    db_path: DatabaseTarget,
+    *,
+    system: str,
+    start_ts: float,
+    end_ts: float,
+) -> list[tuple[float, float | None, float | None, float | None, float | None]]:
+    if not _db_exists(db_path):
+        return []
+    try:
+        with _session_scope(db_path) as session:
+            return [
+                (float(row[0]), row[1], row[2], row[3], row[4])
+                for row in session.execute(
+                    select(
+                        AssembledFlowSnapshotRow.assembled_at_epoch,
+                        AssembledFlowSnapshotRow.pv_w,
+                        AssembledFlowSnapshotRow.grid_w,
+                        AssembledFlowSnapshotRow.battery_w,
+                        AssembledFlowSnapshotRow.load_w,
+                    )
+                    .where(
+                        AssembledFlowSnapshotRow.system == system,
+                        AssembledFlowSnapshotRow.assembled_at_epoch >= start_ts,
+                        AssembledFlowSnapshotRow.assembled_at_epoch < end_ts,
+                    )
+                    .order_by(AssembledFlowSnapshotRow.assembled_at_epoch.asc())
+                ).all()
+            ]
+    except SQLAlchemyError:
+        return []
+
+
 def compute_daily_usage(
-    db_path: Path,
+    db_path: DatabaseTarget,
     *,
     system: str,
     target_day_utc: date,
@@ -786,31 +751,33 @@ def compute_daily_usage(
 ) -> dict[str, object]:
     day_start = datetime.combine(target_day_utc, time.min, tzinfo=UTC)
     day_end = day_start + timedelta(days=1)
-    start_ts = day_start.timestamp()
-    end_ts = day_end.timestamp()
-
-    if not db_path.exists():
-        rows: list[tuple[float, float | None, float | None, float | None, float | None]] = []
-    else:
-        try:
-            with sqlite3.connect(db_path) as conn:
-                rows = conn.execute(
-                    """
-                    SELECT assembled_at_epoch, pv_w, grid_w, battery_w, load_w
-                    FROM assembled_flow_snapshots
-                    WHERE system = ? AND assembled_at_epoch >= ? AND assembled_at_epoch < ?
-                    ORDER BY assembled_at_epoch ASC;
-                    """,
-                    (system, start_ts, end_ts),
-                ).fetchall()
-        except sqlite3.OperationalError:
-            rows = []
-
+    rows = _load_power_rows(db_path, system=system, start_ts=day_start.timestamp(), end_ts=day_end.timestamp())
     expected = int(round(86400.0 / sample_interval_seconds))
+    return _integrate_usage_rows(
+        rows,
+        system=system,
+        start_label="day_utc",
+        start_value=day_start.date().isoformat(),
+        expected=expected,
+        sample_interval_seconds=sample_interval_seconds,
+    )
+
+
+def _integrate_usage_rows(
+    rows: list[tuple[float, float | None, float | None, float | None, float | None]],
+    *,
+    system: str,
+    start_label: str,
+    start_value: str,
+    expected: int,
+    sample_interval_seconds: float,
+    end_label: str | None = None,
+    end_value: str | None = None,
+) -> dict[str, object]:
     if len(rows) < 2:
-        return {
+        payload = {
             "system": system,
-            "day_utc": day_start.date().isoformat(),
+            start_label: start_value,
             "samples": len(rows),
             "expected_samples": expected,
             "coverage_ratio": round((len(rows) / expected), 4) if expected > 0 else None,
@@ -824,6 +791,9 @@ def compute_daily_usage(
             },
             "quality": {"note": "Not enough samples to integrate."},
         }
+        if end_label and end_value is not None:
+            payload[end_label] = end_value
+        return payload
 
     home_load_wh = 0.0
     solar_wh = 0.0
@@ -831,17 +801,16 @@ def compute_daily_usage(
     grid_export_wh = 0.0
     battery_charge_wh = 0.0
     battery_discharge_wh = 0.0
-
     max_dt = sample_interval_seconds * 2.5
-    for i in range(len(rows) - 1):
-        ts, pv_w, grid_w, battery_w, load_w = rows[i]
-        next_ts = rows[i + 1][0]
+
+    for current_row, next_row in zip(rows, rows[1:]):
+        ts, pv_w, grid_w, battery_w, load_w = current_row
+        next_ts = next_row[0]
         dt = max(0.0, float(next_ts) - float(ts))
         if dt <= 0:
             continue
         if dt > max_dt:
             dt = max_dt
-
         if load_w is not None and load_w > 0:
             home_load_wh += float(load_w) * dt / 3600.0
         if pv_w is not None and pv_w > 0:
@@ -859,9 +828,9 @@ def compute_daily_usage(
             elif battery < 0:
                 battery_charge_wh += (-battery) * dt / 3600.0
 
-    return {
+    payload = {
         "system": system,
-        "day_utc": day_start.date().isoformat(),
+        start_label: start_value,
         "samples": len(rows),
         "expected_samples": expected,
         "coverage_ratio": round((len(rows) / expected), 4) if expected > 0 else None,
@@ -878,10 +847,13 @@ def compute_daily_usage(
             "gap_clamp_seconds": max_dt,
         },
     }
+    if end_label and end_value is not None:
+        payload[end_label] = end_value
+    return payload
 
 
 def list_samples(
-    db_path: Path,
+    db_path: DatabaseTarget,
     *,
     system: str | None,
     target_day_utc: date | None,
@@ -890,253 +862,160 @@ def list_samples(
     page: int,
     page_size: int,
 ) -> dict[str, object]:
-    if page < 1:
-        page = 1
-    if page_size < 1:
-        page_size = 1
-    if page_size > 500:
-        page_size = 500
-
-    where_conditions: list[str] = []
-    params: list[object] = []
-    if system:
-        where_conditions.append("system = ?")
-        params.append(system)
-    if target_day_utc is not None:
-        day_start = datetime.combine(target_day_utc, time.min, tzinfo=UTC)
-        day_end = day_start + timedelta(days=1)
-        where_conditions.append("assembled_at_epoch >= ?")
-        where_conditions.append("assembled_at_epoch < ?")
-        params.extend([day_start.timestamp(), day_end.timestamp()])
-    if start_at_utc is not None:
-        where_conditions.append("assembled_at_epoch >= ?")
-        params.append(start_at_utc.astimezone(UTC).timestamp())
-    if end_at_utc is not None:
-        where_conditions.append("assembled_at_epoch < ?")
-        params.append(end_at_utc.astimezone(UTC).timestamp())
-    where_sql = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
-
-    if not db_path.exists():
-        return {
-            "count": 0,
-            "total": 0,
-            "page": page,
-            "page_size": page_size,
-            "has_next": False,
-            "has_prev": False,
-            "items": [],
-        }
+    safe_page, safe_page_size = _paginate(page, page_size)
+    if not _db_exists(db_path):
+        return _empty_page(safe_page, safe_page_size)
 
     try:
-        with sqlite3.connect(db_path) as conn:
-            total = int(
-                conn.execute(
-                    f"SELECT COUNT(*) FROM assembled_flow_snapshots {where_sql};",
-                    params,
-                ).fetchone()[0]
-            )
-            start = (page - 1) * page_size
-            query_params = [*params, page_size, start]
-            rows = conn.execute(
-                f"""
-                SELECT
-                    id,
-                    system,
-                    assembled_at_utc,
-                    source,
-                    pv_w,
-                    grid_w,
-                    battery_w,
-                    load_w,
-                    battery_soc_percent,
-                    inverter_status,
-                    balance_w
-                FROM assembled_flow_snapshots
-                {where_sql}
-                ORDER BY assembled_at_epoch DESC
-                LIMIT ? OFFSET ?;
-                """,
-                query_params,
-            ).fetchall()
-    except sqlite3.OperationalError:
-        total = 0
-        rows = []
+        with _session_scope(db_path) as session:
+            stmt = select(AssembledFlowSnapshotRow)
+            count_stmt = select(func.count()).select_from(AssembledFlowSnapshotRow)
+            filters = []
+            if system:
+                filters.append(AssembledFlowSnapshotRow.system == system)
+            if target_day_utc is not None:
+                day_start = datetime.combine(target_day_utc, time.min, tzinfo=UTC)
+                day_end = day_start + timedelta(days=1)
+                filters.append(AssembledFlowSnapshotRow.assembled_at_epoch >= day_start.timestamp())
+                filters.append(AssembledFlowSnapshotRow.assembled_at_epoch < day_end.timestamp())
+            if start_at_utc is not None:
+                filters.append(AssembledFlowSnapshotRow.assembled_at_epoch >= start_at_utc.astimezone(UTC).timestamp())
+            if end_at_utc is not None:
+                filters.append(AssembledFlowSnapshotRow.assembled_at_epoch < end_at_utc.astimezone(UTC).timestamp())
+            if filters:
+                stmt = stmt.where(*filters)
+                count_stmt = count_stmt.where(*filters)
+            total = int(session.scalar(count_stmt) or 0)
+            rows = session.scalars(
+                stmt.order_by(desc(AssembledFlowSnapshotRow.assembled_at_epoch))
+                .offset((safe_page - 1) * safe_page_size)
+                .limit(safe_page_size)
+            ).all()
+    except SQLAlchemyError:
+        return _empty_page(safe_page, safe_page_size)
 
     items = [
         {
-            "id": int(row[0]),
-            "system": str(row[1]),
-            "sampled_at_utc": row[2],
-            "source": str(row[3]),
-            "pv_w": row[4],
-            "grid_w": row[5],
-            "battery_w": row[6],
-            "load_w": row[7],
-            "battery_soc_percent": row[8],
-            "inverter_status": row[9],
-            "balance_w": row[10],
+            "id": int(row.id),
+            "system": str(row.system),
+            "sampled_at_utc": row.assembled_at_utc,
+            "source": str(row.source),
+            "pv_w": row.pv_w,
+            "grid_w": row.grid_w,
+            "battery_w": row.battery_w,
+            "load_w": row.load_w,
+            "battery_soc_percent": row.battery_soc_percent,
+            "inverter_status": row.inverter_status,
+            "balance_w": row.balance_w,
         }
         for row in rows
     ]
-    end = page * page_size
+    end = safe_page * safe_page_size
     return {
         "count": len(items),
         "total": total,
-        "page": page,
-        "page_size": page_size,
+        "page": safe_page,
+        "page_size": safe_page_size,
         "has_next": end < total,
-        "has_prev": page > 1,
+        "has_prev": safe_page > 1,
         "items": items,
     }
 
 
-def get_latest_sample(db_path: Path, *, system: str) -> dict[str, object] | None:
-    if not db_path.exists():
+def get_latest_sample(db_path: DatabaseTarget, *, system: str) -> dict[str, object] | None:
+    if not _db_exists(db_path):
         return None
-
     try:
-        with sqlite3.connect(db_path) as conn:
-            row = conn.execute(
-                """
-                SELECT
-                    assembled_at_utc,
-                    source,
-                    pv_w,
-                    grid_w,
-                    battery_w,
-                    load_w,
-                    battery_soc_percent,
-                    inverter_status,
-                    balance_w,
-                    flow_json
-                FROM assembled_flow_snapshots
-                WHERE system = ?
-                ORDER BY assembled_at_epoch DESC
-                LIMIT 1;
-                """,
-                (system,),
-            ).fetchone()
-    except sqlite3.OperationalError:
+        with _session_scope(db_path) as session:
+            row = session.scalar(
+                select(AssembledFlowSnapshotRow)
+                .where(AssembledFlowSnapshotRow.system == system)
+                .order_by(desc(AssembledFlowSnapshotRow.assembled_at_epoch))
+                .limit(1)
+            )
+    except SQLAlchemyError:
+        return None
+    if row is None:
         return None
 
-    if not row:
-        return None
-
-    payload_json = row[9]
-    payload: dict[str, object] = {}
-    if isinstance(payload_json, str) and payload_json.strip():
-        try:
-            parsed = json.loads(payload_json)
-            if isinstance(parsed, dict):
-                payload = parsed
-        except json.JSONDecodeError:
-            payload = {}
-
+    payload = _json_loads(row.flow_json, default={})
+    if not isinstance(payload, dict):
+        payload = {}
     return {
         "system": system,
-        "sampled_at_utc": row[0],
-        "source": row[1],
-        "pv_w": row[2],
-        "grid_w": row[3],
-        "battery_w": row[4],
-        "load_w": row[5],
-        "battery_soc_percent": row[6],
-        "inverter_status": row[7],
-        "balance_w": row[8],
+        "sampled_at_utc": row.assembled_at_utc,
+        "source": row.source,
+        "pv_w": row.pv_w,
+        "grid_w": row.grid_w,
+        "battery_w": row.battery_w,
+        "load_w": row.load_w,
+        "battery_soc_percent": row.battery_soc_percent,
+        "inverter_status": row.inverter_status,
+        "balance_w": row.balance_w,
         "payload": payload,
     }
 
 
-def upsert_realtime_kv(db_path: Path, rows: list[tuple[str, str, str]]) -> None:
+def upsert_realtime_kv(db_path: DatabaseTarget, rows: list[tuple[str, str, str]]) -> None:
     if not rows:
         return
-    with sqlite3.connect(db_path) as conn:
-        conn.executemany(
-            """
-            INSERT INTO realtime_kv(attribute, value, source)
-            VALUES (?, ?, ?)
-            ON CONFLICT(attribute) DO UPDATE SET
-                value = excluded.value,
-                source = excluded.source;
-            """,
-            rows,
-        )
-        conn.commit()
+    with _session_scope(db_path) as session:
+        for attribute, value_text, source in rows:
+            existing = session.get(RealtimeKvRow, attribute)
+            if existing is None:
+                session.add(RealtimeKvRow(attribute=attribute, value=value_text, source=source))
+                continue
+            existing.value = value_text
+            existing.source = source
 
 
-def get_realtime_kv_by_prefix(db_path: Path, *, prefix: str) -> dict[str, dict[str, object]]:
-    if not db_path.exists():
+def get_realtime_kv_by_prefix(db_path: DatabaseTarget, *, prefix: str) -> dict[str, dict[str, object]]:
+    if not _db_exists(db_path):
         return {}
     try:
-        with sqlite3.connect(db_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT attribute, value, source
-                FROM realtime_kv
-                WHERE attribute LIKE ?;
-                """,
-                (f"{prefix}%",),
-            ).fetchall()
-    except sqlite3.OperationalError:
+        with _session_scope(db_path) as session:
+            rows = session.scalars(
+                select(RealtimeKvRow).where(RealtimeKvRow.attribute.like(f"{prefix}%"))
+            ).all()
+    except SQLAlchemyError:
         return {}
 
     data: dict[str, dict[str, object]] = {}
-    for attribute, value_text, source in rows:
-        parsed_value: object = value_text
-        if isinstance(value_text, str):
-            try:
-                parsed_value = json.loads(value_text)
-            except json.JSONDecodeError:
-                parsed_value = value_text
-        data[str(attribute)] = {
+    for row in rows:
+        parsed_value = _json_loads(row.value, default=row.value)
+        data[str(row.attribute)] = {
             "value": parsed_value,
-            "source": str(source or ""),
+            "source": str(row.source or ""),
         }
     return data
 
 
-def list_realtime_kv_rows(db_path: Path, *, prefix: str | None = None) -> list[dict[str, object]]:
-    if not db_path.exists():
+def list_realtime_kv_rows(db_path: DatabaseTarget, *, prefix: str | None = None) -> list[dict[str, object]]:
+    if not _db_exists(db_path):
         return []
-    where_sql = ""
-    params: tuple[object, ...] = ()
-    if prefix:
-        where_sql = "WHERE attribute LIKE ?"
-        params = (f"{prefix}%",)
     try:
-        with sqlite3.connect(db_path) as conn:
-            rows = conn.execute(
-                f"""
-                SELECT attribute, value, source
-                FROM realtime_kv
-                {where_sql}
-                ORDER BY attribute ASC;
-                """,
-                params,
-            ).fetchall()
-    except sqlite3.OperationalError:
+        with _session_scope(db_path) as session:
+            stmt = select(RealtimeKvRow).order_by(RealtimeKvRow.attribute.asc())
+            if prefix:
+                stmt = stmt.where(RealtimeKvRow.attribute.like(f"{prefix}%"))
+            rows = session.scalars(stmt).all()
+    except SQLAlchemyError:
         return []
 
     items: list[dict[str, object]] = []
-    for attribute, value_text, source in rows:
-        parsed_value: object = value_text
-        if isinstance(value_text, str):
-            try:
-                parsed_value = json.loads(value_text)
-            except json.JSONDecodeError:
-                parsed_value = value_text
+    for row in rows:
         items.append(
             {
-                "attribute": str(attribute),
-                "value": parsed_value,
-                "source": str(source or ""),
+                "attribute": str(row.attribute),
+                "value": _json_loads(row.value, default=row.value),
+                "source": str(row.source or ""),
             }
         )
     return items
 
 
 def insert_raw_request_result(
-    db_path: Path,
+    db_path: DatabaseTarget,
     *,
     round_id: str,
     system: str | None,
@@ -1152,117 +1031,72 @@ def insert_raw_request_result(
     response_text: str | None,
     response_json: object | None,
 ) -> None:
-    parsed_requested = datetime.fromisoformat(requested_at_utc.replace("Z", "+00:00"))
-    if parsed_requested.tzinfo is None:
-        parsed_requested = parsed_requested.replace(tzinfo=UTC)
-    requested_norm = parsed_requested.astimezone(UTC).isoformat()
-    requested_epoch = parsed_requested.astimezone(UTC).timestamp()
+    requested = _parse_iso_to_utc(requested_at_utc)
     response_json_text = None if response_json is None else json.dumps(response_json, ensure_ascii=False)
-
-    with sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
-        conn.execute(f"PRAGMA busy_timeout={int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)};")
-        conn.execute(
-            """
-            INSERT INTO raw_request_results (
-                round_id,
-                system,
-                source,
-                endpoint,
-                method,
-                request_url,
-                requested_at_utc,
-                requested_at_epoch,
-                duration_ms,
-                ok,
-                status_code,
-                error_text,
-                response_text,
-                response_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """,
-            (
-                round_id,
-                str(system or "") or None,
-                source,
-                endpoint,
-                method,
-                request_url,
-                requested_norm,
-                requested_epoch,
-                duration_ms,
-                1 if ok else 0,
-                status_code,
-                error_text,
-                _truncate_result_text(response_text),
-                response_json_text,
-            ),
+    with _session_scope(db_path) as session:
+        session.add(
+            RawRequestResultRow(
+                round_id=round_id,
+                system=str(system or "") or None,
+                source=source,
+                endpoint=endpoint,
+                method=method,
+                request_url=request_url,
+                requested_at_utc=requested.isoformat(),
+                requested_at_epoch=requested.timestamp(),
+                duration_ms=duration_ms,
+                ok=1 if ok else 0,
+                status_code=status_code,
+                error_text=error_text,
+                response_text=_truncate_result_text(response_text),
+                response_json=response_json_text,
+            )
         )
-        conn.commit()
 
 
 def get_latest_raw_request_result(
-    db_path: Path,
+    db_path: DatabaseTarget,
     *,
     source: str,
     endpoint: str,
 ) -> dict[str, object] | None:
-    if not db_path.exists():
+    if not _db_exists(db_path):
         return None
     try:
-        with sqlite3.connect(db_path) as conn:
-            row = conn.execute(
-                """
-                SELECT
-                    round_id,
-                    system,
-                    request_url,
-                    requested_at_utc,
-                    duration_ms,
-                    ok,
-                    status_code,
-                    error_text,
-                    response_json,
-                    response_text
-                FROM raw_request_results
-                WHERE source = ? AND endpoint = ?
-                ORDER BY requested_at_epoch DESC
-                LIMIT 1;
-                """
-                ,
-                (source, endpoint),
-            ).fetchone()
-    except sqlite3.OperationalError:
+        with _session_scope(db_path) as session:
+            row = session.scalar(
+                select(RawRequestResultRow)
+                .where(
+                    RawRequestResultRow.source == source,
+                    RawRequestResultRow.endpoint == endpoint,
+                )
+                .order_by(desc(RawRequestResultRow.requested_at_epoch))
+                .limit(1)
+            )
+    except SQLAlchemyError:
+        return None
+    if row is None:
         return None
 
-    if not row:
-        return None
-
-    payload_json = row[8]
-    payload: object | None = None
-    if isinstance(payload_json, str) and payload_json.strip():
-        try:
-            payload = json.loads(payload_json)
-        except json.JSONDecodeError:
-            payload = None
-
+    payload = _json_loads(row.response_json, default=None)
     return {
-        "round_id": row[0],
-        "system": row[1],
+        "round_id": row.round_id,
+        "system": row.system,
         "endpoint": endpoint,
-        "path": row[2],
-        "requested_at_utc": row[3],
-        "fetch_ms": row[4],
-        "ok": bool(row[5]),
-        "status_code": row[6],
-        "error": row[7],
+        "path": row.request_url,
+        "requested_at_utc": row.requested_at_utc,
+        "fetch_ms": row.duration_ms,
+        "ok": bool(row.ok),
+        "status_code": row.status_code,
+        "error": row.error_text,
         "payload": payload,
-        "response_text": row[9],
+        "response_text": row.response_text,
         "last_success_at_utc": None,
     }
 
 
 def list_raw_request_results(
-    db_path: Path,
+    db_path: DatabaseTarget,
     *,
     page: int,
     page_size: int,
@@ -1270,108 +1104,66 @@ def list_raw_request_results(
     system: str | None = None,
     source: str | None = None,
 ) -> dict[str, object]:
-    if page < 1:
-        page = 1
-    if page_size < 1:
-        page_size = 1
-    if page_size > 500:
-        page_size = 500
-
-    where_conditions: list[str] = []
-    params: list[object] = []
-    if round_id:
-        where_conditions.append("round_id = ?")
-        params.append(round_id)
-    if system:
-        where_conditions.append("system = ?")
-        params.append(system)
-    if source:
-        where_conditions.append("source = ?")
-        params.append(source)
-    where_sql = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
-
-    if not db_path.exists():
-        return {
-            "count": 0,
-            "total": 0,
-            "page": page,
-            "page_size": page_size,
-            "has_next": False,
-            "has_prev": False,
-            "items": [],
-        }
+    safe_page, safe_page_size = _paginate(page, page_size)
+    if not _db_exists(db_path):
+        return _empty_page(safe_page, safe_page_size)
 
     try:
-        with sqlite3.connect(db_path) as conn:
-            total = int(conn.execute(f"SELECT COUNT(*) FROM raw_request_results {where_sql};", params).fetchone()[0])
-            start = (page - 1) * page_size
-            query_params = [*params, page_size, start]
-            rows = conn.execute(
-                f"""
-                SELECT
-                    id,
-                    round_id,
-                    system,
-                    source,
-                    endpoint,
-                    method,
-                    request_url,
-                    requested_at_utc,
-                    duration_ms,
-                    ok,
-                    status_code,
-                    error_text,
-                    response_json
-                FROM raw_request_results
-                {where_sql}
-                ORDER BY requested_at_epoch DESC
-                LIMIT ? OFFSET ?;
-                """,
-                query_params,
-            ).fetchall()
-    except sqlite3.OperationalError:
-        total = 0
-        rows = []
+        with _session_scope(db_path) as session:
+            stmt = select(RawRequestResultRow)
+            count_stmt = select(func.count()).select_from(RawRequestResultRow)
+            filters = []
+            if round_id:
+                filters.append(RawRequestResultRow.round_id == round_id)
+            if system:
+                filters.append(RawRequestResultRow.system == system)
+            if source:
+                filters.append(RawRequestResultRow.source == source)
+            if filters:
+                stmt = stmt.where(*filters)
+                count_stmt = count_stmt.where(*filters)
+            total = int(session.scalar(count_stmt) or 0)
+            rows = session.scalars(
+                stmt.order_by(desc(RawRequestResultRow.requested_at_epoch))
+                .offset((safe_page - 1) * safe_page_size)
+                .limit(safe_page_size)
+            ).all()
+    except SQLAlchemyError:
+        return _empty_page(safe_page, safe_page_size)
 
     items: list[dict[str, object]] = []
     for row in rows:
-        parsed_json: object = None
-        if isinstance(row[12], str) and row[12].strip():
-            try:
-                parsed_json = json.loads(row[12])
-            except json.JSONDecodeError:
-                parsed_json = row[12]
         items.append(
             {
-                "id": int(row[0]),
-                "round_id": str(row[1]),
-                "system": str(row[2] or ""),
-                "source": str(row[3]),
-                "endpoint": str(row[4]),
-                "method": str(row[5]),
-                "request_url": str(row[6]),
-                "requested_at_utc": row[7],
-                "duration_ms": row[8],
-                "ok": bool(row[9]),
-                "status_code": row[10],
-                "error_text": str(row[11] or ""),
-                "response_json": parsed_json,
+                "id": int(row.id),
+                "round_id": str(row.round_id),
+                "system": str(row.system or ""),
+                "source": str(row.source),
+                "endpoint": str(row.endpoint),
+                "method": str(row.method),
+                "request_url": str(row.request_url),
+                "requested_at_utc": row.requested_at_utc,
+                "duration_ms": row.duration_ms,
+                "ok": bool(row.ok),
+                "status_code": row.status_code,
+                "error_text": str(row.error_text or ""),
+                "response_json": _json_loads(row.response_json, default=None),
             }
         )
-    end = page * page_size
+    end = safe_page * safe_page_size
     return {
         "count": len(items),
         "total": total,
-        "page": page,
-        "page_size": page_size,
+        "page": safe_page,
+        "page_size": safe_page_size,
         "has_next": end < total,
-        "has_prev": page > 1,
+        "has_prev": safe_page > 1,
         "items": items,
     }
 
 
 def get_series_samples(
-    db_path: Path,
+    db_path: DatabaseTarget,
     *,
     system: str,
     hours: int,
@@ -1392,7 +1184,7 @@ def get_series_samples(
         end_at = datetime.now(UTC)
         start_at = end_at - timedelta(hours=safe_hours)
 
-    if not db_path.exists():
+    if not _db_exists(db_path):
         return {
             "system": system,
             "hours": safe_hours,
@@ -1404,29 +1196,30 @@ def get_series_samples(
         }
 
     try:
-        with sqlite3.connect(db_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT
-                    assembled_at_utc,
-                    assembled_at_epoch,
-                    pv_w,
-                    grid_w,
-                    battery_w,
-                    load_w
-                    FROM assembled_flow_snapshots
-                    WHERE system = ? AND assembled_at_epoch >= ? AND assembled_at_epoch <= ?
-                    ORDER BY assembled_at_epoch ASC;
-                """,
-                (system, start_at.timestamp(), end_at.timestamp()),
-            ).fetchall()
-    except sqlite3.OperationalError:
+        with _session_scope(db_path) as session:
+            rows = session.execute(
+                select(
+                    AssembledFlowSnapshotRow.assembled_at_utc,
+                    AssembledFlowSnapshotRow.assembled_at_epoch,
+                    AssembledFlowSnapshotRow.pv_w,
+                    AssembledFlowSnapshotRow.grid_w,
+                    AssembledFlowSnapshotRow.battery_w,
+                    AssembledFlowSnapshotRow.load_w,
+                )
+                .where(
+                    AssembledFlowSnapshotRow.system == system,
+                    AssembledFlowSnapshotRow.assembled_at_epoch >= start_at.timestamp(),
+                    AssembledFlowSnapshotRow.assembled_at_epoch <= end_at.timestamp(),
+                )
+                .order_by(AssembledFlowSnapshotRow.assembled_at_epoch.asc())
+            ).all()
+    except SQLAlchemyError:
         rows = []
 
     if len(rows) > safe_max_points:
         step = max(1, len(rows) // safe_max_points)
-        sampled_rows = rows[::step]
-        if sampled_rows[-1][1] != rows[-1][1]:
+        sampled_rows = list(rows[::step])
+        if sampled_rows and sampled_rows[-1][1] != rows[-1][1]:
             sampled_rows.append(rows[-1])
         rows = sampled_rows
 
@@ -1453,7 +1246,7 @@ def get_series_samples(
 
 
 def compute_usage_between(
-    db_path: Path,
+    db_path: DatabaseTarget,
     *,
     system: str,
     start_at_utc: datetime,
@@ -1462,96 +1255,16 @@ def compute_usage_between(
 ) -> dict[str, object]:
     start_ts = start_at_utc.astimezone(UTC).timestamp()
     end_ts = end_at_utc.astimezone(UTC).timestamp()
-
-    if not db_path.exists():
-        rows: list[tuple[float, float | None, float | None, float | None, float | None]] = []
-    else:
-        try:
-            with sqlite3.connect(db_path) as conn:
-                rows = conn.execute(
-                    """
-                    SELECT assembled_at_epoch, pv_w, grid_w, battery_w, load_w
-                    FROM assembled_flow_snapshots
-                    WHERE system = ? AND assembled_at_epoch >= ? AND assembled_at_epoch < ?
-                    ORDER BY assembled_at_epoch ASC;
-                    """,
-                    (system, start_ts, end_ts),
-                ).fetchall()
-        except sqlite3.OperationalError:
-            rows = []
-
+    rows = _load_power_rows(db_path, system=system, start_ts=start_ts, end_ts=end_ts)
     duration_seconds = max(0.0, end_ts - start_ts)
     expected = int(round(duration_seconds / sample_interval_seconds)) if sample_interval_seconds > 0 else 0
-    if len(rows) < 2:
-        return {
-            "system": system,
-            "start_at_utc": start_at_utc.isoformat(),
-            "end_at_utc": end_at_utc.isoformat(),
-            "samples": len(rows),
-            "expected_samples": expected,
-            "coverage_ratio": round((len(rows) / expected), 4) if expected > 0 else None,
-            "energy_kwh": {
-                "home_load": 0.0,
-                "solar_generation": 0.0,
-                "grid_import": 0.0,
-                "grid_export": 0.0,
-                "battery_charge": 0.0,
-                "battery_discharge": 0.0,
-            },
-            "quality": {"note": "Not enough samples to integrate."},
-        }
-
-    home_load_wh = 0.0
-    solar_wh = 0.0
-    grid_import_wh = 0.0
-    grid_export_wh = 0.0
-    battery_charge_wh = 0.0
-    battery_discharge_wh = 0.0
-
-    max_dt = sample_interval_seconds * 2.5
-    for i in range(len(rows) - 1):
-        ts, pv_w, grid_w, battery_w, load_w = rows[i]
-        next_ts = rows[i + 1][0]
-        dt = max(0.0, float(next_ts) - float(ts))
-        if dt <= 0:
-            continue
-        if dt > max_dt:
-            dt = max_dt
-
-        if load_w is not None and load_w > 0:
-            home_load_wh += float(load_w) * dt / 3600.0
-        if pv_w is not None and pv_w > 0:
-            solar_wh += float(pv_w) * dt / 3600.0
-        if grid_w is not None:
-            grid = float(grid_w)
-            if grid > 0:
-                grid_import_wh += grid * dt / 3600.0
-            elif grid < 0:
-                grid_export_wh += (-grid) * dt / 3600.0
-        if battery_w is not None:
-            battery = float(battery_w)
-            if battery > 0:
-                battery_discharge_wh += battery * dt / 3600.0
-            elif battery < 0:
-                battery_charge_wh += (-battery) * dt / 3600.0
-
-    return {
-        "system": system,
-        "start_at_utc": start_at_utc.isoformat(),
-        "end_at_utc": end_at_utc.isoformat(),
-        "samples": len(rows),
-        "expected_samples": expected,
-        "coverage_ratio": round((len(rows) / expected), 4) if expected > 0 else None,
-        "energy_kwh": {
-            "home_load": round(home_load_wh / 1000.0, 4),
-            "solar_generation": round(solar_wh / 1000.0, 4),
-            "grid_import": round(grid_import_wh / 1000.0, 4),
-            "grid_export": round(grid_export_wh / 1000.0, 4),
-            "battery_charge": round(battery_charge_wh / 1000.0, 4),
-            "battery_discharge": round(battery_discharge_wh / 1000.0, 4),
-        },
-        "quality": {
-            "integration": "left-rectangle",
-            "gap_clamp_seconds": max_dt,
-        },
-    }
+    return _integrate_usage_rows(
+        rows,
+        system=system,
+        start_label="start_at_utc",
+        start_value=start_at_utc.isoformat(),
+        end_label="end_at_utc",
+        end_value=end_at_utc.isoformat(),
+        expected=expected,
+        sample_interval_seconds=sample_interval_seconds,
+    )
