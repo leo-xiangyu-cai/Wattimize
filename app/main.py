@@ -84,7 +84,7 @@ TESLA_GRID_SUPPORT_WINDOW_START_HOUR = 11
 TESLA_GRID_SUPPORT_WINDOW_END_HOUR = 14
 TESLA_GRID_SUPPORT_TARGET_MIN_W = 14_000.0
 TESLA_GRID_SUPPORT_TARGET_MAX_W = 15_000.0
-TESLA_GRID_SUPPORT_HARD_MAX_W = 15_500.0
+TESLA_GRID_SUPPORT_HARD_MAX_W = 15_000.0
 TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A: tuple[int, ...] = (10, 15)
 WORKER_PENDING_LOG_TIMEOUT_SECONDS = 60.0
 TESLA_OBSERVATION_SERVICE = "tesla_home_assistant_collection"
@@ -1465,28 +1465,11 @@ def _choose_tesla_grid_support_target(base_grid_w: float) -> dict[str, object]:
     valid_candidates = [
         candidate
         for candidate in candidates
-        if float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_HARD_MAX_W
+        if float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_TARGET_MAX_W
     ]
     if not valid_candidates:
         return candidates[0]
-
-    in_band = [
-        candidate
-        for candidate in valid_candidates
-        if TESLA_GRID_SUPPORT_TARGET_MIN_W <= float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_TARGET_MAX_W
-    ]
-    if in_band:
-        return max(in_band, key=lambda candidate: float(candidate["predicted_grid_w"]))
-
-    below_band = [
-        candidate
-        for candidate in valid_candidates
-        if float(candidate["predicted_grid_w"]) < TESLA_GRID_SUPPORT_TARGET_MIN_W
-    ]
-    if below_band:
-        return max(below_band, key=lambda candidate: float(candidate["predicted_grid_w"]))
-
-    return min(valid_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
+    return max(valid_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
 
 
 def _choose_tesla_grid_support_target_from_options(
@@ -1508,28 +1491,11 @@ def _choose_tesla_grid_support_target_from_options(
     valid_candidates = [
         candidate
         for candidate in candidates
-        if float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_HARD_MAX_W
+        if float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_TARGET_MAX_W
     ]
     if not valid_candidates:
         return candidates[0]
-
-    in_band = [
-        candidate
-        for candidate in valid_candidates
-        if TESLA_GRID_SUPPORT_TARGET_MIN_W <= float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_TARGET_MAX_W
-    ]
-    if in_band:
-        return max(in_band, key=lambda candidate: float(candidate["predicted_grid_w"]))
-
-    below_band = [
-        candidate
-        for candidate in valid_candidates
-        if float(candidate["predicted_grid_w"]) < TESLA_GRID_SUPPORT_TARGET_MIN_W
-    ]
-    if below_band:
-        return max(below_band, key=lambda candidate: float(candidate["predicted_grid_w"]))
-
-    return min(valid_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
+    return max(valid_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
 
 
 def _tesla_observation_charge_state(observation: dict[str, object]) -> dict[str, object]:
@@ -1563,8 +1529,19 @@ def _tesla_available_charge_current_options(charge_state: dict[str, object]) -> 
         return TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
     step_i = int(round(step_a or 1))
     step_i = max(step_i, 1)
-    values = tuple(range(min_i, max_i + 1, step_i))
-    return values or TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
+    supported_values = tuple(range(min_i, max_i + 1, step_i))
+    if not supported_values:
+        return TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
+
+    preferred_values = tuple(
+        amps
+        for amps in TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
+        if min_i <= amps <= max_i and ((amps - min_i) % step_i == 0)
+    )
+    if preferred_values:
+        return preferred_values
+
+    return supported_values
 
 
 async def _run_midday_window_check(
@@ -1642,19 +1619,23 @@ async def _run_midday_window_check(
         result["available_current_options_amps"] = list(available_current_options)
         desired = _choose_tesla_grid_support_target_from_options(base_grid_w, available_current_options)
         result["decision"] = desired
-        result["decision_reason"] = (
-            "selected_highest_candidate_within_target_band"
-            if TESLA_GRID_SUPPORT_TARGET_MIN_W <= float(desired["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_TARGET_MAX_W
-            else "selected_best_safe_candidate"
-        )
+        result["decision_reason"] = "selected_max_safe_candidate_under_grid_cap"
 
         current_configured_amps = _to_number(charge_state.get("configured_current_amps"))
+        current_actual_amps = _to_number(charge_state.get("current_amps"))
         connection_state = str(charge_state.get("connection_state") or "").strip().lower()
         status_text = str(charge_state.get("status_text") or "").strip().lower()
         desired_amps = int(desired["charge_current_amps"])
         current_grid_import_w = float(result["current_grid_import_w"])
-        current_in_target_band = TESLA_GRID_SUPPORT_TARGET_MIN_W <= current_grid_import_w <= TESLA_GRID_SUPPORT_TARGET_MAX_W
-        effective_current_amps = current_configured_amps or _to_number(charge_state.get("current_amps")) or 0.0
+        effective_current_amps = current_actual_amps or current_configured_amps or 0.0
+        configured_matches_desired = (
+            current_configured_amps is not None
+            and int(round(current_configured_amps)) == desired_amps
+        )
+        actual_matches_desired = (
+            current_actual_amps is not None
+            and int(round(current_actual_amps)) == desired_amps
+        )
 
         result["candidates"] = [
             {
@@ -1671,13 +1652,17 @@ async def _run_midday_window_check(
             status = "skipped"
             return result
 
-        if current_in_target_band and charging_enabled:
+        if (
+            charging_enabled
+            and configured_matches_desired
+            and (current_actual_amps is None or actual_matches_desired)
+        ):
             result["decision"] = {
                 "mode": "hold_current_state",
                 "charge_current_amps": int(round(effective_current_amps)) if effective_current_amps > 0 else desired_amps,
                 "predicted_grid_w": round(current_grid_import_w, 1),
             }
-            result["decision_reason"] = "current_grid_already_in_target_with_tesla_active"
+            result["decision_reason"] = "already_at_max_safe_current_under_grid_cap"
             result["action"] = {"type": "noop", "reason": "keep_current_state"}
             status = "noop"
             return result
@@ -1714,7 +1699,14 @@ async def _run_midday_window_check(
             result["action"] = {"type": "apply", "steps": actions}
             status = "applied"
         else:
-            result["action"] = {"type": "noop", "reason": "already_at_target"}
+            result["action"] = {
+                "type": "noop",
+                "reason": (
+                    "configured_target_applied_actual_current_differs"
+                    if configured_matches_desired and current_actual_amps is not None and not actual_matches_desired
+                    else "already_at_target"
+                ),
+            }
             status = "noop"
         return result
     except Exception as exc:  # noqa: BLE001
@@ -2561,6 +2553,8 @@ def _build_combined_flow_payload(
     saj_metrics_map = saj_metrics if isinstance(saj_metrics, dict) else {}
     solplanet_metrics = solplanet_flow.get("metrics")
     solplanet_metrics_map = solplanet_metrics if isinstance(solplanet_metrics, dict) else {}
+    saj_notes = saj_metrics_map.get("notes")
+    saj_notes_list = saj_notes if isinstance(saj_notes, list) else []
 
     solar_primary_w = _to_number(saj_metrics_map.get("pv_w"))
     solar_secondary_w = _to_number(solplanet_metrics_map.get("pv_w"))
@@ -2594,6 +2588,32 @@ def _build_combined_flow_payload(
     tesla_connection_state = str(tesla_charging_map.get("connection_state") or "").strip() or None
     tesla_requested_enabled = tesla_charging_map.get("requested_enabled")
     tesla_cable_connected = tesla_charging_map.get("cable_connected")
+    saj_pv_estimate_w: float | None = None
+    if inverter1_w is not None and battery1_w is not None:
+        saj_pv_estimate_w = max(inverter1_w - battery1_w, 0.0)
+        if saj_pv_estimate_w <= BALANCE_TOLERANCE_W:
+            saj_pv_estimate_w = 0.0
+    solplanet_battery_discharging = bool(battery2_w is not None and battery2_w >= POWER_FLOW_ACTIVE_THRESHOLD_W)
+    saj_pv_suspect = bool(
+        saj_pv_estimate_w is not None
+        and solar_primary_w is not None
+        and solar_primary_w > saj_pv_estimate_w + BALANCE_TOLERANCE_W
+    )
+    use_saj_pv_estimate = bool(
+        saj_pv_estimate_w is not None
+        and (
+            solar_primary_w is None
+            or (
+                solplanet_battery_discharging
+                and (
+                    saj_pv_suspect
+                    or "saj_offnet_detected" in saj_notes_list
+                )
+            )
+        )
+    )
+    if use_saj_pv_estimate:
+        solar_primary_w = saj_pv_estimate_w
 
     total_load_w: float | None = None
     if inverter1_w is not None and inverter2_w is not None and grid_w is not None:
@@ -2639,7 +2659,11 @@ def _build_combined_flow_payload(
         "inverter_power_w": total_inverter_w,
         "inverter1_w": inverter1_w,
         "inverter2_w": inverter2_w,
-        "pv_source": "calc:saj.pv_w + solplanet.pv_w",
+        "pv_source": (
+            "calc:(saj.inverter_power_w - saj.battery_w) + solplanet.pv_w"
+            if use_saj_pv_estimate
+            else "calc:saj.pv_w + solplanet.pv_w"
+        ),
         "grid_source": str(saj_metrics_map.get("grid_source") or "unavailable"),
         "battery_source": "calc:saj.battery_w + solplanet.battery_w",
         "battery1_source": str(saj_metrics_map.get("battery_source") or "unavailable"),
@@ -2660,6 +2684,11 @@ def _build_combined_flow_payload(
         "notes": [
             "combined_flow_requires_full_round_success",
             "combined_grid_uses_saj_grid_w",
+            (
+                "combined_solar_uses_saj_inverter_minus_battery_when_solplanet_discharge_pollutes_saj_pv"
+                if use_saj_pv_estimate
+                else "combined_solar_uses_saj_pv_plus_solplanet_pv"
+            ),
             "combined_total_load_uses_saj_inverter_power + solplanet_inverter_power + saj_grid",
             "combined_tesla_observation_embedded",
         ],
@@ -4708,10 +4737,21 @@ async def worker_logs(
     page_size: int = Query(default=100, ge=1, le=500),
     system: str | None = Query(default=None, description="saj or solplanet"),
     service: str | None = Query(default=None, description="home_assistant or solplanet_cgi"),
+    status: str | None = Query(default=None, description="ok/failed/pending/skipped/applied/noop/timeout"),
+    exclude_status: str | None = Query(default=None, description="comma-separated statuses to exclude"),
     category: str | None = Query(default=None, description="all/saj/solplanet/combined/tesla"),
 ) -> dict[str, object]:
     normalized_system: str | None = None
     normalized_service = str(service or "").strip() or None
+    normalized_status = str(status or "").strip().lower() or None
+    excluded_statuses = tuple(
+        part
+        for part in (
+            str(item).strip().lower()
+            for item in str(exclude_status or "").split(",")
+        )
+        if part
+    )
     normalized_category = str(category or "").strip().lower()
     if normalized_category in ("all", ""):
         normalized_category = ""
@@ -4751,6 +4791,8 @@ async def worker_logs(
         worker="worker",
         system=normalized_system,
         service=normalized_service,
+        status=normalized_status,
+        exclude_statuses=excluded_statuses,
     )
     payload["updated_at"] = datetime.now(UTC).isoformat()
     return payload

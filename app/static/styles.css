@@ -911,6 +911,17 @@ td {
   cursor: pointer;
 }
 
+.worker-logs-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.worker-logs-checkbox input {
+  margin: 0;
+}
+
 .worker-log-detail-table th,
 .worker-log-detail-table td {
   vertical-align: top;
@@ -1038,6 +1049,628 @@ td {
 
 .combined-flow-board {
   min-height: 640px;
+}
+
+.mobile-flow-board {
+  display: none;
+  margin-top: 14px;
+}
+
+.mobile-energy-card {
+  border: 1px solid #d7e0d9;
+  border-radius: 22px;
+  padding: 14px 12px 12px;
+  background:
+    radial-gradient(circle at top left, rgba(241, 248, 244, 0.98), rgba(241, 248, 244, 0) 38%),
+    linear-gradient(180deg, rgba(247, 251, 248, 0.98), rgba(239, 246, 241, 0.98));
+  box-shadow: 0 14px 28px rgba(16, 37, 25, 0.08);
+}
+
+.mobile-energy-card-head {
+  margin-bottom: 10px;
+}
+
+.mobile-energy-card-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #2d5644;
+}
+
+.mobile-energy-card-text {
+  margin-top: 5px;
+  font-size: 12px;
+  color: #6a7b72;
+}
+
+.mobile-energy-scene {
+  position: relative;
+  width: 100%;
+  min-height: 680px;
+  border-radius: 18px;
+  background: rgba(226, 234, 230, 0.52);
+  overflow: hidden;
+}
+
+.mobile-energy-node {
+  position: absolute;
+  width: 84px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  z-index: 2;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.mobile-energy-node.is-active {
+  transform: translateY(-1px);
+}
+
+.mobile-energy-node.is-dimmed {
+  opacity: 0.48;
+}
+
+.mobile-energy-icon {
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(203, 211, 206, 0.96);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 6px 16px rgba(34, 46, 40, 0.06);
+  color: #55605a;
+}
+
+.mobile-energy-node.is-active .mobile-energy-icon {
+  border-color: rgba(105, 172, 134, 0.95);
+  background: #ffffff;
+  color: #2c6f4f;
+}
+
+.mobile-energy-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.mobile-energy-icon svg * {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mobile-energy-title {
+  margin: 8px 0 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #37423d;
+}
+
+.mobile-energy-value,
+.mobile-energy-subvalue {
+  margin: 2px 0 0;
+  min-height: 16px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #7b38d0;
+}
+
+.mobile-energy-subvalue {
+  color: #6c7a73;
+  font-weight: 600;
+}
+
+.mobile-energy-node .data-kind-value {
+  justify-content: center;
+  gap: 0.22em;
+}
+
+.mobile-energy-node .data-kind-badge {
+  width: 1.05em;
+  height: 1.05em;
+  font-size: 0.58em;
+}
+
+.mobile-energy-node.node-solar { left: 10%; top: 7%; }
+.mobile-energy-node.node-grid { right: 10%; top: 7%; }
+.mobile-energy-node.node-home { left: calc(50% - 42px); top: 31%; width: 84px; }
+.mobile-energy-node.node-inverter1 { left: 10%; top: 40%; }
+.mobile-energy-node.node-inverter2 { right: 10%; top: 40%; }
+.mobile-energy-node.node-battery1 { left: 8%; top: 69%; }
+.mobile-energy-node.node-load { left: calc(50% - 42px); top: 69%; width: 84px; }
+.mobile-energy-node.node-battery2 { right: 8%; top: 69%; }
+.mobile-energy-node.node-tesla { right: 10%; top: 86%; width: 84px; }
+
+.mobile-energy-line {
+  position: absolute;
+  z-index: 1;
+  background: rgba(126, 137, 132, 0.28);
+  border-radius: 999px;
+}
+
+.mobile-energy-line::before,
+.mobile-energy-line::after {
+  content: "";
+  position: absolute;
+}
+
+.mobile-energy-line::before {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: transparent;
+  opacity: 0;
+}
+
+.mobile-energy-line::after {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(88, 95, 92, 0.3);
+}
+
+.mobile-energy-line.is-active {
+  background: linear-gradient(180deg, rgba(61, 172, 120, 0.85), rgba(61, 172, 120, 0.55));
+  box-shadow: 0 0 0 1px rgba(61, 172, 120, 0.12);
+}
+
+.mobile-energy-line.is-active::before {
+  opacity: 1;
+  background: rgba(61, 172, 120, 0.95);
+  box-shadow: 0 0 0 4px rgba(61, 172, 120, 0.12);
+}
+
+.mobile-energy-line.is-active::after {
+  background: rgba(61, 172, 120, 0.92);
+}
+
+.mobile-energy-line.is-reverse.is-active {
+  background: linear-gradient(180deg, rgba(74, 136, 255, 0.85), rgba(74, 136, 255, 0.55));
+}
+
+.mobile-energy-line.is-reverse.is-active::before {
+  background: rgba(74, 136, 255, 0.95);
+  box-shadow: 0 0 0 4px rgba(74, 136, 255, 0.12);
+}
+
+.mobile-energy-line.is-reverse.is-active::after {
+  background: rgba(74, 136, 255, 0.92);
+}
+
+.mobile-energy-line.line-solar-inverter1 {
+  left: 25%;
+  top: 21%;
+  width: 2px;
+  height: 25%;
+}
+
+.mobile-energy-line.line-solar-inverter1::before {
+  left: -4px;
+  top: 0;
+}
+
+.mobile-energy-line.line-solar-inverter1::after {
+  left: -3px;
+  bottom: 18%;
+}
+
+.mobile-energy-line.line-grid-home {
+  right: 25%;
+  top: 21%;
+  width: 2px;
+  height: 21%;
+}
+
+.mobile-energy-line.line-grid-home::before {
+  left: -4px;
+  top: 0;
+}
+
+.mobile-energy-line.line-grid-home::after {
+  left: -3px;
+  bottom: 18%;
+}
+
+.mobile-energy-line.line-battery1-inverter1 {
+  left: 25%;
+  top: 57%;
+  width: 2px;
+  height: 16%;
+}
+
+.mobile-energy-line.line-battery1-inverter1::before {
+  left: -4px;
+  top: 0;
+}
+
+.mobile-energy-line.line-battery1-inverter1::after {
+  left: -3px;
+  top: 28%;
+}
+
+.mobile-energy-line.line-battery2-inverter2 {
+  right: 25%;
+  top: 57%;
+  width: 2px;
+  height: 16%;
+}
+
+.mobile-energy-line.line-battery2-inverter2::before {
+  left: -4px;
+  top: 0;
+}
+
+.mobile-energy-line.line-battery2-inverter2::after {
+  left: -3px;
+  top: 28%;
+}
+
+.mobile-energy-line.line-home-load {
+  left: calc(50% - 1px);
+  top: 51%;
+  width: 2px;
+  height: 19%;
+}
+
+.mobile-energy-line.line-home-load::before {
+  left: -4px;
+  top: 0;
+}
+
+.mobile-energy-line.line-home-load::after {
+  left: -3px;
+  top: 22%;
+}
+
+.mobile-energy-line.line-home-tesla {
+  right: 19%;
+  top: 83%;
+  width: 2px;
+  height: 7%;
+}
+
+.mobile-energy-line.line-home-tesla::before {
+  left: -4px;
+  top: 0;
+}
+
+.mobile-energy-line.line-home-tesla::after {
+  left: -3px;
+  top: 38%;
+}
+
+.mobile-energy-line.line-inverter1-home {
+  left: 30%;
+  top: 46.5%;
+  width: 21%;
+  height: 2px;
+}
+
+.mobile-energy-line.line-inverter1-home::before {
+  left: 0;
+  top: -4px;
+}
+
+.mobile-energy-line.line-inverter1-home::after {
+  left: 46%;
+  top: -3px;
+}
+
+.mobile-energy-line.line-inverter2-home {
+  left: 50%;
+  top: 46.5%;
+  width: 21%;
+  height: 2px;
+}
+
+.mobile-energy-line.line-inverter2-home::before {
+  left: 0;
+  top: -4px;
+}
+
+.mobile-energy-line.line-inverter2-home::after {
+  left: 46%;
+  top: -3px;
+}
+
+@keyframes mobileFlowMoveY {
+  from { top: 0; }
+  to { top: calc(100% - 10px); }
+}
+
+@keyframes mobileFlowMoveYReverse {
+  from { top: calc(100% - 10px); }
+  to { top: 0; }
+}
+
+@keyframes mobileFlowMoveX {
+  from { left: 0; }
+  to { left: calc(100% - 10px); }
+}
+
+@keyframes mobileFlowMoveXReverse {
+  from { left: calc(100% - 10px); }
+  to { left: 0; }
+}
+
+.mobile-energy-line.line-solar-inverter1.is-active::before,
+.mobile-energy-line.line-grid-home.is-active::before,
+.mobile-energy-line.line-battery1-inverter1.is-active::before,
+.mobile-energy-line.line-battery2-inverter2.is-active::before,
+.mobile-energy-line.line-home-load.is-active::before,
+.mobile-energy-line.line-home-tesla.is-active::before {
+  animation: mobileFlowMoveY 1.4s linear infinite;
+}
+
+.mobile-energy-line.line-solar-inverter1.is-active.is-reverse::before,
+.mobile-energy-line.line-grid-home.is-active.is-reverse::before,
+.mobile-energy-line.line-battery1-inverter1.is-active.is-reverse::before,
+.mobile-energy-line.line-battery2-inverter2.is-active.is-reverse::before,
+.mobile-energy-line.line-home-load.is-active.is-reverse::before,
+.mobile-energy-line.line-home-tesla.is-active.is-reverse::before {
+  animation: mobileFlowMoveYReverse 1.4s linear infinite;
+}
+
+.mobile-energy-line.line-inverter1-home.is-active::before,
+.mobile-energy-line.line-inverter2-home.is-active::before {
+  animation: mobileFlowMoveX 1.4s linear infinite;
+}
+
+.mobile-energy-line.line-inverter1-home.is-active.is-reverse::before,
+.mobile-energy-line.line-inverter2-home.is-active.is-reverse::before {
+  animation: mobileFlowMoveXReverse 1.4s linear infinite;
+}
+
+.mobile-energy-detail {
+  margin-top: 10px;
+  border: 1px solid #d7e0d9;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.mobile-energy-detail summary {
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  font-weight: 700;
+  color: #31483d;
+}
+
+.mobile-energy-detail summary::-webkit-details-marker {
+  display: none;
+}
+
+.mobile-energy-detail-body {
+  padding: 0 12px 12px;
+}
+
+.mobile-energy-detail-body p {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #586a62;
+}
+
+.mobile-energy-formula {
+  margin-top: 10px;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #42534a;
+  word-break: break-word;
+}
+
+.mobile-flow-shell {
+  display: grid;
+  gap: 10px;
+}
+
+.mobile-flow-intro {
+  padding: 14px;
+  border: 1px solid #d6e0d8;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top left, rgba(220, 244, 230, 0.95), rgba(220, 244, 230, 0) 44%),
+    linear-gradient(180deg, rgba(252, 255, 252, 0.98), rgba(242, 248, 243, 0.96));
+}
+
+.mobile-flow-intro-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #315846;
+}
+
+.mobile-flow-intro-text {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #56675d;
+}
+
+.mobile-flow-chip-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mobile-flow-chip {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid #d5dfd7;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.mobile-flow-chip-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6a7d72;
+}
+
+.mobile-flow-chip-value {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #203128;
+}
+
+.mobile-flow-step {
+  border: 1px solid #d2ddd5;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 250, 246, 0.98));
+  box-shadow: 0 10px 24px rgba(24, 44, 31, 0.05);
+  overflow: hidden;
+}
+
+.mobile-flow-step summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.mobile-flow-step summary::-webkit-details-marker {
+  display: none;
+}
+
+.mobile-flow-step[open] summary {
+  border-bottom: 1px solid #dfe7e1;
+}
+
+.mobile-flow-step-main {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.mobile-flow-step-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #22352b;
+}
+
+.mobile-flow-step-value {
+  min-width: 0;
+  font-size: 13px;
+  color: #607068;
+}
+
+.mobile-flow-step-state {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+  color: #5f7167;
+  background: #edf2ee;
+}
+
+.mobile-flow-step-state.is-positive {
+  color: #1b734b;
+  background: #dff4e8;
+}
+
+.mobile-flow-step-state.is-negative {
+  color: #b33a4a;
+  background: #fde6ea;
+}
+
+.mobile-flow-step-chevron {
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid #6e8076;
+  border-bottom: 2px solid #6e8076;
+  transform: rotate(45deg);
+  transition: transform 140ms ease;
+}
+
+.mobile-flow-step[open] .mobile-flow-step-chevron {
+  transform: rotate(225deg);
+}
+
+.mobile-flow-step-body {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px 14px;
+}
+
+.mobile-flow-metric-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.mobile-flow-metric-label {
+  font-size: 12px;
+  color: #6a7c72;
+}
+
+.mobile-flow-metric-value {
+  min-width: 0;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 700;
+  color: #24342c;
+}
+
+.mobile-flow-metric-value.is-positive {
+  color: #1f7a52;
+}
+
+.mobile-flow-metric-value.is-negative {
+  color: #c43f4e;
+}
+
+.mobile-flow-connector {
+  position: relative;
+  height: 16px;
+}
+
+.mobile-flow-connector::before {
+  content: "";
+  position: absolute;
+  left: 23px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(76, 126, 99, 0.14), rgba(76, 126, 99, 0.34));
+}
+
+.mobile-flow-connector::after {
+  content: "";
+  position: absolute;
+  left: 19px;
+  bottom: -1px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 7px solid rgba(76, 126, 99, 0.52);
+}
+
+.mobile-flow-formula {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #42534a;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .efd-scene {
@@ -1518,6 +2151,19 @@ td {
   box-shadow: none;
 }
 
+.efd-node.efd-node-tesla .node-mini-value .tesla-current-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  white-space: normal;
+}
+
+.efd-node.efd-node-tesla .node-mini-value .tesla-current-line {
+  display: block;
+  line-height: 1.2;
+}
+
 .efd-node.efd-node-tesla .tesla-control-btn {
   position: relative;
   left: auto;
@@ -1910,8 +2556,60 @@ td {
 
   .topbar-actions {
     width: 100%;
-    justify-content: flex-start;
+    justify-content: stretch;
     flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .lang-switch,
+  .refresh-switch {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .lang-switch select,
+  .refresh-switch select,
+  #configBtn,
+  #refreshBtn {
+    width: 100%;
+  }
+
+  #configBtn,
+  #refreshBtn {
+    min-height: 46px;
+  }
+
+  .topbar-actions > .btn,
+  .topbar-actions > label {
+    flex: 1 1 100%;
+  }
+
+  .topbar h1 {
+    font-size: 30px;
+  }
+
+  .card {
+    padding: 12px;
+  }
+
+  h2 {
+    font-size: 22px;
+  }
+
+  .tabs {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .tab-btn {
+    padding: 10px 14px;
+    font-size: 16px;
+  }
+
+  .tab-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
 
   .flow-board {
@@ -1969,6 +2667,22 @@ td {
   .line-load {
     left: 50%;
     width: 43%;
+  }
+
+  #energyFlowCombined {
+    display: none;
+  }
+
+  .mobile-flow-board {
+    display: block;
+  }
+
+  .combined-debug-panel {
+    display: none;
+  }
+
+  .balance-formula {
+    display: none;
   }
 }
 

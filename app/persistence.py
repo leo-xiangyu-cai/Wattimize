@@ -424,6 +424,8 @@ def list_worker_api_logs(
     worker: str | None = None,
     system: str | None = None,
     service: str | None = None,
+    status: str | None = None,
+    exclude_statuses: tuple[str, ...] | None = None,
 ) -> dict[str, object]:
     if page < 1:
         page = 1
@@ -443,6 +445,18 @@ def list_worker_api_logs(
     if service:
         where_conditions.append("service = ?")
         params.append(service)
+    if status:
+        where_conditions.append("status = ?")
+        params.append(status)
+    normalized_excluded_statuses = tuple(
+        str(item or "").strip()
+        for item in (exclude_statuses or ())
+        if str(item or "").strip()
+    )
+    if normalized_excluded_statuses:
+        placeholders = ", ".join("?" for _ in normalized_excluded_statuses)
+        where_conditions.append(f"COALESCE(status, '') NOT IN ({placeholders})")
+        params.extend(normalized_excluded_statuses)
     where_sql = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
 
     if not db_path.exists():

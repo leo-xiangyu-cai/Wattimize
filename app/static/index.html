@@ -76,6 +76,7 @@
                 <span id="combined-updatedAt" class="muted">-</span>
               </div>
               <div id="energyFlowCombined" class="flow-board combined-flow-board diagram-host" data-diagram="combined"></div>
+              <div id="energyFlowCombinedMobile" class="mobile-flow-board" aria-live="polite"></div>
               <p id="combined-loadFormulaText" class="balance-formula muted">-</p>
               <section class="combined-debug-panel">
                 <div class="section-header">
@@ -357,6 +358,19 @@
                 <option value="combined" data-i18n="workerLogsCategoryCombined">Combined</option>
                 <option value="tesla" data-i18n="workerLogsCategoryTesla">Tesla</option>
               </select>
+            </label>
+            <label data-i18n="workerLogsServiceLabel">
+              Service
+              <select id="workerLogsServiceSelect">
+                <option value="all" data-i18n="workerLogsServiceAll">All</option>
+                <option value="worker_midday_window_check" data-i18n="workerLogsServiceTeslaControl">Tesla Control</option>
+                <option value="tesla_home_assistant_collection" data-i18n="workerLogsServiceTeslaObserve">Tesla Observe</option>
+                <option value="combined_assembly" data-i18n="workerLogsServiceCombinedAssembly">Combined Assembly</option>
+              </select>
+            </label>
+            <label id="workerLogsHideNoopLabel" class="worker-logs-checkbox hidden">
+              <input id="workerLogsHideNoopCheckbox" type="checkbox" />
+              <span data-i18n="workerLogsHideNoop">Hide No Ops</span>
             </label>
           </div>
           <p id="workerLogsConfigMeta" class="muted">-</p>
