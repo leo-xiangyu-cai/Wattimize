@@ -53,6 +53,9 @@
         <button id="tabSampling" class="tab-btn" type="button" data-tab="sampling" data-i18n="samplingTab">
           Sampling
         </button>
+        <button id="tabDatabase" class="tab-btn" type="button" data-tab="database" data-i18n="databaseTab">
+          Database
+        </button>
         <button id="tabWorkerLogs" class="tab-btn" type="button" data-tab="workerLogs" data-i18n="workerLogsTab">
           Worker Logs
         </button>
@@ -62,6 +65,13 @@
       </nav>
 
       <section id="dashboardView" class="view">
+        <section id="dashboardNotificationsSection" class="dashboard-notifications hidden" aria-live="polite">
+          <div class="dashboard-notifications-header">
+            <h2 data-i18n="dashboardNotificationsTitle">Notifications</h2>
+            <span id="dashboardNotificationsUpdatedAt" class="muted">-</span>
+          </div>
+          <div id="dashboardNotificationsList" class="dashboard-notifications-list"></div>
+        </section>
         <section class="card">
           <div class="section-header">
             <h2 data-i18n="integratedFlowTitle">Integrated Dashboard</h2>
@@ -391,7 +401,8 @@
                 <option value="solplanet" data-i18n="workerLogsCategorySolplanet">SoulPlanet</option>
                 <option value="combined" data-i18n="workerLogsCategoryCombined">Combined</option>
                 <option value="tesla" data-i18n="workerLogsCategoryTesla">Tesla</option>
-                <option value="alarm" data-i18n="workerLogsCategoryAlarm">Alarm</option>
+                <option value="notification" data-i18n="workerLogsCategoryNotification">Notification</option>
+                <option value="operation" data-i18n="workerLogsCategoryOperation">Operation</option>
                 <option value="alert" data-i18n="workerLogsCategoryAlert">Alert</option>
               </select>
             </label>
@@ -399,12 +410,8 @@
               Service
               <select id="workerLogsServiceSelect">
                 <option value="all" data-i18n="workerLogsServiceAll">All</option>
-                <option value="overnight_shoulder">Overnight Shoulder</option>
-                <option value="free_energy">Free Energy</option>
-                <option value="after_free_shoulder">After Free Shoulder</option>
-                <option value="after_free_peak">After Free Peak</option>
-                <option value="export_window">Export Window</option>
-                <option value="post_export_peak">Post Export Peak</option>
+                <option value="notification">Notification</option>
+                <option value="operation">Operation</option>
                 <option value="tesla" data-i18n="workerLogsServiceTeslaObserve">Tesla Observe</option>
                 <option value="combined_assembly" data-i18n="workerLogsServiceCombinedAssembly">Combined Assembly</option>
               </select>
@@ -432,6 +439,36 @@
             <table>
               <thead id="workerLogsHead"></thead>
               <tbody id="workerLogsBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="databaseView" class="view hidden">
+        <section class="card">
+          <div class="section-header">
+            <h2 data-i18n="databaseTitle">Database Browser</h2>
+            <span id="databaseUpdatedAt" class="muted">-</span>
+          </div>
+          <div class="sampling-top-filters">
+            <label data-i18n="databaseTableLabel">
+              Table
+              <select id="databaseTableSelect">
+                <option value="" data-i18n="databaseTablePlaceholder">Select a table</option>
+              </select>
+            </label>
+          </div>
+          <p id="databaseMeta" class="muted">-</p>
+          <p id="databaseCount" class="muted">-</p>
+          <div class="pager">
+            <button id="databasePrevPageBtn" class="btn secondary" type="button" data-i18n="prevBtn">Prev</button>
+            <span id="databasePageInfo" class="muted">Page -</span>
+            <button id="databaseNextPageBtn" class="btn secondary" type="button" data-i18n="nextBtn">Next</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead id="databaseHead"></thead>
+              <tbody id="databaseBody"></tbody>
             </table>
           </div>
         </section>
@@ -471,6 +508,21 @@
           <h3>Payload</h3>
           <pre id="workerLogDetailPayload" class="raw-pre">-</pre>
         </section>
+      </div>
+    </div>
+
+    <div id="databaseRowDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="databaseRowDetailModalTitle">
+      <div class="modal-card worker-log-detail-modal-card">
+        <div class="section-header">
+          <h2 id="databaseRowDetailModalTitle">Database Row Detail</h2>
+          <button id="databaseRowDetailCloseBtn" class="btn secondary" type="button" data-i18n="closeBtn">Close</button>
+        </div>
+        <p id="databaseRowDetailMeta" class="muted">-</p>
+        <div class="table-wrap">
+          <table class="worker-log-detail-table">
+            <tbody id="databaseRowDetailBody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 

@@ -911,6 +911,21 @@ td {
   cursor: pointer;
 }
 
+.database-row {
+  cursor: pointer;
+}
+
+.database-cell {
+  max-width: 240px;
+}
+
+.database-cell-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .worker-logs-checkbox {
   display: inline-flex;
   align-items: center;
@@ -3123,6 +3138,149 @@ td {
 
 .saj-mask-input-trigger {
   cursor: pointer;
+}
+
+.dashboard-notifications {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid #d7e0c4;
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(252, 253, 246, 0.98), rgba(245, 248, 236, 0.98));
+  box-shadow: 0 8px 18px rgba(75, 88, 41, 0.08);
+}
+
+.dashboard-notifications-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.dashboard-notifications-header h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.dashboard-notifications-list {
+  display: grid;
+  gap: 10px;
+}
+
+.dashboard-notification-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #d7dfc2;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.dashboard-notification-item.level-alarm {
+  border-color: #e1b5aa;
+  background: #fff5f2;
+}
+
+.dashboard-notification-item.level-warning {
+  border-color: #e7d39b;
+  background: #fff9eb;
+}
+
+.dashboard-notification-item.level-info {
+  border-color: #b9d4cb;
+  background: #f2fbf7;
+}
+
+.dashboard-notification-main {
+  min-width: 0;
+}
+
+.dashboard-notification-topline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.dashboard-notification-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: #e8efd8;
+  color: #3d4a1a;
+}
+
+.dashboard-notification-level {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dashboard-notification-item.level-alarm .dashboard-notification-level {
+  color: #aa3d2d;
+}
+
+.dashboard-notification-item.level-warning .dashboard-notification-level {
+  color: #8a6300;
+}
+
+.dashboard-notification-item.level-info .dashboard-notification-level {
+  color: #1d6a53;
+}
+
+.dashboard-notification-message {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.dashboard-notification-meta {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.dashboard-notification-dismiss {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #cfd8bd;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #57613b;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dashboard-notification-dismiss:hover {
+  background: #f2f6e8;
+}
+
+.dashboard-notification-dismiss:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+@media (max-width: 720px) {
+  .dashboard-notification-item {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-notification-dismiss {
+    justify-self: end;
+  }
 }
 
 @keyframes rawBarPulse {

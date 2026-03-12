@@ -74,8 +74,16 @@ const I18N = {
     solplanetControlTab: "Solplanet Control",
     entitiesTab: "Entities",
     samplingTab: "Sampling",
+    databaseTab: "Database",
     workerLogsTab: "Worker Logs",
     failureLogTab: "Failure Logs",
+    databaseTitle: "Database Browser",
+    databaseTableLabel: "Table",
+    databaseTablePlaceholder: "Select a table",
+    databaseMeta: "Table {table} · {columns} columns",
+    databaseTotal: "Total {total} rows",
+    databasePageInfo: "Page {page}/{totalPages} (showing {count})",
+    databaseEmpty: "Select a table to view data.",
     sajControlTitle: "SAJ Control",
     solplanetControlTitle: "Solplanet Control",
     solplanetControlLimitsTitle: "Power Limits",
@@ -218,6 +226,14 @@ const I18N = {
     coreTitle: "Core Entities",
     flowTitle: "Real-time Energy Flow Comparison",
     integratedFlowTitle: "Dashboard",
+    dashboardNotificationsTitle: "Notifications",
+    dashboardNotificationStateNotified: "Notified",
+    dashboardNotificationStateDismissed: "Dismissed",
+    dashboardNotificationDismiss: "Dismiss",
+    dashboardNotificationLevelAlarm: "Alarm",
+    dashboardNotificationLevelWarning: "Warning",
+    dashboardNotificationLevelInfo: "Info",
+    dashboardNotificationMeta: "Window {window} · Trigger {trigger} · {time}",
     integratedFlowSubtitle: "SAJ solar/grid + SAJ/Solplanet batteries, dual inverters in parallel",
     mobileFlowTitle: "Phone Flow",
     mobileFlowHint: "Compact icon flow with linked devices for phone screens.",
@@ -366,7 +382,8 @@ const I18N = {
     workerLogsCategorySolplanet: "SoulPlanet",
     workerLogsCategoryCombined: "Combined",
     workerLogsCategoryTesla: "Tesla",
-    workerLogsCategoryAlarm: "Alarm",
+    workerLogsCategoryNotification: "Notification",
+    workerLogsCategoryOperation: "Operation",
     workerLogsCategoryAlert: "Alert",
     workerLogsSystemLabel: "System",
     workerLogsSystemAll: "All",
@@ -379,7 +396,7 @@ const I18N = {
     workerLogsServiceCombinedAssembly: "Combined Assembly",
     workerLogsHidePassive: "Hide No Ops / Skipped",
     workerLogsConfigMeta: "Solplanet config: host {host}",
-    workerLogsTableTime: "Time (UTC)",
+    workerLogsTableTime: "Time",
     workerLogsTableRound: "Run ID",
     workerLogsTableSystem: "System",
     workerLogsTableService: "Service",
@@ -396,6 +413,10 @@ const I18N = {
     workerLogsStatusSkipped: "Skipped",
     workerLogsStatusApplied: "Applied",
     workerLogsStatusNoop: "Noop",
+    workerLogsStatusNotification: "Notification",
+    workerLogsStatusNoNotification: "No Notification",
+    workerLogsStatusOperation: "Operation",
+    workerLogsStatusNop: "No Operation",
     workerLogsStatusTimeout: "Timeout",
     workerLogDetailTitle: "Worker Log Detail",
     workerLogDetailMeta: "{service} · {status} · {time}",
@@ -564,8 +585,16 @@ const I18N = {
     solplanetControlTab: "Solplanet 管理",
     entitiesTab: "实体",
     samplingTab: "采样",
+    databaseTab: "Database",
     workerLogsTab: "Worker日志",
     failureLogTab: "失败日志",
+    databaseTitle: "数据库浏览",
+    databaseTableLabel: "数据表",
+    databaseTablePlaceholder: "选择一个数据表",
+    databaseMeta: "表 {table} · {columns} 列",
+    databaseTotal: "共 {total} 行",
+    databasePageInfo: "第 {page}/{totalPages} 页（当前 {count} 行）",
+    databaseEmpty: "请选择一个数据表查看数据。",
     sajControlTitle: "SAJ 管理",
     solplanetControlTitle: "Solplanet 管理",
     solplanetControlLimitsTitle: "功率限制",
@@ -708,6 +737,14 @@ const I18N = {
     coreTitle: "核心实体",
     flowTitle: "实时能量流向对比",
     integratedFlowTitle: "Dashboard",
+    dashboardNotificationsTitle: "通知",
+    dashboardNotificationStateNotified: "已通知",
+    dashboardNotificationStateDismissed: "已忽略",
+    dashboardNotificationDismiss: "忽略",
+    dashboardNotificationLevelAlarm: "告警",
+    dashboardNotificationLevelWarning: "提醒",
+    dashboardNotificationLevelInfo: "信息",
+    dashboardNotificationMeta: "窗口 {window} · 条件 {trigger} · {time}",
     integratedFlowSubtitle: "SAJ 的 solar/grid + SAJ/Solplanet 电池，双逆变器并联",
     mobileFlowTitle: "手机流程视图",
     mobileFlowHint: "手机端的紧凑图标连线视图。",
@@ -856,7 +893,8 @@ const I18N = {
     workerLogsCategorySolplanet: "SoulPlanet",
     workerLogsCategoryCombined: "整合",
     workerLogsCategoryTesla: "特斯拉",
-    workerLogsCategoryAlarm: "告警",
+    workerLogsCategoryNotification: "通知",
+    workerLogsCategoryOperation: "操作",
     workerLogsCategoryAlert: "提醒",
     workerLogsSystemLabel: "系统",
     workerLogsSystemAll: "全部",
@@ -869,7 +907,7 @@ const I18N = {
     workerLogsServiceCombinedAssembly: "整合组装",
     workerLogsHidePassive: "隐藏 No Ops / Skipped",
     workerLogsConfigMeta: "Solplanet 配置：host {host}",
-    workerLogsTableTime: "时间 (UTC)",
+    workerLogsTableTime: "时间",
     workerLogsTableRound: "运行ID",
     workerLogsTableSystem: "系统",
     workerLogsTableService: "服务",
@@ -886,6 +924,10 @@ const I18N = {
     workerLogsStatusSkipped: "跳过",
     workerLogsStatusApplied: "已执行",
     workerLogsStatusNoop: "无操作",
+    workerLogsStatusNotification: "通知",
+    workerLogsStatusNoNotification: "无通知",
+    workerLogsStatusOperation: "有操作",
+    workerLogsStatusNop: "无操作记录",
     workerLogsStatusTimeout: "超时",
     workerLogDetailTitle: "Worker 日志详情",
     workerLogDetailMeta: "{service} · {status} · {time}",
@@ -1021,6 +1063,11 @@ const samplingPager = {
   hasNext: false,
   hasPrev: false,
 };
+const databasePager = {
+  page: 1,
+  hasNext: false,
+  hasPrev: false,
+};
 const workerLogsPager = {
   page: 1,
   hasNext: false,
@@ -1032,22 +1079,12 @@ const workerFailureLogState = {
 };
 let workerLogsDefaultsApplied = false;
 const WORKER_LOGS_TABLE_MODE_KEY = "workerLogsTableMode";
-const OVERNIGHT_SHOULDER_WORKER_SERVICE = "overnight_shoulder";
-const FREE_ENERGY_WORKER_SERVICE = "free_energy";
-const AFTER_FREE_SHOULDER_WORKER_SERVICE = "after_free_shoulder";
-const AFTER_FREE_PEAK_WORKER_SERVICE = "after_free_peak";
-const EXPORT_WINDOW_WORKER_SERVICE = "export_window";
-const POST_EXPORT_PEAK_WORKER_SERVICE = "post_export_peak";
+const NOTIFICATION_SUMMARY_WORKER_SERVICE = "notification";
+const OPERATION_SUMMARY_WORKER_SERVICE = "operation";
 const TESLA_OBSERVATION_WORKER_SERVICE = "tesla";
 const COMBINED_ASSEMBLY_WORKER_SERVICE = "combined_assembly";
-const ALARM_WORKER_SERVICES = [
-  OVERNIGHT_SHOULDER_WORKER_SERVICE,
-  FREE_ENERGY_WORKER_SERVICE,
-  AFTER_FREE_SHOULDER_WORKER_SERVICE,
-  AFTER_FREE_PEAK_WORKER_SERVICE,
-  EXPORT_WINDOW_WORKER_SERVICE,
-  POST_EXPORT_PEAK_WORKER_SERVICE,
-];
+const NOTIFICATION_WORKER_SERVICES = [NOTIFICATION_SUMMARY_WORKER_SERVICE];
+const OPERATION_WORKER_SERVICES = [OPERATION_SUMMARY_WORKER_SERVICE];
 const WORKER_LOG_HUMAN_COLUMNS = [
   "id",
   "time",
@@ -1079,6 +1116,7 @@ const WORKER_LOG_RAW_COLUMNS = [
 ];
 const PAGE_SIZE = 80;
 const SAMPLING_PAGE_SIZE = 100;
+const DATABASE_PAGE_SIZE = 50;
 const WORKER_FAILURE_LOG_PAGE_SIZE = 100;
 const AUTO_REFRESH_KEY = "autoRefreshSeconds";
 const SOLPLANET_RAW_MODE_KEY = "solplanetRawMode";
@@ -1269,6 +1307,7 @@ const SOLPLANET_DASHBOARD_FIELD_MAP = {
 };
 const stateCache = {
   lastSummary: null,
+  lastDashboardNotifications: null,
   lastCollectorStatus: null,
   lastEntities: null,
   lastSolplanetRaw: {},
@@ -1284,6 +1323,8 @@ const stateCache = {
   lastSamplingUsageBySystem: null,
   lastSamplingPage: null,
   lastSamplingSeries: null,
+  lastDatabaseTables: null,
+  lastDatabasePage: null,
   lastWorkerLogsPage: null,
   lastWorkerFailureLog: null,
   rawCardMode: {},
@@ -1303,16 +1344,17 @@ function getLang() {
 }
 
 let currentLang = getLang();
-let currentTab = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling", "workerLogs", "workerFailureLog"].includes(localStorage.getItem("activeTab"))
+let currentTab = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"].includes(localStorage.getItem("activeTab"))
   ? localStorage.getItem("activeTab")
   : "dashboard";
-const ALL_TABS = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling", "workerLogs", "workerFailureLog"];
+const ALL_TABS = ["dashboard", "entities", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"];
 let solplanetRawMode = localStorage.getItem(SOLPLANET_RAW_MODE_KEY) === "table" ? "table" : "cards";
 let sajActionDebugMode = localStorage.getItem(SAJ_ACTION_DEBUG_MODE_KEY) === "1";
 let autoRefreshTimerId = null;
 let autoRefreshSeconds = getAutoRefreshSeconds();
 let sajControlLastEditAt = 0;
 let solplanetControlBusy = false;
+const dashboardNotificationDismissBusy = new Set();
 let summaryRequestId = 0;
 let configReady = false;
 let samplingChart = null;
@@ -1329,6 +1371,7 @@ const tabLoadState = {
   sajControl: { inFlight: false },
   solplanetControl: { inFlight: false },
   sampling: { inFlight: false },
+  database: { inFlight: false },
   workerLogs: { inFlight: false },
   workerFailureLog: { inFlight: false },
 };
@@ -1556,21 +1599,7 @@ function formatWorkerLogLocalTimeFromEpoch(epochSeconds) {
   if (!Number.isFinite(raw)) return "-";
   const dt = new Date(raw * 1000);
   if (Number.isNaN(dt.getTime())) return "-";
-  try {
-    const text = new Intl.DateTimeFormat(undefined, {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    }).format(dt);
-    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
-    return formatNoWrapText(`${text} ${zone}`);
-  } catch (_err) {
-    return formatNoWrapText(dt.toLocaleString());
-  }
+  return formatDateTimeWithAgo(dt.toISOString());
 }
 
 function getWorkerLogsTableMode() {
@@ -1591,7 +1620,8 @@ function renderWorkerLogsHead() {
 
 function workerLogCellValue(item, column, statusPresentation) {
   if (column === "time") {
-    return formatWorkerLogLocalTimeFromEpoch(item.requested_at_epoch);
+    const formattedUtc = formatDateTimeWithAgo(item?.requested_at_utc || null);
+    return formattedUtc !== "-" ? formattedUtc : formatWorkerLogLocalTimeFromEpoch(item?.requested_at_epoch);
   }
   if (column === "duration") {
     const raw = Number(item?.duration_ms);
@@ -1745,6 +1775,7 @@ function applyTranslations() {
   renderSajProfilePanel();
   renderSolplanetControlFromCache();
   rerenderSamplingViewFromCache();
+  rerenderDatabaseViewFromCache();
   if (stateCache.lastEntities) renderEntitiesPage(stateCache.lastEntities);
 }
 
@@ -1762,6 +1793,12 @@ function setConfigModalVisible(visible) {
 
 function setWorkerLogDetailModalVisible(visible) {
   const modal = document.getElementById("workerLogDetailModal");
+  if (!modal) return;
+  modal.classList.toggle("hidden", !visible);
+}
+
+function setDatabaseRowDetailModalVisible(visible) {
+  const modal = document.getElementById("databaseRowDetailModal");
   if (!modal) return;
   modal.classList.toggle("hidden", !visible);
 }
@@ -3797,8 +3834,91 @@ function renderSummary(payload) {
     quality: getFlowQuality(combinedFlow, Number(combinedCount) || 0),
     count: Number(combinedCount) || 0,
   });
+  renderDashboardNotifications(stateCache.lastDashboardNotifications);
   renderCombinedEnergyFlow(combinedFlow, tesla);
   renderCombinedDebug(combinedFlow, collectorStatus);
+}
+
+function dashboardNotificationLevelText(level) {
+  if (level === "alarm") return t("dashboardNotificationLevelAlarm");
+  if (level === "warning") return t("dashboardNotificationLevelWarning");
+  return t("dashboardNotificationLevelInfo");
+}
+
+function renderDashboardNotifications(payload) {
+  const section = document.getElementById("dashboardNotificationsSection");
+  const list = document.getElementById("dashboardNotificationsList");
+  if (!section || !list) return;
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  section.classList.toggle("hidden", items.length === 0);
+  setText("dashboardNotificationsUpdatedAt", formatUpdatedAt(payload?.updated_at || null));
+  list.innerHTML = "";
+  for (const item of items) {
+    const article = document.createElement("article");
+    const level = String(item?.level || "info").trim().toLowerCase();
+    const notificationKey = String(item?.notification_key || "");
+    article.className = `dashboard-notification-item level-${escapeHtml(level)}`;
+    const dismissBusy = dashboardNotificationDismissBusy.has(notificationKey);
+    article.innerHTML = `
+      <div class="dashboard-notification-main">
+        <div class="dashboard-notification-topline">
+          <span class="dashboard-notification-state">${escapeHtml(t("dashboardNotificationStateNotified"))}</span>
+          <span class="dashboard-notification-level">${escapeHtml(dashboardNotificationLevelText(level))}</span>
+        </div>
+        <p class="dashboard-notification-message">${escapeHtml(String(item?.message || "-"))}</p>
+        <div class="dashboard-notification-meta">
+          ${escapeHtml(
+            t("dashboardNotificationMeta", {
+              window: String(item?.window || "-"),
+              trigger: String(item?.trigger_text || "-"),
+              time: formatDateTimeWithAgo(item?.requested_at_utc || null),
+            }),
+          )}
+        </div>
+      </div>
+      <button
+        class="dashboard-notification-dismiss"
+        type="button"
+        aria-label="${escapeHtml(t("dashboardNotificationDismiss"))}"
+        title="${escapeHtml(t("dashboardNotificationDismiss"))}"
+        ${dismissBusy ? "disabled" : ""}
+      >&times;</button>
+    `;
+    const dismissButton = article.querySelector(".dashboard-notification-dismiss");
+    if (dismissButton) {
+      dismissButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void dismissDashboardNotification(notificationKey);
+      });
+    }
+    list.appendChild(article);
+  }
+}
+
+async function dismissDashboardNotification(notificationKey) {
+  const normalizedKey = String(notificationKey || "").trim();
+  if (!normalizedKey || dashboardNotificationDismissBusy.has(normalizedKey)) return;
+  dashboardNotificationDismissBusy.add(normalizedKey);
+  renderDashboardNotifications(stateCache.lastDashboardNotifications);
+  try {
+    await fetchJson("/api/dashboard/notifications/dismiss", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notification_key: normalizedKey }),
+      timeoutMs: 8000,
+    });
+    const current = stateCache.lastDashboardNotifications || { items: [], updated_at: null };
+    stateCache.lastDashboardNotifications = {
+      ...current,
+      items: (Array.isArray(current.items) ? current.items : []).filter((item) => item?.notification_key !== normalizedKey),
+      updated_at: new Date().toISOString(),
+    };
+  } catch (err) {
+    window.alert(String(err));
+  } finally {
+    dashboardNotificationDismissBusy.delete(normalizedKey);
+    renderDashboardNotifications(stateCache.lastDashboardNotifications);
+  }
 }
 
 function formatCollectorSystemStatus(label, systemState) {
@@ -4387,6 +4507,129 @@ function renderSamplingPage(payload) {
   renderSamplingRows(payload.items || []);
 }
 
+function buildDatabaseUrl() {
+  const params = new URLSearchParams();
+  const table = document.getElementById("databaseTableSelect")?.value || "";
+  if (table) params.set("table", table);
+  params.set("page", String(databasePager.page));
+  params.set("page_size", String(DATABASE_PAGE_SIZE));
+  return `/api/database/table?${params.toString()}`;
+}
+
+function renderDatabaseTableOptions(payload) {
+  const select = document.getElementById("databaseTableSelect");
+  if (!select) return;
+  const currentValue = select.value;
+  const tables = Array.isArray(payload?.tables) ? payload.tables : [];
+  select.innerHTML =
+    `<option value="">${escapeHtml(t("databaseTablePlaceholder"))}</option>` +
+    tables.map((item) => {
+      const tableName = String(item?.name || "").trim();
+      return `<option value="${escapeHtml(tableName)}">${escapeHtml(tableName)}</option>`;
+    }).join("");
+  const preferredValue = currentValue || stateCache.lastDatabasePage?.table || String(tables[0]?.name || "");
+  if (preferredValue && tables.some((item) => String(item?.name || "") === preferredValue)) {
+    select.value = preferredValue;
+  }
+}
+
+function renderDatabaseRows(payload) {
+  const head = document.getElementById("databaseHead");
+  const body = document.getElementById("databaseBody");
+  if (!head || !body) return;
+  const columns = Array.isArray(payload?.columns) ? payload.columns : [];
+  head.innerHTML = `<tr>${columns.map((column) => `<th>${escapeHtml(column?.name || "-")}</th>`).join("")}</tr>`;
+  body.innerHTML = "";
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  for (const item of items) {
+    const tr = document.createElement("tr");
+    tr.classList.add("database-row");
+    tr.innerHTML = columns.map((column) => {
+      const key = String(column?.name || "");
+      const rawValue = item?.[key];
+      const text =
+        rawValue === null || rawValue === undefined || rawValue === ""
+          ? "-"
+          : typeof rawValue === "object"
+            ? JSON.stringify(rawValue)
+            : String(rawValue);
+      return `<td class="database-cell" title="${escapeHtml(text)}"><span class="database-cell-text">${escapeHtml(text)}</span></td>`;
+    }).join("");
+    tr.addEventListener("click", () => {
+      openDatabaseRowDetailModal(payload, item);
+    });
+    body.appendChild(tr);
+  }
+}
+
+function renderDatabasePage(payload) {
+  const totalPages = Math.max(1, Math.ceil((payload.total || 0) / (payload.page_size || DATABASE_PAGE_SIZE)));
+  setText("databaseMeta", t("databaseMeta", { table: payload.table || "-", columns: payload.columns?.length || 0 }));
+  setText("databaseCount", t("databaseTotal", { total: payload.total || 0 }));
+  setText(
+    "databasePageInfo",
+    t("databasePageInfo", {
+      page: payload.page || 1,
+      totalPages,
+      count: payload.count || 0,
+    }),
+  );
+  setText("databaseUpdatedAt", formatUpdatedAt(payload.updated_at || null));
+  document.getElementById("databasePrevPageBtn").disabled = !Boolean(payload.has_prev);
+  document.getElementById("databaseNextPageBtn").disabled = !Boolean(payload.has_next);
+  renderDatabaseRows(payload);
+}
+
+function renderDatabaseEmptyState() {
+  const head = document.getElementById("databaseHead");
+  const body = document.getElementById("databaseBody");
+  if (head) head.innerHTML = "";
+  if (body) body.innerHTML = "";
+  setText("databaseMeta", t("databaseEmpty"));
+  setText("databaseCount", t("databaseTotal", { total: 0 }));
+  setText("databasePageInfo", t("pageDash"));
+  setText("databaseUpdatedAt", formatUpdatedAt(null));
+  const prevBtn = document.getElementById("databasePrevPageBtn");
+  const nextBtn = document.getElementById("databaseNextPageBtn");
+  if (prevBtn) prevBtn.disabled = true;
+  if (nextBtn) nextBtn.disabled = true;
+}
+
+function openDatabaseRowDetailModal(payload, item) {
+  const tableName = String(payload?.table || "-");
+  const columns = Array.isArray(payload?.columns) ? payload.columns : [];
+  setText("databaseRowDetailMeta", `Table ${tableName}`);
+  const body = document.getElementById("databaseRowDetailBody");
+  if (body) {
+    body.innerHTML = columns.map((column) => {
+      const key = String(column?.name || "");
+      const rawValue = item?.[key];
+      const text =
+        rawValue === null || rawValue === undefined || rawValue === ""
+          ? "-"
+          : typeof rawValue === "object"
+            ? JSON.stringify(rawValue, null, 2)
+            : String(rawValue);
+      return `
+        <tr>
+          <th>${escapeHtml(key || "-")}</th>
+          <td><div class="worker-log-detail-value">${escapeHtml(text)}</div></td>
+        </tr>
+      `;
+    }).join("");
+  }
+  setDatabaseRowDetailModalVisible(true);
+}
+
+function rerenderDatabaseViewFromCache() {
+  if (stateCache.lastDatabaseTables) renderDatabaseTableOptions(stateCache.lastDatabaseTables);
+  if (stateCache.lastDatabasePage) {
+    renderDatabasePage(stateCache.lastDatabasePage);
+    return;
+  }
+  renderDatabaseEmptyState();
+}
+
 function buildWorkerLogsUrl() {
   const params = new URLSearchParams();
   const category = document.getElementById("workerLogsCategorySelect")?.value || "all";
@@ -4395,7 +4638,7 @@ function buildWorkerLogsUrl() {
   if (service && service !== "all") params.set("service", service);
   else if (category && category !== "all" && category !== "alert") params.set("category", category);
   const excludedStatuses = [];
-  if (hidePassive) excludedStatuses.push("noop", "skipped", "outside_window");
+  if (hidePassive) excludedStatuses.push("noop", "skipped", "outside_window", "nop", "no_notification");
   if (excludedStatuses.length) params.set("exclude_status", excludedStatuses.join(","));
   params.set("page", String(workerLogsPager.page));
   params.set("page_size", "100");
@@ -4413,13 +4656,15 @@ function syncWorkerLogsFilters() {
     const allowedServices =
       category === "tesla"
         ? new Set(["all", TESLA_OBSERVATION_WORKER_SERVICE])
-        : category === "alarm"
-          ? new Set(["all", ...ALARM_WORKER_SERVICES])
+        : category === "notification"
+          ? new Set(["all", ...NOTIFICATION_WORKER_SERVICES])
+        : category === "operation"
+          ? new Set(["all", ...OPERATION_WORKER_SERVICES])
         : category === "alert"
-          ? new Set(["all", ...ALARM_WORKER_SERVICES, TESLA_OBSERVATION_WORKER_SERVICE, COMBINED_ASSEMBLY_WORKER_SERVICE])
+          ? new Set(["all", ...NOTIFICATION_WORKER_SERVICES, ...OPERATION_WORKER_SERVICES, TESLA_OBSERVATION_WORKER_SERVICE, COMBINED_ASSEMBLY_WORKER_SERVICE])
         : category === "combined"
           ? new Set(["all", COMBINED_ASSEMBLY_WORKER_SERVICE, TESLA_OBSERVATION_WORKER_SERVICE])
-          : new Set(["all", ...ALARM_WORKER_SERVICES, TESLA_OBSERVATION_WORKER_SERVICE, COMBINED_ASSEMBLY_WORKER_SERVICE]);
+          : new Set(["all", ...NOTIFICATION_WORKER_SERVICES, ...OPERATION_WORKER_SERVICES, TESLA_OBSERVATION_WORKER_SERVICE, COMBINED_ASSEMBLY_WORKER_SERVICE]);
     for (const option of serviceSelect.options) {
       option.hidden = !allowedServices.has(option.value);
     }
@@ -4428,7 +4673,10 @@ function syncWorkerLogsFilters() {
     }
   }
   const selectedService = serviceSelect?.value || "all";
-  const showHideNoop = selectedService === "all" || ALARM_WORKER_SERVICES.includes(selectedService);
+  const showHideNoop =
+    selectedService === "all" ||
+    NOTIFICATION_WORKER_SERVICES.includes(selectedService) ||
+    OPERATION_WORKER_SERVICES.includes(selectedService);
   if (hidePassiveLabel) hidePassiveLabel.classList.toggle("hidden", !showHideNoop);
   if (!showHideNoop && hidePassiveCheckbox) hidePassiveCheckbox.checked = false;
 }
@@ -4439,6 +4687,7 @@ function workerLogMatchesAlertFilter(item, filterValue) {
   return (
     resultText.includes("notification ") ||
     resultText.includes("warning") ||
+    resultText.includes("notification") ||
     resultText.includes("alarm") ||
     resultText.includes("solplanet_low_battery") ||
     resultText.includes("grid_import_started") ||
@@ -4457,7 +4706,8 @@ function workerSourcePatternClass(item) {
   const system = String(item?.system || "").trim().toLowerCase();
   const service = String(item?.service || "").trim().toLowerCase();
   if (service === TESLA_OBSERVATION_WORKER_SERVICE || system === "tesla") return "worker-service-tesla";
-  if (system === "alarm" || ALARM_WORKER_SERVICES.includes(service)) return "worker-service-tesla";
+  if (system === "notification" || NOTIFICATION_WORKER_SERVICES.includes(service)) return "worker-service-tesla";
+  if (system === "operation" || OPERATION_WORKER_SERVICES.includes(service)) return "worker-service-combined";
   if (system === "combined" || service === "combined_assembly") return "worker-service-combined";
   if (system === "saj") return "worker-service-saj";
   if (system === "solplanet") return "worker-service-solplanet";
@@ -4471,6 +4721,10 @@ function workerLogStatusPresentation(item) {
   if (rawStatus === "outside_window") return { text: "Outside Window", className: "worker-status-skipped" };
   if (rawStatus === "applied") return { text: t("workerLogsStatusApplied"), className: "worker-status-ok" };
   if (rawStatus === "noop") return { text: t("workerLogsStatusNoop"), className: "worker-status-skipped" };
+  if (rawStatus === "notification") return { text: t("workerLogsStatusNotification"), className: "worker-status-failed" };
+  if (rawStatus === "no_notification") return { text: t("workerLogsStatusNoNotification"), className: "worker-status-ok" };
+  if (rawStatus === "operation") return { text: t("workerLogsStatusOperation"), className: "worker-status-ok" };
+  if (rawStatus === "nop") return { text: t("workerLogsStatusNop"), className: "worker-status-skipped" };
   if (rawStatus === "ok") return { text: t("workerLogsStatusOk"), className: "worker-status-ok" };
   if (rawStatus === "timeout") return { text: t("workerLogsStatusTimeout"), className: "worker-status-failed" };
   if (rawStatus === "failed") return { text: t("workerLogsStatusFailed"), className: "worker-status-failed" };
@@ -6856,6 +7110,7 @@ async function loadSummary() {
   const baseResults = await Promise.allSettled([
     fetchJson("/api/collector/status", { timeoutMs: 6000 }),
     fetchJson("/api/saj/control/profile", { timeoutMs: 8000 }),
+    fetchJson("/api/dashboard/notifications", { timeoutMs: 8000 }),
   ]);
   if (requestId !== summaryRequestId) return;
 
@@ -6868,6 +7123,9 @@ async function loadSummary() {
     renderSajProfilePanel();
   } else {
     setText("sajProfileStatusText", t("sajProfileLoadFailed", { error: String(baseResults[1].reason) }));
+  }
+  if (baseResults[2].status === "fulfilled") {
+    stateCache.lastDashboardNotifications = baseResults[2].value;
   }
   renderSummary(summary);
 
@@ -7141,6 +7399,43 @@ async function loadSampling() {
   }
 }
 
+async function loadDatabase() {
+  try {
+    const tablesPayload = await fetchJson("/api/database/tables", { timeoutMs: 6000 });
+    stateCache.lastDatabaseTables = tablesPayload;
+    renderDatabaseTableOptions(tablesPayload);
+
+    const selectedTable = document.getElementById("databaseTableSelect")?.value || "";
+    if (!selectedTable) {
+      stateCache.lastDatabasePage = null;
+      renderDatabaseEmptyState();
+      return;
+    }
+
+    const payload = await fetchJson(buildDatabaseUrl(), { timeoutMs: 10000 });
+    databasePager.hasNext = Boolean(payload.has_next);
+    databasePager.hasPrev = Boolean(payload.has_prev);
+    stateCache.lastDatabasePage = payload;
+    renderDatabasePage(payload);
+  } catch (err) {
+    stateCache.lastDatabasePage = null;
+    databasePager.hasNext = false;
+    databasePager.hasPrev = false;
+    setText("databaseMeta", t("loadFailed", { error: String(err) }));
+    setText("databaseCount", t("databaseTotal", { total: 0 }));
+    setText("databasePageInfo", t("pageDash"));
+    setText("databaseUpdatedAt", formatUpdatedAt(null));
+    const head = document.getElementById("databaseHead");
+    const body = document.getElementById("databaseBody");
+    const prevBtn = document.getElementById("databasePrevPageBtn");
+    const nextBtn = document.getElementById("databaseNextPageBtn");
+    if (head) head.innerHTML = "";
+    if (body) body.innerHTML = "";
+    if (prevBtn) prevBtn.disabled = true;
+    if (nextBtn) nextBtn.disabled = true;
+  }
+}
+
 function rerenderSamplingViewFromCache() {
   if (stateCache.lastSamplingStatus) renderSamplingStatus(stateCache.lastSamplingStatus);
   if (stateCache.lastSamplingDaily) {
@@ -7237,6 +7532,7 @@ function tabHasCachedData(tab) {
   if (tab === "sajControl") return Boolean(stateCache.lastSajControl);
   if (tab === "solplanetControl") return Boolean(stateCache.lastSolplanetControl);
   if (tab === "sampling") return Boolean(stateCache.lastSamplingPage || stateCache.lastSamplingStatus || stateCache.lastSamplingSeries);
+  if (tab === "database") return Boolean(stateCache.lastDatabaseTables || stateCache.lastDatabasePage);
   if (tab === "workerLogs") return Boolean(stateCache.lastWorkerLogsPage);
   if (tab === "workerFailureLog") return Boolean(stateCache.lastWorkerFailureLog);
   return false;
@@ -7277,6 +7573,10 @@ async function loadTabWithGuard(tab, fromAutoRefresh = false) {
     }
     if (tabKey === "sampling") {
       await loadSampling();
+      return true;
+    }
+    if (tabKey === "database") {
+      await loadDatabase();
       return true;
     }
     if (tabKey === "workerLogs") {
@@ -7326,6 +7626,7 @@ function setActiveTab(tab, load = true) {
     tab === "sajControl" ||
     tab === "solplanetControl" ||
     tab === "sampling" ||
+    tab === "database" ||
     tab === "workerLogs" ||
     tab === "workerFailureLog"
       ? tab
@@ -7339,6 +7640,7 @@ function setActiveTab(tab, load = true) {
   const solplanetControlView = document.getElementById("solplanetControlView");
   const entitiesView = document.getElementById("entitiesView");
   const samplingView = document.getElementById("samplingView");
+  const databaseView = document.getElementById("databaseView");
   const workerLogsView = document.getElementById("workerLogsView");
   const workerFailureLogView = document.getElementById("workerFailureLogView");
   const tabDashboard = document.getElementById("tabDashboard");
@@ -7348,6 +7650,7 @@ function setActiveTab(tab, load = true) {
   const tabSolplanetControl = document.getElementById("tabSolplanetControl");
   const tabEntities = document.getElementById("tabEntities");
   const tabSampling = document.getElementById("tabSampling");
+  const tabDatabase = document.getElementById("tabDatabase");
   const tabWorkerLogs = document.getElementById("tabWorkerLogs");
   const tabWorkerFailureLog = document.getElementById("tabWorkerFailureLog");
 
@@ -7357,6 +7660,7 @@ function setActiveTab(tab, load = true) {
   const sajControlActive = currentTab === "sajControl";
   const solplanetControlActive = currentTab === "solplanetControl";
   const samplingActive = currentTab === "sampling";
+  const databaseActive = currentTab === "database";
   const workerLogsActive = currentTab === "workerLogs";
   const workerFailureLogActive = currentTab === "workerFailureLog";
   const anyRawActive = solplanetRawActive || sajRawActive;
@@ -7371,6 +7675,7 @@ function setActiveTab(tab, load = true) {
       dashboardActive ||
         anyRawActive ||
         samplingActive ||
+        databaseActive ||
         sajControlActive ||
         solplanetControlActive ||
         workerLogsActive ||
@@ -7378,6 +7683,7 @@ function setActiveTab(tab, load = true) {
     );
   }
   if (samplingView) samplingView.classList.toggle("hidden", !samplingActive);
+  if (databaseView) databaseView.classList.toggle("hidden", !databaseActive);
   if (workerLogsView) workerLogsView.classList.toggle("hidden", !workerLogsActive);
   if (workerFailureLogView) workerFailureLogView.classList.toggle("hidden", !workerFailureLogActive);
   if (tabDashboard) tabDashboard.classList.toggle("active", dashboardActive);
@@ -7387,6 +7693,7 @@ function setActiveTab(tab, load = true) {
   if (tabSolplanetControl) tabSolplanetControl.classList.toggle("active", solplanetControlActive);
   if (tabEntities) tabEntities.classList.toggle("active", currentTab === "entities");
   if (tabSampling) tabSampling.classList.toggle("active", samplingActive);
+  if (tabDatabase) tabDatabase.classList.toggle("active", databaseActive);
   if (tabWorkerLogs) tabWorkerLogs.classList.toggle("active", workerLogsActive);
   if (tabWorkerFailureLog) tabWorkerFailureLog.classList.toggle("active", workerFailureLogActive);
   if (dashboardActive) {
@@ -7451,6 +7758,9 @@ bindClickIfPresent("tabEntities", () => {
 bindClickIfPresent("tabSampling", () => {
   setActiveTab("sampling");
 });
+bindClickIfPresent("tabDatabase", () => {
+  setActiveTab("database");
+});
 bindClickIfPresent("tabWorkerLogs", () => {
   setActiveTab("workerLogs");
 });
@@ -7491,6 +7801,23 @@ bindClickIfPresent("samplingNextPageBtn", async () => {
   if (!samplingPager.hasNext) return;
   samplingPager.page += 1;
   await loadSampling();
+});
+
+bindClickIfPresent("databasePrevPageBtn", async () => {
+  if (!databasePager.hasPrev || databasePager.page <= 1) return;
+  databasePager.page -= 1;
+  await loadDatabase();
+});
+
+bindClickIfPresent("databaseNextPageBtn", async () => {
+  if (!databasePager.hasNext) return;
+  databasePager.page += 1;
+  await loadDatabase();
+});
+
+bindChangeIfPresent("databaseTableSelect", async () => {
+  databasePager.page = 1;
+  await loadDatabase();
 });
 
 bindChangeIfPresent("samplingSystemSelect", async () => {
@@ -7560,11 +7887,26 @@ bindClickIfPresent("workerLogDetailCloseBtn", () => {
     });
   }
 }
+bindClickIfPresent("databaseRowDetailCloseBtn", () => {
+  setDatabaseRowDetailModalVisible(false);
+});
+{
+  const modal = document.getElementById("databaseRowDetailModal");
+  if (modal) {
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) setDatabaseRowDetailModalVisible(false);
+    });
+  }
+}
 window.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   const modal = document.getElementById("workerLogDetailModal");
   if (modal && !modal.classList.contains("hidden")) {
     setWorkerLogDetailModalVisible(false);
+  }
+  const databaseModal = document.getElementById("databaseRowDetailModal");
+  if (databaseModal && !databaseModal.classList.contains("hidden")) {
+    setDatabaseRowDetailModalVisible(false);
   }
 });
 

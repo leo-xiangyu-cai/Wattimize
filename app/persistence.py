@@ -136,6 +136,14 @@ class WorkerApiLogRow(Base):
     payload_json = Column(String)
 
 
+class NotificationDismissalRow(Base):
+    __tablename__ = "notification_dismissals"
+
+    notification_key = Column(String, primary_key=True)
+    dismissed_at_utc = Column(String, nullable=False)
+    dismissed_at_epoch = Column(Float, nullable=False, index=True)
+
+
 class RawRequestResultRow(Base):
     __tablename__ = "raw_request_results"
 
@@ -285,6 +293,86 @@ def _empty_page(page: int, page_size: int) -> dict[str, object]:
         "has_next": False,
         "has_prev": False,
         "items": [],
+    }
+
+
+def _quote_sqlite_identifier(identifier: str) -> str:
+    escaped = str(identifier).replace('"', '""')
+    return f'"{escaped}"'
+
+
+def _json_safe_db_value(value: object) -> object:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.hex()
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    return str(value)
+
+
+def list_database_tables(db_path: DatabaseTarget) -> dict[str, object]:
+    engine = _create_engine_for_target(db_path)
+    inspector = inspect(engine)
+    table_names = sorted(inspector.get_table_names())
+    return {
+        "tables": [
+            {
+                "name": table_name,
+            }
+            for table_name in table_names
+        ],
+    }
+
+
+def list_database_table_rows(
+    db_path: DatabaseTarget,
+    *,
+    table: str,
+    page: int,
+    page_size: int,
+) -> dict[str, object]:
+    safe_page, safe_page_size = _paginate(page, page_size)
+    engine = _create_engine_for_target(db_path)
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    normalized_table = str(table or "").strip()
+    if not normalized_table:
+        raise ValueError("table is required")
+    if normalized_table not in table_names:
+        raise ValueError(f"Unknown table: {normalized_table}")
+
+    columns = inspector.get_columns(normalized_table)
+    quoted_table = _quote_sqlite_identifier(normalized_table)
+    offset = (safe_page - 1) * safe_page_size
+    with engine.connect() as conn:
+        total = int(conn.execute(text(f"SELECT COUNT(*) FROM {quoted_table}")).scalar_one())
+        rows = conn.execute(
+            text(f"SELECT * FROM {quoted_table} LIMIT :limit OFFSET :offset"),
+            {"limit": safe_page_size, "offset": offset},
+        ).mappings().all()
+    items = [{key: _json_safe_db_value(value) for key, value in row.items()} for row in rows]
+    count = len(items)
+    return {
+        "table": normalized_table,
+        "columns": [
+            {
+                "name": str(column.get("name") or ""),
+                "type": str(column.get("type") or ""),
+                "nullable": bool(column.get("nullable", True)),
+            }
+            for column in columns
+        ],
+        "count": count,
+        "total": total,
+        "page": safe_page,
+        "page_size": safe_page_size,
+        "has_next": offset + count < total,
+        "has_prev": safe_page > 1,
+        "items": items,
     }
 
 
@@ -540,6 +628,106 @@ def list_worker_api_logs(
         "has_prev": safe_page > 1,
         "items": items,
     }
+
+
+def _worker_notification_list_from_payload(payload_obj: object) -> list[dict[str, object]]:
+    payload = payload_obj if isinstance(payload_obj, dict) else {}
+    notifications = payload.get("notifications")
+    if isinstance(notifications, list):
+        return [item for item in notifications if isinstance(item, dict)]
+    notification = payload.get("notification")
+    return [notification] if isinstance(notification, dict) else []
+
+
+def _worker_notification_key(log_id: int, notification_index: int) -> str:
+    return f"worker-log-{int(log_id)}-notification-{int(notification_index)}"
+
+
+def list_active_notification_entries(
+    db_path: DatabaseTarget,
+    *,
+    system: str,
+    service: str,
+    status: str,
+) -> list[dict[str, object]]:
+    if not _db_exists(db_path):
+        return []
+    try:
+        with _session_scope(db_path) as session:
+            dismissed_keys = {
+                str(row.notification_key)
+                for row in session.scalars(select(NotificationDismissalRow)).all()
+            }
+            rows = session.scalars(
+                select(WorkerApiLogRow)
+                .where(
+                    WorkerApiLogRow.system == system,
+                    WorkerApiLogRow.service == service,
+                    WorkerApiLogRow.status == status,
+                )
+                .order_by(desc(WorkerApiLogRow.requested_at_epoch))
+            ).all()
+    except SQLAlchemyError:
+        return []
+
+    items: list[dict[str, object]] = []
+    latest_by_group: dict[str, dict[str, object]] = {}
+    for row in rows:
+        payload = _json_loads(row.payload_json, default={})
+        notification_list = _worker_notification_list_from_payload(payload)
+        for index, notification in enumerate(notification_list):
+            notification_key = _worker_notification_key(int(row.id), index)
+            if notification_key in dismissed_keys:
+                continue
+            notification_map = notification if isinstance(notification, dict) else {}
+            group_key = (
+                f"{str(notification_map.get('code') or 'unknown').strip()}::"
+                f"{str(notification_map.get('target') or '').strip()}"
+            )
+            item = {
+                "notification_key": notification_key,
+                "log_id": int(row.id),
+                "round_id": str(row.round_id or ""),
+                "requested_at_utc": str(row.requested_at_utc or ""),
+                "requested_at_epoch": float(row.requested_at_epoch or 0.0),
+                "notification_index": int(index),
+                "notification": notification_map,
+                "payload_json": payload if isinstance(payload, dict) else {},
+            }
+            existing = latest_by_group.get(group_key)
+            if existing is None or float(item["requested_at_epoch"]) > float(existing["requested_at_epoch"]):
+                latest_by_group[group_key] = item
+    items.extend(latest_by_group.values())
+    items.sort(key=lambda item: float(item.get("requested_at_epoch") or 0.0), reverse=True)
+    return items
+
+
+def dismiss_notification_entry(
+    db_path: DatabaseTarget,
+    *,
+    notification_key: str,
+    dismissed_at_utc: str,
+) -> bool:
+    normalized_key = str(notification_key or "").strip()
+    if not normalized_key:
+        return False
+    dismissed_at = _parse_iso_to_utc(dismissed_at_utc)
+    try:
+        with _session_scope(db_path) as session:
+            row = session.get(NotificationDismissalRow, normalized_key)
+            if row is None:
+                row = NotificationDismissalRow(
+                    notification_key=normalized_key,
+                    dismissed_at_utc=dismissed_at.isoformat(),
+                    dismissed_at_epoch=dismissed_at.timestamp(),
+                )
+                session.add(row)
+            else:
+                row.dismissed_at_utc = dismissed_at.isoformat()
+                row.dismissed_at_epoch = dismissed_at.timestamp()
+        return True
+    except SQLAlchemyError:
+        return False
 
 
 def insert_sample(db_path: DatabaseTarget, sample: EnergySample) -> None:
