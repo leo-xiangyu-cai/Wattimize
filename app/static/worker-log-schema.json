@@ -1,0 +1,84 @@
+{
+  "categories": {
+    "all": {
+      "value": "all",
+      "system": null,
+      "services": ["tesla", "notification", "operation", "combined_assembly"],
+      "statuses": ["pending", "ok", "failed", "timeout", "skipped", "send", "applied", "noop", "outside_window"]
+    },
+    "saj": {
+      "value": "saj",
+      "system": "saj",
+      "services": [],
+      "statuses": ["pending", "ok", "failed", "timeout", "skipped"]
+    },
+    "solplanet": {
+      "value": "solplanet",
+      "system": "solplanet",
+      "services": [],
+      "statuses": ["pending", "ok", "failed", "timeout", "skipped"]
+    },
+    "combined": {
+      "value": "combined",
+      "system": "combined",
+      "services": ["combined_assembly"],
+      "statuses": ["pending", "ok", "failed", "timeout"]
+    },
+    "tesla": {
+      "value": "tesla",
+      "system": "tesla",
+      "services": ["tesla"],
+      "statuses": ["pending", "ok", "failed", "timeout", "skipped"]
+    },
+    "notification": {
+      "value": "notification",
+      "system": "notification",
+      "services": ["notification"],
+      "statuses": ["pending", "send", "noop", "failed", "timeout"]
+    },
+    "operation": {
+      "value": "operation",
+      "system": "operation",
+      "services": ["operation"],
+      "statuses": ["pending", "applied", "noop", "outside_window", "skipped", "timeout", "failed"]
+    }
+  },
+  "services": {
+    "tesla": {
+      "value": "tesla",
+      "category": "tesla",
+      "system": "tesla",
+      "statuses": ["pending", "ok", "failed", "timeout", "skipped"]
+    },
+    "notification": {
+      "value": "notification",
+      "category": "notification",
+      "system": "notification",
+      "statuses": ["pending", "send", "noop", "failed", "timeout"]
+    },
+    "operation": {
+      "value": "operation",
+      "category": "operation",
+      "system": "operation",
+      "statuses": ["pending", "applied", "noop", "outside_window", "skipped", "timeout", "failed"]
+    },
+    "combined_assembly": {
+      "value": "combined_assembly",
+      "category": "combined",
+      "system": "combined",
+      "statuses": ["pending", "ok", "failed", "timeout"]
+    }
+  },
+  "statuses": {
+    "pending": { "value": "pending" },
+    "ok": { "value": "ok" },
+    "failed": { "value": "failed" },
+    "timeout": { "value": "timeout" },
+    "skipped": { "value": "skipped" },
+    "outside_window": { "value": "outside_window" },
+    "noop": { "value": "noop" },
+    "applied": { "value": "applied" },
+    "send": { "value": "send" },
+    "dismissed": { "value": "dismissed" }
+  }
+}

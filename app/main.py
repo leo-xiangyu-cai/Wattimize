@@ -41,7 +41,9 @@ from app.home_assistant import HomeAssistantClient
 from app.persistence import (
     DEFAULT_DB_PATH,
     EnergySample,
+    migrate_worker_log_legacy_statuses,
     count_pending_worker_api_logs,
+    backfill_notification_entries_from_worker_logs,
     compute_daily_usage,
     compute_usage_between,
     dismiss_notification_entry,
@@ -65,10 +67,35 @@ from app.persistence import (
     list_realtime_kv_rows,
     list_samples,
     list_worker_api_logs,
+    upsert_notification_entries,
     update_worker_api_log,
     upsert_realtime_kv,
 )
 from app.solplanet_cgi import SolplanetCgiClient
+from app.worker_log_schema import (
+    WORKER_LOG_CATEGORY_ALL,
+    WORKER_LOG_CATEGORY_COMBINED,
+    WORKER_LOG_CATEGORY_NOTIFICATION,
+    WORKER_LOG_CATEGORY_OPERATION,
+    WORKER_LOG_CATEGORY_SAJ,
+    WORKER_LOG_CATEGORY_SOLPLANET,
+    WORKER_LOG_CATEGORY_TESLA,
+    WORKER_LOG_NOTIFICATION_ACTIVE_STATUSES,
+    WORKER_LOG_STATUS_APPLIED,
+    WORKER_LOG_STATUS_FAILED,
+    WORKER_LOG_STATUS_NOOP,
+    WORKER_LOG_STATUS_OK,
+    WORKER_LOG_STATUS_OUTSIDE_WINDOW,
+    WORKER_LOG_STATUS_PENDING,
+    WORKER_LOG_STATUS_SEND,
+    WORKER_LOG_STATUS_SKIPPED,
+    WORKER_LOG_STATUS_TIMEOUT,
+    category_config as worker_log_category_config,
+    category_service_values as worker_log_category_service_values,
+    category_status_values as worker_log_category_status_values,
+    service_config as worker_log_service_config,
+    service_status_values as worker_log_service_status_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +168,14 @@ WORKER_SUMMARY_SERVICES: tuple[tuple[str, str], ...] = (
     (TESLA_LOG_SYSTEM, TESLA_OBSERVATION_SERVICE),
     (NOTIFICATION_LOG_SYSTEM, NOTIFICATION_SUMMARY_SERVICE),
     (OPERATION_LOG_SYSTEM, OPERATION_SUMMARY_SERVICE),
+)
+WORKER_LOG_LEGACY_STATUSES: tuple[str, ...] = (
+    "notification",
+    "no_notification",
+    "notified",
+    "alarmed",
+    "operation",
+    "nop",
 )
 
 app = FastAPI(title="Wattimize API", version="0.1.0")
@@ -336,7 +371,7 @@ def _worker_round_log_plan(round_number: int, round_id: str, requested_at_utc: s
 
     saj_url = f"{settings.ha_url}/api/states" if settings.ha_url else ""
     saj_endpoint = "home_assistant_all_states"
-    saj_status = "pending" if _endpoint_is_eligible("saj", saj_endpoint, round_number) else "skipped"
+    saj_status = WORKER_LOG_STATUS_PENDING if _endpoint_is_eligible("saj", saj_endpoint, round_number) else WORKER_LOG_STATUS_SKIPPED
     plan.append(
         {
             "request_token": _worker_log_request_token(round_id, "home_assistant", "GET", saj_url),
@@ -352,7 +387,7 @@ def _worker_round_log_plan(round_number: int, round_id: str, requested_at_utc: s
             "status_code": None,
             "duration_ms": None,
             "result_text": None,
-            "error_text": "endpoint_backoff" if saj_status == "skipped" else None,
+            "error_text": "endpoint_backoff" if saj_status == WORKER_LOG_STATUS_SKIPPED else None,
         }
     )
 
@@ -368,7 +403,7 @@ def _worker_round_log_plan(round_number: int, round_id: str, requested_at_utc: s
             if settings.solplanet_dongle_host
             else path
         )
-        endpoint_status = "pending" if _endpoint_is_eligible("solplanet", endpoint, round_number) else "skipped"
+        endpoint_status = WORKER_LOG_STATUS_PENDING if _endpoint_is_eligible("solplanet", endpoint, round_number) else WORKER_LOG_STATUS_SKIPPED
         plan.append(
             {
                 "request_token": _worker_log_request_token(round_id, "solplanet_cgi", "GET", api_link),
@@ -384,7 +419,7 @@ def _worker_round_log_plan(round_number: int, round_id: str, requested_at_utc: s
                 "status_code": None,
                 "duration_ms": None,
                 "result_text": None,
-                "error_text": "endpoint_backoff" if endpoint_status == "skipped" else None,
+                "error_text": "endpoint_backoff" if endpoint_status == WORKER_LOG_STATUS_SKIPPED else None,
             }
         )
 
@@ -401,7 +436,7 @@ def _worker_round_log_plan(round_number: int, round_id: str, requested_at_utc: s
                 "api_link": api_link,
                 "requested_at_utc": requested_at_utc,
                 "ok": False,
-                "status": "pending",
+                "status": WORKER_LOG_STATUS_PENDING,
                 "status_code": None,
                 "duration_ms": None,
                 "result_text": None,
@@ -468,7 +503,7 @@ def _handle_outbound_request_log(event: dict[str, object]) -> None:
                 storage_db_path,
                 request_token=request_token,
                 ok=ok,
-                status="ok" if ok else "failed",
+                status=WORKER_LOG_STATUS_OK if ok else WORKER_LOG_STATUS_FAILED,
                 status_code=status_code,
                 duration_ms=duration_ms,
                 result_text=result_text,
@@ -486,7 +521,7 @@ def _handle_outbound_request_log(event: dict[str, object]) -> None:
                 api_link=api_link,
                 requested_at_utc=worker_requested_at,
                 ok=ok,
-                status="ok" if ok else "failed",
+                status=WORKER_LOG_STATUS_OK if ok else WORKER_LOG_STATUS_FAILED,
                 status_code=status_code,
                 duration_ms=duration_ms,
                 result_text=result_text,
@@ -1986,15 +2021,35 @@ def _worker_action_map(payload: dict[str, object]) -> dict[str, object]:
     return action if isinstance(action, dict) else {}
 
 
+def _worker_action_list(payload: dict[str, object]) -> list[dict[str, object]]:
+    actions = payload.get("actions")
+    action_list = [item for item in actions if isinstance(item, dict)] if isinstance(actions, list) else []
+    if action_list:
+        return action_list
+    action = payload.get("action")
+    return [action] if isinstance(action, dict) else []
+
+
+def _append_worker_action(payload: dict[str, object], action: dict[str, object]) -> None:
+    actions = payload.get("actions")
+    if isinstance(actions, list):
+        actions.append(action)
+    else:
+        payload["actions"] = [action]
+    payload["action"] = action
+
+
 def _worker_action_steps(action_map: dict[str, object]) -> list[str]:
     steps = action_map.get("steps")
     return [str(item) for item in steps if str(item).strip()] if isinstance(steps, list) else []
 
 
 def _worker_has_operation(payload: dict[str, object]) -> bool:
-    action_map = _worker_action_map(payload)
-    action_type = str(action_map.get("type") or "").strip().lower()
-    return action_type not in ("", "noop")
+    for action_map in _worker_action_list(payload):
+        action_type = str(action_map.get("type") or "").strip().lower()
+        if action_type not in ("", "noop"):
+            return True
+    return False
 
 
 def _worker_effective_window_mode(payload: dict[str, object]) -> str:
@@ -2067,14 +2122,18 @@ def _worker_primary_notification(payload: dict[str, object]) -> dict[str, object
 
 
 def _worker_operation_detail_text(payload: dict[str, object]) -> str:
-    action_map = _worker_action_map(payload)
-    action_type = str(action_map.get("type") or "noop").strip().lower()
-    steps = _worker_action_steps(action_map)
-    if action_type == "stop_charging":
-        return "stop_charging"
-    if steps:
-        return ", ".join(steps)
-    return str(action_map.get("reason") or action_type or "noop")
+    details: list[str] = []
+    for action_map in _worker_action_list(payload):
+        action_type = str(action_map.get("type") or "noop").strip().lower()
+        steps = _worker_action_steps(action_map)
+        if action_type == "stop_charging":
+            details.append("stop_charging")
+            continue
+        if steps:
+            details.append(", ".join(steps))
+            continue
+        details.append(str(action_map.get("reason") or action_type or "noop"))
+    return " | ".join(item for item in details if item) or "noop"
 
 
 def _worker_check_priority(payload: dict[str, object]) -> tuple[int, int]:
@@ -2103,7 +2162,7 @@ def _select_worker_summary_source(
             "window_mode": "off",
             "window_schedule": _window_schedule_text("off"),
             "window_active": False,
-            "log_status": "skipped",
+            "log_status": WORKER_LOG_STATUS_SKIPPED,
             "log_ok": False,
             "log_error_text": "worker_check_unavailable",
         }
@@ -2118,13 +2177,36 @@ def _collect_worker_notifications(*sources: dict[str, object] | None) -> list[di
     return notifications
 
 
+def _collect_worker_actions(*sources: dict[str, object] | None) -> list[dict[str, object]]:
+    actions: list[dict[str, object]] = []
+    for source in sources:
+        if isinstance(source, dict):
+            actions.extend(_worker_action_list(source))
+    return actions
+
+
+def _notification_entity_from_payload(notification: dict[str, object]) -> dict[str, object]:
+    code = str(notification.get("code") or "unknown").strip() or "unknown"
+    target = str(notification.get("target") or "").strip()
+    return {
+        **notification,
+        "notification_key": f"{code}::{target}",
+        "code": code,
+        "target": target,
+        "level": str(notification.get("level") or "info").strip().lower() or "info",
+        "message": str(notification.get("message") or code or "Notification").strip() or code,
+        "trigger_text": _worker_notification_trigger_text(notification),
+        "window": str(notification.get("window") or "").strip(),
+    }
+
+
 def _build_notification_summary_payload(
     source: dict[str, object],
     *,
     notifications: list[dict[str, object]] | None = None,
 ) -> tuple[str, bool, dict[str, object], str | None]:
     notifications = list(notifications or _worker_notification_list(source))
-    status = "notification" if notifications else "no_notification"
+    status = WORKER_LOG_STATUS_SEND if notifications else WORKER_LOG_STATUS_NOOP
     payload = {
         "record_kind": "notification",
         "window_mode": _worker_window_name(source),
@@ -2137,9 +2219,14 @@ def _build_notification_summary_payload(
     return status, bool(source.get("log_ok", True)), payload, error_text
 
 
-def _build_operation_summary_payload(source: dict[str, object]) -> tuple[str, bool, dict[str, object], str | None]:
-    action_map = _worker_action_map(source)
-    status = "operation" if _worker_has_operation(source) else "nop"
+def _build_operation_summary_payload(
+    source: dict[str, object],
+    *,
+    actions: list[dict[str, object]] | None = None,
+) -> tuple[str, bool, dict[str, object], str | None]:
+    action_list = list(actions or _worker_action_list(source))
+    action_map = action_list[-1] if action_list else {}
+    status = WORKER_LOG_STATUS_APPLIED if any(str(item.get("type") or "").strip().lower() not in ("", "noop") for item in action_list) else WORKER_LOG_STATUS_NOOP
     payload = {
         "record_kind": "operation",
         "window_mode": _worker_window_name(source),
@@ -2147,6 +2234,12 @@ def _build_operation_summary_payload(source: dict[str, object]) -> tuple[str, bo
         "window_active": bool(source.get("window_active")),
         "source_status": source.get("log_status"),
         "decision_reason": source.get("decision_reason"),
+        "decision_reasons": [
+            str(item.get("decision_reason") or "").strip()
+            for item in [source]
+            if isinstance(item, dict) and str(item.get("decision_reason") or "").strip()
+        ],
+        "actions": action_list,
         "action": action_map,
     }
     error_text = str(source.get("log_error_text") or "").strip() or None
@@ -2174,7 +2267,7 @@ def _dashboard_notification_item(entry: dict[str, object]) -> dict[str, object]:
     level = str(notification_map.get("level") or "info").strip().lower() or "info"
     return {
         "notification_key": str(entry.get("notification_key") or ""),
-        "state": "notified",
+        "state": str(entry.get("status") or "active"),
         "level": level,
         "code": str(notification_map.get("code") or "unknown"),
         "target": str(notification_map.get("target") or ""),
@@ -5880,7 +5973,7 @@ async def _await_round_request_log_settlement(
         storage_db_path,
         round_id=round_id,
         services=services,
-        status="timeout",
+        status=WORKER_LOG_STATUS_TIMEOUT,
         error_text=timeout_error_text,
     )
 
@@ -5927,16 +6020,16 @@ def _worker_control_result_text(
         window_mode = _worker_window_name(payload)
         window_schedule = _worker_window_label(payload)
         notification = _worker_primary_notification(payload)
-        if status == "notification" and notification:
+        if status == WORKER_LOG_STATUS_SEND and notification:
             code = str(notification.get("code") or "unknown").strip()
             trigger = _worker_notification_trigger_text(notification)
             return (
-                "Notification notification: "
+                f"Notification {status}: "
                 f"window={window_mode}, schedule={window_schedule}, "
                 f"reason={code}, trigger={trigger}"
             )
         return (
-            "Notification no_notification: "
+            f"Notification {status}: "
             f"window={window_mode}, schedule={window_schedule}, "
             f"reason={error_text or 'no_notification_triggered'}"
         )
@@ -5945,14 +6038,14 @@ def _worker_control_result_text(
         window_schedule = _worker_window_label(payload)
         detail = _worker_operation_detail_text(payload)
         decision_reason = str(payload.get("decision_reason") or "-")
-        if status == "operation":
+        if status == WORKER_LOG_STATUS_APPLIED:
             return (
-                "Operation operation: "
+                f"Operation {status}: "
                 f"window={window_mode}, schedule={window_schedule}, "
                 f"action={detail}, reason={decision_reason}"
             )
         return (
-            "Operation nop: "
+            f"Operation {status}: "
             f"window={window_mode}, schedule={window_schedule}, "
             f"reason={decision_reason if decision_reason != '-' else detail}"
         )
@@ -6256,7 +6349,7 @@ async def _persist_worker_control_log(
     status: str,
     payload: dict[str, object],
     error_text: str | None = None,
-) -> None:
+) -> int | None:
     normalized_round_id = str(round_id or "").strip() or str(request_round_ctx.get() or "").strip()
     api_link = f"worker://{system}/{service}"
     request_token = _worker_log_request_token(normalized_round_id, service, "AUTO", api_link)
@@ -6264,7 +6357,7 @@ async def _persist_worker_control_log(
     payload_json = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
     try:
         if request_token:
-            await asyncio.to_thread(
+            log_id = await asyncio.to_thread(
                 update_worker_api_log,
                 storage_db_path,
                 request_token=request_token,
@@ -6276,8 +6369,8 @@ async def _persist_worker_control_log(
                 error_text=error_text,
                 payload_json=payload_json,
             )
-            return
-        await asyncio.to_thread(
+            return log_id
+        log_id = await asyncio.to_thread(
             insert_worker_api_log,
             storage_db_path,
             request_token=request_token or None,
@@ -6296,8 +6389,10 @@ async def _persist_worker_control_log(
             error_text=error_text,
             payload_json=payload_json,
         )
+        return log_id
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to persist worker control log for %s/%s: %s", system, service, exc)
+        return None
 
 
 async def _persist_worker_summary_logs(
@@ -6311,11 +6406,17 @@ async def _persist_worker_summary_logs(
 ) -> None:
     source = _select_worker_summary_source(midday_result, saj_watch_result, battery_full_result)
     all_notifications = _collect_worker_notifications(midday_result, saj_watch_result, battery_full_result)
+    all_actions = _collect_worker_actions(midday_result, saj_watch_result, battery_full_result)
+    all_decision_reasons = [
+        str(item.get("decision_reason") or "").strip()
+        for item in (midday_result, saj_watch_result, battery_full_result)
+        if isinstance(item, dict) and str(item.get("decision_reason") or "").strip()
+    ]
     notification_status, notification_ok, notification_payload, notification_error_text = _build_notification_summary_payload(
         source,
         notifications=all_notifications,
     )
-    await _persist_worker_control_log(
+    notification_log_id = await _persist_worker_control_log(
         round_id=round_id,
         system=NOTIFICATION_LOG_SYSTEM,
         service=NOTIFICATION_SUMMARY_SERVICE,
@@ -6326,7 +6427,29 @@ async def _persist_worker_summary_logs(
         payload=notification_payload,
         error_text=notification_error_text,
     )
-    operation_status, operation_ok, operation_payload, operation_error_text = _build_operation_summary_payload(source)
+    if notification_status == WORKER_LOG_STATUS_SEND:
+        notification_entities = [
+            _notification_entity_from_payload(item)
+            for item in _worker_notification_list(notification_payload)
+            if isinstance(item, dict)
+        ]
+        if notification_entities:
+            await asyncio.to_thread(
+                upsert_notification_entries,
+                storage_db_path,
+                notifications=notification_entities,
+                requested_at_utc=requested_at_utc,
+                source_system=NOTIFICATION_LOG_SYSTEM,
+                source_service=NOTIFICATION_SUMMARY_SERVICE,
+                log_id=notification_log_id,
+            )
+    operation_status, operation_ok, operation_payload, operation_error_text = _build_operation_summary_payload(
+        source,
+        actions=all_actions,
+    )
+    operation_payload["decision_reasons"] = all_decision_reasons
+    if all_decision_reasons and not operation_payload.get("decision_reason"):
+        operation_payload["decision_reason"] = all_decision_reasons[-1]
     await _persist_worker_control_log(
         round_id=round_id,
         system=OPERATION_LOG_SYSTEM,
@@ -6868,11 +6991,12 @@ async def worker_logs(
     service: str | None = Query(default=None, description="home_assistant or solplanet_cgi"),
     status: str | None = Query(
         default=None,
-        description="ok/failed/pending/skipped/applied/noop/notification/no_notification/operation/nop/timeout",
+        description="worker log status defined in worker-log-schema.json",
     ),
     exclude_status: str | None = Query(default=None, description="comma-separated statuses to exclude"),
-    category: str | None = Query(default=None, description="all/saj/solplanet/combined/tesla/notification/operation"),
+    category: str | None = Query(default=None, description="worker log category defined in worker-log-schema.json"),
 ) -> dict[str, object]:
+    valid_status_values = set(worker_log_category_status_values(WORKER_LOG_CATEGORY_ALL)) | set(WORKER_LOG_LEGACY_STATUSES)
     normalized_system: str | None = None
     normalized_service = str(service or "").strip() or None
     normalized_status = str(status or "").strip().lower() or None
@@ -6885,40 +7009,46 @@ async def worker_logs(
         if part
     )
     normalized_category = str(category or "").strip().lower()
-    if normalized_category in ("all", ""):
+    if normalized_service and not worker_log_service_config(normalized_service):
+        raise HTTPException(status_code=400, detail=f"unknown worker log service: {normalized_service}")
+    if normalized_status and normalized_status not in valid_status_values:
+        raise HTTPException(status_code=400, detail=f"unknown worker log status: {normalized_status}")
+    if normalized_category in (WORKER_LOG_CATEGORY_ALL, ""):
         normalized_category = ""
-    if normalized_category == "saj":
-        normalized_system = "saj"
-        normalized_service = None
-    elif normalized_category == "solplanet":
-        normalized_system = "solplanet"
-        normalized_service = None
-    elif normalized_category == "combined":
-        normalized_system = "combined"
-        normalized_service = "combined_assembly"
-    elif normalized_category == "tesla":
-        normalized_system = TESLA_LOG_SYSTEM
-        normalized_service = None
-    elif normalized_category in ("notification", "alarm"):
-        normalized_system = NOTIFICATION_LOG_SYSTEM
-        normalized_service = None
-    elif normalized_category == "operation":
-        normalized_system = OPERATION_LOG_SYSTEM
-        normalized_service = None
+    category_entry = worker_log_category_config(normalized_category) if normalized_category else None
+    if category_entry:
+        normalized_system = str(category_entry.get("system") or "").strip() or None
+        allowed_services = worker_log_category_service_values(normalized_category)
+        if normalized_service and normalized_service not in allowed_services:
+            raise HTTPException(status_code=400, detail=f"service {normalized_service} is not valid for category {normalized_category}")
+        if not normalized_service and len(allowed_services) == 1:
+            normalized_service = allowed_services[0]
     elif system:
         normalized_system = _normalize_system_name(system)
     elif normalized_category:
         raise HTTPException(
             status_code=400,
-            detail="category must be one of: all, saj, solplanet, combined, tesla, notification, operation",
+            detail="category must be one of the values defined in worker-log-schema.json",
         )
     elif system:
         normalized_system = _normalize_system_name(system)
+    allowed_statuses = (
+        worker_log_service_status_values(normalized_service)
+        if normalized_service
+        else worker_log_category_status_values(normalized_category or WORKER_LOG_CATEGORY_ALL)
+    )
+    allowed_statuses = tuple(dict.fromkeys([*allowed_statuses, *WORKER_LOG_LEGACY_STATUSES]))
+    if normalized_status and allowed_statuses and normalized_status not in allowed_statuses:
+        raise HTTPException(status_code=400, detail=f"status {normalized_status} is not valid for the selected category/service")
+    if excluded_statuses and allowed_statuses:
+        invalid_excluded = [item for item in excluded_statuses if item not in allowed_statuses]
+        if invalid_excluded:
+            raise HTTPException(status_code=400, detail=f"invalid excluded statuses: {', '.join(invalid_excluded)}")
     await asyncio.to_thread(
         expire_pending_worker_api_logs,
         storage_db_path,
         older_than_epoch=datetime.now(UTC).timestamp() - WORKER_PENDING_LOG_TIMEOUT_SECONDS,
-        status="timeout",
+        status=WORKER_LOG_STATUS_TIMEOUT,
         error_text="worker_log_timeout",
     )
     payload = await asyncio.to_thread(
@@ -6943,7 +7073,7 @@ async def dashboard_notifications() -> dict[str, object]:
         storage_db_path,
         system=NOTIFICATION_LOG_SYSTEM,
         service=NOTIFICATION_SUMMARY_SERVICE,
-        status="notification",
+        status=WORKER_LOG_NOTIFICATION_ACTIVE_STATUSES,
     )
     items = [_dashboard_notification_item(entry) for entry in entries]
     items.sort(
@@ -7953,6 +8083,15 @@ async def on_shutdown() -> None:
 
 @app.on_event("startup")
 async def on_startup() -> None:
+    await asyncio.to_thread(init_db, storage_db_path)
+    await asyncio.to_thread(migrate_worker_log_legacy_statuses, storage_db_path)
+    await asyncio.to_thread(
+        backfill_notification_entries_from_worker_logs,
+        storage_db_path,
+        system=NOTIFICATION_LOG_SYSTEM,
+        service=NOTIFICATION_SUMMARY_SERVICE,
+        active_statuses=(WORKER_LOG_STATUS_SEND, "notification", "notified", "alarmed"),
+    )
     await _start_collector()
 
 

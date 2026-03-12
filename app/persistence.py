@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -12,6 +13,23 @@ from typing import Any, Optional
 from sqlalchemy import Column, Float, Integer, String, create_engine, desc, func, inspect, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
+from app.worker_log_schema import (
+    WORKER_LOG_STATUS_PENDING,
+    WORKER_LOG_STATUS_TIMEOUT,
+    status_config as worker_log_status_config,
+)
+
+NOTIFICATION_STATUS_ACTIVE = "active"
+NOTIFICATION_STATUS_DISMISSED = "dismissed"
+WORKER_LOG_LEGACY_STATUS_MAP: dict[str, str] = {
+    "notification": "send",
+    "notified": "send",
+    "alarmed": "send",
+    "no_notification": "noop",
+    "operation": "applied",
+    "nop": "noop",
+}
 
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "energy_samples.sqlite3"
@@ -142,6 +160,31 @@ class NotificationDismissalRow(Base):
     notification_key = Column(String, primary_key=True)
     dismissed_at_utc = Column(String, nullable=False)
     dismissed_at_epoch = Column(Float, nullable=False, index=True)
+
+
+class NotificationEntryRow(Base):
+    __tablename__ = "notifications"
+
+    notification_key = Column(String, primary_key=True)
+    code = Column(String, nullable=False, index=True)
+    target = Column(String, nullable=False, index=True)
+    level = Column(String, nullable=False)
+    title = Column(String)
+    message = Column(String, nullable=False)
+    trigger_text = Column(String)
+    window = Column(String)
+    source_system = Column(String)
+    source_service = Column(String)
+    status = Column(String, nullable=False, index=True)
+    first_seen_at_utc = Column(String, nullable=False)
+    first_seen_at_epoch = Column(Float, nullable=False, index=True)
+    last_seen_at_utc = Column(String, nullable=False)
+    last_seen_at_epoch = Column(Float, nullable=False, index=True)
+    first_log_id = Column(Integer)
+    last_log_id = Column(Integer)
+    dismissed_at_utc = Column(String)
+    dismissed_at_epoch = Column(Float)
+    payload_json = Column(String)
 
 
 class RawRequestResultRow(Base):
@@ -278,6 +321,24 @@ def _truncate_payload_text(text_value: str | None) -> str:
     return f"{raw[:keep]}{tail}"
 
 
+def _normalize_worker_log_status(status: str | None) -> str | None:
+    normalized = str(status or "").strip().lower()
+    if not normalized:
+        return None
+    if worker_log_status_config(normalized):
+        return normalized
+    return normalized
+
+
+def _normalize_notification_key(notification_key: str | None, *, code: str | None = None, target: str | None = None) -> str:
+    normalized_key = str(notification_key or "").strip()
+    if normalized_key:
+        return normalized_key
+    normalized_code = str(code or "unknown").strip() or "unknown"
+    normalized_target = str(target or "").strip()
+    return f"{normalized_code}::{normalized_target}"
+
+
 def _paginate(page: int, page_size: int) -> tuple[int, int]:
     safe_page = max(1, page)
     safe_page_size = min(500, max(1, page_size))
@@ -397,6 +458,32 @@ def init_db(db_path: DatabaseTarget) -> None:
             conn.execute(text("ALTER TABLE worker_api_logs ADD COLUMN status VARCHAR"))
         if "payload_json" not in worker_columns:
             conn.execute(text("ALTER TABLE worker_api_logs ADD COLUMN payload_json VARCHAR"))
+    notification_columns = {column["name"] for column in inspector.get_columns("notifications")}
+    with engine.begin() as conn:
+        if "title" not in notification_columns:
+            conn.execute(text("ALTER TABLE notifications ADD COLUMN title VARCHAR"))
+
+
+def migrate_worker_log_legacy_statuses(db_path: DatabaseTarget) -> int:
+    if not _db_exists(db_path):
+        return 0
+    updated = 0
+    try:
+        with _session_scope(db_path) as session:
+            rows = session.scalars(
+                select(WorkerApiLogRow).where(WorkerApiLogRow.status.in_(tuple(WORKER_LOG_LEGACY_STATUS_MAP.keys())))
+            ).all()
+            for row in rows:
+                normalized = WORKER_LOG_LEGACY_STATUS_MAP.get(str(row.status or "").strip().lower())
+                if not normalized:
+                    continue
+                if str(row.status or "").strip().lower() == normalized:
+                    continue
+                row.status = normalized
+                updated += 1
+        return updated
+    except SQLAlchemyError:
+        return 0
 
 
 def insert_worker_api_log(
@@ -419,6 +506,7 @@ def insert_worker_api_log(
     payload_json: str | None = None,
 ) -> int:
     requested = _parse_iso_to_utc(requested_at_utc)
+    normalized_status = _normalize_worker_log_status(status)
     with _session_scope(db_path) as session:
         row = WorkerApiLogRow(
             request_token=str(request_token or "") or None,
@@ -431,7 +519,7 @@ def insert_worker_api_log(
             requested_at_utc=requested.isoformat(),
             requested_at_epoch=requested.timestamp(),
             ok=1 if ok else 0,
-            status=str(status or "") or None,
+            status=normalized_status,
             status_code=status_code,
             duration_ms=duration_ms,
             result_text=_truncate_result_text(result_text),
@@ -454,9 +542,10 @@ def update_worker_api_log(
     result_text: str | None,
     error_text: str | None,
     payload_json: str | None = None,
-) -> None:
+ ) -> int | None:
     if not request_token:
-        return
+        return None
+    normalized_status = _normalize_worker_log_status(status)
     with _session_scope(db_path) as session:
         row = session.scalar(
             select(WorkerApiLogRow)
@@ -465,33 +554,35 @@ def update_worker_api_log(
             .limit(1)
         )
         if row is None:
-            return
+            return None
         row.ok = 1 if ok else 0
-        row.status = str(status or "") or None
+        row.status = normalized_status
         row.status_code = status_code
         row.duration_ms = duration_ms
         row.result_text = _truncate_result_text(result_text)
         row.error_text = str(error_text or "") or None
         row.payload_json = _truncate_payload_text(payload_json) if payload_json is not None else row.payload_json
+        session.flush()
+        return int(row.id)
 
 
 def expire_pending_worker_api_logs(
     db_path: DatabaseTarget,
     *,
     older_than_epoch: float,
-    status: str = "timeout",
+    status: str = WORKER_LOG_STATUS_TIMEOUT,
     error_text: str = "worker_log_timeout",
 ) -> int:
     with _session_scope(db_path) as session:
         rows = session.scalars(
             select(WorkerApiLogRow).where(
-                WorkerApiLogRow.status == "pending",
+                WorkerApiLogRow.status == WORKER_LOG_STATUS_PENDING,
                 WorkerApiLogRow.requested_at_epoch < float(older_than_epoch),
             )
         ).all()
         for row in rows:
             row.ok = 0
-            row.status = str(status or "timeout")
+            row.status = _normalize_worker_log_status(status) or WORKER_LOG_STATUS_TIMEOUT
             row.error_text = row.error_text or str(error_text or "worker_log_timeout")
         return len(rows)
 
@@ -501,7 +592,7 @@ def finalize_pending_worker_api_logs_for_round(
     *,
     round_id: str,
     services: tuple[str, ...] | None = None,
-    status: str = "timeout",
+    status: str = WORKER_LOG_STATUS_TIMEOUT,
     error_text: str = "worker_round_incomplete",
 ) -> int:
     normalized_round_id = str(round_id or "").strip()
@@ -513,14 +604,14 @@ def finalize_pending_worker_api_logs_for_round(
     with _session_scope(db_path) as session:
         stmt = select(WorkerApiLogRow).where(
             WorkerApiLogRow.round_id == normalized_round_id,
-            WorkerApiLogRow.status == "pending",
+            WorkerApiLogRow.status == WORKER_LOG_STATUS_PENDING,
         )
         if normalized_services:
             stmt = stmt.where(WorkerApiLogRow.service.in_(normalized_services))
         rows = session.scalars(stmt).all()
         for row in rows:
             row.ok = 0
-            row.status = str(status or "timeout")
+            row.status = _normalize_worker_log_status(status) or WORKER_LOG_STATUS_TIMEOUT
             row.error_text = row.error_text or str(error_text or "worker_round_incomplete")
         return len(rows)
 
@@ -573,21 +664,31 @@ def list_worker_api_logs(
         with _session_scope(db_path) as session:
             stmt = select(WorkerApiLogRow)
             count_stmt = select(func.count()).select_from(WorkerApiLogRow)
-            filters = []
+            status_count_stmt = select(
+                WorkerApiLogRow.status,
+                func.count().label("count"),
+            ).select_from(WorkerApiLogRow)
+            base_filters = []
             if worker:
-                filters.append(WorkerApiLogRow.worker == worker)
+                base_filters.append(WorkerApiLogRow.worker == worker)
             if system:
-                filters.append(WorkerApiLogRow.system == system)
+                base_filters.append(WorkerApiLogRow.system == system)
             if service:
-                filters.append(WorkerApiLogRow.service == service)
+                base_filters.append(WorkerApiLogRow.service == service)
             if status:
-                filters.append(WorkerApiLogRow.status == status)
+                base_filters.append(WorkerApiLogRow.status == status)
+            if base_filters:
+                status_count_stmt = status_count_stmt.where(*base_filters)
+            filters = list(base_filters)
             if normalized_excluded_statuses:
                 filters.append(func.coalesce(WorkerApiLogRow.status, "").not_in(normalized_excluded_statuses))
             if filters:
                 stmt = stmt.where(*filters)
                 count_stmt = count_stmt.where(*filters)
             total = int(session.scalar(count_stmt) or 0)
+            status_rows = session.execute(
+                status_count_stmt.group_by(WorkerApiLogRow.status).order_by(WorkerApiLogRow.status.asc())
+            ).all()
             rows = session.scalars(
                 stmt.order_by(desc(WorkerApiLogRow.requested_at_epoch))
                 .offset((safe_page - 1) * safe_page_size)
@@ -627,6 +728,14 @@ def list_worker_api_logs(
         "has_next": end < total,
         "has_prev": safe_page > 1,
         "items": items,
+        "status_counts": [
+            {
+                "status": str(status_value or ""),
+                "count": int(count_value or 0),
+            }
+            for status_value, count_value in status_rows
+            if str(status_value or "").strip()
+        ],
     }
 
 
@@ -643,63 +752,261 @@ def _worker_notification_key(log_id: int, notification_index: int) -> str:
     return f"worker-log-{int(log_id)}-notification-{int(notification_index)}"
 
 
+def _stable_notification_keys_from_dismissals(session: Session) -> set[str]:
+    raw_keys = {
+        str(row.notification_key or "").strip()
+        for row in session.scalars(select(NotificationDismissalRow)).all()
+    }
+    stable_keys = {key for key in raw_keys if key and "::" in key}
+    legacy_refs: list[tuple[int, int]] = []
+    for key in raw_keys:
+        match = re.fullmatch(r"worker-log-(\d+)-notification-(\d+)", key)
+        if not match:
+            continue
+        legacy_refs.append((int(match.group(1)), int(match.group(2))))
+    if not legacy_refs:
+        return stable_keys
+    log_ids = sorted({log_id for log_id, _ in legacy_refs})
+    rows = {
+        int(row.id): row
+        for row in session.scalars(select(WorkerApiLogRow).where(WorkerApiLogRow.id.in_(log_ids))).all()
+    }
+    for log_id, notification_index in legacy_refs:
+        row = rows.get(log_id)
+        if row is None:
+            continue
+        payload = _json_loads(row.payload_json, default={})
+        notification_list = _worker_notification_list_from_payload(payload)
+        if 0 <= notification_index < len(notification_list):
+            notification = notification_list[notification_index]
+            if isinstance(notification, dict):
+                stable_keys.add(
+                    _normalize_notification_key(
+                        notification.get("notification_key"),
+                        code=notification.get("code"),
+                        target=notification.get("target"),
+                    )
+                )
+    return stable_keys
+
+
 def list_active_notification_entries(
     db_path: DatabaseTarget,
     *,
     system: str,
     service: str,
-    status: str,
+    status: str | tuple[str, ...],
 ) -> list[dict[str, object]]:
+    del system, service, status
     if not _db_exists(db_path):
         return []
     try:
         with _session_scope(db_path) as session:
-            dismissed_keys = {
-                str(row.notification_key)
-                for row in session.scalars(select(NotificationDismissalRow)).all()
-            }
+            rows = session.scalars(
+                select(NotificationEntryRow)
+                .where(NotificationEntryRow.status == NOTIFICATION_STATUS_ACTIVE)
+                .order_by(desc(NotificationEntryRow.last_seen_at_epoch))
+            ).all()
+    except SQLAlchemyError:
+        return []
+
+    return [
+        {
+            "notification_key": str(row.notification_key or ""),
+            "status": str(row.status or NOTIFICATION_STATUS_ACTIVE),
+            "log_id": int(row.last_log_id or 0),
+            "requested_at_utc": str(row.last_seen_at_utc or ""),
+            "requested_at_epoch": float(row.last_seen_at_epoch or 0.0),
+            "notification": {
+                "code": str(row.code or "unknown"),
+                "target": str(row.target or ""),
+                "level": str(row.level or "info"),
+                "title": str(row.title or ""),
+                "message": str(row.message or ""),
+                "window": str(row.window or ""),
+            },
+            "payload_json": _json_loads(row.payload_json, default={}),
+        }
+        for row in rows
+    ]
+
+
+def upsert_notification_entries(
+    db_path: DatabaseTarget,
+    *,
+    notifications: list[dict[str, object]],
+    requested_at_utc: str,
+    source_system: str,
+    source_service: str,
+    log_id: int | None = None,
+) -> int:
+    normalized_notifications = [item for item in notifications if isinstance(item, dict)]
+    if not normalized_notifications:
+        return 0
+    seen_at = _parse_iso_to_utc(requested_at_utc)
+    updated = 0
+    try:
+        with _session_scope(db_path) as session:
+            for notification in normalized_notifications:
+                code = str(notification.get("code") or "unknown").strip() or "unknown"
+                target = str(notification.get("target") or "").strip()
+                notification_key = _normalize_notification_key(
+                    notification.get("notification_key"),
+                    code=code,
+                    target=target,
+                )
+                row = session.get(NotificationEntryRow, notification_key)
+                level = str(notification.get("level") or "info").strip().lower() or "info"
+                title = str(notification.get("title") or "").strip() or None
+                message = str(notification.get("message") or code or "Notification").strip() or code
+                trigger_text = str(notification.get("trigger_text") or "").strip() or None
+                window = str(notification.get("window") or "").strip() or None
+                payload_json = json.dumps(notification, ensure_ascii=False, default=str)
+                if row is None:
+                    row = NotificationEntryRow(
+                        notification_key=notification_key,
+                        code=code,
+                        target=target,
+                        level=level,
+                        title=title,
+                        message=message,
+                        trigger_text=trigger_text,
+                        window=window,
+                        source_system=str(source_system or "").strip() or None,
+                        source_service=str(source_service or "").strip() or None,
+                        status=NOTIFICATION_STATUS_ACTIVE,
+                        first_seen_at_utc=seen_at.isoformat(),
+                        first_seen_at_epoch=seen_at.timestamp(),
+                        last_seen_at_utc=seen_at.isoformat(),
+                        last_seen_at_epoch=seen_at.timestamp(),
+                        first_log_id=int(log_id) if log_id else None,
+                        last_log_id=int(log_id) if log_id else None,
+                        payload_json=payload_json,
+                    )
+                    session.add(row)
+                    session.flush()
+                else:
+                    row.code = code
+                    row.target = target
+                    row.level = level
+                    row.title = title
+                    row.message = message
+                    row.trigger_text = trigger_text
+                    row.window = window
+                    row.source_system = str(source_system or "").strip() or None
+                    row.source_service = str(source_service or "").strip() or None
+                    row.status = NOTIFICATION_STATUS_ACTIVE
+                    row.last_seen_at_utc = seen_at.isoformat()
+                    row.last_seen_at_epoch = seen_at.timestamp()
+                    row.last_log_id = int(log_id) if log_id else row.last_log_id
+                    row.dismissed_at_utc = None
+                    row.dismissed_at_epoch = None
+                    row.payload_json = payload_json
+                updated += 1
+        return updated
+    except SQLAlchemyError:
+        return 0
+
+
+def backfill_notification_entries_from_worker_logs(
+    db_path: DatabaseTarget,
+    *,
+    system: str,
+    service: str,
+    active_statuses: tuple[str, ...],
+) -> int:
+    if not _db_exists(db_path):
+        return 0
+    normalized_statuses = tuple(_normalize_worker_log_status(item) for item in active_statuses if item)
+    normalized_statuses = tuple(item for item in normalized_statuses if item)
+    if not normalized_statuses:
+        return 0
+    try:
+        with _session_scope(db_path) as session:
             rows = session.scalars(
                 select(WorkerApiLogRow)
                 .where(
                     WorkerApiLogRow.system == system,
                     WorkerApiLogRow.service == service,
-                    WorkerApiLogRow.status == status,
+                    WorkerApiLogRow.status.in_(normalized_statuses),
                 )
-                .order_by(desc(WorkerApiLogRow.requested_at_epoch))
+                .order_by(WorkerApiLogRow.requested_at_epoch.asc(), WorkerApiLogRow.id.asc())
             ).all()
+            dismissed_keys = _stable_notification_keys_from_dismissals(session)
+            updated = 0
+            for row in rows:
+                payload = _json_loads(row.payload_json, default={})
+                notification_list = _worker_notification_list_from_payload(payload)
+                seen_at = _parse_iso_to_utc(str(row.requested_at_utc or datetime.now(UTC).isoformat()))
+                for notification in notification_list:
+                    if not isinstance(notification, dict):
+                        continue
+                    code = str(notification.get("code") or "unknown").strip() or "unknown"
+                    target = str(notification.get("target") or "").strip()
+                    notification_key = _normalize_notification_key(
+                        notification.get("notification_key"),
+                        code=code,
+                        target=target,
+                    )
+                    row_status = NOTIFICATION_STATUS_DISMISSED if notification_key in dismissed_keys else NOTIFICATION_STATUS_ACTIVE
+                    entry = session.get(NotificationEntryRow, notification_key)
+                    level = str(notification.get("level") or "info").strip().lower() or "info"
+                    title = str(notification.get("title") or "").strip() or None
+                    message = str(notification.get("message") or code or "Notification").strip() or code
+                    trigger_text = str(notification.get("trigger_text") or "").strip() or None
+                    window = str(notification.get("window") or "").strip() or None
+                    payload_json = json.dumps(notification, ensure_ascii=False, default=str)
+                    if entry is None:
+                        entry = NotificationEntryRow(
+                            notification_key=notification_key,
+                            code=code,
+                            target=target,
+                            level=level,
+                            title=title,
+                            message=message,
+                            trigger_text=trigger_text,
+                            window=window,
+                            source_system=str(system or "").strip() or None,
+                            source_service=str(service or "").strip() or None,
+                            status=row_status,
+                            first_seen_at_utc=seen_at.isoformat(),
+                            first_seen_at_epoch=seen_at.timestamp(),
+                            last_seen_at_utc=seen_at.isoformat(),
+                            last_seen_at_epoch=seen_at.timestamp(),
+                            first_log_id=int(row.id),
+                            last_log_id=int(row.id),
+                            dismissed_at_utc=seen_at.isoformat() if row_status == NOTIFICATION_STATUS_DISMISSED else None,
+                            dismissed_at_epoch=seen_at.timestamp() if row_status == NOTIFICATION_STATUS_DISMISSED else None,
+                            payload_json=payload_json,
+                        )
+                        session.add(entry)
+                        session.flush()
+                    else:
+                        if not entry.first_seen_at_utc or float(entry.first_seen_at_epoch or 0.0) > seen_at.timestamp():
+                            entry.first_seen_at_utc = seen_at.isoformat()
+                            entry.first_seen_at_epoch = seen_at.timestamp()
+                            entry.first_log_id = int(row.id)
+                        if float(entry.last_seen_at_epoch or 0.0) <= seen_at.timestamp():
+                            entry.code = code
+                            entry.target = target
+                            entry.level = level
+                            entry.title = title
+                            entry.message = message
+                            entry.trigger_text = trigger_text
+                            entry.window = window
+                            entry.source_system = str(system or "").strip() or None
+                            entry.source_service = str(service or "").strip() or None
+                            entry.status = row_status
+                            entry.last_seen_at_utc = seen_at.isoformat()
+                            entry.last_seen_at_epoch = seen_at.timestamp()
+                            entry.last_log_id = int(row.id)
+                            entry.dismissed_at_utc = seen_at.isoformat() if row_status == NOTIFICATION_STATUS_DISMISSED else None
+                            entry.dismissed_at_epoch = seen_at.timestamp() if row_status == NOTIFICATION_STATUS_DISMISSED else None
+                            entry.payload_json = payload_json
+                    updated += 1
+        return updated
     except SQLAlchemyError:
-        return []
-
-    items: list[dict[str, object]] = []
-    latest_by_group: dict[str, dict[str, object]] = {}
-    for row in rows:
-        payload = _json_loads(row.payload_json, default={})
-        notification_list = _worker_notification_list_from_payload(payload)
-        for index, notification in enumerate(notification_list):
-            notification_key = _worker_notification_key(int(row.id), index)
-            if notification_key in dismissed_keys:
-                continue
-            notification_map = notification if isinstance(notification, dict) else {}
-            group_key = (
-                f"{str(notification_map.get('code') or 'unknown').strip()}::"
-                f"{str(notification_map.get('target') or '').strip()}"
-            )
-            item = {
-                "notification_key": notification_key,
-                "log_id": int(row.id),
-                "round_id": str(row.round_id or ""),
-                "requested_at_utc": str(row.requested_at_utc or ""),
-                "requested_at_epoch": float(row.requested_at_epoch or 0.0),
-                "notification_index": int(index),
-                "notification": notification_map,
-                "payload_json": payload if isinstance(payload, dict) else {},
-            }
-            existing = latest_by_group.get(group_key)
-            if existing is None or float(item["requested_at_epoch"]) > float(existing["requested_at_epoch"]):
-                latest_by_group[group_key] = item
-    items.extend(latest_by_group.values())
-    items.sort(key=lambda item: float(item.get("requested_at_epoch") or 0.0), reverse=True)
-    return items
+        return 0
 
 
 def dismiss_notification_entry(
@@ -714,6 +1021,11 @@ def dismiss_notification_entry(
     dismissed_at = _parse_iso_to_utc(dismissed_at_utc)
     try:
         with _session_scope(db_path) as session:
+            notification_row = session.get(NotificationEntryRow, normalized_key)
+            if notification_row is not None:
+                notification_row.status = NOTIFICATION_STATUS_DISMISSED
+                notification_row.dismissed_at_utc = dismissed_at.isoformat()
+                notification_row.dismissed_at_epoch = dismissed_at.timestamp()
             row = session.get(NotificationDismissalRow, normalized_key)
             if row is None:
                 row = NotificationDismissalRow(

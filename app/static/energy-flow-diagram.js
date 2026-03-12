@@ -930,6 +930,7 @@
       this.edgeStateById = new Map();
       this.edgeMetaById = new Map();
       this.labelMetaById = new Map();
+      this.markerMetaById = new Map();
       this.lastPositions = {};
       this.lastViewport = null;
       this.contentBounds = { minX: 0, minY: 0, maxX: 1, maxY: 1, width: 1, height: 1 };
@@ -977,6 +978,7 @@
     render() {
       this.edgeMetaById.clear();
       this.labelMetaById.clear();
+      this.markerMetaById.clear();
 
       const nodes = this.spec.nodes.map((node) => ({
         ...node,
@@ -1031,6 +1033,9 @@
       this.spec.edges.forEach((edge) => {
         const points = resolveEdgePoints(edge, positions, this.spec, viewport);
         const labelPoint = resolveEdgeLabelPoint(edge, points, this.spec, viewport);
+        const markerPoint = edge.markerPosition
+          ? normalizePoint(edge.markerPosition, viewport, this.spec?.coordinateSystem || "top-left")
+          : polylineMidpoint(points);
         this.edgeMetaById.set(edge.id, {
           id: edge.id,
           points,
@@ -1058,6 +1063,21 @@
             edgeId: edge.id,
             point: labelPoint,
             element: labelEl,
+          });
+        }
+
+        if (edge.markerId) {
+          const markerEl = document.createElement("div");
+          markerEl.id = edge.markerId;
+          markerEl.className = `flow-edge-marker ${edge.markerClassName || ""}`.trim();
+          markerEl.style.left = `${markerPoint.x}px`;
+          markerEl.style.top = `${markerPoint.y}px`;
+          markerEl.setAttribute("aria-hidden", "true");
+          this.labelLayer.appendChild(markerEl);
+          this.markerMetaById.set(edge.markerId, {
+            edgeId: edge.id,
+            point: markerPoint,
+            element: markerEl,
           });
         }
       });
@@ -1184,6 +1204,13 @@
       meta.element.classList.toggle("active", Boolean(active));
       const edgeState = this.edgeStateById.get(meta.edgeId);
       meta.element.dataset.theme = String(edgeState?.theme || "default");
+      return true;
+    }
+
+    setEdgeMarker(markerId, visible) {
+      const meta = this.markerMetaById.get(markerId);
+      if (!meta) return false;
+      meta.element.classList.toggle("visible", Boolean(visible));
       return true;
     }
 

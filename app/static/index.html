@@ -47,9 +47,6 @@
         <button id="tabSajControl" class="tab-btn" type="button" data-tab="sajControl" data-i18n="sajControlTab">
           SAJ Control
         </button>
-        <button id="tabEntities" class="tab-btn" type="button" data-tab="entities" data-i18n="entitiesTab">
-          Entities
-        </button>
         <button id="tabSampling" class="tab-btn" type="button" data-tab="sampling" data-i18n="samplingTab">
           Sampling
         </button>
@@ -261,46 +258,6 @@
         </section>
       </section>
 
-      <section id="entitiesView" class="view hidden">
-        <section class="card">
-          <h2 data-i18n="entityExplorerTitle">Entity Explorer</h2>
-          <form id="filterForm" class="filters">
-            <label data-i18n="domainLabel">
-              Domain
-              <input id="domainInput" type="text" placeholder="sensor" data-i18n-placeholder="domainPlaceholder" />
-            </label>
-            <label data-i18n="brandLabel">
-              Brand
-              <input id="brandInput" type="text" value="saj" placeholder="saj" data-i18n-placeholder="brandPlaceholder" />
-            </label>
-            <label data-i18n="queryLabel">
-              Query
-              <input id="qInput" type="text" placeholder="battery" data-i18n-placeholder="queryPlaceholder" />
-            </label>
-            <button type="submit" class="btn" data-i18n="searchBtn">Search</button>
-          </form>
-          <p id="entityCount" class="muted">-</p>
-          <div class="pager">
-            <button id="prevPageBtn" class="btn secondary" type="button" data-i18n="prevBtn">Prev</button>
-            <span id="pageInfo" class="muted">Page -</span>
-            <button id="nextPageBtn" class="btn secondary" type="button" data-i18n="nextBtn">Next</button>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th data-i18n="tableEntity">Entity</th>
-                  <th data-i18n="tableState">State</th>
-                  <th data-i18n="tableUnit">Unit</th>
-                  <th data-i18n="tableName">Name</th>
-                </tr>
-              </thead>
-              <tbody id="entitiesBody"></tbody>
-            </table>
-          </div>
-        </section>
-      </section>
-
       <section id="samplingView" class="view hidden">
         <section class="card">
           <div class="section-header">
@@ -392,9 +349,9 @@
             <h2 data-i18n="workerLogsTitle">Worker API Logs</h2>
             <span id="workerLogsUpdatedAt" class="muted">-</span>
           </div>
-          <div class="sampling-top-filters">
-            <label data-i18n="workerLogsCategoryLabel">
-              Category
+          <div class="sampling-top-filters worker-logs-filters">
+            <label class="worker-logs-filter-field" data-i18n="workerLogsCategoryLabel">
+              <span class="worker-logs-filter-label">Category</span>
               <select id="workerLogsCategorySelect">
                 <option value="all" data-i18n="workerLogsCategoryAll">All</option>
                 <option value="saj" data-i18n="workerLogsCategorySaj">SAJ</option>
@@ -403,31 +360,23 @@
                 <option value="tesla" data-i18n="workerLogsCategoryTesla">Tesla</option>
                 <option value="notification" data-i18n="workerLogsCategoryNotification">Notification</option>
                 <option value="operation" data-i18n="workerLogsCategoryOperation">Operation</option>
-                <option value="alert" data-i18n="workerLogsCategoryAlert">Alert</option>
               </select>
             </label>
-            <label data-i18n="workerLogsServiceLabel">
-              Service
+            <label class="worker-logs-filter-field" data-i18n="workerLogsServiceLabel">
+              <span class="worker-logs-filter-label">Service</span>
               <select id="workerLogsServiceSelect">
                 <option value="all" data-i18n="workerLogsServiceAll">All</option>
-                <option value="notification">Notification</option>
-                <option value="operation">Operation</option>
-                <option value="tesla" data-i18n="workerLogsServiceTeslaObserve">Tesla Observe</option>
-                <option value="combined_assembly" data-i18n="workerLogsServiceCombinedAssembly">Combined Assembly</option>
               </select>
             </label>
-            <label id="workerLogsHidePassiveLabel" class="worker-logs-checkbox hidden">
-              <input id="workerLogsHidePassiveCheckbox" type="checkbox" />
-              <span data-i18n="workerLogsHidePassive">Hide No Ops / Skipped</span>
-            </label>
-            <label>
-              table_mode
+            <label class="worker-logs-filter-field worker-logs-filter-field-compact">
+              <span class="worker-logs-filter-label">table_mode</span>
               <select id="workerLogsTableModeSelect">
                 <option value="human_readable_table">human_readable_table</option>
                 <option value="raw_table">raw_table</option>
               </select>
             </label>
           </div>
+          <div id="workerLogsTypeFilters" class="worker-logs-type-filters hidden"></div>
           <p id="workerLogsConfigMeta" class="muted">-</p>
           <p id="workerLogsCount" class="muted">-</p>
           <div class="pager">
