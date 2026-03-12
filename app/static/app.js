@@ -65,8 +65,8 @@ const I18N = {
     configMustSaveFirst: "Configuration is not complete yet. Please save first.",
     refreshBtn: "Refresh",
     dashboardTab: "Dashboard",
-    notificationMatrixTab: "Notification Matrix",
-    notificationMatrixTitle: "Time Window Notifications",
+    notificationMatrixTab: "Notification",
+    notificationMatrixTitle: "Notification",
     notificationMatrixIntro: "Each panel shows the worker notifications configured for that time window. Checkboxes are currently fixed on because the system behavior is already enabled.",
     notificationMatrixNoNotifications: "No dedicated notification is configured for this window at the moment.",
     notificationMatrixAlwaysNote: "This watch is always active and is shown separately from the 24-hour time-window schedule.",
@@ -124,8 +124,11 @@ const I18N = {
     combinedDebugTitle: "Combined Debug",
     combinedDebugMeta: "Source {source} · storage_backed {storageBacked} · stale {stale} · sample age {sampleAge}s · kv items {kvCount}",
     combinedCollectorMeta: "Collector: SAJ {saj} · Solplanet {solplanet} · Combined {combined}",
-    solplanetRawTab: "Solplanet Raw",
-    sajRawTab: "SAJ Raw",
+    rawDataTab: "Raw Data",
+    rawDataTitle: "Raw Data",
+    rawDataSystemLabel: "System",
+    rawDataSystemSolplanet: "Solplanet",
+    rawDataSystemSaj: "SAJ",
     sajControlTab: "SAJ Control",
     solplanetControlTab: "Solplanet Control",
     entitiesTab: "Entities",
@@ -580,6 +583,8 @@ const I18N = {
     rawApiSajCoreEntities: "Configured Entity List (Static)",
     rawViewExplain: "Notes",
     rawViewJson: "JSON",
+    rawExpandRequest: "Expand request",
+    rawCollapseRequest: "Collapse request",
     rawKvAttr: "Attribute",
     rawKvValue: "Value",
     rawKvSource: "Source",
@@ -632,8 +637,8 @@ const I18N = {
     configMustSaveFirst: "当前还未完成配置，请先保存",
     refreshBtn: "刷新",
     dashboardTab: "总览",
-    notificationMatrixTab: "通知矩阵",
-    notificationMatrixTitle: "时间窗口通知",
+    notificationMatrixTab: "通知",
+    notificationMatrixTitle: "Notification",
     notificationMatrixIntro: "每个面板展示该时间窗口下 worker 已配置的通知。当前复选框固定为开启，因为系统行为已经默认启用。",
     notificationMatrixNoNotifications: "这个时间窗口当前没有单独配置专门通知。",
     notificationMatrixAlwaysNote: "这个监控始终开启，单独展示，不属于 24 小时时间窗口切分的一部分。",
@@ -691,8 +696,11 @@ const I18N = {
     combinedDebugTitle: "整合数据调试",
     combinedDebugMeta: "来源 {source} · storage_backed {storageBacked} · stale {stale} · 样本年龄 {sampleAge}s · KV 条数 {kvCount}",
     combinedCollectorMeta: "采集器: SAJ {saj} · Solplanet {solplanet} · Combined {combined}",
-    solplanetRawTab: "Solplanet 原始",
-    sajRawTab: "SAJ 原始",
+    rawDataTab: "Raw Data",
+    rawDataTitle: "Raw Data",
+    rawDataSystemLabel: "系统",
+    rawDataSystemSolplanet: "Solplanet",
+    rawDataSystemSaj: "SAJ",
     sajControlTab: "SAJ 管理",
     solplanetControlTab: "Solplanet 管理",
     entitiesTab: "实体",
@@ -1147,6 +1155,8 @@ const I18N = {
     rawApiSajCoreEntities: "配置实体清单（静态）",
     rawViewExplain: "说明",
     rawViewJson: "JSON",
+    rawExpandRequest: "展开请求",
+    rawCollapseRequest: "折叠请求",
     rawKvAttr: "属性",
     rawKvValue: "值",
     rawKvSource: "来源",
@@ -1255,6 +1265,8 @@ const DATABASE_PAGE_SIZE = 50;
 const WORKER_FAILURE_LOG_PAGE_SIZE = 100;
 const AUTO_REFRESH_KEY = "autoRefreshSeconds";
 const SOLPLANET_RAW_MODE_KEY = "solplanetRawMode";
+const RAW_CARD_COLLAPSE_KEY = "rawCardCollapseState";
+const RAW_DATA_SYSTEM_KEY = "rawDataSystem";
 const SAJ_ACTION_DEBUG_MODE_KEY = "sajActionDebugMode";
 const AUTO_REFRESH_OPTIONS = [0, 5, 10];
 const SAJ_CONTROL_EDIT_GRACE_MS = 15000;
@@ -1462,6 +1474,15 @@ const stateCache = {
   lastWorkerLogsPage: null,
   lastWorkerFailureLog: null,
   rawCardMode: {},
+  rawCardCollapse: (() => {
+    try {
+      const raw = localStorage.getItem(RAW_CARD_COLLAPSE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  })(),
   systemLoadMeta: {
     saj: { phase: "idle", updatedAt: null, quality: "ok", count: 0 },
     solplanet: { phase: "idle", updatedAt: null, quality: "ok", count: 0 },
@@ -1609,11 +1630,12 @@ function getLang() {
 }
 
 let currentLang = getLang();
-let currentTab = ["dashboard", "notificationMatrix", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"].includes(localStorage.getItem("activeTab"))
+let currentTab = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"].includes(localStorage.getItem("activeTab"))
   ? localStorage.getItem("activeTab")
   : "dashboard";
-const ALL_TABS = ["dashboard", "notificationMatrix", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"];
+const ALL_TABS = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"];
 let solplanetRawMode = localStorage.getItem(SOLPLANET_RAW_MODE_KEY) === "table" ? "table" : "cards";
+let rawDataSystem = localStorage.getItem(RAW_DATA_SYSTEM_KEY) === "saj" ? "saj" : "solplanet";
 let sajActionDebugMode = localStorage.getItem(SAJ_ACTION_DEBUG_MODE_KEY) === "1";
 let autoRefreshTimerId = null;
 let autoRefreshSeconds = getAutoRefreshSeconds();
@@ -1634,9 +1656,7 @@ const tabLoadState = {
   dashboard: { inFlight: false },
   notificationMatrix: { inFlight: false },
   entities: { inFlight: false },
-  solplanetRaw: { inFlight: false },
-  sajRaw: { inFlight: false },
-  sajControl: { inFlight: false },
+  rawData: { inFlight: false },
   solplanetControl: { inFlight: false },
   sampling: { inFlight: false },
   database: { inFlight: false },
@@ -4204,11 +4224,17 @@ function renderNotificationMatrix() {
     }
     notificationMatrixCollapseInitialized = true;
   }
+  const toggleNotificationMatrixWindow = (windowId) => {
+    const normalizedWindowId = String(windowId || "").trim();
+    if (!normalizedWindowId) return;
+    notificationMatrixCollapseState[normalizedWindowId] = !Boolean(notificationMatrixCollapseState[normalizedWindowId]);
+    renderNotificationMatrix();
+  };
   for (const windowItem of NOTIFICATION_MATRIX_WINDOWS) {
     const panel = document.createElement("article");
     const isCurrentWindow = windowItem.id === currentWindowId;
     const isCollapsed = Boolean(notificationMatrixCollapseState[windowItem.id]);
-    panel.className = `notification-window-panel${isCurrentWindow ? " is-current-window" : ""}`;
+    panel.className = `notification-window-panel${isCurrentWindow ? " is-current-window" : ""}${isCollapsed ? " is-collapsed" : ""}`;
     const notifications = Array.isArray(windowItem.notifications) ? windowItem.notifications : [];
     const listHtml = notifications.length
       ? notifications.map((item) => {
@@ -4234,37 +4260,60 @@ function renderNotificationMatrix() {
       : `<div class="notification-window-empty">${escapeHtml(t("notificationMatrixNoNotifications"))}</div>`;
 
     panel.innerHTML = `
-      <header class="notification-window-panel-header">
+      <header
+        class="notification-window-panel-header"
+        data-window-id="${escapeHtml(windowItem.id)}"
+        ${isCollapsed ? "" : `role="button" tabindex="0" aria-expanded="true" aria-label="${escapeHtml(t("notificationMatrixCollapseWindow"))}"`}
+      >
         <div class="notification-window-title-row">
-          <h3 class="notification-window-title">${escapeHtml(t(windowItem.titleKey))}</h3>
+          <div class="notification-window-title-block">
+            <h3 class="notification-window-title">${escapeHtml(t(windowItem.titleKey))}</h3>
+            <span class="notification-window-title-time">${escapeHtml(String(windowItem.schedule || "-"))}</span>
+          </div>
           <div class="notification-window-header-actions">
             ${isCurrentWindow ? `<span class="notification-window-current-badge">${escapeHtml(t("notificationMatrixCurrentWindowBadge"))}</span>` : ""}
-            <button
-              type="button"
-              class="notification-window-toggle${isCollapsed ? " is-collapsed" : ""}"
-              data-window-id="${escapeHtml(windowItem.id)}"
-              aria-expanded="${isCollapsed ? "false" : "true"}"
-              aria-label="${escapeHtml(t(isCollapsed ? "notificationMatrixExpandWindow" : "notificationMatrixCollapseWindow"))}"
-            >
+            <span class="notification-window-toggle${isCollapsed ? " is-collapsed" : ""}" aria-hidden="true">
               <span class="notification-window-toggle-chevron" aria-hidden="true"></span>
-            </button>
+            </span>
           </div>
         </div>
       </header>
       <div class="notification-window-body${isCollapsed ? " hidden" : ""}">
-        <span class="notification-window-time">${escapeHtml(String(windowItem.schedule || "-"))}</span>
         <p class="notification-window-summary">${escapeHtml(t(windowItem.summaryKey))}</p>
         ${windowItem.noteKey ? `<p class="notification-window-note">${escapeHtml(t(windowItem.noteKey))}</p>` : ""}
         <div class="notification-window-list">${listHtml}</div>
       </div>
     `;
-    const toggleButton = panel.querySelector(".notification-window-toggle");
-    if (toggleButton) {
-      toggleButton.addEventListener("click", () => {
-        const windowId = String(toggleButton.getAttribute("data-window-id") || "").trim();
-        if (!windowId) return;
-        notificationMatrixCollapseState[windowId] = !Boolean(notificationMatrixCollapseState[windowId]);
-        renderNotificationMatrix();
+    if (isCollapsed) {
+      panel.setAttribute("role", "button");
+      panel.setAttribute("tabindex", "0");
+      panel.setAttribute("aria-expanded", "false");
+      panel.setAttribute("aria-label", t("notificationMatrixExpandWindow"));
+    }
+    const toggleFromTarget = (target) => {
+      if (!target) return;
+      toggleNotificationMatrixWindow(target.getAttribute("data-window-id"));
+    };
+    if (isCollapsed) {
+      panel.setAttribute("data-window-id", windowItem.id);
+      panel.addEventListener("click", () => {
+        toggleFromTarget(panel);
+      });
+      panel.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggleFromTarget(panel);
+      });
+    }
+    const header = panel.querySelector(".notification-window-panel-header");
+    if (header && !isCollapsed) {
+      header.addEventListener("click", () => {
+        toggleNotificationMatrixWindow(header.getAttribute("data-window-id"));
+      });
+      header.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggleNotificationMatrixWindow(header.getAttribute("data-window-id"));
       });
     }
     root.appendChild(panel);
@@ -6195,6 +6244,40 @@ function getRawCardMode(key) {
   return mode === "json" ? "json" : "explain";
 }
 
+function getRawCardCollapsed(key) {
+  return Boolean(stateCache.rawCardCollapse?.[key]);
+}
+
+function setRawCardCollapsed(key, collapsed) {
+  if (!stateCache.rawCardCollapse || typeof stateCache.rawCardCollapse !== "object") {
+    stateCache.rawCardCollapse = {};
+  }
+  stateCache.rawCardCollapse[key] = Boolean(collapsed);
+  try {
+    localStorage.setItem(RAW_CARD_COLLAPSE_KEY, JSON.stringify(stateCache.rawCardCollapse));
+  } catch {
+    // Ignore storage failures so the UI still works.
+  }
+  syncRawCardCollapsedUi(key);
+}
+
+function toggleRawCardCollapsed(key) {
+  setRawCardCollapsed(key, !getRawCardCollapsed(key));
+}
+
+function syncRawCardCollapsedUi(key) {
+  const header = document.getElementById(`raw-header-${key}`);
+  const body = document.getElementById(`raw-body-${key}`);
+  const toggle = document.getElementById(`raw-toggle-${key}`);
+  const collapsed = getRawCardCollapsed(key);
+  if (header) {
+    header.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    header.setAttribute("aria-label", t(collapsed ? "rawExpandRequest" : "rawCollapseRequest"));
+  }
+  if (body) body.classList.toggle("hidden", collapsed);
+  if (toggle) toggle.classList.toggle("is-collapsed", collapsed);
+}
+
 function setRawCardMode(key, mode) {
   stateCache.rawCardMode[key] = mode === "json" ? "json" : "explain";
   const explainBtn = document.getElementById(`raw-tab-explain-${key}`);
@@ -6403,20 +6486,44 @@ function ensureRawCard(key, titleKey, bodyId) {
     card.className = "raw-card";
     card.id = cardId;
     card.innerHTML = `
-      <h3 id="raw-title-${key}"></h3>
-      <div id="raw-progress-${key}" class="raw-progress"><div class="raw-progress-fill"></div></div>
-      <p id="raw-meta-${key}" class="raw-meta">-</p>
-      <div class="raw-switch">
-        <button id="raw-tab-explain-${key}" type="button" class="raw-tab-btn active"></button>
-        <button id="raw-tab-json-${key}" type="button" class="raw-tab-btn"></button>
+      <header
+        id="raw-header-${key}"
+        class="raw-card-header"
+        role="button"
+        tabindex="0"
+      >
+        <div class="raw-card-title-row">
+          <h3 id="raw-title-${key}"></h3>
+          <span id="raw-toggle-${key}" class="raw-card-toggle" aria-hidden="true">
+            <span class="raw-card-toggle-chevron" aria-hidden="true"></span>
+          </span>
+        </div>
+        <p id="raw-summary-${key}" class="raw-card-summary">-</p>
+      </header>
+      <div id="raw-body-${key}" class="raw-card-body">
+        <div id="raw-progress-${key}" class="raw-progress"><div class="raw-progress-fill"></div></div>
+        <p id="raw-meta-${key}" class="raw-meta">-</p>
+        <div class="raw-switch">
+          <button id="raw-tab-explain-${key}" type="button" class="raw-tab-btn active"></button>
+          <button id="raw-tab-json-${key}" type="button" class="raw-tab-btn"></button>
+        </div>
+        <div id="raw-explain-${key}" class="raw-explain"></div>
+        <pre id="raw-pre-${key}" class="raw-pre">-</pre>
       </div>
-      <div id="raw-explain-${key}" class="raw-explain"></div>
-      <pre id="raw-pre-${key}" class="raw-pre">-</pre>
     `;
     body.appendChild(card);
 
+    const header = document.getElementById(`raw-header-${key}`);
     const explainBtn = document.getElementById(`raw-tab-explain-${key}`);
     const jsonBtn = document.getElementById(`raw-tab-json-${key}`);
+    if (header) {
+      header.addEventListener("click", () => toggleRawCardCollapsed(key));
+      header.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggleRawCardCollapsed(key);
+      });
+    }
     if (explainBtn) explainBtn.addEventListener("click", () => setRawCardMode(key, "explain"));
     if (jsonBtn) jsonBtn.addEventListener("click", () => setRawCardMode(key, "json"));
   }
@@ -6424,6 +6531,7 @@ function ensureRawCard(key, titleKey, bodyId) {
   setText(`raw-tab-explain-${key}`, t("rawViewExplain"));
   setText(`raw-tab-json-${key}`, t("rawViewJson"));
   setRawCardMode(key, getRawCardMode(key));
+  syncRawCardCollapsedUi(key);
 }
 
 function renderRawCard(api, state, bodyId) {
@@ -6431,6 +6539,7 @@ function renderRawCard(api, state, bodyId) {
   const progress = document.getElementById(`raw-progress-${api.key}`);
   const meta = document.getElementById(`raw-meta-${api.key}`);
   const pre = document.getElementById(`raw-pre-${api.key}`);
+  const summary = document.getElementById(`raw-summary-${api.key}`);
   if (progress) {
     progress.classList.remove("loading", "done", "failed");
     if (state.phase === "loading") progress.classList.add("loading");
@@ -6452,6 +6561,11 @@ function renderRawCard(api, state, bodyId) {
     const statusBadgeClass = normalizedStatus === "stale"
       ? "raw-status-badge stale"
       : (normalizedStatus === "success" || state.phase === "done" ? "raw-status-badge success" : "raw-status-badge failed");
+    if (summary) {
+      summary.innerHTML =
+        `<span class="raw-card-summary-path">${escapeHtml(state.path || api.url || "-")}</span>` +
+        `<span class="${statusBadgeClass}">${escapeHtml(statusBadgeText)}</span>`;
+    }
     if (state.phase === "loading") {
       meta.innerHTML =
         `<div class="raw-meta-line"><span class="raw-meta-label">${escapeHtml(t("rawLoading"))}</span><span>${escapeHtml(state.path || "-")}</span></div>` +
@@ -6478,6 +6592,7 @@ function renderRawCard(api, state, bodyId) {
   }
   if (pre) pre.textContent = JSON.stringify(state.payload ?? null, null, 2);
   renderRawExplainTable(api, state);
+  syncRawCardCollapsedUi(api.key);
 }
 
 function renderRawSummary(rawStateMap, metaId, updatedId) {
@@ -6499,6 +6614,25 @@ function renderRawSummary(rawStateMap, metaId, updatedId) {
   setText(updatedId, `${t("updatedAt")}: ${updatedText}`);
 }
 
+function syncRawDataSystemUi() {
+  const select = document.getElementById("rawDataSystemSelect");
+  const solplanetPanel = document.getElementById("solplanetRawPanel");
+  const sajPanel = document.getElementById("sajRawPanel");
+  if (select) select.value = rawDataSystem;
+  if (solplanetPanel) solplanetPanel.classList.toggle("hidden", rawDataSystem !== "solplanet");
+  if (sajPanel) sajPanel.classList.toggle("hidden", rawDataSystem !== "saj");
+}
+
+function setRawDataSystem(system, { load = true } = {}) {
+  rawDataSystem = system === "saj" ? "saj" : "solplanet";
+  localStorage.setItem(RAW_DATA_SYSTEM_KEY, rawDataSystem);
+  syncRawDataSystemUi();
+  if (currentTab !== "rawData") return;
+  if (rawDataSystem === "solplanet") renderSolplanetRawFromCache();
+  else renderSajRawFromCache();
+  if (load) void loadCurrentTab();
+}
+
 function setSolplanetRawMode(mode, load = true) {
   solplanetRawMode = mode === "table" ? "table" : "cards";
   localStorage.setItem(SOLPLANET_RAW_MODE_KEY, solplanetRawMode);
@@ -6512,7 +6646,7 @@ function setSolplanetRawMode(mode, load = true) {
   if (tableWrap) tableWrap.classList.toggle("hidden", solplanetRawMode !== "table");
   if (solplanetRawMode === "cards") renderSolplanetRawFromCache();
   else renderSolplanetKvFromCache();
-  if (load && currentTab === "solplanetRaw") void loadCurrentTab();
+  if (load && currentTab === "rawData" && rawDataSystem === "solplanet") void loadCurrentTab();
 }
 
 function renderSolplanetRawFromCache() {
@@ -6532,6 +6666,24 @@ function renderSolplanetRawFromCache() {
     renderRawCard(api, state, "solplanetRawBody");
   }
   renderRawSummary(stateCache.lastSolplanetRaw, "solplanetRawMeta", "solplanetRawUpdatedAt");
+}
+
+function renderSajRawFromCache() {
+  for (const api of SAJ_RAW_APIS) {
+    const state = stateCache.lastSajRaw[api.key] || {
+      phase: "idle",
+      path: api.url,
+      payload: null,
+      error: null,
+      fetch_ms: null,
+      updated_at: null,
+      status: null,
+      last_requested_at: null,
+      last_success_at: null,
+    };
+    renderRawCard(api, state, "sajRawBody");
+  }
+  renderRawSummary(stateCache.lastSajRaw, "sajRawMeta", "sajRawUpdatedAt");
 }
 
 function renderSolplanetKvFromCache() {
@@ -8214,12 +8366,11 @@ async function loadCurrentTab(fromAutoRefresh = false) {
 function tabHasCachedData(tab) {
   if (tab === "dashboard") return Boolean(stateCache.lastSummary);
   if (tab === "notificationMatrix") return true;
-  if (tab === "solplanetRaw") {
+  if (tab === "rawData") {
+    if (rawDataSystem === "saj") return SAJ_RAW_APIS.some((api) => stateCache.lastSajRaw?.[api.key]?.payload !== undefined);
     if (solplanetRawMode === "table") return stateCache.lastSolplanetKv?.phase && stateCache.lastSolplanetKv.phase !== "idle";
     return SOLPLANET_RAW_APIS.some((api) => stateCache.lastSolplanetRaw?.[api.key]?.payload !== undefined);
   }
-  if (tab === "sajRaw") return SAJ_RAW_APIS.some((api) => stateCache.lastSajRaw?.[api.key]?.payload !== undefined);
-  if (tab === "sajControl") return Boolean(stateCache.lastSajControl);
   if (tab === "solplanetControl") return Boolean(stateCache.lastSolplanetControl);
   if (tab === "sampling") return Boolean(stateCache.lastSamplingPage || stateCache.lastSamplingStatus || stateCache.lastSamplingSeries);
   if (tab === "database") return Boolean(stateCache.lastDatabaseTables || stateCache.lastDatabasePage);
@@ -8239,19 +8390,10 @@ async function loadTabWithGuard(tab, fromAutoRefresh = false) {
       renderNotificationMatrix();
       return true;
     }
-    if (tabKey === "solplanetRaw") {
-      await loadSolplanetRaw();
-      return true;
-    }
-    if (tabKey === "sajRaw") {
-      await loadSajRaw();
-      return true;
-    }
-    if (tabKey === "sajControl") {
-      if (fromAutoRefresh && stateCache.lastSajControl && isSajControlLocalEditing()) {
-        return false;
-      }
-      await loadSajControl();
+    if (tabKey === "rawData") {
+      syncRawDataSystemUi();
+      if (rawDataSystem === "saj") await loadSajRaw();
+      else await loadSolplanetRaw();
       return true;
     }
     if (tabKey === "solplanetControl") {
@@ -8312,9 +8454,7 @@ function setActiveTab(tab, load = true) {
   const previousTab = currentTab;
   currentTab =
     tab === "notificationMatrix" ||
-    tab === "solplanetRaw" ||
-    tab === "sajRaw" ||
-    tab === "sajControl" ||
+    tab === "rawData" ||
     tab === "solplanetControl" ||
     tab === "sampling" ||
     tab === "database" ||
@@ -8329,9 +8469,7 @@ function setActiveTab(tab, load = true) {
 
   const dashboardView = document.getElementById("dashboardView");
   const notificationMatrixView = document.getElementById("notificationMatrixView");
-  const solplanetRawView = document.getElementById("solplanetRawView");
-  const sajRawView = document.getElementById("sajRawView");
-  const sajControlView = document.getElementById("sajControlView");
+  const rawDataView = document.getElementById("rawDataView");
   const solplanetControlView = document.getElementById("solplanetControlView");
   const samplingView = document.getElementById("samplingView");
   const databaseView = document.getElementById("databaseView");
@@ -8339,9 +8477,7 @@ function setActiveTab(tab, load = true) {
   const workerFailureLogView = document.getElementById("workerFailureLogView");
   const tabDashboard = document.getElementById("tabDashboard");
   const tabNotificationMatrix = document.getElementById("tabNotificationMatrix");
-  const tabSolplanetRaw = document.getElementById("tabSolplanetRaw");
-  const tabSajRaw = document.getElementById("tabSajRaw");
-  const tabSajControl = document.getElementById("tabSajControl");
+  const tabRawData = document.getElementById("tabRawData");
   const tabSolplanetControl = document.getElementById("tabSolplanetControl");
   const tabSampling = document.getElementById("tabSampling");
   const tabDatabase = document.getElementById("tabDatabase");
@@ -8350,20 +8486,15 @@ function setActiveTab(tab, load = true) {
 
   const dashboardActive = currentTab === "dashboard";
   const notificationMatrixActive = currentTab === "notificationMatrix";
-  const solplanetRawActive = currentTab === "solplanetRaw";
-  const sajRawActive = currentTab === "sajRaw";
-  const sajControlActive = currentTab === "sajControl";
+  const rawDataActive = currentTab === "rawData";
   const solplanetControlActive = currentTab === "solplanetControl";
   const samplingActive = currentTab === "sampling";
   const databaseActive = currentTab === "database";
   const workerLogsActive = currentTab === "workerLogs";
   const workerFailureLogActive = currentTab === "workerFailureLog";
-  const anyRawActive = solplanetRawActive || sajRawActive;
   if (dashboardView) dashboardView.classList.toggle("hidden", !dashboardActive);
   if (notificationMatrixView) notificationMatrixView.classList.toggle("hidden", !notificationMatrixActive);
-  if (solplanetRawView) solplanetRawView.classList.toggle("hidden", !solplanetRawActive);
-  if (sajRawView) sajRawView.classList.toggle("hidden", !sajRawActive);
-  if (sajControlView) sajControlView.classList.toggle("hidden", !sajControlActive);
+  if (rawDataView) rawDataView.classList.toggle("hidden", !rawDataActive);
   if (solplanetControlView) solplanetControlView.classList.toggle("hidden", !solplanetControlActive);
   if (samplingView) samplingView.classList.toggle("hidden", !samplingActive);
   if (databaseView) databaseView.classList.toggle("hidden", !databaseActive);
@@ -8371,14 +8502,27 @@ function setActiveTab(tab, load = true) {
   if (workerFailureLogView) workerFailureLogView.classList.toggle("hidden", !workerFailureLogActive);
   if (tabDashboard) tabDashboard.classList.toggle("active", dashboardActive);
   if (tabNotificationMatrix) tabNotificationMatrix.classList.toggle("active", notificationMatrixActive);
-  if (tabSolplanetRaw) tabSolplanetRaw.classList.toggle("active", solplanetRawActive);
-  if (tabSajRaw) tabSajRaw.classList.toggle("active", sajRawActive);
-  if (tabSajControl) tabSajControl.classList.toggle("active", sajControlActive);
+  if (tabRawData) tabRawData.classList.toggle("active", rawDataActive);
   if (tabSolplanetControl) tabSolplanetControl.classList.toggle("active", solplanetControlActive);
   if (tabSampling) tabSampling.classList.toggle("active", samplingActive);
   if (tabDatabase) tabDatabase.classList.toggle("active", databaseActive);
   if (tabWorkerLogs) tabWorkerLogs.classList.toggle("active", workerLogsActive);
   if (tabWorkerFailureLog) tabWorkerFailureLog.classList.toggle("active", workerFailureLogActive);
+  [
+    [tabDashboard, dashboardActive],
+    [tabNotificationMatrix, notificationMatrixActive],
+    [tabRawData, rawDataActive],
+    [tabSolplanetControl, solplanetControlActive],
+    [tabSampling, samplingActive],
+    [tabDatabase, databaseActive],
+    [tabWorkerLogs, workerLogsActive],
+    [tabWorkerFailureLog, workerFailureLogActive],
+  ].forEach(([tab, active]) => {
+    if (!tab) return;
+    tab.setAttribute("aria-selected", active ? "true" : "false");
+    tab.tabIndex = active ? 0 : -1;
+  });
+  syncRawDataSystemUi();
   if (dashboardActive) {
     window.requestAnimationFrame(() => {
       refreshFlowDiagrams();
@@ -8421,20 +8565,17 @@ bindClickIfPresent("tabDashboard", () => {
 bindClickIfPresent("tabNotificationMatrix", () => {
   setActiveTab("notificationMatrix");
 });
-bindClickIfPresent("tabSolplanetRaw", () => {
-  setActiveTab("solplanetRaw");
+bindClickIfPresent("tabRawData", () => {
+  setActiveTab("rawData");
+});
+bindChangeIfPresent("rawDataSystemSelect", (event) => {
+  setRawDataSystem(event.target.value, { load: true });
 });
 bindClickIfPresent("solplanetRawModeCardsBtn", () => {
   setSolplanetRawMode("cards");
 });
 bindClickIfPresent("solplanetRawModeTableBtn", () => {
   setSolplanetRawMode("table");
-});
-bindClickIfPresent("tabSajRaw", () => {
-  setActiveTab("sajRaw");
-});
-bindClickIfPresent("tabSajControl", () => {
-  setActiveTab("sajControl");
 });
 bindClickIfPresent("tabSolplanetControl", () => {
   setActiveTab("solplanetControl");
@@ -8836,6 +8977,7 @@ samplingRangeState.startDate = getLocalDateText(-1);
   samplingRangeState.startDateTime = toLocalDateTimeInputValueFromMs(now.getTime() - 6 * 3600 * 1000);
 }
 renderSamplingRangeInputContainer();
+syncRawDataSystemUi();
 setActiveTab(currentTab, false);
 setAutoRefresh(autoRefreshSeconds);
 void ensureConfigReady().then((ready) => {

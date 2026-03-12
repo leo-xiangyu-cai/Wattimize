@@ -34,32 +34,26 @@
         </div>
       </header>
 
-      <nav class="tabs" aria-label="Main tabs">
-        <button id="tabDashboard" class="tab-btn active" type="button" data-tab="dashboard" data-i18n="dashboardTab">
+      <nav class="tabs" aria-label="Main tabs" role="tablist">
+        <button id="tabDashboard" class="tab-btn active" type="button" data-tab="dashboard" data-i18n="dashboardTab" role="tab" aria-selected="true" aria-controls="dashboardView">
           Dashboard
         </button>
-        <button id="tabNotificationMatrix" class="tab-btn" type="button" data-tab="notificationMatrix" data-i18n="notificationMatrixTab">
-          Notification Matrix
+        <button id="tabNotificationMatrix" class="tab-btn" type="button" data-tab="notificationMatrix" data-i18n="notificationMatrixTab" role="tab" aria-selected="false" aria-controls="notificationMatrixView" tabindex="-1">
+          Notification
         </button>
-        <button id="tabSolplanetRaw" class="tab-btn" type="button" data-tab="solplanetRaw" data-i18n="solplanetRawTab">
-          Solplanet Raw
+        <button id="tabRawData" class="tab-btn" type="button" data-tab="rawData" data-i18n="rawDataTab" role="tab" aria-selected="false" aria-controls="rawDataView" tabindex="-1">
+          Raw Data
         </button>
-        <button id="tabSajRaw" class="tab-btn" type="button" data-tab="sajRaw" data-i18n="sajRawTab">
-          SAJ Raw
-        </button>
-        <button id="tabSajControl" class="tab-btn" type="button" data-tab="sajControl" data-i18n="sajControlTab">
-          SAJ Control
-        </button>
-        <button id="tabSampling" class="tab-btn" type="button" data-tab="sampling" data-i18n="samplingTab">
+        <button id="tabSampling" class="tab-btn" type="button" data-tab="sampling" data-i18n="samplingTab" role="tab" aria-selected="false" aria-controls="samplingView" tabindex="-1">
           Sampling
         </button>
-        <button id="tabDatabase" class="tab-btn" type="button" data-tab="database" data-i18n="databaseTab">
+        <button id="tabDatabase" class="tab-btn" type="button" data-tab="database" data-i18n="databaseTab" role="tab" aria-selected="false" aria-controls="databaseView" tabindex="-1">
           Database
         </button>
-        <button id="tabWorkerLogs" class="tab-btn" type="button" data-tab="workerLogs" data-i18n="workerLogsTab">
+        <button id="tabWorkerLogs" class="tab-btn" type="button" data-tab="workerLogs" data-i18n="workerLogsTab" role="tab" aria-selected="false" aria-controls="workerLogsView" tabindex="-1">
           Worker Logs
         </button>
-        <button id="tabWorkerFailureLog" class="tab-btn" type="button" data-tab="workerFailureLog" data-i18n="failureLogTab">
+        <button id="tabWorkerFailureLog" class="tab-btn" type="button" data-tab="workerFailureLog" data-i18n="failureLogTab" role="tab" aria-selected="false" aria-controls="workerFailureLogView" tabindex="-1">
           Failure Logs
         </button>
       </nav>
@@ -122,7 +116,7 @@
       <section id="notificationMatrixView" class="view hidden">
         <section class="card notification-matrix-card">
           <div class="section-header">
-            <h2 data-i18n="notificationMatrixTitle">Time Window Notifications</h2>
+            <h2 data-i18n="notificationMatrixTitle">Notification</h2>
           </div>
           <p class="muted" data-i18n="notificationMatrixIntro">
             Each panel shows the worker notifications configured for that time window. Checkboxes are currently fixed on because the system behavior is already enabled.
@@ -131,8 +125,23 @@
         </section>
       </section>
 
-      <section id="solplanetRawView" class="view hidden">
+      <section id="rawDataView" class="view hidden">
         <section class="card">
+          <div class="section-header">
+            <h2 data-i18n="rawDataTitle">Raw Data</h2>
+          </div>
+          <div class="saj-control-row">
+            <label data-i18n="rawDataSystemLabel">
+              System
+              <select id="rawDataSystemSelect">
+                <option value="solplanet" data-i18n="rawDataSystemSolplanet">Solplanet</option>
+                <option value="saj" data-i18n="rawDataSystemSaj">SAJ</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section id="solplanetRawPanel" class="card">
           <div class="section-header">
             <h2 data-i18n="solplanetRawTitle">Solplanet Raw API Dump</h2>
             <span id="solplanetRawUpdatedAt" class="muted">-</span>
@@ -151,7 +160,7 @@
               DB Table
             </button>
           </div>
-          <div id="solplanetRawBody" class="raw-grid"></div>
+          <div id="solplanetRawBody" class="raw-grid raw-grid-single"></div>
           <div id="solplanetRawTableWrap" class="table-wrap hidden">
             <table>
               <thead>
@@ -165,111 +174,14 @@
             </table>
           </div>
         </section>
-      </section>
 
-      <section id="sajRawView" class="view hidden">
-        <section class="card">
+        <section id="sajRawPanel" class="card hidden">
           <div class="section-header">
             <h2 data-i18n="sajRawTitle">SAJ Raw Data</h2>
             <span id="sajRawUpdatedAt" class="muted">-</span>
           </div>
           <p id="sajRawMeta" class="muted">-</p>
           <div id="sajRawBody" class="raw-grid"></div>
-        </section>
-      </section>
-
-      <section id="sajControlView" class="view hidden">
-        <section class="card">
-          <div class="section-header">
-            <h2 data-i18n="sajControlTitle">SAJ Control</h2>
-            <span id="sajControlUpdatedAt" class="muted">-</span>
-          </div>
-          <p id="sajPassiveModeAlert" class="saj-passive-alert hidden">-</p>
-          <p id="sajControlMeta" class="muted">-</p>
-          <article id="sajProfilePanel" class="saj-control-panel saj-profile-panel">
-            <h3 data-i18n="sajProfilePanelKicker">SAJ Profile</h3>
-            <div class="saj-control-row">
-              <label class="saj-profile-field">
-                <span data-i18n="sajProfileSelectedLabel">Selected</span>
-                <select id="sajProfileSelect">
-                  <option value="self_consumption" data-i18n="sajProfileOptionSelfConsumption">Self Consumption</option>
-                  <option value="time_of_use" data-i18n="sajProfileOptionTimeOfUse">Time of Use</option>
-                  <option value="microgrid" data-i18n="sajProfileOptionMicrogrid">Microgrid</option>
-                </select>
-              </label>
-              <button id="sajProfileApplyBtn" class="btn" type="button" data-i18n="sajProfileApplyBtn">Apply</button>
-            </div>
-            <p id="sajProfileDesiredText" class="muted">-</p>
-            <p id="sajProfileActualText" class="muted">-</p>
-            <p id="sajProfileStatusText" class="muted">-</p>
-          </article>
-
-          <div class="saj-control-grid">
-            <article class="saj-control-panel">
-              <h3 data-i18n="sajControlModeTitle">Working Mode</h3>
-              <p id="sajModeExplain" class="muted" data-i18n="sajControlModeExplain">
-                Mode code mapping may differ by firmware. Test 0~6 against app labels.
-              </p>
-              <p id="sajModeReadbackText" class="muted">mode_input=-, mode_sensor=-, inverter_mode=-</p>
-              <div class="saj-control-row">
-                <label data-i18n="sajControlModeCodeLabel">
-                  Mode Code
-                  <select id="sajModeCodeInput">
-                    <option value="0" data-i18n="sajModeOption0">0 - Self-Consumption Mode</option>
-                    <option value="1" data-i18n="sajModeOption1">1 - Time of Use Mode</option>
-                    <option value="2" data-i18n="sajModeOption2">2 - Backup Mode</option>
-                    <option value="3" data-i18n="sajModeOption3">3 - Passive Mode</option>
-                    <option value="4" data-i18n="sajModeOption4">4 - Reserved/Unknown</option>
-                    <option value="5" data-i18n="sajModeOption5">5 - Reserved/Unknown</option>
-                    <option value="6" data-i18n="sajModeOption6">6 - Reserved/Unknown</option>
-                  </select>
-                </label>
-                <button id="sajModeApplyBtn" class="btn" type="button" data-i18n="sajControlApplyBtn">Apply</button>
-              </div>
-              <label class="saj-debug-toggle">
-                <input id="sajActionDebugModeInput" type="checkbox" />
-                <span data-i18n="sajControlDebugModeLabel">Debug Mode</span>
-              </label>
-            </article>
-
-            <article class="saj-control-panel">
-              <h3 data-i18n="sajControlCurrentStateTitle">Current Slot State</h3>
-              <div class="saj-control-row">
-                <label data-i18n="sajControlChargeEnableMaskLabel">
-                  Charge Enable Mask
-                  <input id="sajQuickChargeEnableMaskInput" type="number" min="0" max="127" step="1" value="0" />
-                </label>
-                <label data-i18n="sajControlDischargeEnableMaskLabel">
-                  Discharge Enable Mask
-                  <input id="sajQuickDischargeEnableMaskInput" type="number" min="0" max="127" step="1" value="0" />
-                </label>
-                <button id="sajMaskSaveBtn" class="btn" type="button" data-i18n="configSaveBtn">Save</button>
-              </div>
-              <div class="table-wrap">
-                <table class="saj-control-table">
-                  <thead>
-                    <tr>
-                      <th data-i18n="sajControlEnableCol">Enable</th>
-                      <th data-i18n="sajControlTypeCol">Type</th>
-                      <th data-i18n="sajControlSlotCol">Slot</th>
-                      <th data-i18n="sajControlInputStartCol">Input Start</th>
-                      <th data-i18n="sajControlInputEndCol">Input End</th>
-                      <th data-i18n="sajControlInputPowerCol">Input Power(%)</th>
-                      <th data-i18n="sajControlInputMaskCol">Input Mask</th>
-                      <th data-i18n="sajControlActualStartCol">Actual Start</th>
-                      <th data-i18n="sajControlActualEndCol">Actual End</th>
-                      <th data-i18n="sajControlActualPowerCol">Actual Power(%)</th>
-                      <th data-i18n="sajControlActualMaskCol">Actual Mask</th>
-                    </tr>
-                  </thead>
-                  <tbody id="sajControlSlotsBody"></tbody>
-                </table>
-              </div>
-            </article>
-
-          </div>
-
-          <pre id="sajControlStateJson" class="raw-pre">-</pre>
         </section>
       </section>
 
