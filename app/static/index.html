@@ -38,6 +38,9 @@
         <button id="tabDashboard" class="tab-btn active" type="button" data-tab="dashboard" data-i18n="dashboardTab">
           Dashboard
         </button>
+        <button id="tabNotificationMatrix" class="tab-btn" type="button" data-tab="notificationMatrix" data-i18n="notificationMatrixTab">
+          Notification Matrix
+        </button>
         <button id="tabSolplanetRaw" class="tab-btn" type="button" data-tab="solplanetRaw" data-i18n="solplanetRawTab">
           Solplanet Raw
         </button>
@@ -113,6 +116,18 @@
               </section>
             </section>
           </div>
+        </section>
+      </section>
+
+      <section id="notificationMatrixView" class="view hidden">
+        <section class="card notification-matrix-card">
+          <div class="section-header">
+            <h2 data-i18n="notificationMatrixTitle">Time Window Notifications</h2>
+          </div>
+          <p class="muted" data-i18n="notificationMatrixIntro">
+            Each panel shows the worker notifications configured for that time window. Checkboxes are currently fixed on because the system behavior is already enabled.
+          </p>
+          <div id="notificationMatrixPanels" class="notification-matrix-grid"></div>
         </section>
       </section>
 

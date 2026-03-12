@@ -65,6 +65,45 @@ const I18N = {
     configMustSaveFirst: "Configuration is not complete yet. Please save first.",
     refreshBtn: "Refresh",
     dashboardTab: "Dashboard",
+    notificationMatrixTab: "Notification Matrix",
+    notificationMatrixTitle: "Time Window Notifications",
+    notificationMatrixIntro: "Each panel shows the worker notifications configured for that time window. Checkboxes are currently fixed on because the system behavior is already enabled.",
+    notificationMatrixNoNotifications: "No dedicated notification is configured for this window at the moment.",
+    notificationMatrixAlwaysNote: "This watch is always active and is shown separately from the 24-hour time-window schedule.",
+    notificationMatrixWindowFreeEnergyTitle: "Free Energy Window",
+    notificationMatrixWindowFreeEnergySummary: "11:00-14:00. Worker mainly controls Tesla charging current here and does not emit a dedicated notification.",
+    notificationMatrixWindowAfterFreeShoulderTitle: "After-Free Shoulder",
+    notificationMatrixWindowAfterFreeShoulderSummary: "14:00-16:00. Worker watches Solplanet battery headroom before the export period.",
+    notificationMatrixWindowAfterFreePeakTitle: "After-Free Peak",
+    notificationMatrixWindowAfterFreePeakSummary: "16:00-18:00. Worker keeps watching Solplanet battery headroom before export pricing starts.",
+    notificationMatrixWindowExportTitle: "Export Window",
+    notificationMatrixWindowExportSummary: "18:00-20:00. Worker tracks export behavior and low-battery/import alarms while Tesla charging follows surplus logic.",
+    notificationMatrixWindowPostExportPeakTitle: "Post-Export Peak",
+    notificationMatrixWindowPostExportPeakSummary: "20:00-23:00. Worker tries to avoid expensive import and raises early warnings when that risk appears.",
+    notificationMatrixWindowOvernightTitle: "Overnight Shoulder",
+    notificationMatrixWindowOvernightSummary: "23:00-11:00 next day. Worker observes SAJ battery SOC and sends threshold reminders once per overnight window.",
+    notificationMatrixWindowAlwaysTitle: "Always-On Battery Watch",
+    notificationMatrixWindowAlwaysSummary: "Not part of the 24-hour window split. Worker sends a one-time notification when either battery newly reaches 100% SOC.",
+    notificationRuleSolplanetLowAvailableCapacityTitle: "Solplanet available capacity is low",
+    notificationRuleSolplanetLowAvailableCapacityTrigger: "Triggers when Solplanet available capacity drops below 25 kWh during this window.",
+    notificationRuleSolplanetLowBatteryTitle: "Solplanet battery is low during export",
+    notificationRuleSolplanetLowBatteryTrigger: "Triggers when Solplanet SOC drops below 20% during the export window.",
+    notificationRuleGridImportStartedTitle: "Grid import started during export",
+    notificationRuleGridImportStartedTrigger: "Triggers once when grid import changes from inactive to active during the export window.",
+    notificationRuleSolarSurplusExportEnergyReachedTitle: "Export energy threshold reached",
+    notificationRuleSolarSurplusExportEnergyReachedTrigger: "Triggers once when exported energy in the export window reaches 9 kWh.",
+    notificationRuleSolplanetLowBatteryPostExportPeakTitle: "Solplanet battery is low in the expensive period",
+    notificationRuleSolplanetLowBatteryPostExportPeakTrigger: "Triggers when Solplanet SOC drops below 20% during the post-export peak window.",
+    notificationRuleGridImportStartedPostExportPeakTitle: "Grid import started in the expensive period",
+    notificationRuleGridImportStartedPostExportPeakTrigger: "Triggers once when grid import changes from inactive to active during the post-export peak window.",
+    notificationRuleSajBatteryWatch50Title: "SAJ battery reached 50%",
+    notificationRuleSajBatteryWatch50Trigger: "Triggers once per overnight window when SAJ SOC falls to 50% or below.",
+    notificationRuleSajBatteryWatch20Title: "SAJ battery reached 20%",
+    notificationRuleSajBatteryWatch20Trigger: "Triggers once per overnight window when SAJ SOC falls to 20% or below.",
+    notificationRuleSajBatteryFullTitle: "SAJ battery reached 100%",
+    notificationRuleSajBatteryFullTrigger: "Triggers once when SAJ battery newly reaches 100% SOC.",
+    notificationRuleSolplanetBatteryFullTitle: "Solplanet battery reached 100%",
+    notificationRuleSolplanetBatteryFullTrigger: "Triggers once when Solplanet battery newly reaches 100% SOC.",
     combinedDebugTitle: "Combined Debug",
     combinedDebugMeta: "Source {source} · storage_backed {storageBacked} · stale {stale} · sample age {sampleAge}s · kv items {kvCount}",
     combinedCollectorMeta: "Collector: SAJ {saj} · Solplanet {solplanet} · Combined {combined}",
@@ -576,6 +615,45 @@ const I18N = {
     configMustSaveFirst: "当前还未完成配置，请先保存",
     refreshBtn: "刷新",
     dashboardTab: "总览",
+    notificationMatrixTab: "通知矩阵",
+    notificationMatrixTitle: "时间窗口通知",
+    notificationMatrixIntro: "每个面板展示该时间窗口下 worker 已配置的通知。当前复选框固定为开启，因为系统行为已经默认启用。",
+    notificationMatrixNoNotifications: "这个时间窗口当前没有单独配置专门通知。",
+    notificationMatrixAlwaysNote: "这个监控始终开启，单独展示，不属于 24 小时时间窗口切分的一部分。",
+    notificationMatrixWindowFreeEnergyTitle: "免费电时段",
+    notificationMatrixWindowFreeEnergySummary: "11:00-14:00。这个窗口里 worker 主要调整 Tesla 充电行为，不单独发通知。",
+    notificationMatrixWindowAfterFreeShoulderTitle: "免费电后肩时段",
+    notificationMatrixWindowAfterFreeShoulderSummary: "14:00-16:00。这个窗口里 worker 主要观察 Solplanet 电池余量，为后续 export 时段做准备。",
+    notificationMatrixWindowAfterFreePeakTitle: "免费电后峰前时段",
+    notificationMatrixWindowAfterFreePeakSummary: "16:00-18:00。这个窗口继续观察 Solplanet 电池余量，确保 export 时段前有足够储能。",
+    notificationMatrixWindowExportTitle: "Export 时段",
+    notificationMatrixWindowExportSummary: "18:00-20:00。这个窗口会跟踪外送行为，同时监控低电量和电网反向转正向导入告警。",
+    notificationMatrixWindowPostExportPeakTitle: "Export 后高价时段",
+    notificationMatrixWindowPostExportPeakSummary: "20:00-23:00。这个窗口会尽量避免高价购电，并在风险出现时尽早提醒。",
+    notificationMatrixWindowOvernightTitle: "夜间肩时段",
+    notificationMatrixWindowOvernightSummary: "23:00-次日11:00。这个窗口只观察 SAJ 电池 SOC，并在每个夜间窗口内按阈值提醒一次。",
+    notificationMatrixWindowAlwaysTitle: "始终开启的满电监控",
+    notificationMatrixWindowAlwaysSummary: "不属于 24 小时时段切分。任一电池新达到 100% SOC 时发送一次通知。",
+    notificationRuleSolplanetLowAvailableCapacityTitle: "Solplanet 可用电量过低",
+    notificationRuleSolplanetLowAvailableCapacityTrigger: "当这个窗口内 Solplanet 可用容量低于 25 kWh 时触发。",
+    notificationRuleSolplanetLowBatteryTitle: "Export 时段 Solplanet 电量过低",
+    notificationRuleSolplanetLowBatteryTrigger: "当 export 时段内 Solplanet SOC 低于 20% 时触发。",
+    notificationRuleGridImportStartedTitle: "Export 时段开始从电网取电",
+    notificationRuleGridImportStartedTrigger: "当 export 时段内电网状态从未取电切换到开始取电时触发一次。",
+    notificationRuleSolarSurplusExportEnergyReachedTitle: "Export 能量达到阈值",
+    notificationRuleSolarSurplusExportEnergyReachedTrigger: "当 export 时段累计外送电量达到 9 kWh 时触发一次。",
+    notificationRuleSolplanetLowBatteryPostExportPeakTitle: "高价时段 Solplanet 电量过低",
+    notificationRuleSolplanetLowBatteryPostExportPeakTrigger: "当 export 后高价时段内 Solplanet SOC 低于 20% 时触发。",
+    notificationRuleGridImportStartedPostExportPeakTitle: "高价时段开始从电网取电",
+    notificationRuleGridImportStartedPostExportPeakTrigger: "当 export 后高价时段内电网状态从未取电切换到开始取电时触发一次。",
+    notificationRuleSajBatteryWatch50Title: "SAJ 电池降到 50%",
+    notificationRuleSajBatteryWatch50Trigger: "每个夜间窗口内，当 SAJ SOC 降到 50% 或更低时触发一次。",
+    notificationRuleSajBatteryWatch20Title: "SAJ 电池降到 20%",
+    notificationRuleSajBatteryWatch20Trigger: "每个夜间窗口内，当 SAJ SOC 降到 20% 或更低时触发一次。",
+    notificationRuleSajBatteryFullTitle: "SAJ 电池达到 100%",
+    notificationRuleSajBatteryFullTrigger: "当 SAJ 电池新达到 100% SOC 时触发一次。",
+    notificationRuleSolplanetBatteryFullTitle: "Solplanet 电池达到 100%",
+    notificationRuleSolplanetBatteryFullTrigger: "当 Solplanet 电池新达到 100% SOC 时触发一次。",
     combinedDebugTitle: "整合数据调试",
     combinedDebugMeta: "来源 {source} · storage_backed {storageBacked} · stale {stale} · 样本年龄 {sampleAge}s · KV 条数 {kvCount}",
     combinedCollectorMeta: "采集器: SAJ {saj} · Solplanet {solplanet} · Combined {combined}",
@@ -1358,6 +1436,131 @@ const stateCache = {
 };
 let teslaControlBusy = false;
 
+const NOTIFICATION_MATRIX_WINDOWS = [
+  {
+    id: "free_energy",
+    schedule: "11:00-14:00",
+    titleKey: "notificationMatrixWindowFreeEnergyTitle",
+    summaryKey: "notificationMatrixWindowFreeEnergySummary",
+    notifications: [],
+  },
+  {
+    id: "after_free_shoulder",
+    schedule: "14:00-16:00",
+    titleKey: "notificationMatrixWindowAfterFreeShoulderTitle",
+    summaryKey: "notificationMatrixWindowAfterFreeShoulderSummary",
+    notifications: [
+      {
+        level: "alarm",
+        code: "solplanet_low_available_capacity",
+        titleKey: "notificationRuleSolplanetLowAvailableCapacityTitle",
+        triggerKey: "notificationRuleSolplanetLowAvailableCapacityTrigger",
+      },
+    ],
+  },
+  {
+    id: "after_free_peak",
+    schedule: "16:00-18:00",
+    titleKey: "notificationMatrixWindowAfterFreePeakTitle",
+    summaryKey: "notificationMatrixWindowAfterFreePeakSummary",
+    notifications: [
+      {
+        level: "alarm",
+        code: "solplanet_low_available_capacity",
+        titleKey: "notificationRuleSolplanetLowAvailableCapacityTitle",
+        triggerKey: "notificationRuleSolplanetLowAvailableCapacityTrigger",
+      },
+    ],
+  },
+  {
+    id: "export_window",
+    schedule: "18:00-20:00",
+    titleKey: "notificationMatrixWindowExportTitle",
+    summaryKey: "notificationMatrixWindowExportSummary",
+    notifications: [
+      {
+        level: "warning",
+        code: "solplanet_low_battery",
+        titleKey: "notificationRuleSolplanetLowBatteryTitle",
+        triggerKey: "notificationRuleSolplanetLowBatteryTrigger",
+      },
+      {
+        level: "alarm",
+        code: "grid_import_started",
+        titleKey: "notificationRuleGridImportStartedTitle",
+        triggerKey: "notificationRuleGridImportStartedTrigger",
+      },
+      {
+        level: "alarm",
+        code: "solar_surplus_export_energy_reached",
+        titleKey: "notificationRuleSolarSurplusExportEnergyReachedTitle",
+        triggerKey: "notificationRuleSolarSurplusExportEnergyReachedTrigger",
+      },
+    ],
+  },
+  {
+    id: "post_export_peak",
+    schedule: "20:00-23:00",
+    titleKey: "notificationMatrixWindowPostExportPeakTitle",
+    summaryKey: "notificationMatrixWindowPostExportPeakSummary",
+    notifications: [
+      {
+        level: "warning",
+        code: "solplanet_low_battery_post_export_peak",
+        titleKey: "notificationRuleSolplanetLowBatteryPostExportPeakTitle",
+        triggerKey: "notificationRuleSolplanetLowBatteryPostExportPeakTrigger",
+      },
+      {
+        level: "alarm",
+        code: "grid_import_started_post_export_peak",
+        titleKey: "notificationRuleGridImportStartedPostExportPeakTitle",
+        triggerKey: "notificationRuleGridImportStartedPostExportPeakTrigger",
+      },
+    ],
+  },
+  {
+    id: "overnight_shoulder",
+    schedule: "23:00-11:00(+1d)",
+    titleKey: "notificationMatrixWindowOvernightTitle",
+    summaryKey: "notificationMatrixWindowOvernightSummary",
+    notifications: [
+      {
+        level: "warning",
+        code: "saj_battery_watch_50_percent",
+        titleKey: "notificationRuleSajBatteryWatch50Title",
+        triggerKey: "notificationRuleSajBatteryWatch50Trigger",
+      },
+      {
+        level: "alarm",
+        code: "saj_battery_watch_20_percent",
+        titleKey: "notificationRuleSajBatteryWatch20Title",
+        triggerKey: "notificationRuleSajBatteryWatch20Trigger",
+      },
+    ],
+  },
+  {
+    id: "always",
+    schedule: "always",
+    titleKey: "notificationMatrixWindowAlwaysTitle",
+    summaryKey: "notificationMatrixWindowAlwaysSummary",
+    noteKey: "notificationMatrixAlwaysNote",
+    notifications: [
+      {
+        level: "info",
+        code: "saj_battery_full",
+        titleKey: "notificationRuleSajBatteryFullTitle",
+        triggerKey: "notificationRuleSajBatteryFullTrigger",
+      },
+      {
+        level: "info",
+        code: "solplanet_battery_full",
+        titleKey: "notificationRuleSolplanetBatteryFullTitle",
+        triggerKey: "notificationRuleSolplanetBatteryFullTrigger",
+      },
+    ],
+  },
+];
+
 function getLang() {
   const saved = localStorage.getItem("lang");
   if (saved === "en" || saved === "zh") return saved;
@@ -1366,10 +1569,10 @@ function getLang() {
 }
 
 let currentLang = getLang();
-let currentTab = ["dashboard", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"].includes(localStorage.getItem("activeTab"))
+let currentTab = ["dashboard", "notificationMatrix", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"].includes(localStorage.getItem("activeTab"))
   ? localStorage.getItem("activeTab")
   : "dashboard";
-const ALL_TABS = ["dashboard", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"];
+const ALL_TABS = ["dashboard", "notificationMatrix", "solplanetRaw", "sajRaw", "sajControl", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"];
 let solplanetRawMode = localStorage.getItem(SOLPLANET_RAW_MODE_KEY) === "table" ? "table" : "cards";
 let sajActionDebugMode = localStorage.getItem(SAJ_ACTION_DEBUG_MODE_KEY) === "1";
 let autoRefreshTimerId = null;
@@ -1387,6 +1590,7 @@ let samplingRangeApplyingFromBrush = false;
 let samplingLegendSyncing = false;
 const tabLoadState = {
   dashboard: { inFlight: false },
+  notificationMatrix: { inFlight: false },
   entities: { inFlight: false },
   solplanetRaw: { inFlight: false },
   sajRaw: { inFlight: false },
@@ -1796,6 +2000,7 @@ function applyTranslations() {
   renderSajControlFromCache();
   renderSajProfilePanel();
   renderSolplanetControlFromCache();
+  renderNotificationMatrix();
   rerenderSamplingViewFromCache();
   rerenderDatabaseViewFromCache();
 }
@@ -3941,6 +4146,48 @@ function renderDashboardNotifications(payload) {
       });
     }
     list.appendChild(article);
+  }
+}
+
+function renderNotificationMatrix() {
+  const root = document.getElementById("notificationMatrixPanels");
+  if (!root) return;
+  root.innerHTML = "";
+  for (const windowItem of NOTIFICATION_MATRIX_WINDOWS) {
+    const panel = document.createElement("article");
+    panel.className = "notification-window-panel";
+    const notifications = Array.isArray(windowItem.notifications) ? windowItem.notifications : [];
+    const listHtml = notifications.length
+      ? notifications.map((item) => {
+        const level = String(item.level || "info").trim().toLowerCase();
+        return `
+          <article class="notification-rule-item level-${escapeHtml(level)}">
+            <label class="notification-rule-check" aria-label="${escapeHtml(t(item.titleKey))}">
+              <input type="checkbox" checked disabled />
+            </label>
+            <div class="notification-rule-main">
+              <div class="notification-rule-topline">
+                <span class="notification-rule-level">${escapeHtml(dashboardNotificationLevelText(level))}</span>
+                <span class="notification-rule-code">${escapeHtml(String(item.code || "-"))}</span>
+              </div>
+              <p class="notification-rule-title">${escapeHtml(t(item.titleKey))}</p>
+              <p class="notification-rule-trigger">${escapeHtml(t(item.triggerKey))}</p>
+            </div>
+          </article>
+        `;
+      }).join("")
+      : `<div class="notification-window-empty">${escapeHtml(t("notificationMatrixNoNotifications"))}</div>`;
+
+    panel.innerHTML = `
+      <header class="notification-window-panel-header">
+        <h3 class="notification-window-title">${escapeHtml(t(windowItem.titleKey))}</h3>
+        <span class="notification-window-time">${escapeHtml(String(windowItem.schedule || "-"))}</span>
+        <p class="notification-window-summary">${escapeHtml(t(windowItem.summaryKey))}</p>
+        ${windowItem.noteKey ? `<p class="notification-window-note">${escapeHtml(t(windowItem.noteKey))}</p>` : ""}
+      </header>
+      <div class="notification-window-list">${listHtml}</div>
+    `;
+    root.appendChild(panel);
   }
 }
 
@@ -7652,6 +7899,7 @@ async function loadCurrentTab(fromAutoRefresh = false) {
 
 function tabHasCachedData(tab) {
   if (tab === "dashboard") return Boolean(stateCache.lastSummary);
+  if (tab === "notificationMatrix") return true;
   if (tab === "solplanetRaw") {
     if (solplanetRawMode === "table") return stateCache.lastSolplanetKv?.phase && stateCache.lastSolplanetKv.phase !== "idle";
     return SOLPLANET_RAW_APIS.some((api) => stateCache.lastSolplanetRaw?.[api.key]?.payload !== undefined);
@@ -7673,6 +7921,10 @@ async function loadTabWithGuard(tab, fromAutoRefresh = false) {
   if (slot?.inFlight) return false;
   if (slot) slot.inFlight = true;
   try {
+    if (tabKey === "notificationMatrix") {
+      renderNotificationMatrix();
+      return true;
+    }
     if (tabKey === "solplanetRaw") {
       await loadSolplanetRaw();
       return true;
@@ -7744,6 +7996,7 @@ function setAutoRefresh(seconds) {
 
 function setActiveTab(tab, load = true) {
   currentTab =
+    tab === "notificationMatrix" ||
     tab === "solplanetRaw" ||
     tab === "sajRaw" ||
     tab === "sajControl" ||
@@ -7757,6 +8010,7 @@ function setActiveTab(tab, load = true) {
   localStorage.setItem("activeTab", currentTab);
 
   const dashboardView = document.getElementById("dashboardView");
+  const notificationMatrixView = document.getElementById("notificationMatrixView");
   const solplanetRawView = document.getElementById("solplanetRawView");
   const sajRawView = document.getElementById("sajRawView");
   const sajControlView = document.getElementById("sajControlView");
@@ -7766,6 +8020,7 @@ function setActiveTab(tab, load = true) {
   const workerLogsView = document.getElementById("workerLogsView");
   const workerFailureLogView = document.getElementById("workerFailureLogView");
   const tabDashboard = document.getElementById("tabDashboard");
+  const tabNotificationMatrix = document.getElementById("tabNotificationMatrix");
   const tabSolplanetRaw = document.getElementById("tabSolplanetRaw");
   const tabSajRaw = document.getElementById("tabSajRaw");
   const tabSajControl = document.getElementById("tabSajControl");
@@ -7776,6 +8031,7 @@ function setActiveTab(tab, load = true) {
   const tabWorkerFailureLog = document.getElementById("tabWorkerFailureLog");
 
   const dashboardActive = currentTab === "dashboard";
+  const notificationMatrixActive = currentTab === "notificationMatrix";
   const solplanetRawActive = currentTab === "solplanetRaw";
   const sajRawActive = currentTab === "sajRaw";
   const sajControlActive = currentTab === "sajControl";
@@ -7786,6 +8042,7 @@ function setActiveTab(tab, load = true) {
   const workerFailureLogActive = currentTab === "workerFailureLog";
   const anyRawActive = solplanetRawActive || sajRawActive;
   if (dashboardView) dashboardView.classList.toggle("hidden", !dashboardActive);
+  if (notificationMatrixView) notificationMatrixView.classList.toggle("hidden", !notificationMatrixActive);
   if (solplanetRawView) solplanetRawView.classList.toggle("hidden", !solplanetRawActive);
   if (sajRawView) sajRawView.classList.toggle("hidden", !sajRawActive);
   if (sajControlView) sajControlView.classList.toggle("hidden", !sajControlActive);
@@ -7795,6 +8052,7 @@ function setActiveTab(tab, load = true) {
   if (workerLogsView) workerLogsView.classList.toggle("hidden", !workerLogsActive);
   if (workerFailureLogView) workerFailureLogView.classList.toggle("hidden", !workerFailureLogActive);
   if (tabDashboard) tabDashboard.classList.toggle("active", dashboardActive);
+  if (tabNotificationMatrix) tabNotificationMatrix.classList.toggle("active", notificationMatrixActive);
   if (tabSolplanetRaw) tabSolplanetRaw.classList.toggle("active", solplanetRawActive);
   if (tabSajRaw) tabSajRaw.classList.toggle("active", sajRawActive);
   if (tabSajControl) tabSajControl.classList.toggle("active", sajControlActive);
@@ -7841,6 +8099,9 @@ bindClickIfPresent("configBtn", () => {
 
 bindClickIfPresent("tabDashboard", () => {
   setActiveTab("dashboard");
+});
+bindClickIfPresent("tabNotificationMatrix", () => {
+  setActiveTab("notificationMatrix");
 });
 bindClickIfPresent("tabSolplanetRaw", () => {
   setActiveTab("solplanetRaw");
