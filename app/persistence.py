@@ -573,18 +573,21 @@ def expire_pending_worker_api_logs(
     status: str = WORKER_LOG_STATUS_TIMEOUT,
     error_text: str = "worker_log_timeout",
 ) -> int:
-    with _session_scope(db_path) as session:
-        rows = session.scalars(
-            select(WorkerApiLogRow).where(
-                WorkerApiLogRow.status == WORKER_LOG_STATUS_PENDING,
-                WorkerApiLogRow.requested_at_epoch < float(older_than_epoch),
-            )
-        ).all()
-        for row in rows:
-            row.ok = 0
-            row.status = _normalize_worker_log_status(status) or WORKER_LOG_STATUS_TIMEOUT
-            row.error_text = row.error_text or str(error_text or "worker_log_timeout")
-        return len(rows)
+    try:
+        with _session_scope(db_path) as session:
+            rows = session.scalars(
+                select(WorkerApiLogRow).where(
+                    WorkerApiLogRow.status == WORKER_LOG_STATUS_PENDING,
+                    WorkerApiLogRow.requested_at_epoch < float(older_than_epoch),
+                )
+            ).all()
+            for row in rows:
+                row.ok = 0
+                row.status = _normalize_worker_log_status(status) or WORKER_LOG_STATUS_TIMEOUT
+                row.error_text = row.error_text or str(error_text or "worker_log_timeout")
+            return len(rows)
+    except SQLAlchemyError:
+        return 0
 
 
 def finalize_pending_worker_api_logs_for_round(
@@ -601,19 +604,22 @@ def finalize_pending_worker_api_logs_for_round(
     normalized_services = tuple(
         str(service or "").strip() for service in (services or ()) if str(service or "").strip()
     )
-    with _session_scope(db_path) as session:
-        stmt = select(WorkerApiLogRow).where(
-            WorkerApiLogRow.round_id == normalized_round_id,
-            WorkerApiLogRow.status == WORKER_LOG_STATUS_PENDING,
-        )
-        if normalized_services:
-            stmt = stmt.where(WorkerApiLogRow.service.in_(normalized_services))
-        rows = session.scalars(stmt).all()
-        for row in rows:
-            row.ok = 0
-            row.status = _normalize_worker_log_status(status) or WORKER_LOG_STATUS_TIMEOUT
-            row.error_text = row.error_text or str(error_text or "worker_round_incomplete")
-        return len(rows)
+    try:
+        with _session_scope(db_path) as session:
+            stmt = select(WorkerApiLogRow).where(
+                WorkerApiLogRow.round_id == normalized_round_id,
+                WorkerApiLogRow.status == WORKER_LOG_STATUS_PENDING,
+            )
+            if normalized_services:
+                stmt = stmt.where(WorkerApiLogRow.service.in_(normalized_services))
+            rows = session.scalars(stmt).all()
+            for row in rows:
+                row.ok = 0
+                row.status = _normalize_worker_log_status(status) or WORKER_LOG_STATUS_TIMEOUT
+                row.error_text = row.error_text or str(error_text or "worker_round_incomplete")
+            return len(rows)
+    except SQLAlchemyError:
+        return 0
 
 
 def count_pending_worker_api_logs(
