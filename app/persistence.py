@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import re
+import statistics
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -1326,7 +1327,14 @@ def _integrate_usage_rows(
     grid_export_wh = 0.0
     battery_charge_wh = 0.0
     battery_discharge_wh = 0.0
-    max_dt = sample_interval_seconds * 2.5
+    observed_dts = [
+        max(0.0, float(next_row[0]) - float(current_row[0]))
+        for current_row, next_row in zip(rows, rows[1:])
+        if float(next_row[0]) > float(current_row[0])
+    ]
+    observed_interval_seconds = statistics.median(observed_dts) if observed_dts else 0.0
+    baseline_interval_seconds = max(float(sample_interval_seconds), float(observed_interval_seconds or 0.0))
+    max_dt = baseline_interval_seconds * 2.5
 
     for current_row, next_row in zip(rows, rows[1:]):
         ts, pv_w, grid_w, battery_w, load_w = current_row
@@ -1369,6 +1377,8 @@ def _integrate_usage_rows(
         },
         "quality": {
             "integration": "left-rectangle",
+            "configured_interval_seconds": float(sample_interval_seconds),
+            "observed_interval_seconds": round(observed_interval_seconds, 3) if observed_interval_seconds > 0 else None,
             "gap_clamp_seconds": max_dt,
         },
     }
