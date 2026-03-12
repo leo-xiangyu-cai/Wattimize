@@ -43,6 +43,7 @@ SOLPLANET_ENDPOINT_TABLES: dict[str, str] = {
     "getdefine": "solplanet_getdefine",
 }
 WORKER_API_LOG_RESULT_MAX_CHARS = 20000
+WORKER_API_LOG_PAYLOAD_MAX_CHARS = 200000
 
 
 @dataclass(frozen=True)
@@ -132,6 +133,7 @@ class WorkerApiLogRow(Base):
     duration_ms = Column(Float)
     result_text = Column(String)
     error_text = Column(String)
+    payload_json = Column(String)
 
 
 class RawRequestResultRow(Base):
@@ -259,6 +261,15 @@ def _truncate_result_text(text_value: str | None) -> str:
     return f"{raw[:keep]}{tail}"
 
 
+def _truncate_payload_text(text_value: str | None) -> str:
+    raw = str(text_value or "")
+    if len(raw) <= WORKER_API_LOG_PAYLOAD_MAX_CHARS:
+        return raw
+    tail = f"\n...[truncated {len(raw) - WORKER_API_LOG_PAYLOAD_MAX_CHARS} chars]"
+    keep = max(0, WORKER_API_LOG_PAYLOAD_MAX_CHARS - len(tail))
+    return f"{raw[:keep]}{tail}"
+
+
 def _paginate(page: int, page_size: int) -> tuple[int, int]:
     safe_page = max(1, page)
     safe_page_size = min(500, max(1, page_size))
@@ -296,6 +307,8 @@ def init_db(db_path: DatabaseTarget) -> None:
             conn.execute(text("ALTER TABLE worker_api_logs ADD COLUMN round_id VARCHAR"))
         if "status" not in worker_columns:
             conn.execute(text("ALTER TABLE worker_api_logs ADD COLUMN status VARCHAR"))
+        if "payload_json" not in worker_columns:
+            conn.execute(text("ALTER TABLE worker_api_logs ADD COLUMN payload_json VARCHAR"))
 
 
 def insert_worker_api_log(
@@ -315,6 +328,7 @@ def insert_worker_api_log(
     duration_ms: float | None,
     result_text: str | None,
     error_text: str | None,
+    payload_json: str | None = None,
 ) -> int:
     requested = _parse_iso_to_utc(requested_at_utc)
     with _session_scope(db_path) as session:
@@ -334,6 +348,7 @@ def insert_worker_api_log(
             duration_ms=duration_ms,
             result_text=_truncate_result_text(result_text),
             error_text=str(error_text or "") or None,
+            payload_json=_truncate_payload_text(payload_json) if payload_json is not None else None,
         )
         session.add(row)
         session.flush()
@@ -350,6 +365,7 @@ def update_worker_api_log(
     duration_ms: float | None,
     result_text: str | None,
     error_text: str | None,
+    payload_json: str | None = None,
 ) -> None:
     if not request_token:
         return
@@ -368,6 +384,7 @@ def update_worker_api_log(
         row.duration_ms = duration_ms
         row.result_text = _truncate_result_text(result_text)
         row.error_text = str(error_text or "") or None
+        row.payload_json = _truncate_payload_text(payload_json) if payload_json is not None else row.payload_json
 
 
 def expire_pending_worker_api_logs(
@@ -502,12 +519,14 @@ def list_worker_api_logs(
             "method": str(row.method),
             "api_link": str(row.api_link),
             "requested_at_utc": row.requested_at_utc,
+            "requested_at_epoch": row.requested_at_epoch,
             "ok": bool(row.ok),
             "status": str(row.status or ""),
             "status_code": row.status_code,
             "duration_ms": row.duration_ms,
             "result_text": str(row.result_text or ""),
             "error_text": str(row.error_text or ""),
+            "payload_json": _json_loads(row.payload_json, default=None),
         }
         for row in rows
     ]

@@ -80,10 +80,22 @@ SYSTEM_PREFIXES: dict[str, tuple[str, ...]] = {
 }
 BALANCE_TOLERANCE_W = 100.0
 TESLA_ASSUMED_CHARGING_VOLTAGE_V = 240.0
-TESLA_GRID_SUPPORT_WINDOW_START_HOUR = 11
-TESLA_GRID_SUPPORT_WINDOW_END_HOUR = 14
-TESLA_SOLAR_SURPLUS_WINDOW_START_HOUR = 18
-TESLA_SOLAR_SURPLUS_WINDOW_END_HOUR = 20
+FREE_ENERGY_WINDOW_START_HOUR = 11
+FREE_ENERGY_WINDOW_END_HOUR = 14
+FREE_ENERGY_WINDOW_SELF_CONSUMPTION_START_MINUTE = 50
+AFTER_FREE_SHOULDER_WINDOW_START_HOUR = 14
+AFTER_FREE_SHOULDER_WINDOW_END_HOUR = 16
+AFTER_FREE_PEAK_WINDOW_START_HOUR = 16
+AFTER_FREE_PEAK_WINDOW_END_HOUR = 18
+EXPORT_WINDOW_START_HOUR = 18
+EXPORT_WINDOW_END_HOUR = 20
+POST_EXPORT_PEAK_WINDOW_START_HOUR = 20
+POST_EXPORT_PEAK_WINDOW_END_HOUR = 23
+OVERNIGHT_SHOULDER_WINDOW_START_HOUR = 23
+OVERNIGHT_SHOULDER_WINDOW_END_HOUR = 11
+SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_HIGH_SOC_PERCENT = 50.0
+SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_LOW_SOC_PERCENT = 20.0
+POST_EXPORT_PEAK_WINDOW_TARIFF_P_PER_KWH = 53.0
 TESLA_GRID_SUPPORT_TARGET_MIN_W = 14_000.0
 TESLA_GRID_SUPPORT_TARGET_MAX_W = 15_000.0
 TESLA_GRID_SUPPORT_HARD_MAX_W = 15_000.0
@@ -96,8 +108,23 @@ SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH = 9_000.0
 TESLA_CURRENT_MISMATCH_RESTART_MIN_DELTA_A = 2.0
 TESLA_CURRENT_MISMATCH_RESTART_COOLDOWN_SECONDS = 300.0
 WORKER_PENDING_LOG_TIMEOUT_SECONDS = 60.0
-TESLA_OBSERVATION_SERVICE = "tesla_home_assistant_collection"
-MIDDAY_WINDOW_CHECK_SERVICE = "worker_midday_window_check"
+TESLA_LOG_SYSTEM = "tesla"
+TESLA_OBSERVATION_SERVICE = "tesla"
+ALARM_LOG_SYSTEM = "alarm"
+WINDOW_CHECK_FREE_ENERGY_SERVICE = "free_energy"
+WINDOW_CHECK_AFTER_FREE_SHOULDER_SERVICE = "after_free_shoulder"
+WINDOW_CHECK_AFTER_FREE_PEAK_SERVICE = "after_free_peak"
+WINDOW_CHECK_EXPORT_WINDOW_SERVICE = "export_window"
+WINDOW_CHECK_POST_EXPORT_PEAK_SERVICE = "post_export_peak"
+OVERNIGHT_SHOULDER_SERVICE = "overnight_shoulder"
+WINDOW_CHECK_SERVICES: tuple[str, ...] = (
+    WINDOW_CHECK_FREE_ENERGY_SERVICE,
+    WINDOW_CHECK_AFTER_FREE_SHOULDER_SERVICE,
+    WINDOW_CHECK_AFTER_FREE_PEAK_SERVICE,
+    WINDOW_CHECK_EXPORT_WINDOW_SERVICE,
+    WINDOW_CHECK_POST_EXPORT_PEAK_SERVICE,
+)
+ALARM_SERVICES: tuple[str, ...] = (*WINDOW_CHECK_SERVICES, OVERNIGHT_SHOULDER_SERVICE)
 
 app = FastAPI(title="Wattimize API", version="0.1.0")
 static_dir = Path(__file__).parent / "static"
@@ -344,14 +371,18 @@ def _worker_round_log_plan(round_number: int, round_id: str, requested_at_utc: s
             }
         )
 
-    for service in ("combined_assembly", TESLA_OBSERVATION_SERVICE, MIDDAY_WINDOW_CHECK_SERVICE):
-        api_link = f"worker://combined/{service}"
+    for system, service in (
+        ("combined", "combined_assembly"),
+        (TESLA_LOG_SYSTEM, TESLA_OBSERVATION_SERVICE),
+        *[(ALARM_LOG_SYSTEM, service) for service in ALARM_SERVICES],
+    ):
+        api_link = f"worker://{system}/{service}"
         plan.append(
             {
                 "request_token": _worker_log_request_token(round_id, service, "AUTO", api_link),
                 "round_id": round_id,
                 "worker": "worker",
-                "system": "combined",
+                "system": system,
                 "service": service,
                 "method": "AUTO",
                 "api_link": api_link,
@@ -1725,36 +1756,187 @@ def _tesla_control_state_charge_power_w(control_state: dict[str, object]) -> flo
     return max(current_a * voltage_v, 0.0)
 
 
-def _is_within_tesla_grid_support_window(now_local: datetime) -> bool:
+def _is_hour_in_window(hour: int, start_hour: int, end_hour: int) -> bool:
+    if start_hour < end_hour:
+        return start_hour <= hour < end_hour
+    return hour >= start_hour or hour < end_hour
+
+
+def _is_within_free_energy_window(now_local: datetime) -> bool:
     hour = now_local.hour
-    return TESLA_GRID_SUPPORT_WINDOW_START_HOUR <= hour < TESLA_GRID_SUPPORT_WINDOW_END_HOUR
+    return _is_hour_in_window(hour, FREE_ENERGY_WINDOW_START_HOUR, FREE_ENERGY_WINDOW_END_HOUR)
 
 
-def _is_within_tesla_solar_surplus_window(now_local: datetime) -> bool:
+def _is_within_after_free_shoulder_window(now_local: datetime) -> bool:
     hour = now_local.hour
-    return TESLA_SOLAR_SURPLUS_WINDOW_START_HOUR <= hour < TESLA_SOLAR_SURPLUS_WINDOW_END_HOUR
+    return _is_hour_in_window(hour, AFTER_FREE_SHOULDER_WINDOW_START_HOUR, AFTER_FREE_SHOULDER_WINDOW_END_HOUR)
 
 
-def _tesla_midday_window_mode(now_local: datetime) -> Literal["grid_support", "solar_surplus", "off"]:
-    if _is_within_tesla_grid_support_window(now_local):
-        return "grid_support"
-    if _is_within_tesla_solar_surplus_window(now_local):
-        return "solar_surplus"
+def _is_within_after_free_peak_window(now_local: datetime) -> bool:
+    hour = now_local.hour
+    return _is_hour_in_window(hour, AFTER_FREE_PEAK_WINDOW_START_HOUR, AFTER_FREE_PEAK_WINDOW_END_HOUR)
+
+
+def _is_within_export_window(now_local: datetime) -> bool:
+    hour = now_local.hour
+    return _is_hour_in_window(hour, EXPORT_WINDOW_START_HOUR, EXPORT_WINDOW_END_HOUR)
+
+
+def _is_within_post_export_peak_window(now_local: datetime) -> bool:
+    hour = now_local.hour
+    return _is_hour_in_window(hour, POST_EXPORT_PEAK_WINDOW_START_HOUR, POST_EXPORT_PEAK_WINDOW_END_HOUR)
+
+
+def _is_within_overnight_shoulder_window(now_local: datetime) -> bool:
+    hour = now_local.hour
+    return _is_hour_in_window(hour, OVERNIGHT_SHOULDER_WINDOW_START_HOUR, OVERNIGHT_SHOULDER_WINDOW_END_HOUR)
+
+
+def _overnight_shoulder_window_key(now_local: datetime) -> str:
+    if now_local.hour >= OVERNIGHT_SHOULDER_WINDOW_START_HOUR:
+        return now_local.strftime("%Y-%m-%d")
+    return (now_local - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def _tesla_midday_window_mode(now_local: datetime) -> Literal["free_energy", "after_free_shoulder", "after_free_peak", "export_window", "post_export_peak", "off"]:
+    if _is_within_free_energy_window(now_local):
+        return "free_energy"
+    if _is_within_after_free_shoulder_window(now_local):
+        return "after_free_shoulder"
+    if _is_within_after_free_peak_window(now_local):
+        return "after_free_peak"
+    if _is_within_export_window(now_local):
+        return "export_window"
+    if _is_within_post_export_peak_window(now_local):
+        return "post_export_peak"
     return "off"
 
 
 def _window_schedule_text(window_mode: str) -> str:
-    if window_mode == "grid_support":
+    if window_mode == "free_energy":
         return (
-            f"{TESLA_GRID_SUPPORT_WINDOW_START_HOUR:02d}:00-"
-            f"{TESLA_GRID_SUPPORT_WINDOW_END_HOUR:02d}:00"
+            f"{FREE_ENERGY_WINDOW_START_HOUR:02d}:00-"
+            f"{FREE_ENERGY_WINDOW_END_HOUR:02d}:00"
         )
-    if window_mode == "solar_surplus":
+    if window_mode == "after_free_shoulder":
         return (
-            f"{TESLA_SOLAR_SURPLUS_WINDOW_START_HOUR:02d}:00-"
-            f"{TESLA_SOLAR_SURPLUS_WINDOW_END_HOUR:02d}:00"
+            f"{AFTER_FREE_SHOULDER_WINDOW_START_HOUR:02d}:00-"
+            f"{AFTER_FREE_SHOULDER_WINDOW_END_HOUR:02d}:00"
+        )
+    if window_mode == "after_free_peak":
+        return (
+            f"{AFTER_FREE_PEAK_WINDOW_START_HOUR:02d}:00-"
+            f"{AFTER_FREE_PEAK_WINDOW_END_HOUR:02d}:00"
+        )
+    if window_mode == "export_window":
+        return (
+            f"{EXPORT_WINDOW_START_HOUR:02d}:00-"
+            f"{EXPORT_WINDOW_END_HOUR:02d}:00"
+        )
+    if window_mode == "post_export_peak":
+        return (
+            f"{POST_EXPORT_PEAK_WINDOW_START_HOUR:02d}:00-"
+            f"{POST_EXPORT_PEAK_WINDOW_END_HOUR:02d}:00"
+        )
+    if window_mode == "overnight_shoulder":
+        return (
+            f"{OVERNIGHT_SHOULDER_WINDOW_START_HOUR:02d}:00-"
+            f"{OVERNIGHT_SHOULDER_WINDOW_END_HOUR:02d}:00(+1d)"
         )
     return "outside_configured_windows"
+
+
+def _window_tariff_p_per_kwh(window_mode: str) -> float | None:
+    if window_mode == "post_export_peak":
+        return POST_EXPORT_PEAK_WINDOW_TARIFF_P_PER_KWH
+    return None
+
+
+def _window_check_service_name(window_mode: str) -> str | None:
+    return {
+        "free_energy": WINDOW_CHECK_FREE_ENERGY_SERVICE,
+        "after_free_shoulder": WINDOW_CHECK_AFTER_FREE_SHOULDER_SERVICE,
+        "after_free_peak": WINDOW_CHECK_AFTER_FREE_PEAK_SERVICE,
+        "export_window": WINDOW_CHECK_EXPORT_WINDOW_SERVICE,
+        "post_export_peak": WINDOW_CHECK_POST_EXPORT_PEAK_SERVICE,
+        "overnight_shoulder": OVERNIGHT_SHOULDER_SERVICE,
+    }.get(window_mode)
+
+
+def _window_mode_for_service(service: str) -> str | None:
+    return {
+        WINDOW_CHECK_FREE_ENERGY_SERVICE: "free_energy",
+        WINDOW_CHECK_AFTER_FREE_SHOULDER_SERVICE: "after_free_shoulder",
+        WINDOW_CHECK_AFTER_FREE_PEAK_SERVICE: "after_free_peak",
+        WINDOW_CHECK_EXPORT_WINDOW_SERVICE: "export_window",
+        WINDOW_CHECK_POST_EXPORT_PEAK_SERVICE: "post_export_peak",
+        OVERNIGHT_SHOULDER_SERVICE: "overnight_shoulder",
+    }.get(service)
+
+
+def _window_schedule_text_for_service(service: str) -> str:
+    mode = _window_mode_for_service(service)
+    return _window_schedule_text(mode or "off")
+
+
+def _saj_target_profile_for_time(now_local: datetime) -> tuple[str, str]:
+    if _is_within_free_energy_window(now_local):
+        window_end_threshold = now_local.replace(
+            hour=FREE_ENERGY_WINDOW_END_HOUR - 1,
+            minute=FREE_ENERGY_WINDOW_SELF_CONSUMPTION_START_MINUTE,
+            second=0,
+            microsecond=0,
+        )
+        if now_local < window_end_threshold:
+            return "time_of_use", "free_energy_window_force_time_of_use"
+        return "self_consumption", "free_energy_window_last_10_minutes_force_self_consumption"
+    return "self_consumption", "outside_free_energy_window_force_self_consumption"
+
+
+async def _guard_saj_profile_for_time(now_local: datetime) -> dict[str, object]:
+    desired_profile, desired_reason = _saj_target_profile_for_time(now_local)
+    _, states_by_id = await _saj_control_states()
+    control_state = _build_saj_control_state(states_by_id)
+    profile_state = _build_saj_profile_state(control_state)
+    selected_profile = str(profile_state.get("selected_profile") or "").strip()
+    input_profile = str(profile_state.get("input_profile") or "").strip()
+    actual_profile = str(profile_state.get("actual_profile") or "").strip()
+    needs_apply = (
+        selected_profile != desired_profile
+        or input_profile != desired_profile
+        or (actual_profile != "" and actual_profile != desired_profile)
+    )
+    result: dict[str, object] = {
+        "desired_profile": desired_profile,
+        "desired_reason": desired_reason,
+        "selected_profile": selected_profile or None,
+        "input_profile": input_profile or None,
+        "actual_profile": actual_profile or None,
+        "actual_profile_source": profile_state.get("actual_profile_source"),
+        "input_profile_source": profile_state.get("input_profile_source"),
+        "pending_remote_sync": bool(profile_state.get("pending_remote_sync")),
+        "action": "noop",
+    }
+    if not needs_apply:
+        return result
+
+    apply_result = await _saj_apply_profile(desired_profile)
+    updated_profile_state = apply_result.get("profile_state")
+    updated_profile_map = updated_profile_state if isinstance(updated_profile_state, dict) else {}
+    result.update(
+        {
+            "action": "apply_profile",
+            "applied_profile": desired_profile,
+            "selected_profile": updated_profile_map.get("selected_profile"),
+            "input_profile": updated_profile_map.get("input_profile"),
+            "actual_profile": updated_profile_map.get("actual_profile"),
+            "actual_profile_source": updated_profile_map.get("actual_profile_source"),
+            "input_profile_source": updated_profile_map.get("input_profile_source"),
+            "pending_remote_sync": bool(updated_profile_map.get("pending_remote_sync")),
+            "changed": apply_result.get("changed"),
+        }
+    )
+    return result
 
 
 def _append_worker_notification(payload: dict[str, object], notification: dict[str, object]) -> None:
@@ -1976,8 +2158,12 @@ async def _run_midday_window_check(
         "window_active": window_mode != "off",
         "window_mode": window_mode,
         "window_schedule": _window_schedule_text(window_mode),
-        "grid_support_window_active": window_mode == "grid_support",
-        "solar_surplus_window_active": window_mode == "solar_surplus",
+        "window_tariff_p_per_kwh": _window_tariff_p_per_kwh(window_mode),
+        "free_energy_window_active": window_mode == "free_energy",
+        "after_free_shoulder_window_active": window_mode == "after_free_shoulder",
+        "after_free_peak_window_active": window_mode == "after_free_peak",
+        "export_window_active": window_mode == "export_window",
+        "post_export_peak_window_active": window_mode == "post_export_peak",
         "target_grid_min_w": TESLA_GRID_SUPPORT_TARGET_MIN_W,
         "target_grid_max_w": TESLA_GRID_SUPPORT_TARGET_MAX_W,
         "hard_grid_max_w": TESLA_GRID_SUPPORT_HARD_MAX_W,
@@ -1987,6 +2173,7 @@ async def _run_midday_window_check(
     ok = True
     error_text: str | None = None
     try:
+        result["saj_profile_guard"] = await _guard_saj_profile_for_time(now_local)
         observation = (
             tesla_observation_result.get("observation")
             if isinstance(tesla_observation_result, dict)
@@ -2007,6 +2194,7 @@ async def _run_midday_window_check(
         if window_mode == "off":
             combined_status = collector_status.setdefault("combined", {})
             combined_status["grid_import_active"] = False
+            combined_status["peak_price_grid_import_active"] = False
             combined_status["solar_surplus_export_last_tracked_at"] = None
             result["decision"] = {
                 "mode": "off",
@@ -2052,7 +2240,67 @@ async def _run_midday_window_check(
             status = "skipped"
             return result
 
-        if window_mode == "solar_surplus":
+        if window_mode == "post_export_peak":
+            solplanet_soc_percent = _to_number(metrics_map.get("battery2_soc_percent"))
+            combined_status = collector_status.setdefault("combined", {})
+            result["post_export_peak"] = {
+                "tariff_p_per_kwh": POST_EXPORT_PEAK_WINDOW_TARIFF_P_PER_KWH,
+                "solplanet_soc_percent": solplanet_soc_percent,
+                "low_battery_alarm_threshold_soc_percent": SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT,
+            }
+            if solplanet_soc_percent is not None and solplanet_soc_percent < SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT:
+                _append_worker_notification(result, {
+                    "level": "warning",
+                    "code": "solplanet_low_battery_post_export_peak",
+                    "target": "solplanet_battery",
+                    "window": _window_schedule_text("post_export_peak"),
+                    "tariff_p_per_kwh": POST_EXPORT_PEAK_WINDOW_TARIFF_P_PER_KWH,
+                    "threshold_soc_percent": SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT,
+                    "current_soc_percent": round(solplanet_soc_percent, 1),
+                    "message": (
+                        "Solplanet battery SOC is below 20% during the post-export peak window; "
+                        "raise an early warning to avoid expensive grid import."
+                    ),
+                })
+            was_importing = bool(combined_status.get("peak_price_grid_import_active"))
+            is_importing = current_grid_import_w > 0.0
+            if is_importing and not was_importing:
+                _append_worker_notification(result, {
+                    "level": "alarm",
+                    "code": "grid_import_started_post_export_peak",
+                    "target": "grid",
+                    "window": _window_schedule_text("post_export_peak"),
+                    "tariff_p_per_kwh": POST_EXPORT_PEAK_WINDOW_TARIFF_P_PER_KWH,
+                    "current_grid_import_w": round(current_grid_import_w, 1),
+                    "message": (
+                        "Grid import started during the post-export peak window; raise one alarm "
+                        "so this expensive period does not consume more than expected."
+                    ),
+                })
+            combined_status["peak_price_grid_import_active"] = is_importing
+            result["decision"] = {
+                "mode": "off",
+                "charge_current_amps": 0,
+                "predicted_grid_w": round(float(grid_w), 1),
+            }
+            result["decision_reason"] = "avoid_expensive_post_export_peak_window"
+            if charge_requested_enabled or charging_enabled:
+                await _tesla_set_charging(False)
+                result["action"] = {"type": "stop_charging", "reason": "post_export_peak_window"}
+                status = "applied"
+            else:
+                result["action"] = {"type": "noop", "reason": "post_export_peak_window_already_stopped"}
+                status = "noop"
+            return result
+
+        if window_mode in ("after_free_shoulder", "after_free_peak"):
+            result["decision"] = {"mode": "observe_only"}
+            result["decision_reason"] = f"{window_mode}_logic_not_implemented_yet"
+            result["action"] = {"type": "noop", "reason": "window_logic_not_implemented"}
+            status = "noop"
+            return result
+
+        if window_mode == "export_window":
             pv_w = _to_number(metrics_map.get("pv_w"))
             load_w = _to_number(metrics_map.get("load_w"))
             saj_soc_percent = _to_number(metrics_map.get("battery1_soc_percent"))
@@ -2084,7 +2332,7 @@ async def _run_midday_window_check(
             result["current_grid_export_w"] = round(current_grid_export_w, 1)
             result["base_grid_without_tesla_w"] = round(base_grid_without_tesla_w, 1)
             result["base_export_without_tesla_w"] = round(export_without_tesla_w, 1)
-            result["solar_surplus"] = {
+            result["export_window"] = {
                 "pv_w": pv_w,
                 "load_w": load_w,
                 "solar_excess_vs_load_w": round(solar_excess_vs_load_w, 1) if solar_excess_vs_load_w is not None else None,
@@ -2104,13 +2352,13 @@ async def _run_midday_window_check(
             }
             if solplanet_soc_percent < SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT:
                 _append_worker_notification(result, {
-                    "level": "warning",
-                    "code": "solplanet_low_battery",
-                    "target": "solplanet_battery",
+                        "level": "warning",
+                        "code": "solplanet_low_battery",
+                        "target": "solplanet_battery",
                     "threshold_soc_percent": SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT,
                     "current_soc_percent": round(solplanet_soc_percent, 1),
-                    "message": (
-                        "Solplanet battery SOC is below 20%; keep one reminder in worklog "
+                        "message": (
+                        "Solplanet battery SOC is below 20% during the export window; keep one reminder in worklog "
                         "until notification handling is implemented."
                     ),
                 })
@@ -2124,7 +2372,7 @@ async def _run_midday_window_check(
                     "target": "grid",
                     "current_grid_import_w": round(current_grid_import_w, 1),
                     "message": (
-                        "Grid import started during the third worker window; add one alarm "
+                        "Grid import started during the export window; add one alarm "
                         "reminder to worklog."
                     ),
                 })
@@ -2145,13 +2393,13 @@ async def _run_midday_window_check(
                     "level": "alarm",
                     "code": "solar_surplus_export_energy_reached",
                     "target": "grid_export_energy",
-                    "window": _window_schedule_text("solar_surplus"),
+                    "window": _window_schedule_text("export_window"),
                     "current_export_total_wh": round(float(export_tracking["total_export_wh"]), 1),
                     "current_export_total_kwh": round(float(export_tracking["total_export_wh"]) / 1000.0, 4),
                     "threshold_wh": SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH,
                     "threshold_kwh": round(SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH / 1000.0, 3),
                     "message": (
-                        "Exported energy during the third worker window reached the configured "
+                        "Exported energy during the export window reached the configured "
                         "threshold; add one alarm reminder to worklog."
                     ),
                 })
@@ -2452,10 +2700,131 @@ async def _run_midday_window_check(
         result["error"] = error_text
         raise
     finally:
+        active_service = _window_check_service_name(str(result.get("window_mode") or "off"))
+        for service_name in WINDOW_CHECK_SERVICES:
+            service_payload = dict(result)
+            service_payload["service_window"] = service_name
+            service_payload["service_window_schedule"] = _window_schedule_text_for_service(service_name)
+            service_payload["service_window_active"] = service_name == active_service
+            await _persist_worker_control_log(
+                round_id=round_id,
+                system=ALARM_LOG_SYSTEM,
+                service=service_name,
+                requested_at_utc=requested_at_utc,
+                started_monotonic=started_monotonic,
+                ok=ok if service_name == active_service else True,
+                status=status if service_name == active_service else "outside_window",
+                payload=service_payload,
+                error_text=error_text if service_name == active_service else None,
+            )
+
+
+async def _run_saj_battery_watch_check(
+    combined_flow: dict[str, object] | None,
+    *,
+    round_id: str | None = None,
+    requested_at_utc: str | None = None,
+) -> dict[str, object]:
+    requested_at_utc = str(requested_at_utc or "").strip() or datetime.now(UTC).isoformat()
+    started_monotonic = monotonic()
+    now_local, timezone_name = _tesla_grid_support_now_local()
+    window_active = _is_within_overnight_shoulder_window(now_local)
+    result: dict[str, object] = {
+        "executed_at_utc": datetime.now(UTC).isoformat(),
+        "evaluated_at_local": now_local.isoformat(),
+        "timezone": timezone_name,
+        "window_active": window_active,
+        "window_mode": "overnight_shoulder" if window_active else "off",
+        "window_schedule": _window_schedule_text("overnight_shoulder"),
+        "target": "saj_battery",
+        "thresholds_soc_percent": [
+            SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_HIGH_SOC_PERCENT,
+            SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_LOW_SOC_PERCENT,
+        ],
+    }
+    status = "ok"
+    ok = True
+    error_text: str | None = None
+    try:
+        if not window_active:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "outside_window"}
+            status = "outside_window"
+            return result
+
+        metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
+        metrics_map = metrics if isinstance(metrics, dict) else {}
+        saj_soc_percent = _to_number(metrics_map.get("battery1_soc_percent"))
+        result["saj_soc_percent"] = saj_soc_percent
+        result["battery1_soc_percent"] = saj_soc_percent
+        result["battery2_soc_percent"] = _to_number(metrics_map.get("battery2_soc_percent"))
+        if saj_soc_percent is None:
+            result["skipped"] = "combined_saj_soc_unavailable"
+            status = "skipped"
+            return result
+
+        combined_status = collector_status.setdefault("combined", {})
+        window_key = _overnight_shoulder_window_key(now_local)
+        last_window_key = str(combined_status.get("saj_battery_watch_window_key") or "").strip()
+        if last_window_key != window_key:
+            combined_status["saj_battery_watch_50_notified"] = False
+            combined_status["saj_battery_watch_20_notified"] = False
+        combined_status["saj_battery_watch_window_key"] = window_key
+
+        notified_50 = bool(combined_status.get("saj_battery_watch_50_notified"))
+        notified_20 = bool(combined_status.get("saj_battery_watch_20_notified"))
+        result["window_key"] = window_key
+        result["notification_state"] = {
+            "reminder_50_sent": notified_50,
+            "reminder_20_sent": notified_20,
+        }
+
+        if saj_soc_percent <= SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_HIGH_SOC_PERCENT and not notified_50:
+            _append_worker_notification(result, {
+                "level": "warning",
+                "code": "saj_battery_watch_50_percent",
+                "target": "saj_battery",
+                "window": _window_schedule_text("overnight_shoulder"),
+                "threshold_soc_percent": SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_HIGH_SOC_PERCENT,
+                "current_soc_percent": round(saj_soc_percent, 1),
+                "message": "SAJ battery SOC reached 50% during the overnight shoulder window.",
+            })
+            combined_status["saj_battery_watch_50_notified"] = True
+
+        if saj_soc_percent <= SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_LOW_SOC_PERCENT and not notified_20:
+            _append_worker_notification(result, {
+                "level": "alarm",
+                "code": "saj_battery_watch_20_percent",
+                "target": "saj_battery",
+                "window": _window_schedule_text("overnight_shoulder"),
+                "threshold_soc_percent": SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_LOW_SOC_PERCENT,
+                "current_soc_percent": round(saj_soc_percent, 1),
+                "message": "SAJ battery SOC reached 20% during the overnight shoulder window.",
+            })
+            combined_status["saj_battery_watch_20_notified"] = True
+
+        result["notification_state"] = {
+            "reminder_50_sent": bool(combined_status.get("saj_battery_watch_50_notified")),
+            "reminder_20_sent": bool(combined_status.get("saj_battery_watch_20_notified")),
+        }
+        result["decision"] = {"mode": "observe_only"}
+        result["action"] = {"type": "noop", "reason": "watching_saj_battery_soc"}
+        status = "noop"
+        return result
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        status = "failed"
+        error_text = f"{type(exc).__name__}: {exc}"
+        result["error"] = error_text
+        raise
+    finally:
+        result["service_window"] = OVERNIGHT_SHOULDER_SERVICE
+        result["service_window_schedule"] = _window_schedule_text("overnight_shoulder")
+        result["service_window_active"] = window_active
         await _persist_worker_control_log(
             round_id=round_id,
-            system="combined",
-            service=MIDDAY_WINDOW_CHECK_SERVICE,
+            system=ALARM_LOG_SYSTEM,
+            service=OVERNIGHT_SHOULDER_SERVICE,
             requested_at_utc=requested_at_utc,
             started_monotonic=started_monotonic,
             ok=ok,
@@ -2504,7 +2873,7 @@ async def _run_tesla_home_assistant_collection(
     finally:
         await _persist_worker_control_log(
             round_id=round_id,
-            system="combined",
+            system=TESLA_LOG_SYSTEM,
             service=TESLA_OBSERVATION_SERVICE,
             requested_at_utc=requested_at_utc,
             started_monotonic=started_monotonic,
@@ -5051,15 +5420,66 @@ def _worker_control_result_text(
             f"voltage {_fmt_result_number(charging_map.get('voltage_v'), 0, 'V')}, "
             f"power {_fmt_result_number(charging_map.get('power_w'), 1, 'W')}"
         )
-    if service == MIDDAY_WINDOW_CHECK_SERVICE:
+    if service == OVERNIGHT_SHOULDER_SERVICE:
+        service_window_schedule = str(payload.get("service_window_schedule") or _window_schedule_text("overnight_shoulder"))
+        if status == "outside_window":
+            return (
+                "Overnight shoulder outside window: "
+                f"service={service}, schedule={service_window_schedule}, "
+                f"current_window={payload.get('window_mode') or 'off'}"
+            )
+        notifications = payload.get("notifications")
+        notification_list = [item for item in notifications if isinstance(item, dict)] if isinstance(notifications, list) else []
+        if not notification_list:
+            notification = payload.get("notification")
+            if isinstance(notification, dict):
+                notification_list = [notification]
+        extra_parts = []
+        for notification_map in notification_list:
+            code = str(notification_map.get("code") or "warning")
+            if code in ("saj_battery_watch_50_percent", "saj_battery_watch_20_percent"):
+                extra_parts.append(
+                    "notification "
+                    f"{code}: "
+                    f"saj_soc={_fmt_result_number(notification_map.get('current_soc_percent'), 0, '%')}, "
+                    f"threshold={_fmt_result_number(notification_map.get('threshold_soc_percent'), 0, '%')}"
+                )
+                continue
+            extra_parts.append(f"notification {code}")
+        return (
+            f"Overnight shoulder {'skipped' if status == 'skipped' else status}: "
+            f"schedule={service_window_schedule}, active={'yes' if payload.get('window_active') else 'no'}, "
+            f"saj_soc={_fmt_result_number(payload.get('saj_soc_percent'), 0, '%')}, "
+            f"window_key={payload.get('window_key') or '-'}"
+            + (f"; {'; '.join(extra_parts)}" if extra_parts else "")
+            + (
+                f"; skipped={payload.get('skipped') or error_text or 'unavailable'}"
+                if status == "skipped"
+                else ""
+            )
+        )
+    if service in (
+        WINDOW_CHECK_FREE_ENERGY_SERVICE,
+        WINDOW_CHECK_AFTER_FREE_SHOULDER_SERVICE,
+        WINDOW_CHECK_AFTER_FREE_PEAK_SERVICE,
+        WINDOW_CHECK_EXPORT_WINDOW_SERVICE,
+        WINDOW_CHECK_POST_EXPORT_PEAK_SERVICE,
+    ):
+        service_window_schedule = str(payload.get("service_window_schedule") or _window_schedule_text_for_service(service))
+        if status == "outside_window":
+            return (
+                f"Worker window check outside window: "
+                f"service={service}, schedule={service_window_schedule}, "
+                f"current_window={payload.get('window_mode') or 'off'}"
+            )
         action = payload.get("action")
         action_map = action if isinstance(action, dict) else {}
         decision = payload.get("decision")
         decision_map = decision if isinstance(decision, dict) else {}
         tesla_before = payload.get("tesla_state_before")
         tesla_before_map = tesla_before if isinstance(tesla_before, dict) else {}
-        solar_surplus = payload.get("solar_surplus")
-        solar_surplus_map = solar_surplus if isinstance(solar_surplus, dict) else {}
+        export_window = payload.get("export_window")
+        export_window_map = export_window if isinstance(export_window, dict) else {}
         notifications = payload.get("notifications")
         notification_list = [item for item in notifications if isinstance(item, dict)] if isinstance(notifications, list) else []
         if not notification_list:
@@ -5068,8 +5488,11 @@ def _worker_control_result_text(
                 notification_list = [notification]
         window_mode = str(payload.get("window_mode") or "off")
         window_logic = {
-            "grid_support": "grid_support",
-            "solar_surplus": "solar_surplus",
+            "free_energy": "free_energy",
+            "after_free_shoulder": "after_free_shoulder",
+            "after_free_peak": "after_free_peak",
+            "export_window": "export_window",
+            "post_export_peak": "post_export_peak",
             "off": "outside_window",
         }.get(window_mode, window_mode or "unknown")
         action_type = str(action_map.get("type") or "-")
@@ -5125,7 +5548,8 @@ def _worker_control_result_text(
         time_window_text = (
             "time_window "
             f"mode={window_mode}, schedule={payload.get('window_schedule') or '-'}, "
-            f"logic={window_logic}, active={'yes' if payload.get('window_active') else 'no'}"
+            f"logic={window_logic}, active={'yes' if payload.get('window_active') else 'no'}, "
+            f"tariff={_fmt_result_number(payload.get('window_tariff_p_per_kwh'), 1, 'p/kWh')}"
         )
         tesla_text = (
             f"tesla now state={tesla_before_text}, request={tesla_before_request}, status={tesla_before_status}, "
@@ -5133,12 +5557,12 @@ def _worker_control_result_text(
         )
         battery_text = (
             "batteries "
-            f"saj_soc={_fmt_result_number(solar_surplus_map.get('saj_soc_percent'), 0, '%')}, "
-            f"solplanet_soc={_fmt_result_number(solar_surplus_map.get('solplanet_soc_percent'), 0, '%')}, "
-            f"start_threshold={_fmt_result_number(solar_surplus_map.get('start_soc_percent'), 0, '%')}, "
-            f"stop_threshold={_fmt_result_number(solar_surplus_map.get('stop_soc_percent'), 0, '%')}"
+            f"saj_soc={_fmt_result_number(export_window_map.get('saj_soc_percent'), 0, '%')}, "
+            f"solplanet_soc={_fmt_result_number(export_window_map.get('solplanet_soc_percent'), 0, '%')}, "
+            f"start_threshold={_fmt_result_number(export_window_map.get('start_soc_percent'), 0, '%')}, "
+            f"stop_threshold={_fmt_result_number(export_window_map.get('stop_soc_percent'), 0, '%')}"
         )
-        if not solar_surplus_map:
+        if not export_window_map:
             battery_text = (
                 "batteries "
                 f"saj_soc={_fmt_result_number(payload.get('battery1_soc_percent'), 0, '%')}, "
@@ -5155,13 +5579,13 @@ def _worker_control_result_text(
                 f"export={_fmt_result_number(payload.get('current_grid_export_w'), 0, 'W')}, "
                 f"base={_fmt_result_number(payload.get('base_grid_without_tesla_w'), 0, 'W')}"
             )
-        if solar_surplus_map:
+        if export_window_map:
             extra_parts.append(
-                f"solar pv={_fmt_result_number(solar_surplus_map.get('pv_w'), 0, 'W')}, "
-                f"load={_fmt_result_number(solar_surplus_map.get('load_w'), 0, 'W')}, "
-                f"excess={_fmt_result_number(solar_surplus_map.get('solar_excess_vs_load_w'), 0, 'W')}, "
-                f"export_signal={'yes' if solar_surplus_map.get('export_signal_active') else 'no'}, "
-                f"solar_signal={'yes' if solar_surplus_map.get('solar_signal_active') else 'no'}"
+                f"solar pv={_fmt_result_number(export_window_map.get('pv_w'), 0, 'W')}, "
+                f"load={_fmt_result_number(export_window_map.get('load_w'), 0, 'W')}, "
+                f"excess={_fmt_result_number(export_window_map.get('solar_excess_vs_load_w'), 0, 'W')}, "
+                f"export_signal={'yes' if export_window_map.get('export_signal_active') else 'no'}, "
+                f"solar_signal={'yes' if export_window_map.get('solar_signal_active') else 'no'}"
             )
         export_tracking = payload.get("solar_surplus_export_tracking")
         export_tracking_map = export_tracking if isinstance(export_tracking, dict) else {}
@@ -5184,11 +5608,28 @@ def _worker_control_result_text(
                     f"threshold={_fmt_result_number(notification_map.get('threshold_soc_percent'), 0, '%')}"
                 )
                 continue
+            if code == "solplanet_low_battery_post_export_peak":
+                extra_parts.append(
+                    "notification "
+                    f"{code}: "
+                    f"solplanet_soc={_fmt_result_number(notification_map.get('current_soc_percent'), 0, '%')}, "
+                    f"threshold={_fmt_result_number(notification_map.get('threshold_soc_percent'), 0, '%')}, "
+                    f"tariff={_fmt_result_number(notification_map.get('tariff_p_per_kwh'), 1, 'p/kWh')}"
+                )
+                continue
             if code == "grid_import_started":
                 extra_parts.append(
                     "notification "
                     f"{code}: "
                     f"grid_import={_fmt_result_number(notification_map.get('current_grid_import_w'), 0, 'W')}"
+                )
+                continue
+            if code == "grid_import_started_post_export_peak":
+                extra_parts.append(
+                    "notification "
+                    f"{code}: "
+                    f"grid_import={_fmt_result_number(notification_map.get('current_grid_import_w'), 0, 'W')}, "
+                    f"tariff={_fmt_result_number(notification_map.get('tariff_p_per_kwh'), 1, 'p/kWh')}"
                 )
                 continue
             if code == "solar_surplus_export_energy_reached":
@@ -5257,6 +5698,7 @@ async def _persist_worker_control_log(
     api_link = f"worker://{system}/{service}"
     request_token = _worker_log_request_token(normalized_round_id, service, "AUTO", api_link)
     result_text = _worker_control_result_text(service=service, status=status, payload=payload, error_text=error_text)
+    payload_json = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
     try:
         if request_token:
             await asyncio.to_thread(
@@ -5269,6 +5711,7 @@ async def _persist_worker_control_log(
                 duration_ms=round((monotonic() - started_monotonic) * 1000, 1),
                 result_text=result_text,
                 error_text=error_text,
+                payload_json=payload_json,
             )
             return
         await asyncio.to_thread(
@@ -5288,6 +5731,7 @@ async def _persist_worker_control_log(
             duration_ms=round((monotonic() - started_monotonic) * 1000, 1),
             result_text=result_text,
             error_text=error_text,
+            payload_json=payload_json,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to persist worker control log for %s/%s: %s", system, service, exc)
@@ -5542,11 +5986,31 @@ async def _collector_loop() -> None:
         except Exception as window_exc:  # noqa: BLE001
             _append_worker_failure_log(
                 "combined",
-                stage=MIDDAY_WINDOW_CHECK_SERVICE,
+                stage=_window_check_service_name(
+                    _tesla_midday_window_mode(_tesla_grid_support_now_local()[0])
+                ) or "window_check",
                 error=window_exc,
             )
             collector_status.setdefault("combined", {})["last_midday_window_check"] = {
                 "error": f"{type(window_exc).__name__}: {window_exc}",
+                "executed_at": datetime.now(UTC).isoformat(),
+            }
+
+        try:
+            saj_battery_watch_result = await _run_saj_battery_watch_check(
+                round_results.get("combined", {}).get("flow") if isinstance(round_results.get("combined"), dict) else None,
+                round_id=round_id,
+                requested_at_utc=round_started_at_utc,
+            )
+            collector_status.setdefault("combined", {})["last_saj_battery_watch_check"] = saj_battery_watch_result
+        except Exception as watch_exc:  # noqa: BLE001
+            _append_worker_failure_log(
+                "combined",
+                stage=OVERNIGHT_SHOULDER_SERVICE,
+                error=watch_exc,
+            )
+            collector_status.setdefault("combined", {})["last_saj_battery_watch_check"] = {
+                "error": f"{type(watch_exc).__name__}: {watch_exc}",
                 "executed_at": datetime.now(UTC).isoformat(),
             }
 
@@ -5564,7 +6028,16 @@ async def _collector_loop() -> None:
 
         timed_out_pending = await _await_round_request_log_settlement(
             round_id,
-            services=("combined_assembly", TESLA_OBSERVATION_SERVICE, MIDDAY_WINDOW_CHECK_SERVICE),
+            services=(
+                "combined_assembly",
+                TESLA_OBSERVATION_SERVICE,
+                WINDOW_CHECK_FREE_ENERGY_SERVICE,
+                WINDOW_CHECK_AFTER_FREE_SHOULDER_SERVICE,
+                WINDOW_CHECK_AFTER_FREE_PEAK_SERVICE,
+                WINDOW_CHECK_EXPORT_WINDOW_SERVICE,
+                WINDOW_CHECK_POST_EXPORT_PEAK_SERVICE,
+                OVERNIGHT_SHOULDER_SERVICE,
+            ),
             timeout_error_text="worker_round_incomplete",
         )
         if timed_out_pending:
@@ -5729,7 +6202,7 @@ async def worker_logs(
     service: str | None = Query(default=None, description="home_assistant or solplanet_cgi"),
     status: str | None = Query(default=None, description="ok/failed/pending/skipped/applied/noop/timeout"),
     exclude_status: str | None = Query(default=None, description="comma-separated statuses to exclude"),
-    category: str | None = Query(default=None, description="all/saj/solplanet/combined/tesla"),
+    category: str | None = Query(default=None, description="all/saj/solplanet/combined/tesla/alarm"),
 ) -> dict[str, object]:
     normalized_system: str | None = None
     normalized_service = str(service or "").strip() or None
@@ -5755,14 +6228,17 @@ async def worker_logs(
         normalized_system = "combined"
         normalized_service = "combined_assembly"
     elif normalized_category == "tesla":
-        normalized_system = None
-        normalized_service = TESLA_OBSERVATION_SERVICE
+        normalized_system = TESLA_LOG_SYSTEM
+        normalized_service = None
+    elif normalized_category == "alarm":
+        normalized_system = ALARM_LOG_SYSTEM
+        normalized_service = None
     elif system:
         normalized_system = _normalize_system_name(system)
     elif normalized_category:
         raise HTTPException(
             status_code=400,
-            detail="category must be one of: all, saj, solplanet, combined, tesla",
+            detail="category must be one of: all, saj, solplanet, combined, tesla, alarm",
         )
     elif system:
         normalized_system = _normalize_system_name(system)

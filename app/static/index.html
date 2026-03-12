@@ -391,6 +391,7 @@
                 <option value="solplanet" data-i18n="workerLogsCategorySolplanet">SoulPlanet</option>
                 <option value="combined" data-i18n="workerLogsCategoryCombined">Combined</option>
                 <option value="tesla" data-i18n="workerLogsCategoryTesla">Tesla</option>
+                <option value="alarm" data-i18n="workerLogsCategoryAlarm">Alarm</option>
                 <option value="alert" data-i18n="workerLogsCategoryAlert">Alert</option>
               </select>
             </label>
@@ -398,14 +399,26 @@
               Service
               <select id="workerLogsServiceSelect">
                 <option value="all" data-i18n="workerLogsServiceAll">All</option>
-                <option value="worker_midday_window_check" data-i18n="workerLogsServiceTeslaControl">Tesla Control</option>
-                <option value="tesla_home_assistant_collection" data-i18n="workerLogsServiceTeslaObserve">Tesla Observe</option>
+                <option value="overnight_shoulder">Overnight Shoulder</option>
+                <option value="free_energy">Free Energy</option>
+                <option value="after_free_shoulder">After Free Shoulder</option>
+                <option value="after_free_peak">After Free Peak</option>
+                <option value="export_window">Export Window</option>
+                <option value="post_export_peak">Post Export Peak</option>
+                <option value="tesla" data-i18n="workerLogsServiceTeslaObserve">Tesla Observe</option>
                 <option value="combined_assembly" data-i18n="workerLogsServiceCombinedAssembly">Combined Assembly</option>
               </select>
             </label>
             <label id="workerLogsHidePassiveLabel" class="worker-logs-checkbox hidden">
               <input id="workerLogsHidePassiveCheckbox" type="checkbox" />
               <span data-i18n="workerLogsHidePassive">Hide No Ops / Skipped</span>
+            </label>
+            <label>
+              table_mode
+              <select id="workerLogsTableModeSelect">
+                <option value="human_readable_table">human_readable_table</option>
+                <option value="raw_table">raw_table</option>
+              </select>
             </label>
           </div>
           <p id="workerLogsConfigMeta" class="muted">-</p>
@@ -417,19 +430,7 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead>
-                <tr>
-                  <th data-i18n="workerLogsTableTime">Time (UTC)</th>
-                  <th data-i18n="workerLogsTableRound">Run ID</th>
-                  <th data-i18n="workerLogsTableSystem">System</th>
-                  <th data-i18n="workerLogsTableService">Service</th>
-                  <th data-i18n="workerLogsTableMethod">Method</th>
-                  <th data-i18n="workerLogsTableLink">API Link</th>
-                  <th data-i18n="workerLogsTableStatus">Status</th>
-                  <th data-i18n="workerLogsTableDuration">Duration(ms)</th>
-                  <th data-i18n="workerLogsTableResult">Result</th>
-                </tr>
-              </thead>
+              <thead id="workerLogsHead"></thead>
               <tbody id="workerLogsBody"></tbody>
             </table>
           </div>
@@ -466,6 +467,10 @@
             <tbody id="workerLogDetailBody"></tbody>
           </table>
         </div>
+        <section class="raw-section">
+          <h3>Payload</h3>
+          <pre id="workerLogDetailPayload" class="raw-pre">-</pre>
+        </section>
       </div>
     </div>
 

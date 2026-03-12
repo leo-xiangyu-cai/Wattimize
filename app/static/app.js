@@ -366,12 +366,15 @@ const I18N = {
     workerLogsCategorySolplanet: "SoulPlanet",
     workerLogsCategoryCombined: "Combined",
     workerLogsCategoryTesla: "Tesla",
+    workerLogsCategoryAlarm: "Alarm",
     workerLogsCategoryAlert: "Alert",
     workerLogsSystemLabel: "System",
     workerLogsSystemAll: "All",
     workerLogsServiceLabel: "Service",
     workerLogsServiceAll: "All",
-    workerLogsServiceTeslaControl: "Tesla Control",
+    workerLogsServiceGridSupport: "Grid Support",
+    workerLogsServiceSolarSurplus: "Solar Surplus",
+    workerLogsServicePeakPriceGuard: "Peak Price Guard",
     workerLogsServiceTeslaObserve: "Tesla Observe",
     workerLogsServiceCombinedAssembly: "Combined Assembly",
     workerLogsHidePassive: "Hide No Ops / Skipped",
@@ -853,12 +856,15 @@ const I18N = {
     workerLogsCategorySolplanet: "SoulPlanet",
     workerLogsCategoryCombined: "整合",
     workerLogsCategoryTesla: "特斯拉",
+    workerLogsCategoryAlarm: "告警",
     workerLogsCategoryAlert: "提醒",
     workerLogsSystemLabel: "系统",
     workerLogsSystemAll: "全部",
     workerLogsServiceLabel: "服务",
     workerLogsServiceAll: "全部",
-    workerLogsServiceTeslaControl: "特斯拉控制",
+    workerLogsServiceGridSupport: "电网支撑窗口",
+    workerLogsServiceSolarSurplus: "太阳能富余窗口",
+    workerLogsServicePeakPriceGuard: "高价保护窗口",
     workerLogsServiceTeslaObserve: "特斯拉观测",
     workerLogsServiceCombinedAssembly: "整合组装",
     workerLogsHidePassive: "隐藏 No Ops / Skipped",
@@ -1025,9 +1031,52 @@ const workerFailureLogState = {
   hasMore: false,
 };
 let workerLogsDefaultsApplied = false;
-const TESLA_CONTROL_WORKER_SERVICE = "worker_midday_window_check";
-const TESLA_OBSERVATION_WORKER_SERVICE = "tesla_home_assistant_collection";
+const WORKER_LOGS_TABLE_MODE_KEY = "workerLogsTableMode";
+const OVERNIGHT_SHOULDER_WORKER_SERVICE = "overnight_shoulder";
+const FREE_ENERGY_WORKER_SERVICE = "free_energy";
+const AFTER_FREE_SHOULDER_WORKER_SERVICE = "after_free_shoulder";
+const AFTER_FREE_PEAK_WORKER_SERVICE = "after_free_peak";
+const EXPORT_WINDOW_WORKER_SERVICE = "export_window";
+const POST_EXPORT_PEAK_WORKER_SERVICE = "post_export_peak";
+const TESLA_OBSERVATION_WORKER_SERVICE = "tesla";
 const COMBINED_ASSEMBLY_WORKER_SERVICE = "combined_assembly";
+const ALARM_WORKER_SERVICES = [
+  OVERNIGHT_SHOULDER_WORKER_SERVICE,
+  FREE_ENERGY_WORKER_SERVICE,
+  AFTER_FREE_SHOULDER_WORKER_SERVICE,
+  AFTER_FREE_PEAK_WORKER_SERVICE,
+  EXPORT_WINDOW_WORKER_SERVICE,
+  POST_EXPORT_PEAK_WORKER_SERVICE,
+];
+const WORKER_LOG_HUMAN_COLUMNS = [
+  "id",
+  "time",
+  "system",
+  "service",
+  "status",
+  "duration",
+  "error_text",
+  "result_text",
+];
+const WORKER_LOG_RAW_COLUMNS = [
+  "id",
+  "request_token",
+  "requested_at_utc",
+  "requested_at_epoch",
+  "round_id",
+  "worker",
+  "system",
+  "service",
+  "method",
+  "api_link",
+  "ok",
+  "status",
+  "status_code",
+  "duration_ms",
+  "error_text",
+  "result_text",
+  "payload_json",
+];
 const PAGE_SIZE = 80;
 const SAMPLING_PAGE_SIZE = 100;
 const WORKER_FAILURE_LOG_PAGE_SIZE = 100;
@@ -1502,6 +1551,69 @@ function formatDateTimeWithAgo(isoText, options = {}) {
   return formatNoWrapText(combined);
 }
 
+function formatWorkerLogLocalTimeFromEpoch(epochSeconds) {
+  const raw = Number(epochSeconds);
+  if (!Number.isFinite(raw)) return "-";
+  const dt = new Date(raw * 1000);
+  if (Number.isNaN(dt.getTime())) return "-";
+  try {
+    const text = new Intl.DateTimeFormat(undefined, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(dt);
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
+    return formatNoWrapText(`${text} ${zone}`);
+  } catch (_err) {
+    return formatNoWrapText(dt.toLocaleString());
+  }
+}
+
+function getWorkerLogsTableMode() {
+  const raw = document.getElementById("workerLogsTableModeSelect")?.value || "human_readable_table";
+  return raw === "raw_table" ? "raw_table" : "human_readable_table";
+}
+
+function workerLogColumnsForMode(mode) {
+  return mode === "raw_table" ? WORKER_LOG_RAW_COLUMNS : WORKER_LOG_HUMAN_COLUMNS;
+}
+
+function renderWorkerLogsHead() {
+  const head = document.getElementById("workerLogsHead");
+  if (!head) return;
+  const columns = workerLogColumnsForMode(getWorkerLogsTableMode());
+  head.innerHTML = `<tr>${columns.map((name) => `<th>${escapeHtml(name)}</th>`).join("")}</tr>`;
+}
+
+function workerLogCellValue(item, column, statusPresentation) {
+  if (column === "time") {
+    return formatWorkerLogLocalTimeFromEpoch(item.requested_at_epoch);
+  }
+  if (column === "duration") {
+    const raw = Number(item?.duration_ms);
+    if (!Number.isFinite(raw)) return "-";
+    if (raw < 1000) return `${raw.toFixed(raw < 100 ? 1 : 0)} ms`;
+    return `${(raw / 1000).toFixed(raw < 10_000 ? 2 : 1)} s`;
+  }
+  if (column === "status") {
+    return item.status || statusPresentation.text || "-";
+  }
+  if (column === "payload_json") {
+    return item?.payload_json == null ? "-" : JSON.stringify(item.payload_json);
+  }
+  if (column === "ok") {
+    return item.ok == null ? "-" : String(Boolean(item.ok));
+  }
+  const value = item?.[column];
+  if (value == null || value === "") return "-";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 function formatSamplingDateTime(isoText) {
   return formatDateTimeWithAgo(isoText);
 }
@@ -1968,8 +2080,8 @@ const COMBINED_LAYOUT = {
     grid: { x: 582, y: 594 },
     solar: { x: 8, y: 594 },
     switchboard: { x: 558, y: 318 },
-    load: { x: 372, y: 136 },
-    tesla: { x: 770, y: 0 },
+    load: { x: 312, y: 136 },
+    tesla: { x: 830, y: 0 },
     battery1: { x: 24, y: 32 },
     inverter1: { x: 24, y: 360 },
     inverter2: { x: 1113, y: 354 },
@@ -1978,7 +2090,7 @@ const COMBINED_LAYOUT = {
   edges: {
     gridToSwitchboard: {
       points: [{ x: 670, y: 594 }, { x: 670, y: 470 }],
-      labelPosition: { x: 704, y: 532 },
+      labelPosition: { x: 620, y: 532 },
     },
     solarToInverter1: {
       points: [{ x: 96, y: 594 }, { x: 96, y: 468 }],
@@ -1986,21 +2098,21 @@ const COMBINED_LAYOUT = {
     },
     switchboardToTotalLoad: {
       points: [{ x: 670, y: 318 }, { x: 670, y: 205 }],
-      labelPosition: { x: 704, y: 262 },
+      labelPosition: { x: 670, y: 300 },
       lineCap: "butt",
       lineJoin: "miter",
     },
     switchboardToTesla: {
-      points: [{ x: 670, y: 198 }, { x: 770, y: 198 }],
-      labelPosition: { x: 720, y: 230 },
+      points: [{ x: 670, y: 198 }, { x: 830, y: 198 }],
+      labelPosition: { x: 750, y: 230 },
       lineCap: "butt",
       lineJoin: "miter",
       tailUpperGapLength: 9,
       tailRoundedCorner: true,
     },
     switchboardToHomeLoad: {
-      points: [{ x: 670, y: 198 }, { x: 556, y: 198 }],
-      labelPosition: { x: 613, y: 230 },
+      points: [{ x: 670, y: 198 }, { x: 496, y: 198 }],
+      labelPosition: { x: 583, y: 230 },
       lineCap: "butt",
       lineJoin: "miter",
       tailUpperGapLength: 9,
@@ -2008,18 +2120,18 @@ const COMBINED_LAYOUT = {
     },
     battery1ToInverter1: {
       points: [{ x: 114, y: 296 }, { x: 114, y: 360 }],
-      labelPosition: { x: 148, y: 328 },
+      labelPosition: { x: 180, y: 328 },
     },
     battery2ToInverter2: {
       points: [{ x: 1201, y: 296 }, { x: 1201, y: 354 }],
-      labelPosition: { x: 1235, y: 325 },
+      labelPosition: { x: 1135, y: 325 },
     },
     inverter1ToSwitchboard: {
       points: [{ x: 204, y: 414 }, { x: 558, y: 414 }],
       labelPosition: { x: 381, y: 446 },
     },
     inverter2ToSwitchboard: {
-      points: [{ x: 782, y: 414 }, { x: 1113, y: 414 }],
+      points: [{ x: 1113, y: 414 }, { x: 782, y: 414 }],
       labelPosition: { x: 948, y: 446 },
     },
   },
@@ -3555,7 +3667,7 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   setFlowLine(
     "combined-lineBattery2ToInverter2",
     battery2Active,
-    battery2Discharging,
+    !battery2Discharging,
     battery2Discharging ? "batteryDischarge" : "batteryCharge",
   );
 
@@ -4283,7 +4395,7 @@ function buildWorkerLogsUrl() {
   if (service && service !== "all") params.set("service", service);
   else if (category && category !== "all" && category !== "alert") params.set("category", category);
   const excludedStatuses = [];
-  if (hidePassive) excludedStatuses.push("noop", "skipped");
+  if (hidePassive) excludedStatuses.push("noop", "skipped", "outside_window");
   if (excludedStatuses.length) params.set("exclude_status", excludedStatuses.join(","));
   params.set("page", String(workerLogsPager.page));
   params.set("page_size", "100");
@@ -4300,12 +4412,14 @@ function syncWorkerLogsFilters() {
     const selectedService = serviceSelect.value || "all";
     const allowedServices =
       category === "tesla"
-        ? new Set(["all", TESLA_CONTROL_WORKER_SERVICE, TESLA_OBSERVATION_WORKER_SERVICE])
+        ? new Set(["all", TESLA_OBSERVATION_WORKER_SERVICE])
+        : category === "alarm"
+          ? new Set(["all", ...ALARM_WORKER_SERVICES])
         : category === "alert"
-          ? new Set(["all", TESLA_CONTROL_WORKER_SERVICE, TESLA_OBSERVATION_WORKER_SERVICE, COMBINED_ASSEMBLY_WORKER_SERVICE])
+          ? new Set(["all", ...ALARM_WORKER_SERVICES, TESLA_OBSERVATION_WORKER_SERVICE, COMBINED_ASSEMBLY_WORKER_SERVICE])
         : category === "combined"
-          ? new Set(["all", COMBINED_ASSEMBLY_WORKER_SERVICE, TESLA_CONTROL_WORKER_SERVICE, TESLA_OBSERVATION_WORKER_SERVICE])
-          : new Set(["all", TESLA_CONTROL_WORKER_SERVICE, TESLA_OBSERVATION_WORKER_SERVICE, COMBINED_ASSEMBLY_WORKER_SERVICE]);
+          ? new Set(["all", COMBINED_ASSEMBLY_WORKER_SERVICE, TESLA_OBSERVATION_WORKER_SERVICE])
+          : new Set(["all", ...ALARM_WORKER_SERVICES, TESLA_OBSERVATION_WORKER_SERVICE, COMBINED_ASSEMBLY_WORKER_SERVICE]);
     for (const option of serviceSelect.options) {
       option.hidden = !allowedServices.has(option.value);
     }
@@ -4313,7 +4427,8 @@ function syncWorkerLogsFilters() {
       serviceSelect.value = "all";
     }
   }
-  const showHideNoop = (serviceSelect?.value || "all") === TESLA_CONTROL_WORKER_SERVICE;
+  const selectedService = serviceSelect?.value || "all";
+  const showHideNoop = selectedService === "all" || ALARM_WORKER_SERVICES.includes(selectedService);
   if (hidePassiveLabel) hidePassiveLabel.classList.toggle("hidden", !showHideNoop);
   if (!showHideNoop && hidePassiveCheckbox) hidePassiveCheckbox.checked = false;
 }
@@ -4341,7 +4456,8 @@ function compactWorkerLogResultText(value, head = 36, tail = 24) {
 function workerSourcePatternClass(item) {
   const system = String(item?.system || "").trim().toLowerCase();
   const service = String(item?.service || "").trim().toLowerCase();
-  if (service === "tesla_home_assistant_collection") return "worker-service-tesla";
+  if (service === TESLA_OBSERVATION_WORKER_SERVICE || system === "tesla") return "worker-service-tesla";
+  if (system === "alarm" || ALARM_WORKER_SERVICES.includes(service)) return "worker-service-tesla";
   if (system === "combined" || service === "combined_assembly") return "worker-service-combined";
   if (system === "saj") return "worker-service-saj";
   if (system === "solplanet") return "worker-service-solplanet";
@@ -4352,6 +4468,7 @@ function workerLogStatusPresentation(item) {
   const rawStatus = String(item?.status || "").trim().toLowerCase();
   if (rawStatus === "pending") return { text: t("workerLogsStatusPending"), className: "worker-status-pending" };
   if (rawStatus === "skipped") return { text: t("workerLogsStatusSkipped"), className: "worker-status-skipped" };
+  if (rawStatus === "outside_window") return { text: "Outside Window", className: "worker-status-skipped" };
   if (rawStatus === "applied") return { text: t("workerLogsStatusApplied"), className: "worker-status-ok" };
   if (rawStatus === "noop") return { text: t("workerLogsStatusNoop"), className: "worker-status-skipped" };
   if (rawStatus === "ok") return { text: t("workerLogsStatusOk"), className: "worker-status-ok" };
@@ -4399,6 +4516,11 @@ function openWorkerLogDetailModal(item) {
       )
       .join("");
   }
+  const payloadPre = document.getElementById("workerLogDetailPayload");
+  if (payloadPre) {
+    const payload = item?.payload_json ?? null;
+    payloadPre.textContent = payload == null ? "-" : JSON.stringify(payload, null, 2);
+  }
   setWorkerLogDetailModalVisible(true);
 }
 
@@ -4413,6 +4535,7 @@ function renderWorkerLogsRows(items) {
   const body = document.getElementById("workerLogsBody");
   if (!body) return;
   body.innerHTML = "";
+  const columns = workerLogColumnsForMode(getWorkerLogsTableMode());
   const roundColorMap = new Map();
   let nextRoundColor = 1;
   for (const item of items || []) {
@@ -4429,21 +4552,20 @@ function renderWorkerLogsRows(items) {
     }
     const serviceClass = workerSourcePatternClass(item);
     if (roundColorClass) tr.classList.add(roundColorClass);
-    const sampledAt = formatDateTimeWithAgo(item.requested_at_utc);
     const statusPresentation = workerLogStatusPresentation(item);
-    const resultText = item.error_text || item.result_text || "";
-    const resultPreview = compactWorkerLogResultText(resultText);
-    tr.innerHTML = `
-      <td>${escapeHtml(sampledAt)}</td>
-      <td class="worker-link" title="${escapeHtml(item.round_id || "-")}">${escapeHtml(item.round_id || "-")}</td>
-      <td>${escapeHtml(item.system || "-")}</td>
-      <td class="${escapeHtml(serviceClass)}">${escapeHtml(item.service || "-")}</td>
-      <td>${escapeHtml(item.method || "-")}</td>
-      <td class="worker-link" title="${escapeHtml(item.api_link || "-")}">${escapeHtml(item.api_link || "-")}</td>
-      <td class="${escapeHtml(statusPresentation.className)}">${escapeHtml(statusPresentation.text)}</td>
-      <td>${escapeHtml(formatMaybeNumber(item.duration_ms, 1))}</td>
-      <td><pre class="worker-result-pre" title="${escapeHtml(resultText || "-")}">${escapeHtml(resultPreview)}</pre></td>
-    `;
+    tr.innerHTML = columns.map((column) => {
+      const value = workerLogCellValue(item, column, statusPresentation);
+      const className =
+        column === "service" ? serviceClass :
+        column === "status" ? statusPresentation.className :
+        (column === "round_id" || column === "request_token" || column === "api_link") ? "worker-link" : "";
+      const isLong = column === "error_text" || column === "result_text" || column === "payload_json";
+      if (isLong) {
+        return `<td class="${escapeHtml(className)}"><pre class="worker-result-pre" title="${escapeHtml(value)}">${escapeHtml(value)}</pre></td>`;
+      }
+      const title = (column === "round_id" || column === "request_token" || column === "api_link") ? ` title="${escapeHtml(value)}"` : "";
+      return `<td class="${escapeHtml(className)}"${title}>${escapeHtml(value)}</td>`;
+    }).join("");
     tr.addEventListener("click", () => {
       openWorkerLogDetailModal(item);
     });
@@ -7050,9 +7172,15 @@ async function loadWorkerLogs() {
   if (!workerLogsDefaultsApplied) {
     const categorySelect = document.getElementById("workerLogsCategorySelect");
     const serviceSelect = document.getElementById("workerLogsServiceSelect");
+    const tableModeSelect = document.getElementById("workerLogsTableModeSelect");
     if (categorySelect && !categorySelect.value) categorySelect.value = "all";
     if (serviceSelect && !serviceSelect.value) serviceSelect.value = "all";
+    if (tableModeSelect) {
+      const savedMode = localStorage.getItem(WORKER_LOGS_TABLE_MODE_KEY);
+      tableModeSelect.value = savedMode === "raw_table" ? "raw_table" : "human_readable_table";
+    }
     syncWorkerLogsFilters();
+    renderWorkerLogsHead();
     workerLogsDefaultsApplied = true;
   }
   try {
@@ -7455,6 +7583,13 @@ bindChangeIfPresent("workerLogsServiceSelect", async () => {
 bindChangeIfPresent("workerLogsHidePassiveCheckbox", async () => {
   workerLogsPager.page = 1;
   await loadWorkerLogs();
+});
+
+bindChangeIfPresent("workerLogsTableModeSelect", () => {
+  const mode = getWorkerLogsTableMode();
+  localStorage.setItem(WORKER_LOGS_TABLE_MODE_KEY, mode);
+  renderWorkerLogsHead();
+  if (stateCache.lastWorkerLogsPage) renderWorkerLogsPage(stateCache.lastWorkerLogsPage);
 });
 
 function bindClickIfPresent(id, handler) {
