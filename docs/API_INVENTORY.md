@@ -1,6 +1,6 @@
 # API Inventory
 
-Last updated: 2026-03-07
+Last updated: 2026-03-12
 
 This file tracks all backend APIs and their current usage status.
 
@@ -16,9 +16,25 @@ Status values:
 - `GET /api/ha/ping`
 - `GET /api/energy-flow/saj`
 - `GET /api/energy-flow/solplanet`
+- `GET /api/energy-flow/combined`
+- `GET /api/collector/status`
+- `GET /api/dashboard/notifications`
+- `GET /api/time-window-rules`
+- `PUT /api/time-window-rules/{rule_code}`
+- `POST /api/tesla/control/charging`
 
 ### Entities tab
 - `GET /api/entities`
+
+### Storage and database tabs
+- `GET /api/storage/status`
+- `GET /api/storage/samples`
+- `GET /api/storage/series`
+- `GET /api/storage/usage-range`
+- `GET /api/database/tables`
+- `GET /api/database/tables/{table_name}/rows`
+- `GET /api/database/export.sqlite3`
+- `POST /api/database/import.sqlite3`
 
 ### Solplanet Raw tab
 - `GET /api/solplanet/cgi/getdev-device-2`
@@ -77,7 +93,7 @@ Status values:
 - `GET /api/entities/core` (`candidate`, marked deprecated in response)
 - `GET /api/entities/core/{system}` (`candidate`)
 - `GET /api/energy-flow/{system}` (`used`)
-- `GET /api/collector/status` (`debug`)
+- `GET /api/collector/status` (`used`)
 - `POST /api/collector/restart` (`debug`)
 - `GET /api/catalog/domains` (`debug`)
 - `GET /api/catalog/brands` (`debug`)

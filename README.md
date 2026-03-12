@@ -58,6 +58,7 @@ curl -s http://<wattimize-host>:18000/api/energy-flow/solplanet | jq
 curl -s http://<wattimize-host>:18000/api/saj/control/state | jq
 curl -s http://<wattimize-host>:18000/api/saj/control/profile | jq
 curl -s http://<wattimize-host>:18000/api/saj/control/capabilities | jq
+curl -s http://<wattimize-host>:18000/api/time-window-rules | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/profile -H 'Content-Type: application/json' -d '{"profile_id":"time_of_use"}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/working-mode -H 'Content-Type: application/json' -d '{"mode_code":1}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/toggles -H 'Content-Type: application/json' -d '{"charging_control":true,"discharging_control":false,"charge_time_enable_mask":127,"discharge_time_enable_mask":127}' | jq
@@ -82,6 +83,7 @@ curl -s "http://<wattimize-host>:18000/api/storage/daily-usage?system=saj" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/samples?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z&page=1&page_size=20" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/series?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z&max_points=500" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/usage-range?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z" | jq
+curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/charging -H 'Content-Type: application/json' -d '{"enabled":true}' | jq
 curl -s http://<wattimize-host>:18000/api/database/export.sqlite3 -o wattimize.sqlite3
 curl -s -X POST http://<wattimize-host>:18000/api/database/import.sqlite3 -F "file=@wattimize.sqlite3" | jq
 curl -s -X POST http://<wattimize-host>:18000/api/config/solplanet/discover -H 'Content-Type: application/json' -d '{"solplanet_dongle_host":"192.168.1.10"}' | jq
@@ -127,4 +129,13 @@ First-run configuration:
 - Default Solplanet sampling frequency is every 60 seconds (`WATTIMIZE_SOLPLANET_SAMPLE_INTERVAL_SECONDS`).
 - Every sample stores current `pv_w/grid_w/battery_w/load_w/soc/inverter_status/balance` and raw flow payload.
 - Daily usage endpoint integrates power snapshots into kWh (UTC day).
+- `system=combined` is available on range usage and trend series endpoints for the frontend overall view.
+- The Sampling tab includes total cards and chart overlays that split window-specific energy from the full selected range.
 - The frontend can export and import the full SQLite database from the Database tab.
+
+## 7) Time Window Rules And Tesla Control
+
+- The `Time Window` tab shows rule switches for each automation window, covering both notifications and automated operations.
+- Rule state is stored in SQLite and exposed through `GET /api/time-window-rules` and `PUT /api/time-window-rules/{rule_code}`.
+- SAJ profile automation and Tesla charge automation respect these rule switches before issuing control actions.
+- Tesla manual start/stop now returns UI feedback states so the dashboard can show pending, success, and failure confirmation after `/api/tesla/control/charging`.

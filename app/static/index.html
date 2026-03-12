@@ -39,7 +39,7 @@
           Dashboard
         </button>
         <button id="tabNotificationMatrix" class="tab-btn" type="button" data-tab="notificationMatrix" data-i18n="notificationMatrixTab" role="tab" aria-selected="false" aria-controls="notificationMatrixView" tabindex="-1">
-          Notification
+          Time Window
         </button>
         <button id="tabRawData" class="tab-btn" type="button" data-tab="rawData" data-i18n="rawDataTab" role="tab" aria-selected="false" aria-controls="rawDataView" tabindex="-1">
           Raw Data
@@ -116,10 +116,10 @@
       <section id="notificationMatrixView" class="view hidden">
         <section class="card notification-matrix-card">
           <div class="section-header">
-            <h2 data-i18n="notificationMatrixTitle">Notification</h2>
+            <h2 data-i18n="notificationMatrixTitle">Time Window</h2>
           </div>
           <p class="muted" data-i18n="notificationMatrixIntro">
-            Each panel shows the worker notifications configured for that time window. Checkboxes are currently fixed on because the system behavior is already enabled.
+            Each panel shows the active rules configured for that time window, including notifications and automated operations. Checkboxes are currently fixed on because the system behavior is already enabled.
           </p>
           <div id="notificationMatrixPanels" class="notification-matrix-grid"></div>
         </section>
@@ -207,6 +207,16 @@
           </div>
           <p id="samplingStorageMeta" class="muted hidden" hidden aria-hidden="true">-</p>
           <p id="samplingDailyMeta" class="muted hidden" hidden aria-hidden="true">-</p>
+          <section class="sampling-chart-card sampling-totals-card">
+            <div class="section-header">
+              <h3 data-i18n="samplingTotalsTitle">Trend Totals</h3>
+            </div>
+            <p id="samplingTotalsMeta" class="muted">-</p>
+            <div class="sampling-totals-chart-wrap">
+              <div id="samplingTotalsChartCanvas" class="sampling-totals-chart"></div>
+            </div>
+            <div id="samplingTotalsBody" class="sampling-totals-bars"></div>
+          </section>
           <section class="sampling-chart-card">
             <div class="section-header">
               <h3 data-i18n="samplingChartTitle">Power Trend</h3>
@@ -222,16 +232,6 @@
             <div class="sampling-chart-wrap">
               <div id="samplingChartCanvas" class="sampling-chart"></div>
             </div>
-          </section>
-          <section class="sampling-chart-card sampling-totals-card">
-            <div class="section-header">
-              <h3 data-i18n="samplingTotalsTitle">Trend Totals</h3>
-            </div>
-            <p id="samplingTotalsMeta" class="muted">-</p>
-            <div class="sampling-totals-chart-wrap">
-              <div id="samplingTotalsChartCanvas" class="sampling-totals-chart"></div>
-            </div>
-            <div id="samplingTotalsBody" class="sampling-totals-bars"></div>
           </section>
           <p id="samplingCount" class="muted">-</p>
           <div class="pager">

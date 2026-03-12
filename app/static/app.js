@@ -103,10 +103,10 @@ const I18N = {
     configMustSaveFirst: "Configuration is not complete yet. Complete setup first.",
     refreshBtn: "Refresh",
     dashboardTab: "Dashboard",
-    notificationMatrixTab: "Notification",
-    notificationMatrixTitle: "Notification",
-    notificationMatrixIntro: "Each panel shows the worker notifications configured for that time window. Checkboxes are currently fixed on because the system behavior is already enabled.",
-    notificationMatrixNoNotifications: "No dedicated notification is configured for this window at the moment.",
+    notificationMatrixTab: "Time Window",
+    notificationMatrixTitle: "Time Window",
+    notificationMatrixIntro: "Each panel shows the active rules configured for that time window, including notifications and automated operations. Checkboxes are currently fixed on because the system behavior is already enabled.",
+    notificationMatrixNoNotifications: "No rule is configured for this window at the moment.",
     notificationMatrixAlwaysNote: "This watch is always active and is shown separately from the 24-hour time-window schedule.",
     notificationMatrixCurrentWindowBadge: "Current Window",
     notificationMatrixExpandWindow: "Expand window",
@@ -115,8 +115,15 @@ const I18N = {
     notificationMatrixProgressConditionMet: "Condition met now",
     notificationMatrixProgressNotified: "Already notified",
     notificationMatrixProgressNoData: "Waiting for live data",
+    notificationMatrixProgressScheduled: "Scheduled for this window",
+    notificationMatrixProgressApplied: "Applied in this round",
+    notificationMatrixProgressHolding: "Holding target state",
+    notificationMatrixProgressPendingSync: "Waiting for device readback",
+    notificationMatrixProgressDisabled: "Disabled",
+    notificationMatrixProgressSaving: "Saving",
     notificationMatrixProgressWindowTracking: "Only tracked during this window",
     notificationMatrixProgressCurrent: "Current {value}",
+    notificationMatrixProgressTarget: "Target {value}",
     notificationMatrixProgressTriggerAtMost: "Trigger <= {value}",
     notificationMatrixProgressTriggerAtLeast: "Trigger >= {value}",
     notificationMatrixProgressTriggerAbove: "Trigger > {value}",
@@ -137,6 +144,27 @@ const I18N = {
     notificationMatrixWindowOvernightSummary: "23:00-11:00 next day. Worker observes SAJ battery SOC and sends threshold reminders once per overnight window.",
     notificationMatrixWindowAlwaysTitle: "Always-On Battery Watch",
     notificationMatrixWindowAlwaysSummary: "Not part of the 24-hour window split. Worker sends a one-time notification when either battery newly reaches 100% SOC.",
+    notificationMatrixRuleTypeNotification: "Notification",
+    notificationMatrixRuleTypeOperation: "Operation",
+    notificationRuleSajProfileFreeEnergyTitle: "SAJ inverter uses Time of Use in free-energy window",
+    notificationRuleSajProfileFreeEnergyTrigger: "During 11:00-13:50 target SAJ profile is Time of Use, then it switches back to Self Consumption for the last 10 minutes.",
+    notificationRuleSajProfileSelfConsumptionTitle: "SAJ inverter stays in Self Consumption",
+    notificationRuleSajProfileSelfConsumptionTrigger: "Outside the main free-energy period, target SAJ profile stays on Self Consumption.",
+    notificationRuleTeslaFreeEnergyTitle: "Tesla charging current follows free-energy window rule",
+    notificationRuleTeslaFreeEnergyTrigger: "During 11:00-14:00 the worker adjusts Tesla charging current under the configured grid cap.",
+    notificationRuleTeslaAfterFreeShoulderTitle: "Tesla charging follows Solplanet SOC after free-energy window",
+    notificationRuleTeslaAfterFreeShoulderTrigger: "Start when Solplanet SOC reaches 95%, stop when it falls below 90%, otherwise hold the current state.",
+    notificationRuleTeslaAfterFreePeakTitle: "Tesla charging keeps following Solplanet SOC before export pricing",
+    notificationRuleTeslaAfterFreePeakTrigger: "Start when Solplanet SOC reaches 95%, stop when it falls below 90%, otherwise hold the current state.",
+    notificationRuleTeslaExportWindowTitle: "Tesla charging uses solar surplus during export window",
+    notificationRuleTeslaExportWindowTrigger: "Use solar surplus and Solplanet SOC thresholds to decide charging state and current while avoiding unnecessary grid import.",
+    notificationRuleTeslaPostExportPeakTitle: "Tesla charging is forced off in expensive period",
+    notificationRuleTeslaPostExportPeakTrigger: "During 20:00-23:00 the worker stops Tesla charging to avoid expensive grid import.",
+    notificationMatrixTeslaTriggerGridCap: "Target <= 15.0kW grid",
+    notificationMatrixTeslaTriggerSolplanetSoc: "Solplanet {soc} (start >= 95%, keep >= 90%)",
+    notificationMatrixTeslaTriggerExport: "Export {value} / surplus solar",
+    notificationMatrixTeslaTriggerStop: "Target charging off",
+    notificationMatrixTeslaCurrent: "Tesla {actual} / set {configured}",
     notificationRuleSolplanetLowAvailableCapacityTitle: "Solplanet available capacity is low",
     notificationRuleSolplanetLowAvailableCapacityTrigger: "Triggers when Solplanet available capacity drops below 25 kWh during this window.",
     notificationRuleSolplanetLowBatteryTitle: "Solplanet battery is low during export",
@@ -394,9 +422,21 @@ const I18N = {
     teslaControlStateUnavailable: "Control: unavailable",
     teslaControlStart: "Start Charging",
     teslaControlStop: "Stop Charging",
+    teslaControlStarting: "Starting...",
+    teslaControlStopping: "Stopping...",
     teslaControlBusy: "Updating...",
     teslaControlUnavailable: "Control Unavailable",
     teslaControlApplyFailed: "Tesla charging control failed: {error}",
+    teslaControlStatusRequestStart: "Sending start request...",
+    teslaControlStatusRequestStop: "Sending stop request...",
+    teslaControlStatusAwaitingStart: "Start requested. Waiting for Tesla to respond.",
+    teslaControlStatusAwaitingStop: "Stop requested. Waiting for Tesla to respond.",
+    teslaControlStatusDelayedStart: "Start request was sent, but charging has not started yet.",
+    teslaControlStatusDelayedStop: "Stop request was sent, but charging has not stopped yet.",
+    teslaControlStatusFailedStart: "Start request did not go through.",
+    teslaControlStatusFailedStop: "Stop request did not go through.",
+    teslaControlStatusStarted: "Charging started.",
+    teslaControlStatusStopped: "Charging stopped.",
     batteryTitle: "Battery",
     battery1Title: "Battery 1",
     battery2Title: "Battery 2",
@@ -460,6 +500,8 @@ const I18N = {
     samplingTotalsGridTitle: "Grid",
     samplingTotalsBatteryTitle: "Battery",
     samplingTotalsNoData: "No totals available for this range",
+    samplingTotalsWindowOther: "Other",
+    samplingTotalsWindowTotal: "Total",
     samplingOverallMetricPv: "PV Generation",
     samplingOverallMetricGridImport: "Grid Import",
     samplingOverallMetricGridExport: "Grid Export",
@@ -698,10 +740,10 @@ const I18N = {
     configMustSaveFirst: "当前配置还不完整，请先完成配置",
     refreshBtn: "刷新",
     dashboardTab: "总览",
-    notificationMatrixTab: "通知",
-    notificationMatrixTitle: "Notification",
-    notificationMatrixIntro: "每个面板展示该时间窗口下 worker 已配置的通知。当前复选框固定为开启，因为系统行为已经默认启用。",
-    notificationMatrixNoNotifications: "这个时间窗口当前没有单独配置专门通知。",
+    notificationMatrixTab: "Time Window",
+    notificationMatrixTitle: "Time Window",
+    notificationMatrixIntro: "每个面板展示该时间窗口下 worker 已配置的全部规则，包括通知和自动 operation。当前复选框固定为开启，因为系统行为已经默认启用。",
+    notificationMatrixNoNotifications: "这个时间窗口当前没有配置规则。",
     notificationMatrixAlwaysNote: "这个监控始终开启，单独展示，不属于 24 小时时间窗口切分的一部分。",
     notificationMatrixCurrentWindowBadge: "当前窗口",
     notificationMatrixExpandWindow: "展开窗口",
@@ -710,8 +752,15 @@ const I18N = {
     notificationMatrixProgressConditionMet: "当前已满足条件",
     notificationMatrixProgressNotified: "已通知",
     notificationMatrixProgressNoData: "等待实时数据",
+    notificationMatrixProgressScheduled: "该窗口规则已排队",
+    notificationMatrixProgressApplied: "本轮已执行",
+    notificationMatrixProgressHolding: "维持目标状态中",
+    notificationMatrixProgressPendingSync: "等待设备回读",
+    notificationMatrixProgressDisabled: "已禁用",
+    notificationMatrixProgressSaving: "保存中",
     notificationMatrixProgressWindowTracking: "只在这个窗口内跟踪",
     notificationMatrixProgressCurrent: "当前 {value}",
+    notificationMatrixProgressTarget: "目标 {value}",
     notificationMatrixProgressTriggerAtMost: "触发条件 <= {value}",
     notificationMatrixProgressTriggerAtLeast: "触发条件 >= {value}",
     notificationMatrixProgressTriggerAbove: "触发条件 > {value}",
@@ -732,6 +781,27 @@ const I18N = {
     notificationMatrixWindowOvernightSummary: "23:00-次日11:00。这个窗口只观察 SAJ 电池 SOC，并在每个夜间窗口内按阈值提醒一次。",
     notificationMatrixWindowAlwaysTitle: "始终开启的满电监控",
     notificationMatrixWindowAlwaysSummary: "不属于 24 小时时段切分。任一电池新达到 100% SOC 时发送一次通知。",
+    notificationMatrixRuleTypeNotification: "通知",
+    notificationMatrixRuleTypeOperation: "操作",
+    notificationRuleSajProfileFreeEnergyTitle: "免费电时段 SAJ inverter 切到 Time of Use",
+    notificationRuleSajProfileFreeEnergyTrigger: "11:00-13:50 目标 profile 为 Time of Use，最后 10 分钟切回 Self Consumption。",
+    notificationRuleSajProfileSelfConsumptionTitle: "SAJ inverter 保持 Self Consumption",
+    notificationRuleSajProfileSelfConsumptionTrigger: "主免费电时段以外，SAJ 目标 profile 保持在 Self Consumption。",
+    notificationRuleTeslaFreeEnergyTitle: "Tesla 充电电流跟随免费电窗口规则",
+    notificationRuleTeslaFreeEnergyTrigger: "11:00-14:00 期间，worker 会在配置的电网功率上限内调节 Tesla 充电电流。",
+    notificationRuleTeslaAfterFreeShoulderTitle: "免费电后肩时段 Tesla 跟随 Solplanet SOC 规则",
+    notificationRuleTeslaAfterFreeShoulderTrigger: "Solplanet SOC 到 95% 开始充，低于 90% 停止，区间内维持当前状态。",
+    notificationRuleTeslaAfterFreePeakTitle: "峰前时段 Tesla 继续跟随 Solplanet SOC 规则",
+    notificationRuleTeslaAfterFreePeakTrigger: "Solplanet SOC 到 95% 开始充，低于 90% 停止，区间内维持当前状态。",
+    notificationRuleTeslaExportWindowTitle: "Export 时段 Tesla 按太阳能富余充电",
+    notificationRuleTeslaExportWindowTrigger: "结合太阳能富余和 Solplanet SOC 阈值来决定 Tesla 的充电状态和充电电流，尽量避免不必要的电网取电。",
+    notificationRuleTeslaPostExportPeakTitle: "高价时段强制关闭 Tesla 充电",
+    notificationRuleTeslaPostExportPeakTrigger: "20:00-23:00 期间，worker 会停止 Tesla 充电，避免高价电网取电。",
+    notificationMatrixTeslaTriggerGridCap: "目标保持电网 <= 15.0kW",
+    notificationMatrixTeslaTriggerSolplanetSoc: "Solplanet {soc}（达到 95% 开始，>= 90% 维持）",
+    notificationMatrixTeslaTriggerExport: "当前外送 {value} / 太阳能富余",
+    notificationMatrixTeslaTriggerStop: "目标为停止充电",
+    notificationMatrixTeslaCurrent: "Tesla 实际 {actual} / 设定 {configured}",
     notificationRuleSolplanetLowAvailableCapacityTitle: "Solplanet 可用电量过低",
     notificationRuleSolplanetLowAvailableCapacityTrigger: "当这个窗口内 Solplanet 可用容量低于 25 kWh 时触发。",
     notificationRuleSolplanetLowBatteryTitle: "Export 时段 Solplanet 电量过低",
@@ -989,9 +1059,21 @@ const I18N = {
     teslaControlStateUnavailable: "控制不可用",
     teslaControlStart: "开始充电",
     teslaControlStop: "停止充电",
+    teslaControlStarting: "正在开始...",
+    teslaControlStopping: "正在停止...",
     teslaControlBusy: "正在更新...",
     teslaControlUnavailable: "控制不可用",
     teslaControlApplyFailed: "特斯拉充电控制失败：{error}",
+    teslaControlStatusRequestStart: "正在发送开始充电请求...",
+    teslaControlStatusRequestStop: "正在发送停止充电请求...",
+    teslaControlStatusAwaitingStart: "已发出开始请求，等待特斯拉响应。",
+    teslaControlStatusAwaitingStop: "已发出停止请求，等待特斯拉响应。",
+    teslaControlStatusDelayedStart: "开始请求已发出，但车辆还没有开始充电。",
+    teslaControlStatusDelayedStop: "停止请求已发出，但车辆还没有停止充电。",
+    teslaControlStatusFailedStart: "开始充电请求没有成功发出。",
+    teslaControlStatusFailedStop: "停止充电请求没有成功发出。",
+    teslaControlStatusStarted: "已开始充电。",
+    teslaControlStatusStopped: "已停止充电。",
     batteryTitle: "电池",
     battery1Title: "电池 1",
     battery2Title: "电池 2",
@@ -1055,6 +1137,8 @@ const I18N = {
     samplingTotalsGridTitle: "电网",
     samplingTotalsBatteryTitle: "电池",
     samplingTotalsNoData: "当前区间暂无可显示的累计值",
+    samplingTotalsWindowOther: "其他",
+    samplingTotalsWindowTotal: "总量",
     samplingOverallMetricPv: "光伏发电",
     samplingOverallMetricGridImport: "电网购电",
     samplingOverallMetricGridExport: "电网上网",
@@ -1352,6 +1436,8 @@ const AUTO_REFRESH_OPTIONS = [0, 5, 10];
 const SAJ_CONTROL_EDIT_GRACE_MS = 15000;
 const CONFIG_SAMPLE_INTERVAL_OPTIONS = [5, 10, 30, 60, 300];
 const BALANCE_TOLERANCE_W = 100;
+const SAMPLING_GRID_IMPORT_WINDOW = { startHour: 11, endHour: 14, label: "11:00-14:00" };
+const SAMPLING_GRID_EXPORT_WINDOW = { startHour: 18, endHour: 20, label: "18:00-20:00" };
 const SOLPLANET_REALTIME_KV_URL = "/api/solplanet/realtime-kv";
 const SOLPLANET_RAW_APIS = [
   { key: "getdevdata_device_2", titleKey: "rawApiGetdevdata2", url: "/api/solplanet/cgi/getdevdata-device-2" },
@@ -1539,6 +1625,7 @@ const SOLPLANET_DASHBOARD_FIELD_MAP = {
 const stateCache = {
   lastSummary: null,
   lastDashboardNotifications: null,
+  lastTimeWindowRules: null,
   lastCollectorStatus: null,
   lastSolplanetRaw: {},
   lastSolplanetKv: { phase: "idle", items: [], updated_at: null, error: null },
@@ -1574,6 +1661,12 @@ const stateCache = {
   },
 };
 let teslaControlBusy = false;
+const TESLA_CONTROL_CONFIRM_POLL_MS = 1500;
+const TESLA_CONTROL_CONFIRM_TIMEOUT_MS = 15000;
+const TESLA_CONTROL_FEEDBACK_CLEAR_MS = 4000;
+let teslaControlFeedback = null;
+let teslaControlFeedbackTimerId = null;
+const timeWindowRuleBusy = new Set();
 
 const NOTIFICATION_MATRIX_WINDOWS = [
   {
@@ -1581,15 +1674,45 @@ const NOTIFICATION_MATRIX_WINDOWS = [
     schedule: "11:00-14:00",
     titleKey: "notificationMatrixWindowFreeEnergyTitle",
     summaryKey: "notificationMatrixWindowFreeEnergySummary",
-    notifications: [],
+    rules: [
+      {
+        kind: "operation",
+        level: "info",
+        code: "saj_profile_free_energy",
+        titleKey: "notificationRuleSajProfileFreeEnergyTitle",
+        triggerKey: "notificationRuleSajProfileFreeEnergyTrigger",
+      },
+      {
+        kind: "operation",
+        level: "info",
+        code: "tesla_free_energy_control",
+        titleKey: "notificationRuleTeslaFreeEnergyTitle",
+        triggerKey: "notificationRuleTeslaFreeEnergyTrigger",
+      },
+    ],
   },
   {
     id: "after_free_shoulder",
     schedule: "14:00-16:00",
     titleKey: "notificationMatrixWindowAfterFreeShoulderTitle",
     summaryKey: "notificationMatrixWindowAfterFreeShoulderSummary",
-    notifications: [
+    rules: [
       {
+        kind: "operation",
+        level: "info",
+        code: "saj_profile_self_consumption",
+        titleKey: "notificationRuleSajProfileSelfConsumptionTitle",
+        triggerKey: "notificationRuleSajProfileSelfConsumptionTrigger",
+      },
+      {
+        kind: "operation",
+        level: "info",
+        code: "tesla_after_free_shoulder_control",
+        titleKey: "notificationRuleTeslaAfterFreeShoulderTitle",
+        triggerKey: "notificationRuleTeslaAfterFreeShoulderTrigger",
+      },
+      {
+        kind: "notification",
         level: "alarm",
         code: "solplanet_low_available_capacity",
         titleKey: "notificationRuleSolplanetLowAvailableCapacityTitle",
@@ -1602,8 +1725,23 @@ const NOTIFICATION_MATRIX_WINDOWS = [
     schedule: "16:00-18:00",
     titleKey: "notificationMatrixWindowAfterFreePeakTitle",
     summaryKey: "notificationMatrixWindowAfterFreePeakSummary",
-    notifications: [
+    rules: [
       {
+        kind: "operation",
+        level: "info",
+        code: "saj_profile_self_consumption",
+        titleKey: "notificationRuleSajProfileSelfConsumptionTitle",
+        triggerKey: "notificationRuleSajProfileSelfConsumptionTrigger",
+      },
+      {
+        kind: "operation",
+        level: "info",
+        code: "tesla_after_free_peak_control",
+        titleKey: "notificationRuleTeslaAfterFreePeakTitle",
+        triggerKey: "notificationRuleTeslaAfterFreePeakTrigger",
+      },
+      {
+        kind: "notification",
         level: "alarm",
         code: "solplanet_low_available_capacity",
         titleKey: "notificationRuleSolplanetLowAvailableCapacityTitle",
@@ -1616,26 +1754,37 @@ const NOTIFICATION_MATRIX_WINDOWS = [
     schedule: "18:00-20:00",
     titleKey: "notificationMatrixWindowExportTitle",
     summaryKey: "notificationMatrixWindowExportSummary",
-    notifications: [
+    rules: [
       {
+        kind: "operation",
+        level: "info",
+        code: "saj_profile_self_consumption",
+        titleKey: "notificationRuleSajProfileSelfConsumptionTitle",
+        triggerKey: "notificationRuleSajProfileSelfConsumptionTrigger",
+      },
+      {
+        kind: "notification",
         level: "warning",
         code: "solplanet_low_battery",
         titleKey: "notificationRuleSolplanetLowBatteryTitle",
         triggerKey: "notificationRuleSolplanetLowBatteryTrigger",
       },
       {
+        kind: "notification",
         level: "alarm",
         code: "grid_import_started",
         titleKey: "notificationRuleGridImportStartedTitle",
         triggerKey: "notificationRuleGridImportStartedTrigger",
       },
       {
+        kind: "notification",
         level: "alarm",
         code: "solar_surplus_export_energy_reached_5000",
         titleKey: "notificationRuleSolarSurplusExportEnergyReached5000Title",
         triggerKey: "notificationRuleSolarSurplusExportEnergyReached5000Trigger",
       },
       {
+        kind: "notification",
         level: "alarm",
         code: "solar_surplus_export_energy_reached_9000",
         titleKey: "notificationRuleSolarSurplusExportEnergyReached9000Title",
@@ -1648,14 +1797,23 @@ const NOTIFICATION_MATRIX_WINDOWS = [
     schedule: "20:00-23:00",
     titleKey: "notificationMatrixWindowPostExportPeakTitle",
     summaryKey: "notificationMatrixWindowPostExportPeakSummary",
-    notifications: [
+    rules: [
       {
+        kind: "operation",
+        level: "info",
+        code: "saj_profile_self_consumption",
+        titleKey: "notificationRuleSajProfileSelfConsumptionTitle",
+        triggerKey: "notificationRuleSajProfileSelfConsumptionTrigger",
+      },
+      {
+        kind: "notification",
         level: "warning",
         code: "solplanet_low_battery_post_export_peak",
         titleKey: "notificationRuleSolplanetLowBatteryPostExportPeakTitle",
         triggerKey: "notificationRuleSolplanetLowBatteryPostExportPeakTrigger",
       },
       {
+        kind: "notification",
         level: "alarm",
         code: "grid_import_started_post_export_peak",
         titleKey: "notificationRuleGridImportStartedPostExportPeakTitle",
@@ -1668,14 +1826,23 @@ const NOTIFICATION_MATRIX_WINDOWS = [
     schedule: "23:00-11:00(+1d)",
     titleKey: "notificationMatrixWindowOvernightTitle",
     summaryKey: "notificationMatrixWindowOvernightSummary",
-    notifications: [
+    rules: [
       {
+        kind: "operation",
+        level: "info",
+        code: "saj_profile_self_consumption",
+        titleKey: "notificationRuleSajProfileSelfConsumptionTitle",
+        triggerKey: "notificationRuleSajProfileSelfConsumptionTrigger",
+      },
+      {
+        kind: "notification",
         level: "warning",
         code: "saj_battery_watch_50_percent",
         titleKey: "notificationRuleSajBatteryWatch50Title",
         triggerKey: "notificationRuleSajBatteryWatch50Trigger",
       },
       {
+        kind: "notification",
         level: "alarm",
         code: "saj_battery_watch_20_percent",
         titleKey: "notificationRuleSajBatteryWatch20Title",
@@ -1689,14 +1856,16 @@ const NOTIFICATION_MATRIX_WINDOWS = [
     titleKey: "notificationMatrixWindowAlwaysTitle",
     summaryKey: "notificationMatrixWindowAlwaysSummary",
     noteKey: "notificationMatrixAlwaysNote",
-    notifications: [
+    rules: [
       {
+        kind: "notification",
         level: "info",
         code: "saj_battery_full",
         titleKey: "notificationRuleSajBatteryFullTitle",
         triggerKey: "notificationRuleSajBatteryFullTrigger",
       },
       {
+        kind: "notification",
         level: "info",
         code: "solplanet_battery_full",
         titleKey: "notificationRuleSolplanetBatteryFullTitle",
@@ -2104,6 +2273,42 @@ function formatSamplingClock(value, withZone = false) {
   const text = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
   if (!withZone) return text;
   return text;
+}
+
+function buildSamplingTimeAxisConfig(xMin, xMax) {
+  const oneHourMs = 60 * 60 * 1000;
+  const durationMs = Number.isFinite(xMin) && Number.isFinite(xMax) ? Math.max(0, xMax - xMin) : 0;
+  const is24HourView = durationMs >= 20 * oneHourMs && durationMs <= 28 * oneHourMs;
+  if (!is24HourView) {
+    return {
+      splitNumber: 6,
+      axisTick: { show: false },
+      axisLabel: {
+        color: "#6b7f72",
+        formatter: (value) => formatSamplingClock(value, false),
+      },
+    };
+  }
+  return {
+    splitNumber: 24,
+    minInterval: oneHourMs,
+    maxInterval: oneHourMs,
+    axisTick: {
+      show: true,
+      alignWithLabel: true,
+      length: 6,
+      lineStyle: { color: "#adc2b5" },
+    },
+    axisLabel: {
+      color: "#6b7f72",
+      hideOverlap: false,
+      formatter: (value) => {
+        const dt = new Date(value);
+        if (Number.isNaN(dt.getTime())) return "";
+        return `${String(dt.getHours()).padStart(2, "0")}:00`;
+      },
+    },
+  };
 }
 
 function formatLocalDateTime(isoText) {
@@ -2794,7 +2999,7 @@ function buildCombinedDiagramSpec() {
         title: "Tesla",
         titleKey: "teslaChargingLabel",
         width: 176,
-        height: 314,
+        height: 338,
         position: layout.nodes.tesla,
         lines: [
           {
@@ -2805,6 +3010,7 @@ function buildCombinedDiagramSpec() {
           { id: "combined-teslaChargingPowerValue", className: "node-sub-value", text: "-" },
           { id: "combined-teslaChargingCurrentValue", className: "node-mini-value muted", text: "-" },
           { id: "combined-teslaConnectionValue", className: "node-mini-value muted", text: "-" },
+          { id: "combined-teslaControlStatusValue", className: "node-mini-value muted tesla-control-status", text: "-" },
           { type: "button", id: "combined-teslaChargingToggleBtn", className: "tesla-control-btn btn secondary", text: "-" },
         ],
       },
@@ -3645,6 +3851,113 @@ function formatTeslaControlSummary(teslaInfo = null) {
   return t("teslaControlStateUnavailable");
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function clearTeslaControlFeedback() {
+  if (teslaControlFeedbackTimerId) {
+    window.clearTimeout(teslaControlFeedbackTimerId);
+    teslaControlFeedbackTimerId = null;
+  }
+  teslaControlFeedback = null;
+}
+
+function scheduleTeslaControlFeedbackClear(delayMs = TESLA_CONTROL_FEEDBACK_CLEAR_MS) {
+  if (teslaControlFeedbackTimerId) window.clearTimeout(teslaControlFeedbackTimerId);
+  teslaControlFeedbackTimerId = window.setTimeout(() => {
+    teslaControlFeedbackTimerId = null;
+    teslaControlFeedback = null;
+    renderTeslaControlStatus(teslaInfoFromCombinedFlow(stateCache.lastSummary?.combinedFlow || {}));
+  }, delayMs);
+}
+
+function setTeslaControlFeedback(phase, targetEnabled) {
+  teslaControlFeedback = {
+    phase,
+    targetEnabled: Boolean(targetEnabled),
+    updatedAt: Date.now(),
+  };
+}
+
+function effectiveTeslaControlFeedback(teslaInfo = null) {
+  const persisted = teslaInfo?.controlFeedback;
+  if (teslaControlBusy) return teslaControlFeedback || persisted || null;
+  return persisted || teslaControlFeedback || null;
+}
+
+function teslaControlMatchesTarget(teslaInfo = null, targetEnabled = false) {
+  return {
+    requested: typeof teslaInfo?.chargeRequestedEnabled === "boolean"
+      ? teslaInfo.chargeRequestedEnabled === targetEnabled
+      : false,
+    active: typeof teslaInfo?.chargingEnabled === "boolean"
+      ? teslaInfo.chargingEnabled === targetEnabled
+      : false,
+  };
+}
+
+function getTeslaControlStatusPresentation(teslaInfo = null) {
+  const feedback = effectiveTeslaControlFeedback(teslaInfo);
+  if (!feedback) {
+    return { text: formatTeslaControlSummary(teslaInfo), tone: "idle" };
+  }
+  const targetEnabled = feedback.targetEnabled === true;
+  const matches = teslaControlMatchesTarget(teslaInfo, targetEnabled);
+  const action = targetEnabled ? "Start" : "Stop";
+  if (feedback.phase === "success" || matches.active) {
+    return { text: t(targetEnabled ? "teslaControlStatusStarted" : "teslaControlStatusStopped"), tone: "success" };
+  }
+  if (feedback.phase === "failed") {
+    return { text: t(`teslaControlStatusFailed${action}`), tone: "error" };
+  }
+  if (feedback.phase === "delayed") {
+    return { text: t(`teslaControlStatusDelayed${action}`), tone: "warning" };
+  }
+  if (feedback.phase === "awaiting_vehicle" || matches.requested) {
+    return { text: t(`teslaControlStatusAwaiting${action}`), tone: "pending" };
+  }
+  return { text: t(`teslaControlStatusRequest${action}`), tone: "pending" };
+}
+
+function renderTeslaControlStatus(teslaInfo = null) {
+  const el = document.getElementById("combined-teslaControlStatusValue");
+  if (!el) return;
+  const presentation = getTeslaControlStatusPresentation(teslaInfo);
+  el.textContent = presentation.text;
+  el.classList.remove("is-pending", "is-success", "is-warning", "is-error");
+  if (presentation.tone === "pending") el.classList.add("is-pending");
+  if (presentation.tone === "success") el.classList.add("is-success");
+  if (presentation.tone === "warning") el.classList.add("is-warning");
+  if (presentation.tone === "error") el.classList.add("is-error");
+}
+
+async function waitForTeslaControlConfirmation(targetEnabled) {
+  const deadlineAt = Date.now() + TESLA_CONTROL_CONFIRM_TIMEOUT_MS;
+  while (Date.now() < deadlineAt) {
+    await loadSummary();
+    const teslaInfo = teslaInfoFromCombinedFlow(stateCache.lastSummary?.combinedFlow || {});
+    const matches = teslaControlMatchesTarget(teslaInfo, targetEnabled);
+    if (matches.active) {
+      setTeslaControlFeedback("success", targetEnabled);
+      renderTeslaControlStatus(teslaInfo);
+      scheduleTeslaControlFeedbackClear();
+      return true;
+    }
+    setTeslaControlFeedback(matches.requested ? "awaiting_vehicle" : "requesting", targetEnabled);
+    renderTeslaControlStatus(teslaInfo);
+    await sleep(TESLA_CONTROL_CONFIRM_POLL_MS);
+  }
+  await loadSummary();
+  const teslaInfo = teslaInfoFromCombinedFlow(stateCache.lastSummary?.combinedFlow || {});
+  const matches = teslaControlMatchesTarget(teslaInfo, targetEnabled);
+  setTeslaControlFeedback(matches.requested ? "delayed" : "failed", targetEnabled);
+  renderTeslaControlStatus(teslaInfo);
+  return false;
+}
+
 function mergeTeslaControlInfo(baseInfo, controlPayload) {
   const controlState = controlPayload?.control_state || controlPayload || {};
   const observation = controlPayload?.observation || {};
@@ -3677,6 +3990,7 @@ function mergeTeslaControlInfo(baseInfo, controlPayload) {
     chargeRequestedEnabled: resolvedChargeRequestedEnabled,
     canStart: Boolean(controlState?.can_start),
     canStop: Boolean(controlState?.can_stop),
+    controlFeedback: controlState?.feedback || null,
     controlSwitchEntityId: controlState?.switch_entity?.entity_id || null,
     controlStartButtonEntityId: controlState?.start_button_entity?.entity_id || null,
     controlStopButtonEntityId: controlState?.stop_button_entity?.entity_id || null,
@@ -3708,6 +4022,7 @@ function teslaInfoFromCombinedFlow(combinedFlow) {
     chargeRequestedEnabled: typeof control?.charge_requested_enabled === "boolean" ? control.charge_requested_enabled : null,
     canStart: Boolean(control?.can_start),
     canStop: Boolean(control?.can_stop),
+    controlFeedback: control?.feedback || null,
     controlSwitchEntityId: null,
     controlStartButtonEntityId: null,
     controlStopButtonEntityId: null,
@@ -3721,7 +4036,8 @@ function renderTeslaControlButton(teslaInfo = null) {
   const chargingEnabled = teslaInfo?.chargingEnabled === true;
   let label = t("teslaControlUnavailable");
   if (teslaControlBusy) {
-    label = t("teslaControlBusy");
+    const targetEnabled = effectiveTeslaControlFeedback(teslaInfo)?.targetEnabled === true;
+    label = targetEnabled ? t("teslaControlStarting") : t("teslaControlStopping");
   } else if (controlAvailable) {
     label = chargingEnabled ? t("teslaControlStop") : t("teslaControlStart");
   }
@@ -3739,6 +4055,7 @@ function ensureTeslaCardUnifiedContent() {
     "combined-teslaChargingPowerValue",
     "combined-teslaChargingCurrentValue",
     "combined-teslaConnectionValue",
+    "combined-teslaControlStatusValue",
     "combined-teslaChargingToggleBtn",
   ].forEach((id) => {
     const el = document.getElementById(id);
@@ -4119,6 +4436,7 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
     formatTeslaCurrentValueHtml(teslaCurrentA, teslaConfiguredCurrentA, teslaInfo?.currentUnit || "A", dataKinds.teslaCurrent),
   );
   setText("combined-teslaConnectionValue", formatTeslaConnectionSummary(teslaInfo));
+  renderTeslaControlStatus(teslaInfo);
   renderBatterySocDisplay({
     system: null,
     soc: teslaSoc,
@@ -4334,6 +4652,29 @@ function dashboardNotificationStateText(state) {
   return t("dashboardNotificationStateNotified");
 }
 
+function notificationMatrixRuleKindText(kind) {
+  return kind === "operation"
+    ? t("notificationMatrixRuleTypeOperation")
+    : t("notificationMatrixRuleTypeNotification");
+}
+
+function getTimeWindowRuleEnabledMap() {
+  const items = Array.isArray(stateCache.lastTimeWindowRules?.items) ? stateCache.lastTimeWindowRules.items : [];
+  const map = {};
+  for (const item of items) {
+    const code = String(item?.rule_code || "").trim();
+    if (!code) continue;
+    map[code] = Boolean(item?.enabled);
+  }
+  return map;
+}
+
+function isTimeWindowRuleEnabled(ruleCode) {
+  const normalized = String(ruleCode || "").trim();
+  if (!normalized) return true;
+  return getTimeWindowRuleEnabledMap()[normalized] !== false;
+}
+
 function renderDashboardNotifications(payload) {
   const section = document.getElementById("dashboardNotificationsSection");
   const list = document.getElementById("dashboardNotificationsList");
@@ -4407,18 +4748,23 @@ function renderNotificationMatrix() {
     const isCurrentWindow = windowItem.id === currentWindowId;
     const isCollapsed = Boolean(notificationMatrixCollapseState[windowItem.id]);
     panel.className = `notification-window-panel${isCurrentWindow ? " is-current-window" : ""}${isCollapsed ? " is-collapsed" : ""}`;
-    const notifications = Array.isArray(windowItem.notifications) ? windowItem.notifications : [];
-    const listHtml = notifications.length
-      ? notifications.map((item) => {
+    const rules = Array.isArray(windowItem.rules) ? windowItem.rules : [];
+    const listHtml = rules.length
+      ? rules.map((item) => {
         const level = String(item.level || "info").trim().toLowerCase();
-        const progress = getNotificationMatrixProgress(item, windowItem, stateCache.lastSummary);
+        const kind = String(item.kind || "notification").trim().toLowerCase() === "operation" ? "operation" : "notification";
+        const ruleCode = String(item.code || "").trim();
+        const enabled = isTimeWindowRuleEnabled(ruleCode);
+        const busy = timeWindowRuleBusy.has(ruleCode);
+        const progress = getNotificationMatrixProgress(item, windowItem, stateCache.lastSummary, { enabled, busy });
         return `
-          <article class="notification-rule-item level-${escapeHtml(level)}">
+          <article class="notification-rule-item level-${escapeHtml(level)}${enabled ? "" : " is-disabled"}">
             <label class="notification-rule-check" aria-label="${escapeHtml(t(item.titleKey))}">
-              <input type="checkbox" checked disabled />
+              <input type="checkbox" ${enabled ? "checked" : ""} ${busy ? "disabled" : ""} data-rule-code="${escapeHtml(ruleCode)}" />
             </label>
             <div class="notification-rule-main">
               <div class="notification-rule-topline">
+                <span class="notification-rule-kind kind-${escapeHtml(kind)}">${escapeHtml(notificationMatrixRuleKindText(kind))}</span>
                 <span class="notification-rule-level">${escapeHtml(dashboardNotificationLevelText(level))}</span>
                 <span class="notification-rule-code">${escapeHtml(String(item.code || "-"))}</span>
               </div>
@@ -4488,6 +4834,16 @@ function renderNotificationMatrix() {
         toggleNotificationMatrixWindow(header.getAttribute("data-window-id"));
       });
     }
+    for (const checkbox of panel.querySelectorAll(".notification-rule-check input[data-rule-code]")) {
+      checkbox.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+      checkbox.addEventListener("change", (event) => {
+        const target = event.currentTarget;
+        const ruleCode = target?.getAttribute("data-rule-code");
+        void updateTimeWindowRuleState(ruleCode, Boolean(target?.checked));
+      });
+    }
     root.appendChild(panel);
   }
 }
@@ -4519,6 +4875,14 @@ function renderNotificationMatrixProgress(progress) {
   const markerHtml = Number.isFinite(markerRatio) && markerRatio > 0 && markerRatio < 0.995
     ? `<span class="notification-rule-progress-marker${progress.markerLevel ? ` level-${escapeHtml(progress.markerLevel)}` : ""}" style="left: ${(Math.max(0, Math.min(1, markerRatio)) * 100).toFixed(1)}%"></span>`
     : "";
+  const barHtml = progress.hideBar
+    ? ""
+    : `
+      <div class="notification-rule-progress-bar" aria-hidden="true">
+        <span class="notification-rule-progress-fill" style="width: ${width.toFixed(1)}%"></span>
+        ${markerHtml}
+      </div>
+    `;
   return `
     <div class="notification-rule-progress">
       <div class="notification-rule-progress-topline">
@@ -4529,21 +4893,42 @@ function renderNotificationMatrixProgress(progress) {
         <span>${escapeHtml(progress.currentText || "-")}</span>
         <span>${escapeHtml(progress.triggerText || "-")}</span>
       </div>
-      <div class="notification-rule-progress-bar" aria-hidden="true">
-        <span class="notification-rule-progress-fill" style="width: ${width.toFixed(1)}%"></span>
-        ${markerHtml}
-      </div>
+      ${barHtml}
     </div>
   `;
 }
 
-function getNotificationMatrixProgress(item, windowItem, summary) {
+function getNotificationMatrixProgress(item, windowItem, summary, options = {}) {
   const code = String(item?.code || "").trim();
+  const enabled = options?.enabled !== false;
+  const busy = Boolean(options?.busy);
+  if (!enabled || busy) {
+    return {
+      ratio: 0,
+      statusText: t(busy ? "notificationMatrixProgressSaving" : "notificationMatrixProgressDisabled"),
+      currentText: t("notificationMatrixProgressCurrent", { value: "-" }),
+      triggerText: "-",
+      deltaText: "",
+      hideBar: true,
+    };
+  }
+  const currentWindowId = getCurrentNotificationMatrixWindowId(summary);
   const combinedSystems = summary?.collectorStatus?.systems?.combined || {};
   const live = summary?.combinedFlow?.notification_metrics || {};
+  const metrics = summary?.combinedFlow?.metrics || {};
   const midday = combinedSystems.last_midday_window_check || {};
   const sajWatch = combinedSystems.last_saj_battery_watch_check || {};
   const batteryFull = combinedSystems.last_battery_full_notification_check || {};
+  if (code === "saj_profile_free_energy" || code === "saj_profile_self_consumption") {
+    return getNotificationMatrixSajProfileProgress(code, windowItem, currentWindowId, midday);
+  }
+  if (
+    code === "tesla_free_energy_control"
+    || code === "tesla_after_free_shoulder_control"
+    || code === "tesla_after_free_peak_control"
+  ) {
+    return getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWindowId, midday, metrics);
+  }
   if (code === "solplanet_low_available_capacity") {
     const current = Number(live?.solplanet_battery_energy_kwh);
     return buildThresholdProgress({
@@ -4654,6 +5039,97 @@ function getNotificationMatrixProgress(item, windowItem, summary) {
   };
 }
 
+function getNotificationMatrixSajProfileProgress(code, windowItem, currentWindowId, midday) {
+  const guard = midday?.saj_profile_guard || {};
+  const expectedProfile = code === "saj_profile_free_energy" ? "time_of_use" : "self_consumption";
+  const actualProfile = String(guard?.actual_profile || guard?.input_profile || guard?.selected_profile || "").trim();
+  const selectedProfile = String(guard?.selected_profile || "").trim();
+  const isCurrentWindow = currentWindowId === windowItem?.id;
+  let statusText = t("notificationMatrixProgressScheduled");
+  if (isCurrentWindow) {
+    if (Boolean(guard?.pending_remote_sync)) {
+      statusText = t("notificationMatrixProgressPendingSync");
+    } else if (String(guard?.action || "").trim() === "apply_profile") {
+      statusText = t("notificationMatrixProgressApplied");
+    } else if (actualProfile === expectedProfile || selectedProfile === expectedProfile) {
+      statusText = t("notificationMatrixProgressHolding");
+    }
+  }
+  return {
+    ratio: actualProfile === expectedProfile || selectedProfile === expectedProfile ? 1 : 0,
+    statusText,
+    currentText: t("notificationMatrixProgressCurrent", { value: formatSajProfileLabel(actualProfile || selectedProfile || "-") }),
+    triggerText: t("notificationMatrixProgressTarget", { value: formatSajProfileLabel(expectedProfile) }),
+    deltaText: String(guard?.desired_reason || "").trim(),
+    hideBar: true,
+  };
+}
+
+function getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWindowId, midday, metrics) {
+  const isCurrentWindow = currentWindowId === windowItem?.id;
+  const action = midday?.action || {};
+  const decision = midday?.decision || {};
+  const before = midday?.tesla_state_before || {};
+  const actualCurrent = Number(metrics?.tesla_charge_current_amps);
+  const configuredCurrent = Number(metrics?.tesla_configured_current_amps);
+  const solplanetSoc = Number(metrics?.battery2_soc_percent);
+  const connectionState = formatTeslaConnectionText(metrics?.tesla_connection_state || before?.connection_state || "");
+  let statusText = t("notificationMatrixProgressScheduled");
+  if (isCurrentWindow) {
+    const actionType = String(action?.type || "").trim().toLowerCase();
+    if (actionType && actionType !== "noop") {
+      statusText = t("notificationMatrixProgressApplied");
+    } else if (String(decision?.mode || "").trim() === "hold_current_state") {
+      statusText = t("notificationMatrixProgressHolding");
+    } else {
+      statusText = t("notificationMatrixProgressWatching");
+    }
+  }
+  let triggerText = "-";
+  let deltaText = connectionState;
+  if (code === "tesla_free_energy_control") {
+    triggerText = t("notificationMatrixTeslaTriggerGridCap");
+  } else if (code === "tesla_after_free_shoulder_control" || code === "tesla_after_free_peak_control") {
+    const socText = Number.isFinite(solplanetSoc) ? `${formatTrimmedDecimal(solplanetSoc, 1)}%` : "-";
+    triggerText = t("notificationMatrixTeslaTriggerSolplanetSoc", { soc: socText });
+  }
+  if (String(midday?.decision_reason || "").trim() && isCurrentWindow) {
+    deltaText = String(midday.decision_reason).trim();
+  }
+  return {
+    ratio: Number.isFinite(actualCurrent) ? Math.max(0, Math.min(1, actualCurrent / 32)) : 0,
+    statusText,
+    currentText: t("notificationMatrixTeslaCurrent", {
+      actual: formatTeslaAmpText(actualCurrent),
+      configured: formatTeslaAmpText(configuredCurrent),
+    }),
+    triggerText,
+    deltaText,
+    hideBar: true,
+  };
+}
+
+function formatTeslaAmpText(value) {
+  if (!Number.isFinite(Number(value))) return "-";
+  return `${formatTrimmedDecimal(Number(value), 0)}A`;
+}
+
+function formatTeslaConnectionText(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "charging") return t("teslaConnectionStateCharging");
+  if (normalized === "plugged_not_charging") return t("teslaConnectionStatePluggedNotCharging");
+  if (normalized === "unplugged") return t("teslaConnectionStateUnplugged");
+  return t("teslaConnectionStateUnknown");
+}
+
+function formatSajProfileLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "time_of_use") return t("sajProfileOptionTimeOfUse");
+  if (normalized === "self_consumption") return t("sajProfileOptionSelfConsumption");
+  if (normalized === "microgrid") return t("sajProfileOptionMicrogrid");
+  return normalized || "-";
+}
+
 function buildThresholdProgress({
   current,
   threshold,
@@ -4749,6 +5225,41 @@ async function dismissDashboardNotification(notificationKey) {
   } finally {
     dashboardNotificationDismissBusy.delete(normalizedKey);
     renderDashboardNotifications(stateCache.lastDashboardNotifications);
+  }
+}
+
+async function updateTimeWindowRuleState(ruleCode, enabled) {
+  const normalized = String(ruleCode || "").trim();
+  if (!normalized || timeWindowRuleBusy.has(normalized)) return;
+  timeWindowRuleBusy.add(normalized);
+  renderNotificationMatrix();
+  try {
+    const payload = await fetchJson(`/api/time-window-rules/${encodeURIComponent(normalized)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: Boolean(enabled) }),
+      timeoutMs: 10000,
+    });
+    const current = stateCache.lastTimeWindowRules || { items: [], updated_at: null };
+    const items = Array.isArray(current.items) ? [...current.items] : [];
+    const index = items.findIndex((item) => String(item?.rule_code || "").trim() === normalized);
+    const nextItem = {
+      ...(index >= 0 ? items[index] : { rule_code: normalized }),
+      ...payload,
+      enabled: Boolean(payload?.enabled),
+    };
+    if (index >= 0) items[index] = nextItem;
+    else items.push(nextItem);
+    stateCache.lastTimeWindowRules = {
+      ...current,
+      updated_at: payload?.updated_at_utc || new Date().toISOString(),
+      items,
+    };
+  } catch (err) {
+    window.alert(String(err));
+  } finally {
+    timeWindowRuleBusy.delete(normalized);
+    renderNotificationMatrix();
   }
 }
 
@@ -6012,27 +6523,56 @@ function setSamplingFocusSeries(nextKey) {
   }
 }
 
+function normalizeGridWindowBreakdown(rawBreakdown, totalValue) {
+  const total = Math.max(Number(totalValue || 0), 0);
+  const windowValue = Math.max(0, Math.min(total, Number(rawBreakdown?.window || 0)));
+  return {
+    windowValue,
+    otherValue: Math.max(0, total - windowValue),
+    totalValue: total,
+  };
+}
+
+function formatSamplingWindowSplit(windowValue, totalValue) {
+  const total = Math.max(Number(totalValue || 0), 0);
+  if (total <= 0) return "-";
+  return `${formatEnergyKwhText(Math.max(Number(windowValue || 0), 0))} / ${formatEnergyKwhText(total)}`;
+}
+
 function combineSamplingUsageForOverall(usageBySystem) {
+  const combinedUsage = usageBySystem?.combined || null;
   const sajUsage = usageBySystem?.saj || null;
   const solplanetUsage = usageBySystem?.solplanet || null;
+  const combinedEnergy = combinedUsage?.energy_kwh || {};
   const sajEnergy = sajUsage?.energy_kwh || {};
   const solplanetEnergy = solplanetUsage?.energy_kwh || {};
+  const combinedBreakdown = combinedUsage?.breakdown_kwh || {};
+  const sajBreakdown = sajUsage?.breakdown_kwh || {};
+  const solplanetBreakdown = solplanetUsage?.breakdown_kwh || {};
+  const combinedHasData = Number(combinedUsage?.samples || 0) >= 2;
   const sajHasData = Number(sajUsage?.samples || 0) >= 2;
   const solplanetHasData = Number(solplanetUsage?.samples || 0) >= 2;
   return {
     system: "overall",
-    samples: sajHasData || solplanetHasData ? 2 : 0,
+    samples: combinedHasData ? Number(combinedUsage?.samples || 0) : 0,
     energy_kwh: {
-      home_load: (sajHasData ? Number(sajEnergy.home_load || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.home_load || 0) : 0),
-      solar_generation:
-        (sajHasData ? Number(sajEnergy.solar_generation || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.solar_generation || 0) : 0),
-      grid_import: (sajHasData ? Number(sajEnergy.grid_import || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.grid_import || 0) : 0),
-      grid_export: (sajHasData ? Number(sajEnergy.grid_export || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.grid_export || 0) : 0),
+      home_load: combinedHasData ? Number(combinedEnergy.home_load || 0) : 0,
+      solar_generation: combinedHasData ? Number(combinedEnergy.solar_generation || 0) : 0,
+      grid_import: combinedHasData ? Number(combinedEnergy.grid_import || 0) : 0,
+      grid_export: combinedHasData ? Number(combinedEnergy.grid_export || 0) : 0,
       battery_charge:
         (sajHasData ? Number(sajEnergy.battery_charge || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.battery_charge || 0) : 0),
       battery_discharge:
         (sajHasData ? Number(sajEnergy.battery_discharge || 0) : 0) +
         (solplanetHasData ? Number(solplanetEnergy.battery_discharge || 0) : 0),
+    },
+    breakdown_kwh: {
+      grid_import: {
+        window: combinedHasData ? Number(combinedBreakdown?.grid_import?.window || 0) : 0,
+      },
+      grid_export: {
+        window: combinedHasData ? Number(combinedBreakdown?.grid_export?.window || 0) : 0,
+      },
     },
   };
 }
@@ -6129,18 +6669,28 @@ function buildSamplingTotalsRows(usageBySystem, selectedSystem) {
 }
 
 function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
+  const combinedUsage = usageBySystem?.combined || null;
   const sajUsage = usageBySystem?.saj || null;
   const solplanetUsage = usageBySystem?.solplanet || null;
+  const combinedEnergy = combinedUsage?.energy_kwh || {};
   const sajEnergy = sajUsage?.energy_kwh || {};
   const solplanetEnergy = solplanetUsage?.energy_kwh || {};
+  const combinedBreakdown = combinedUsage?.breakdown_kwh || {};
+  const sajBreakdown = sajUsage?.breakdown_kwh || {};
+  const solplanetBreakdown = solplanetUsage?.breakdown_kwh || {};
+  const combinedHasData = Number(combinedUsage?.samples || 0) >= 2;
   const sajHasData = Number(sajUsage?.samples || 0) >= 2;
   const solplanetHasData = Number(solplanetUsage?.samples || 0) >= 2;
 
   if (selectedSystem === "overall") {
+    const totalGridImport = combinedHasData ? Number(combinedEnergy.grid_import || 0) : 0;
+    const totalGridExport = combinedHasData ? Number(combinedEnergy.grid_export || 0) : 0;
+    const gridImportBreakdown = normalizeGridWindowBreakdown(combinedBreakdown?.grid_import, totalGridImport);
+    const gridExportBreakdown = normalizeGridWindowBreakdown(combinedBreakdown?.grid_export, totalGridExport);
     const cards = [
       {
         title: t("samplingOverallMetricPv"),
-        value: (sajHasData ? Number(sajEnergy.solar_generation || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.solar_generation || 0) : 0),
+        value: combinedHasData ? Number(combinedEnergy.solar_generation || 0) : 0,
         kind: "pv",
         seriesKey: "pv_total_w",
         scope: t("samplingTotalsScopeOverall"),
@@ -6149,13 +6699,17 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
       {
         title: t("samplingTotalsGridTitle"),
         leftLabel: t("samplingOverallMetricGridImport"),
-        leftValue: (sajHasData ? Number(sajEnergy.grid_import || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.grid_import || 0) : 0),
+        leftValue: totalGridImport,
         leftKind: "import",
         leftSeriesKey: "grid_import_w",
+        leftWindowValue: gridImportBreakdown.windowValue,
+        leftWindowLabel: SAMPLING_GRID_IMPORT_WINDOW.label,
         rightLabel: t("samplingOverallMetricGridExport"),
-        rightValue: (sajHasData ? Number(sajEnergy.grid_export || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.grid_export || 0) : 0),
+        rightValue: totalGridExport,
         rightKind: "export",
         rightSeriesKey: "grid_export_w",
+        rightWindowValue: gridExportBreakdown.windowValue,
+        rightWindowLabel: SAMPLING_GRID_EXPORT_WINDOW.label,
         scope: t("samplingTotalsScopeOverall"),
         layout: "dual",
       },
@@ -6191,8 +6745,13 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
 
   const selectedUsage = selectedSystem === "solplanet" ? solplanetUsage : sajUsage;
   const selectedEnergy = selectedUsage?.energy_kwh || {};
+  const selectedBreakdown = selectedUsage?.breakdown_kwh || {};
   const selectedHasData = Number(selectedUsage?.samples || 0) >= 2;
   const selectedLabel = formatSamplingSystemLabel(selectedSystem);
+  const totalGridImport = selectedHasData ? Number(selectedEnergy.grid_import || 0) : 0;
+  const totalGridExport = selectedHasData ? Number(selectedEnergy.grid_export || 0) : 0;
+  const gridImportBreakdown = normalizeGridWindowBreakdown(selectedBreakdown?.grid_import, totalGridImport);
+  const gridExportBreakdown = normalizeGridWindowBreakdown(selectedBreakdown?.grid_export, totalGridExport);
   return {
     cards: [
       {
@@ -6206,13 +6765,17 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
       {
         title: t("samplingTotalsGridTitle"),
         leftLabel: t("samplingOverallMetricGridImport"),
-        leftValue: selectedHasData ? Number(selectedEnergy.grid_import || 0) : 0,
+        leftValue: totalGridImport,
         leftKind: "import",
         leftSeriesKey: "grid_w",
+        leftWindowValue: gridImportBreakdown.windowValue,
+        leftWindowLabel: SAMPLING_GRID_IMPORT_WINDOW.label,
         rightLabel: t("samplingOverallMetricGridExport"),
-        rightValue: selectedHasData ? Number(selectedEnergy.grid_export || 0) : 0,
+        rightValue: totalGridExport,
         rightKind: "export",
         rightSeriesKey: "grid_w",
+        rightWindowValue: gridExportBreakdown.windowValue,
+        rightWindowLabel: SAMPLING_GRID_EXPORT_WINDOW.label,
         scope: t("samplingTotalsScopeSystem", { system: selectedLabel }),
         layout: "dual",
       },
@@ -6266,18 +6829,26 @@ function normalizeOverallSeriesItems(items, system) {
 }
 
 function buildOverallSeriesPayload(seriesBySystem, status, range) {
+  const combinedItems = normalizeOverallSeriesItems(seriesBySystem?.combined?.items, "combined");
   const sajItems = normalizeOverallSeriesItems(seriesBySystem?.saj?.items, "saj");
   const solplanetItems = normalizeOverallSeriesItems(seriesBySystem?.solplanet?.items, "solplanet");
-  const tsSet = new Set([...sajItems.map((item) => item.ts), ...solplanetItems.map((item) => item.ts)]);
+  const tsSet = new Set([...combinedItems.map((item) => item.ts), ...sajItems.map((item) => item.ts), ...solplanetItems.map((item) => item.ts)]);
   const timestamps = Array.from(tsSet).sort((a, b) => a - b);
+  const combinedGapMs = Number(status?.saj_sample_interval_seconds || 5) * 2500;
   const sajGapMs = Number(status?.saj_sample_interval_seconds || 5) * 2500;
   const solplanetGapMs = Number(status?.solplanet_sample_interval_seconds || 60) * 2500;
+  let combinedIndex = 0;
   let sajIndex = 0;
   let solplanetIndex = 0;
+  let latestCombined = null;
   let latestSaj = null;
   let latestSolplanet = null;
 
   const items = timestamps.map((ts) => {
+    while (combinedIndex < combinedItems.length && combinedItems[combinedIndex].ts <= ts) {
+      latestCombined = combinedItems[combinedIndex];
+      combinedIndex += 1;
+    }
     while (sajIndex < sajItems.length && sajItems[sajIndex].ts <= ts) {
       latestSaj = sajItems[sajIndex];
       sajIndex += 1;
@@ -6286,14 +6857,9 @@ function buildOverallSeriesPayload(seriesBySystem, status, range) {
       latestSolplanet = solplanetItems[solplanetIndex];
       solplanetIndex += 1;
     }
-    const pvTotal =
-      pickActiveOverallValue(latestSaj, ts, sajGapMs, "pv_total_w") + pickActiveOverallValue(latestSolplanet, ts, solplanetGapMs, "pv_total_w");
-    const gridImport =
-      pickActiveOverallValue(latestSaj, ts, sajGapMs, "grid_import_w") +
-      pickActiveOverallValue(latestSolplanet, ts, solplanetGapMs, "grid_import_w");
-    const gridExport =
-      pickActiveOverallValue(latestSaj, ts, sajGapMs, "grid_export_w") +
-      pickActiveOverallValue(latestSolplanet, ts, solplanetGapMs, "grid_export_w");
+    const pvTotal = pickActiveOverallValue(latestCombined, ts, combinedGapMs, "pv_total_w");
+    const gridImport = pickActiveOverallValue(latestCombined, ts, combinedGapMs, "grid_import_w");
+    const gridExport = pickActiveOverallValue(latestCombined, ts, combinedGapMs, "grid_export_w");
     return {
       sampled_at_utc: new Date(ts).toISOString(),
       pv_total_w: pvTotal,
@@ -6396,6 +6962,7 @@ function renderSamplingChart(seriesPayload) {
   const endMs = new Date(seriesPayload?.end_at_utc || "").getTime();
   const xMin = Number.isFinite(startMs) ? startMs : null;
   const xMax = Number.isFinite(endMs) ? endMs : null;
+  const timeAxisConfig = buildSamplingTimeAxisConfig(xMin, xMax);
 
   const smoothCfg = getSamplingSmoothConfig();
   const preparedSeries = chartSeriesMeta.map((meta) => {
@@ -6512,10 +7079,7 @@ function renderSamplingChart(seriesPayload) {
         max: xMax,
         axisLine: { lineStyle: { color: "#adc2b5" } },
         splitLine: { lineStyle: { color: "#eef4ee" } },
-        axisLabel: {
-          color: "#6b7f72",
-          formatter: (value) => formatSamplingClock(value, false),
-        },
+        ...timeAxisConfig,
       },
       yAxis: {
         type: "value",
@@ -6588,6 +7152,7 @@ function renderSamplingTotalsChartOverlay(chart, rows, hasData) {
     overlay.querySelectorAll(".sampling-totals-chart-lane").forEach((laneNode, laneIndex) => {
       laneNode.classList.toggle("is-hovered", laneIndex === nextIndex);
     });
+    if (chart?.__cards) renderSamplingTotalsChart(chart.__cards);
   };
   rows.forEach((row, index) => {
     const lane = document.createElement("button");
@@ -6626,12 +7191,24 @@ function buildSamplingTotalsChartRows(cards) {
       rows.push({
         label: `${card.leftLabel || ""}${suffix}`.trim(),
         value: Math.max(Number(card.leftValue || 0), 0),
+        overlayValue: Math.max(Number(card.leftWindowValue || 0), 0),
+        overlayLabel: card.leftWindowLabel || "",
+        valueLabel:
+          Number(card.leftValue || 0) > 0 && card.leftWindowLabel
+            ? formatSamplingWindowSplit(card.leftWindowValue, card.leftValue)
+            : null,
         kind: card.leftKind,
         seriesKey: card.leftSeriesKey || null,
       });
       rows.push({
         label: `${card.rightLabel || ""}${suffix}`.trim(),
         value: Math.max(Number(card.rightValue || 0), 0),
+        overlayValue: Math.max(Number(card.rightWindowValue || 0), 0),
+        overlayLabel: card.rightWindowLabel || "",
+        valueLabel:
+          Number(card.rightValue || 0) > 0 && card.rightWindowLabel
+            ? formatSamplingWindowSplit(card.rightWindowValue, card.rightValue)
+            : null,
         kind: card.rightKind,
         seriesKey: card.rightSeriesKey || null,
       });
@@ -6659,14 +7236,24 @@ function renderSamplingTotalsChart(cards) {
   const hasData = rows.some((row) => Number(row.value || 0) !== 0);
   const labels = rows.map((row) => row.label);
   const maxAbs = Math.max(0, ...rows.map((row) => Math.abs(Number(row.value || 0))));
+  const axisMax = maxAbs > 0 ? maxAbs * 1.2 : 1;
+  const isRowHighlighted = (row, index) => {
+    if (samplingTotalsHoverIndex !== null) return samplingTotalsHoverIndex === index;
+    if (samplingChartFocusSeries) return samplingChartFocusSeries === row?.seriesKey;
+    return true;
+  };
+  const isRowDimmed = (row, index) => {
+    if (samplingChartFocusSeries) return samplingChartFocusSeries !== row?.seriesKey;
+    return false;
+  };
   chart.setOption(
     {
       animation: false,
-      grid: { left: 220, right: 72, top: 6, bottom: 6, containLabel: false },
+      grid: { left: 220, right: 108, top: 6, bottom: 6, containLabel: false },
       xAxis: {
         type: "value",
         min: 0,
-        max: maxAbs > 0 ? maxAbs : 1,
+        max: axisMax,
         splitNumber: 2,
         axisLine: { show: false },
         axisTick: { show: false },
@@ -6687,6 +7274,9 @@ function renderSamplingTotalsChart(cards) {
           const idx = Number(params?.dataIndex || 0);
           const row = rows[idx];
           if (!row) return "";
+          if (row.overlayLabel) {
+            return `${escapeHtml(row.label)}<br/>${escapeHtml(row.overlayLabel)}: ${formatEnergyKwhText(row.overlayValue)}<br/>${escapeHtml(t("samplingTotalsWindowOther"))}: ${formatEnergyKwhText(Math.max(row.value - row.overlayValue, 0))}<br/>${escapeHtml(t("samplingTotalsWindowTotal"))}: ${formatEnergyKwhText(row.value)}`;
+          }
           return `${escapeHtml(row.label)}<br/>${formatEnergyKwhText(row.value)}`;
         },
       },
@@ -6705,11 +7295,11 @@ function renderSamplingTotalsChart(cards) {
         {
           type: "bar",
           barWidth: 12,
-          data: rows.map((row) => ({
+          data: rows.map((row, index) => ({
             value: row.value,
             itemStyle: {
               color: getSamplingSeriesColor(row.seriesKey, "#6b7f72"),
-              opacity: !samplingChartFocusSeries || samplingChartFocusSeries === row.seriesKey ? 1 : 0.3,
+              opacity: isRowDimmed(row, index) ? 0.14 : isRowHighlighted(row, index) ? 0.82 : 0.58,
             },
           })),
           itemStyle: {
@@ -6722,10 +7312,14 @@ function renderSamplingTotalsChart(cards) {
             distance: 8,
             color: ({ dataIndex }) => {
               const row = rows[dataIndex];
-              return !samplingChartFocusSeries || samplingChartFocusSeries === row?.seriesKey ? "#415449" : "#9ca9a1";
+              return isRowDimmed(row, dataIndex) ? "#a6b2ab" : isRowHighlighted(row, dataIndex) ? "#16261f" : "#415449";
             },
             fontSize: 11,
-            formatter: ({ value }) => (Number(value) ? `${formatTrimmedDecimal(Math.abs(Number(value)), 2)} kWh` : ""),
+            formatter: ({ dataIndex, value }) => {
+              const row = rows[dataIndex];
+              if (row?.valueLabel) return row.valueLabel;
+              return Number(value) ? `${formatTrimmedDecimal(Math.abs(Number(value)), 2)} kWh` : "";
+            },
           },
           markLine: {
             silent: true,
@@ -6735,6 +7329,24 @@ function renderSamplingTotalsChart(cards) {
             data: [{ xAxis: 0 }],
           },
           cursor: "pointer",
+        },
+        {
+          type: "bar",
+          barWidth: 7,
+          silent: true,
+          tooltip: { show: false },
+          z: 4,
+          data: rows.map((row, index) => ({
+            value: Math.min(Math.max(Number(row.overlayValue || 0), 0), Math.max(Number(row.value || 0), 0)),
+            itemStyle: {
+              color: getSamplingSeriesColor(row.seriesKey, "#6b7f72"),
+              opacity: isRowDimmed(row, index) ? 0.22 : isRowHighlighted(row, index) ? 1 : 0.9,
+            },
+          })),
+          itemStyle: {
+            borderRadius: [999, 999, 999, 999],
+          },
+          emphasis: { disabled: true },
         },
       ],
     },
@@ -6795,8 +7407,20 @@ function renderSamplingTotals(usageBySystem, selectedSystem, rangeLabel, options
       ${cards
         .map((card) => {
           if (card.layout === "dual") {
-            const leftValueText = card.leftValue > 0 ? formatEnergyKwhText(card.leftValue) : "-";
-            const rightValueText = card.rightValue > 0 ? formatEnergyKwhText(card.rightValue) : "-";
+            const leftHasWindowBreakdown = Boolean(card.leftWindowLabel);
+            const rightHasWindowBreakdown = Boolean(card.rightWindowLabel);
+            const leftValueText =
+              card.leftValue > 0
+                ? leftHasWindowBreakdown
+                  ? formatSamplingWindowSplit(card.leftWindowValue, card.leftValue)
+                  : formatEnergyKwhText(card.leftValue)
+                : "-";
+            const rightValueText =
+              card.rightValue > 0
+                ? rightHasWindowBreakdown
+                  ? formatSamplingWindowSplit(card.rightWindowValue, card.rightValue)
+                  : formatEnergyKwhText(card.rightValue)
+                : "-";
             const leftActive = samplingChartFocusSeries && samplingChartFocusSeries === card.leftSeriesKey;
             const rightActive = samplingChartFocusSeries && samplingChartFocusSeries === card.rightSeriesKey;
             const anyActive = leftActive || rightActive;
@@ -6815,17 +7439,21 @@ function renderSamplingTotals(usageBySystem, selectedSystem, rangeLabel, options
                   <button class="sampling-total-dual-value is-left${leftActive ? " is-active" : ""}" type="button" data-sampling-focus-series="${escapeHtml(card.leftSeriesKey || "")}" style="${escapeHtml(leftStyle)}">
                     <span class="sampling-total-dual-label">${escapeHtml(card.leftLabel || "")}</span>
                     <span class="sampling-total-dual-number">${escapeHtml(leftValueText)}</span>
+                    ${leftHasWindowBreakdown ? `<span class="sampling-total-dual-note">${escapeHtml(card.leftWindowLabel || "")}</span>` : ""}
                   </button>
                   <div class="sampling-total-dual-divider"></div>
                   <button class="sampling-total-dual-value is-right${rightActive ? " is-active" : ""}" type="button" data-sampling-focus-series="${escapeHtml(card.rightSeriesKey || "")}" style="${escapeHtml(rightStyle)}">
                     <span class="sampling-total-dual-label">${escapeHtml(card.rightLabel || "")}</span>
                     <span class="sampling-total-dual-number">${escapeHtml(rightValueText)}</span>
+                    ${rightHasWindowBreakdown ? `<span class="sampling-total-dual-note">${escapeHtml(card.rightWindowLabel || "")}</span>` : ""}
                   </button>
                 </div>
                 <div class="sampling-total-balance-track">
                   <div class="sampling-total-balance-center"></div>
                   <div class="sampling-total-balance-fill is-left is-${escapeHtml(card.leftKind)}" style="width:${widthPct(card.leftValue)}%;"></div>
+                  ${leftHasWindowBreakdown ? `<div class="sampling-total-balance-fill-overlay is-left is-${escapeHtml(card.leftKind)}" style="width:${widthPct(card.leftWindowValue)}%;"></div>` : ""}
                   <div class="sampling-total-balance-fill is-right is-${escapeHtml(card.rightKind)}" style="width:${widthPct(card.rightValue)}%;"></div>
+                  ${rightHasWindowBreakdown ? `<div class="sampling-total-balance-fill-overlay is-right is-${escapeHtml(card.rightKind)}" style="width:${widthPct(card.rightWindowValue)}%;"></div>` : ""}
                 </div>
               </article>
             `;
@@ -8568,7 +9196,10 @@ async function toggleTeslaCharging() {
   if (!teslaInfo?.controlAvailable) return;
   const targetEnabled = teslaInfo?.chargingEnabled === true ? false : true;
   teslaControlBusy = true;
+  clearTeslaControlFeedback();
+  setTeslaControlFeedback("requesting", targetEnabled);
   renderTeslaControlButton(teslaInfo);
+  renderTeslaControlStatus(teslaInfo);
   try {
     await fetchJson("/api/tesla/control/charging", {
       method: "POST",
@@ -8576,12 +9207,18 @@ async function toggleTeslaCharging() {
       body: JSON.stringify({ enabled: targetEnabled }),
       timeoutMs: 10000,
     });
-    await loadSummary();
+    setTeslaControlFeedback("awaiting_vehicle", targetEnabled);
+    renderTeslaControlStatus(teslaInfoFromCombinedFlow(stateCache.lastSummary?.combinedFlow || {}));
+    await waitForTeslaControlConfirmation(targetEnabled);
   } catch (err) {
+    setTeslaControlFeedback("failed", targetEnabled);
+    renderTeslaControlStatus(teslaInfoFromCombinedFlow(stateCache.lastSummary?.combinedFlow || {}));
+    scheduleTeslaControlFeedbackClear(6000);
     window.alert(t("teslaControlApplyFailed", { error: String(err) }));
   } finally {
     teslaControlBusy = false;
     renderTeslaControlButton(teslaInfoFromCombinedFlow(stateCache.lastSummary?.combinedFlow || {}));
+    renderTeslaControlStatus(teslaInfoFromCombinedFlow(stateCache.lastSummary?.combinedFlow || {}));
   }
 }
 
@@ -8590,14 +9227,6 @@ async function loadSummary() {
   const summary = stateCache.lastSummary || {
     combinedFlow: { metrics: {} },
     collectorStatus: null,
-    tesla: {
-      chargingW: null, entityId: null, friendlyName: null, updatedAt: null,
-      currentA: null, currentEntityId: null, currentUnit: "A",
-      socPercent: null, socEntityId: null,
-      controlAvailable: false, controlMode: "unavailable", chargingEnabled: null,
-      canStart: false, canStop: false,
-      controlSwitchEntityId: null, controlStartButtonEntityId: null, controlStopButtonEntityId: null,
-    },
   };
   stateCache.lastSummary = summary;
   setSystemLoadMeta("combined", { phase: "loading", updatedAt: null });
@@ -8608,6 +9237,7 @@ async function loadSummary() {
     fetchJson("/api/collector/status", { timeoutMs: 6000 }),
     fetchJson("/api/saj/control/profile", { timeoutMs: 8000 }),
     fetchJson("/api/dashboard/notifications", { timeoutMs: 8000 }),
+    fetchJson("/api/time-window-rules", { timeoutMs: 8000 }),
   ]);
   if (requestId !== summaryRequestId) return;
 
@@ -8624,13 +9254,15 @@ async function loadSummary() {
   if (baseResults[2].status === "fulfilled") {
     stateCache.lastDashboardNotifications = baseResults[2].value;
   }
+  if (baseResults[3].status === "fulfilled") {
+    stateCache.lastTimeWindowRules = baseResults[3].value;
+  }
   renderSummary(summary);
 
   void fetchJson("/api/energy-flow/combined", { timeoutMs: 30000 })
     .then((combinedFlow) => {
       if (requestId !== summaryRequestId) return;
       summary.combinedFlow = { ...combinedFlow, __load_error: false };
-      summary.tesla = teslaInfoFromCombinedFlow(summary.combinedFlow);
       setSystemLoadMeta("combined", {
         phase: "done",
         updatedAt: combinedFlow?.updated_at || new Date().toISOString(),
@@ -8930,18 +9562,24 @@ async function loadSampling() {
     `/api/storage/usage-range?system=saj&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}`;
   const solplanetUsageUrl =
     `/api/storage/usage-range?system=solplanet&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}`;
+  const combinedUsageUrl =
+    `/api/storage/usage-range?system=combined&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}`;
   const sajSeriesUrl =
     `/api/storage/series?system=saj&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}&max_points=500`;
   const solplanetSeriesUrl =
     `/api/storage/series?system=solplanet&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}&max_points=500`;
-  const selectedSeriesUrl = overallMode ? sajSeriesUrl : system === "solplanet" ? solplanetSeriesUrl : sajSeriesUrl;
+  const combinedSeriesUrl =
+    `/api/storage/series?system=combined&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}&max_points=500`;
+  const selectedSeriesUrl = overallMode ? combinedSeriesUrl : system === "solplanet" ? solplanetSeriesUrl : sajSeriesUrl;
 
-  const [statusResult, sajUsageResult, solplanetUsageResult, samplesResult, seriesResult, overallPeerSeriesResult] = await Promise.allSettled([
+  const [statusResult, sajUsageResult, solplanetUsageResult, combinedUsageResult, samplesResult, seriesResult, overallSajSeriesResult, overallSolplanetSeriesResult] = await Promise.allSettled([
     fetchJson("/api/storage/status", { timeoutMs: 6000 }),
     fetchJson(sajUsageUrl, { timeoutMs: 6000 }),
     fetchJson(solplanetUsageUrl, { timeoutMs: 6000 }),
+    overallMode ? fetchJson(combinedUsageUrl, { timeoutMs: 6000 }) : Promise.resolve(null),
     fetchJson(buildSamplingUrl(), { timeoutMs: 6000 }),
     fetchJson(selectedSeriesUrl, { timeoutMs: 6000 }),
+    overallMode ? fetchJson(sajSeriesUrl, { timeoutMs: 6000 }) : Promise.resolve(null),
     overallMode ? fetchJson(solplanetSeriesUrl, { timeoutMs: 6000 }) : Promise.resolve(null),
   ]);
 
@@ -8953,6 +9591,7 @@ async function loadSampling() {
   }
 
   const usageBySystem = {
+    combined: combinedUsageResult.status === "fulfilled" ? combinedUsageResult.value : null,
     saj: sajUsageResult.status === "fulfilled" ? sajUsageResult.value : null,
     solplanet: solplanetUsageResult.status === "fulfilled" ? solplanetUsageResult.value : null,
   };
@@ -8967,7 +9606,12 @@ async function loadSampling() {
   if (selectedUsage) {
     renderSamplingUsage(selectedUsage, range.label);
   } else {
-    const selectedUsageError = system === "solplanet" ? solplanetUsageResult.reason : sajUsageResult.reason;
+    const selectedUsageError =
+      system === "overall"
+        ? combinedUsageResult.reason
+        : system === "solplanet"
+          ? solplanetUsageResult.reason
+          : sajUsageResult.reason;
     setText("samplingDailyMeta", t("loadFailed", { error: String(selectedUsageError) }));
   }
   renderSamplingTotals(usageBySystem, system, range.label);
@@ -8986,13 +9630,15 @@ async function loadSampling() {
   }
 
   const overallHasAnySeries =
-    overallMode && (seriesResult.status === "fulfilled" || overallPeerSeriesResult.status === "fulfilled");
+    overallMode &&
+    (seriesResult.status === "fulfilled" || overallSajSeriesResult.status === "fulfilled" || overallSolplanetSeriesResult.status === "fulfilled");
   if (seriesResult.status === "fulfilled" || overallHasAnySeries) {
     let payload = seriesResult.status === "fulfilled" ? seriesResult.value : { items: [], count: 0 };
     if (overallMode) {
-      const sajSeries = seriesResult.status === "fulfilled" ? seriesResult.value : null;
-      const solplanetSeries = overallPeerSeriesResult.status === "fulfilled" ? overallPeerSeriesResult.value : null;
-      payload = buildOverallSeriesPayload({ saj: sajSeries, solplanet: solplanetSeries }, stateCache.lastSamplingStatus, range);
+      const combinedSeries = seriesResult.status === "fulfilled" ? seriesResult.value : null;
+      const sajSeries = overallSajSeriesResult.status === "fulfilled" ? overallSajSeriesResult.value : null;
+      const solplanetSeries = overallSolplanetSeriesResult.status === "fulfilled" ? overallSolplanetSeriesResult.value : null;
+      payload = buildOverallSeriesPayload({ combined: combinedSeries, saj: sajSeries, solplanet: solplanetSeries }, stateCache.lastSamplingStatus, range);
     }
     stateCache.lastSamplingSeries = payload;
     setText(

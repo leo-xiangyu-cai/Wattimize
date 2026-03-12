@@ -60,13 +60,16 @@ from app.persistence import (
     import_database_bytes,
     init_db,
     insert_sample,
+    get_time_window_rule_states,
     list_active_notification_entries,
     list_database_table_rows,
     list_database_tables,
+    list_time_window_rule_state_rows,
     list_raw_request_results,
     list_realtime_kv_rows,
     list_samples,
     list_worker_api_logs,
+    upsert_time_window_rule_state,
     upsert_notification_entries,
     update_worker_api_log,
     upsert_realtime_kv,
@@ -111,6 +114,10 @@ SYSTEM_PREFIXES: dict[str, tuple[str, ...]] = {
 }
 BALANCE_TOLERANCE_W = 100.0
 TESLA_ASSUMED_CHARGING_VOLTAGE_V = 240.0
+TESLA_CONTROL_FEEDBACK_KV_PREFIX = "ui.tesla_control_feedback."
+TESLA_CONTROL_FEEDBACK_PENDING_TIMEOUT_SECONDS = 15.0
+TESLA_CONTROL_FEEDBACK_SUCCESS_TTL_SECONDS = 4.0
+TESLA_CONTROL_FEEDBACK_FAILURE_TTL_SECONDS = 30.0
 FREE_ENERGY_WINDOW_START_HOUR = 11
 FREE_ENERGY_WINDOW_END_HOUR = 14
 FREE_ENERGY_WINDOW_SELF_CONSUMPTION_START_MINUTE = 50
@@ -177,6 +184,34 @@ WORKER_LOG_LEGACY_STATUSES: tuple[str, ...] = (
     "operation",
     "nop",
 )
+TIME_WINDOW_RULE_DEFINITIONS: tuple[dict[str, str], ...] = (
+    {"code": "saj_profile_free_energy", "window": "free_energy", "kind": "operation"},
+    {"code": "tesla_free_energy_control", "window": "free_energy", "kind": "operation"},
+    {"code": "saj_profile_self_consumption", "window": "after_free_shoulder", "kind": "operation"},
+    {"code": "saj_profile_self_consumption", "window": "after_free_peak", "kind": "operation"},
+    {"code": "saj_profile_self_consumption", "window": "export_window", "kind": "operation"},
+    {"code": "saj_profile_self_consumption", "window": "post_export_peak", "kind": "operation"},
+    {"code": "saj_profile_self_consumption", "window": "overnight_shoulder", "kind": "operation"},
+    {"code": "tesla_after_free_shoulder_control", "window": "after_free_shoulder", "kind": "operation"},
+    {"code": "tesla_after_free_peak_control", "window": "after_free_peak", "kind": "operation"},
+    {"code": "solplanet_low_available_capacity", "window": "after_free_shoulder", "kind": "notification"},
+    {"code": "solplanet_low_available_capacity", "window": "after_free_peak", "kind": "notification"},
+    {"code": "solplanet_low_battery", "window": "export_window", "kind": "notification"},
+    {"code": "grid_import_started", "window": "export_window", "kind": "notification"},
+    {"code": "solar_surplus_export_energy_reached_5000", "window": "export_window", "kind": "notification"},
+    {"code": "solar_surplus_export_energy_reached_9000", "window": "export_window", "kind": "notification"},
+    {"code": "solplanet_low_battery_post_export_peak", "window": "post_export_peak", "kind": "notification"},
+    {"code": "grid_import_started_post_export_peak", "window": "post_export_peak", "kind": "notification"},
+    {"code": "saj_battery_watch_50_percent", "window": "overnight_shoulder", "kind": "notification"},
+    {"code": "saj_battery_watch_20_percent", "window": "overnight_shoulder", "kind": "notification"},
+    {"code": "saj_battery_full", "window": "always", "kind": "notification"},
+    {"code": "solplanet_battery_full", "window": "always", "kind": "notification"},
+)
+TIME_WINDOW_RULE_CODES: tuple[str, ...] = tuple(dict.fromkeys(item["code"] for item in TIME_WINDOW_RULE_DEFINITIONS))
+TIME_WINDOW_RULE_WINDOWS_BY_CODE: dict[str, tuple[str, ...]] = {
+    code: tuple(item["window"] for item in TIME_WINDOW_RULE_DEFINITIONS if item["code"] == code)
+    for code in TIME_WINDOW_RULE_CODES
+}
 
 
 def _solar_surplus_export_energy_notification_code(threshold_wh: float) -> str:
@@ -927,6 +962,10 @@ class NotificationDismissRequest(BaseModel):
     notification_key: str = Field(..., min_length=1, max_length=200)
 
 
+class TimeWindowRuleStatePayload(BaseModel):
+    enabled: bool = Field(...)
+
+
 def _split_entity_id(entity_id: str) -> tuple[str, str]:
     if "." not in entity_id:
         return "", entity_id
@@ -1239,6 +1278,7 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
     tesla_charging_map = tesla_charging_obj if isinstance(tesla_charging_obj, dict) else {}
     tesla_control_state = tesla_raw.get("control_state")
     tesla_control_state_map = tesla_control_state if isinstance(tesla_control_state, dict) else {}
+    tesla_control_feedback = _resolve_tesla_control_feedback(tesla_control_state_map)
 
     return {
         "system": "combined",
@@ -1268,6 +1308,7 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
                 "charge_requested_enabled": tesla_control_state_map.get("charge_requested_enabled"),
                 "can_start": tesla_control_state_map.get("can_start"),
                 "can_stop": tesla_control_state_map.get("can_stop"),
+                "feedback": tesla_control_feedback,
             },
         },
         "notification_metrics": {
@@ -1994,6 +2035,36 @@ def _window_schedule_text_for_service(service: str) -> str:
     return _window_schedule_text(mode or "off")
 
 
+def _tesla_rule_code_for_window(window_mode: str) -> str | None:
+    return {
+        "free_energy": "tesla_free_energy_control",
+        "after_free_shoulder": "tesla_after_free_shoulder_control",
+        "after_free_peak": "tesla_after_free_peak_control",
+    }.get(str(window_mode or "").strip())
+
+
+def _saj_profile_rule_code_for_time(now_local: datetime) -> str:
+    return "saj_profile_free_energy" if _is_within_free_energy_window(now_local) else "saj_profile_self_consumption"
+
+
+async def _load_time_window_rule_enabled_map() -> dict[str, bool]:
+    return await asyncio.to_thread(
+        get_time_window_rule_states,
+        storage_db_path,
+        rule_codes=TIME_WINDOW_RULE_CODES,
+        default_enabled=True,
+    )
+
+
+def _is_time_window_rule_enabled(enabled_map: dict[str, bool] | None, rule_code: str) -> bool:
+    normalized_code = str(rule_code or "").strip()
+    if not normalized_code:
+        return True
+    if not isinstance(enabled_map, dict):
+        return True
+    return bool(enabled_map.get(normalized_code, True))
+
+
 def _saj_target_profile_for_time(now_local: datetime) -> tuple[str, str]:
     if _is_within_free_energy_window(now_local):
         window_end_threshold = now_local.replace(
@@ -2008,8 +2079,18 @@ def _saj_target_profile_for_time(now_local: datetime) -> tuple[str, str]:
     return "self_consumption", "outside_free_energy_window_force_self_consumption"
 
 
-async def _guard_saj_profile_for_time(now_local: datetime) -> dict[str, object]:
+async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str, bool] | None = None) -> dict[str, object]:
     desired_profile, desired_reason = _saj_target_profile_for_time(now_local)
+    rule_code = _saj_profile_rule_code_for_time(now_local)
+    if not _is_time_window_rule_enabled(enabled_map, rule_code):
+        return {
+            "desired_profile": desired_profile,
+            "desired_reason": desired_reason,
+            "rule_code": rule_code,
+            "rule_enabled": False,
+            "action": "noop",
+            "reason": "rule_disabled",
+        }
     _, states_by_id = await _saj_control_states()
     control_state = _build_saj_control_state(states_by_id)
     profile_state = _build_saj_profile_state(control_state)
@@ -2024,6 +2105,8 @@ async def _guard_saj_profile_for_time(now_local: datetime) -> dict[str, object]:
     result: dict[str, object] = {
         "desired_profile": desired_profile,
         "desired_reason": desired_reason,
+        "rule_code": rule_code,
+        "rule_enabled": True,
         "selected_profile": selected_profile or None,
         "input_profile": input_profile or None,
         "actual_profile": actual_profile or None,
@@ -2627,7 +2710,9 @@ async def _run_midday_window_check(
     ok = True
     error_text: str | None = None
     try:
-        result["saj_profile_guard"] = await _guard_saj_profile_for_time(now_local)
+        enabled_map = await _load_time_window_rule_enabled_map()
+        result["rule_enabled_map"] = enabled_map
+        result["saj_profile_guard"] = await _guard_saj_profile_for_time(now_local, enabled_map)
         observation = (
             tesla_observation_result.get("observation")
             if isinstance(tesla_observation_result, dict)
@@ -2651,19 +2736,19 @@ async def _run_midday_window_check(
             combined_status["peak_price_grid_import_active"] = False
             combined_status["solar_surplus_export_last_tracked_at"] = None
             result["decision"] = {
-                "mode": "off",
+                "mode": "observe_only",
                 "charge_current_amps": 0,
                 "predicted_grid_w": None,
             }
-            result["decision_reason"] = "outside_window_force_stop"
-            if charge_requested_enabled or charging_enabled:
-                await _tesla_set_charging(False)
-                result["action"] = {"type": "stop_charging", "reason": "outside_window"}
-                status = "applied"
-            else:
-                result["action"] = {"type": "noop", "reason": "outside_window_already_stopped"}
-                status = "noop"
+            result["decision_reason"] = "outside_tesla_automation_windows"
+            result["action"] = {"type": "noop", "reason": "outside_tesla_automation_windows"}
+            status = "noop"
             return result
+
+        tesla_rule_code = _tesla_rule_code_for_window(window_mode)
+        tesla_rule_enabled = _is_time_window_rule_enabled(enabled_map, tesla_rule_code or "")
+        result["tesla_rule_code"] = tesla_rule_code
+        result["tesla_rule_enabled"] = tesla_rule_enabled
 
         metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
         metrics_map = metrics if isinstance(metrics, dict) else {}
@@ -2741,16 +2826,17 @@ async def _run_midday_window_check(
                 current_grid_export_w=current_grid_export_w,
             )
 
-        if connection_state == "unplugged":
-            result["skipped"] = "tesla_unplugged"
-            status = "skipped"
-            return result
+        if tesla_rule_code:
+            if connection_state == "unplugged":
+                result["skipped"] = "tesla_unplugged"
+                status = "skipped"
+                return result
 
-        if status_text in ("disconnected", "unknown", "unavailable"):
-            result["skipped"] = "tesla_not_ready"
-            result["tesla_status"] = status_text
-            status = "skipped"
-            return result
+            if status_text in ("disconnected", "unknown", "unavailable"):
+                result["skipped"] = "tesla_not_ready"
+                result["tesla_status"] = status_text
+                status = "skipped"
+                return result
 
         if window_mode == "post_export_peak":
             solplanet_soc_percent = _to_number(metrics_map.get("battery2_soc_percent"))
@@ -2760,7 +2846,11 @@ async def _run_midday_window_check(
                 "solplanet_soc_percent": solplanet_soc_percent,
                 "low_battery_alarm_threshold_soc_percent": SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT,
             }
-            if solplanet_soc_percent is not None and solplanet_soc_percent < SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT:
+            if (
+                solplanet_soc_percent is not None
+                and solplanet_soc_percent < SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT
+                and _is_time_window_rule_enabled(enabled_map, "solplanet_low_battery_post_export_peak")
+            ):
                 _append_worker_notification(result, {
                     "level": "warning",
                     "code": "solplanet_low_battery_post_export_peak",
@@ -2776,7 +2866,11 @@ async def _run_midday_window_check(
                 })
             was_importing = bool(combined_status.get("peak_price_grid_import_active"))
             is_importing = current_grid_import_w > 0.0
-            if is_importing and not was_importing:
+            if (
+                is_importing
+                and not was_importing
+                and _is_time_window_rule_enabled(enabled_map, "grid_import_started_post_export_peak")
+            ):
                 _append_worker_notification(result, {
                     "level": "alarm",
                     "code": "grid_import_started_post_export_peak",
@@ -2791,18 +2885,13 @@ async def _run_midday_window_check(
                 })
             combined_status["peak_price_grid_import_active"] = is_importing
             result["decision"] = {
-                "mode": "off",
-                "charge_current_amps": 0,
+                "mode": "observe_only",
+                "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
                 "predicted_grid_w": round(float(grid_w), 1),
             }
-            result["decision_reason"] = "avoid_expensive_post_export_peak_window"
-            if charge_requested_enabled or charging_enabled:
-                await _tesla_set_charging(False)
-                result["action"] = {"type": "stop_charging", "reason": "post_export_peak_window"}
-                status = "applied"
-            else:
-                result["action"] = {"type": "noop", "reason": "post_export_peak_window_already_stopped"}
-                status = "noop"
+            result["decision_reason"] = "post_export_peak_notifications_only"
+            result["action"] = {"type": "noop", "reason": "post_export_peak_notifications_only"}
+            status = "noop"
             return result
 
         if window_mode == "after_free_shoulder":
@@ -2827,6 +2916,7 @@ async def _run_midday_window_check(
             if (
                 solplanet_available_capacity_kwh is not None
                 and solplanet_available_capacity_kwh < SOLPLANET_LOW_AVAILABLE_CAPACITY_NOTIFICATION_THRESHOLD_KWH
+                and _is_time_window_rule_enabled(enabled_map, "solplanet_low_available_capacity")
             ):
                 _append_worker_notification(result, {
                     "level": "alarm",
@@ -2844,6 +2934,17 @@ async def _run_midday_window_check(
             active_or_requested = charging_enabled or charge_requested_enabled
             should_start = solplanet_soc_percent >= TESLA_SOLAR_SURPLUS_START_SOLPLANET_SOC_PERCENT
             should_stop = solplanet_soc_percent < TESLA_SOLAR_SURPLUS_STOP_SOLPLANET_SOC_PERCENT
+
+            if not tesla_rule_enabled:
+                result["decision"] = {
+                    "mode": "observe_only",
+                    "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
+                    "predicted_grid_w": round(float(grid_w), 1),
+                }
+                result["decision_reason"] = "time_window_rule_disabled"
+                result["action"] = {"type": "noop", "reason": "rule_disabled"}
+                status = "noop"
+                return result
 
             if should_start:
                 result["decision"] = {
@@ -2917,6 +3018,7 @@ async def _run_midday_window_check(
             if (
                 solplanet_available_capacity_kwh is not None
                 and solplanet_available_capacity_kwh < SOLPLANET_LOW_AVAILABLE_CAPACITY_NOTIFICATION_THRESHOLD_KWH
+                and _is_time_window_rule_enabled(enabled_map, "solplanet_low_available_capacity")
             ):
                 _append_worker_notification(result, {
                     "level": "alarm",
@@ -2934,6 +3036,17 @@ async def _run_midday_window_check(
             active_or_requested = charging_enabled or charge_requested_enabled
             should_start = solplanet_soc_percent >= TESLA_SOLAR_SURPLUS_START_SOLPLANET_SOC_PERCENT
             should_stop = solplanet_soc_percent < TESLA_SOLAR_SURPLUS_STOP_SOLPLANET_SOC_PERCENT
+
+            if not tesla_rule_enabled:
+                result["decision"] = {
+                    "mode": "observe_only",
+                    "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
+                    "predicted_grid_w": round(float(grid_w), 1),
+                }
+                result["decision_reason"] = "time_window_rule_disabled"
+                result["action"] = {"type": "noop", "reason": "rule_disabled"}
+                status = "noop"
+                return result
 
             if should_start:
                 result["decision"] = {
@@ -3035,7 +3148,10 @@ async def _run_midday_window_check(
                     "battery2_soc_percent": "solplanet_battery_soc",
                 },
             }
-            if solplanet_soc_percent < SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT:
+            if (
+                solplanet_soc_percent < SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT
+                and _is_time_window_rule_enabled(enabled_map, "solplanet_low_battery")
+            ):
                 _append_worker_notification(result, {
                         "level": "warning",
                         "code": "solplanet_low_battery",
@@ -3049,7 +3165,7 @@ async def _run_midday_window_check(
                 })
             was_importing = bool(combined_status.get("grid_import_active"))
             is_importing = current_grid_import_w > 0.0
-            if is_importing and not was_importing:
+            if is_importing and not was_importing and _is_time_window_rule_enabled(enabled_map, "grid_import_started"):
                 _append_worker_notification(result, {
                     "level": "alarm",
                     "code": "grid_import_started",
@@ -3078,6 +3194,7 @@ async def _run_midday_window_check(
                     previous_total_export_wh < threshold_wh
                     and float(export_tracking["total_export_wh"]) >= threshold_wh
                     and not bool(threshold_notified_map.get(threshold_key))
+                    and _is_time_window_rule_enabled(enabled_map, _solar_surplus_export_energy_notification_code(threshold_wh))
                 ):
                     _append_worker_notification(result, {
                         "level": "alarm",
@@ -3096,167 +3213,14 @@ async def _run_midday_window_check(
                     threshold_notified_map[threshold_key] = True
             combined_status["solar_surplus_export_threshold_notified_map"] = threshold_notified_map
             combined_status["solar_surplus_export_threshold_notified"] = any(threshold_notified_map.values())
-
-            desired = _choose_tesla_solar_surplus_target_from_options(
-                base_grid_without_tesla_w,
-                available_current_options,
-            )
-            desired_reason = "use_exported_solar_without_importing_grid_when_available"
-            active_or_requested = charging_enabled or charge_requested_enabled
-            should_start = can_start_from_soc
-            should_continue = active_or_requested and can_continue_from_soc
-            preferred_solar_surplus_amps = (
-                int(max(available_current_options))
-                if available_current_options
-                else 0
-            )
-            if (should_start or should_continue) and preferred_solar_surplus_amps > 0:
-                desired = {
-                    "mode": "charge",
-                    "charge_current_amps": preferred_solar_surplus_amps,
-                    "tesla_power_w": float(preferred_solar_surplus_amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V,
-                    "predicted_grid_w": round(
-                        base_grid_without_tesla_w + (float(preferred_solar_surplus_amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V),
-                        1,
-                    ),
-                }
-                desired_reason = (
-                    "start_from_solplanet_soc_threshold_with_maximum_current"
-                    if should_start and not active_or_requested
-                    else "keep_maximum_current_until_solplanet_soc_below_stop_threshold"
-                )
-            elif not should_continue and not should_start:
-                desired = {
-                    "mode": "off",
-                    "charge_current_amps": 0,
-                    "tesla_power_w": 0.0,
-                    "predicted_grid_w": round(base_grid_without_tesla_w, 1),
-                }
-                desired_reason = (
-                    "wait_for_solplanet_soc_start_threshold"
-                    if not active_or_requested
-                    else "solplanet_soc_below_stop_threshold"
-                )
-
-            result["decision"] = desired
-            result["decision_reason"] = desired_reason
-            result["candidates"] = [
-                {
-                    "mode": "off" if amps == 0 else "charge",
-                    "charge_current_amps": amps,
-                    "predicted_grid_w": round(
-                        base_grid_without_tesla_w + (float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V),
-                        1,
-                    ),
-                    "uses_only_surplus_solar": (
-                        base_grid_without_tesla_w + (float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V)
-                    ) <= 0.0,
-                }
-                for amps in (0, *available_current_options)
-            ]
-
-            desired_amps = int(desired["charge_current_amps"])
-            configured_matches_desired = (
-                current_configured_amps is not None
-                and int(round(current_configured_amps)) == desired_amps
-            )
-            actual_matches_desired = (
-                current_actual_amps is not None
-                and int(round(current_actual_amps)) == desired_amps
-            )
-            effective_current_amps = current_actual_amps or current_configured_amps or 0.0
-            current_gap_to_desired_amps = (
-                float(desired_amps) - float(current_actual_amps)
-                if current_actual_amps is not None
-                else None
-            )
-            current_mismatch_restart_needed = bool(
-                desired["mode"] != "off"
-                and charging_enabled
-                and charge_requested_enabled
-                and configured_matches_desired
-                and current_gap_to_desired_amps is not None
-                and current_gap_to_desired_amps >= TESLA_CURRENT_MISMATCH_RESTART_MIN_DELTA_A
-            )
-            current_mismatch_restart_allowed = current_mismatch_restart_needed
-            current_mismatch_restart_cooldown_remaining_s: float | None = None
-            if current_mismatch_restart_needed:
-                combined_status = collector_status.setdefault("combined", {})
-                last_restart_at_text = str(
-                    combined_status.get("last_tesla_current_mismatch_restart_at") or ""
-                ).strip()
-                if last_restart_at_text:
-                    try:
-                        last_restart_at = datetime.fromisoformat(last_restart_at_text.replace("Z", "+00:00"))
-                        if last_restart_at.tzinfo is None:
-                            last_restart_at = last_restart_at.replace(tzinfo=UTC)
-                        elapsed_s = max((datetime.now(UTC) - last_restart_at.astimezone(UTC)).total_seconds(), 0.0)
-                        if elapsed_s < TESLA_CURRENT_MISMATCH_RESTART_COOLDOWN_SECONDS:
-                            current_mismatch_restart_allowed = False
-                            current_mismatch_restart_cooldown_remaining_s = round(
-                                TESLA_CURRENT_MISMATCH_RESTART_COOLDOWN_SECONDS - elapsed_s,
-                                1,
-                            )
-                    except ValueError:
-                        current_mismatch_restart_allowed = current_mismatch_restart_needed
-
-            if (
-                desired["mode"] != "off"
-                and charging_enabled
-                and configured_matches_desired
-                and (current_actual_amps is None or actual_matches_desired)
-            ):
-                result["decision"] = {
-                    "mode": "hold_current_state",
-                    "charge_current_amps": int(round(effective_current_amps)) if effective_current_amps > 0 else desired_amps,
-                    "predicted_grid_w": round(float(grid_w), 1),
-                }
-                result["decision_reason"] = "already_running_with_allowed_current"
-                result["action"] = {"type": "noop", "reason": "keep_current_state"}
-                status = "noop"
-                return result
-
-            if desired["mode"] == "off":
-                if active_or_requested:
-                    await _tesla_set_charging(False)
-                    result["action"] = {"type": "stop_charging", "reason": desired_reason}
-                    status = "applied"
-                else:
-                    result["action"] = {"type": "noop", "reason": "already_stopped"}
-                    status = "noop"
-                return result
-
-            actions: list[str] = []
-            if current_configured_amps is None or int(round(current_configured_amps)) != desired_amps:
-                await _tesla_set_charge_current(desired_amps)
-                actions.append(f"set_current_{desired_amps}a")
-            if current_mismatch_restart_needed:
-                result["current_mismatch"] = {
-                    "configured_current_amps": current_configured_amps,
-                    "actual_current_amps": current_actual_amps,
-                    "desired_current_amps": desired_amps,
-                    "gap_to_desired_amps": round(current_gap_to_desired_amps or 0.0, 1),
-                    "restart_allowed": current_mismatch_restart_allowed,
-                    "restart_cooldown_remaining_s": current_mismatch_restart_cooldown_remaining_s,
-                }
-            if current_mismatch_restart_allowed:
-                await _tesla_restart_charging()
-                collector_status.setdefault("combined", {})["last_tesla_current_mismatch_restart_at"] = datetime.now(UTC).isoformat()
-                actions.append("restart_charging_for_current_mismatch")
-            if not charging_enabled:
-                if charge_requested_enabled:
-                    await _tesla_restart_charging()
-                    actions.append("restart_charging")
-                else:
-                    await _tesla_set_charging(True)
-                    actions.append("start_charging")
-
-            if actions:
-                result["action"] = {"type": "apply", "steps": actions}
-                status = "applied"
-            else:
-                result["action"] = {"type": "noop", "reason": "already_at_target"}
-                status = "noop"
+            result["decision"] = {
+                "mode": "observe_only",
+                "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
+                "predicted_grid_w": round(float(grid_w), 1),
+            }
+            result["decision_reason"] = "export_window_notifications_only"
+            result["action"] = {"type": "noop", "reason": "export_window_notifications_only"}
+            status = "noop"
             return result
 
         base_grid_w = max(float(result["current_grid_import_w"]) - tesla_charge_power_w, 0.0)
@@ -3333,6 +3297,17 @@ async def _run_midday_window_check(
             }
             result["decision_reason"] = "already_at_max_safe_current_under_grid_cap"
             result["action"] = {"type": "noop", "reason": "keep_current_state"}
+            status = "noop"
+            return result
+
+        if not tesla_rule_enabled:
+            result["decision"] = {
+                "mode": "observe_only",
+                "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else desired_amps,
+                "predicted_grid_w": round(current_grid_import_w, 1),
+            }
+            result["decision_reason"] = "time_window_rule_disabled"
+            result["action"] = {"type": "noop", "reason": "rule_disabled"}
             status = "noop"
             return result
 
@@ -3424,6 +3399,8 @@ async def _run_saj_battery_watch_check(
     ok = True
     error_text: str | None = None
     try:
+        enabled_map = await _load_time_window_rule_enabled_map()
+        result["rule_enabled_map"] = enabled_map
         if not window_active:
             result["decision"] = {"mode": "observe_only"}
             result["action"] = {"type": "noop", "reason": "outside_window"}
@@ -3457,7 +3434,11 @@ async def _run_saj_battery_watch_check(
             "reminder_20_sent": notified_20,
         }
 
-        if saj_soc_percent <= SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_HIGH_SOC_PERCENT and not notified_50:
+        if (
+            saj_soc_percent <= SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_HIGH_SOC_PERCENT
+            and not notified_50
+            and _is_time_window_rule_enabled(enabled_map, "saj_battery_watch_50_percent")
+        ):
             _append_worker_notification(result, {
                 "level": "warning",
                 "code": "saj_battery_watch_50_percent",
@@ -3469,7 +3450,11 @@ async def _run_saj_battery_watch_check(
             })
             combined_status["saj_battery_watch_50_notified"] = True
 
-        if saj_soc_percent <= SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_LOW_SOC_PERCENT and not notified_20:
+        if (
+            saj_soc_percent <= SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_LOW_SOC_PERCENT
+            and not notified_20
+            and _is_time_window_rule_enabled(enabled_map, "saj_battery_watch_20_percent")
+        ):
             _append_worker_notification(result, {
                 "level": "alarm",
                 "code": "saj_battery_watch_20_percent",
@@ -3526,6 +3511,8 @@ async def _run_battery_full_notification_check(
     ok = True
     error_text: str | None = None
     try:
+        enabled_map = await _load_time_window_rule_enabled_map()
+        result["rule_enabled_map"] = enabled_map
         metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
         metrics_map = metrics if isinstance(metrics, dict) else {}
         saj_soc_percent = _to_number(metrics_map.get("battery1_soc_percent"))
@@ -3545,7 +3532,7 @@ async def _run_battery_full_notification_check(
         saj_full_prev = bool(persisted_state.get("saj"))
         solplanet_full_prev = bool(persisted_state.get("solplanet"))
 
-        if saj_full_now and not saj_full_prev:
+        if saj_full_now and not saj_full_prev and _is_time_window_rule_enabled(enabled_map, "saj_battery_full"):
             _append_worker_notification(result, {
                 "level": "info",
                 "code": "saj_battery_full",
@@ -3555,7 +3542,11 @@ async def _run_battery_full_notification_check(
                 "current_soc_percent": round(saj_soc_percent or 0.0, 1),
                 "message": "SAJ battery reached 100% SOC.",
             })
-        if solplanet_full_now and not solplanet_full_prev:
+        if (
+            solplanet_full_now
+            and not solplanet_full_prev
+            and _is_time_window_rule_enabled(enabled_map, "solplanet_battery_full")
+        ):
             _append_worker_notification(result, {
                 "level": "info",
                 "code": "solplanet_battery_full",
@@ -5614,6 +5605,90 @@ def _safe_parse_utc(value: object) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+async def _set_tesla_control_feedback(
+    *,
+    phase: str,
+    target_enabled: bool,
+    requested_at_utc: str | None = None,
+    error: str | None = None,
+) -> dict[str, object]:
+    now = datetime.now(UTC)
+    requested_at = _safe_parse_utc(requested_at_utc) or now
+    ttl_seconds = (
+        TESLA_CONTROL_FEEDBACK_FAILURE_TTL_SECONDS
+        if phase in {"failed", "delayed"}
+        else TESLA_CONTROL_FEEDBACK_SUCCESS_TTL_SECONDS
+        if phase == "success"
+        else TESLA_CONTROL_FEEDBACK_PENDING_TIMEOUT_SECONDS
+    )
+    payload = {
+        "phase": str(phase).strip() or "requesting",
+        "target_enabled": bool(target_enabled),
+        "requested_at_utc": requested_at.isoformat(),
+        "updated_at_utc": now.isoformat(),
+        "expires_at_utc": (requested_at + timedelta(seconds=ttl_seconds)).isoformat(),
+        "error": str(error or "").strip() or None,
+    }
+    rows = [
+        (f"{TESLA_CONTROL_FEEDBACK_KV_PREFIX}{key}", json.dumps(value, ensure_ascii=False), "ui")
+        for key, value in payload.items()
+    ]
+    await asyncio.to_thread(upsert_realtime_kv, storage_db_path, rows)
+    return payload
+
+
+def _load_tesla_control_feedback_sync() -> dict[str, object] | None:
+    kv_map = get_realtime_kv_by_prefix(storage_db_path, prefix=TESLA_CONTROL_FEEDBACK_KV_PREFIX)
+    if not kv_map:
+        return None
+    payload: dict[str, object] = {}
+    for key in ("phase", "target_enabled", "requested_at_utc", "updated_at_utc", "expires_at_utc", "error"):
+        item = kv_map.get(f"{TESLA_CONTROL_FEEDBACK_KV_PREFIX}{key}")
+        if item is not None:
+            payload[key] = item.get("value")
+    return payload or None
+
+
+def _resolve_tesla_control_feedback(control_state: dict[str, object] | None) -> dict[str, object] | None:
+    stored = _load_tesla_control_feedback_sync()
+    if not isinstance(stored, dict) or not stored:
+        return None
+
+    requested_at = _safe_parse_utc(stored.get("requested_at_utc"))
+    if requested_at is None:
+        return None
+    now = datetime.now(UTC)
+    target_enabled = bool(stored.get("target_enabled"))
+    charging_enabled = control_state.get("charging_enabled") if isinstance(control_state, dict) else None
+    requested_enabled = control_state.get("charge_requested_enabled") if isinstance(control_state, dict) else None
+    age_seconds = max(0.0, (now - requested_at).total_seconds())
+    base_phase = str(stored.get("phase") or "requesting").strip().lower()
+
+    resolved_phase = base_phase
+    if charging_enabled is target_enabled:
+        if age_seconds > TESLA_CONTROL_FEEDBACK_SUCCESS_TTL_SECONDS:
+            return None
+        resolved_phase = "success"
+    elif age_seconds > TESLA_CONTROL_FEEDBACK_PENDING_TIMEOUT_SECONDS:
+        resolved_phase = "delayed" if requested_enabled is target_enabled else "failed"
+        expires_at = requested_at + timedelta(seconds=TESLA_CONTROL_FEEDBACK_FAILURE_TTL_SECONDS)
+        if now > expires_at:
+            return None
+    elif requested_enabled is target_enabled:
+        resolved_phase = "awaiting_vehicle"
+    else:
+        resolved_phase = "requesting"
+
+    return {
+        "phase": resolved_phase,
+        "target_enabled": target_enabled,
+        "requested_at_utc": requested_at.isoformat(),
+        "updated_at_utc": str(stored.get("updated_at_utc") or requested_at.isoformat()),
+        "age_seconds": round(age_seconds, 1),
+        "error": str(stored.get("error") or "").strip() or None,
+    }
+
+
 def _kv_source_for_path(system: str, path: str) -> str:
     def _cgi_url(endpoint: str) -> str:
         return (
@@ -7351,6 +7426,56 @@ async def dashboard_notifications() -> dict[str, object]:
     }
 
 
+@app.get("/api/time-window-rules")
+async def get_time_window_rules() -> dict[str, object]:
+    rows = await asyncio.to_thread(list_time_window_rule_state_rows, storage_db_path)
+    state_by_code = {
+        str(item.get("rule_code") or "").strip(): bool(item.get("enabled"))
+        for item in rows
+        if str(item.get("rule_code") or "").strip()
+    }
+    updated_at_by_code = {
+        str(item.get("rule_code") or "").strip(): str(item.get("updated_at_utc") or "")
+        for item in rows
+        if str(item.get("rule_code") or "").strip()
+    }
+    items = [
+        {
+            "rule_code": code,
+            "enabled": bool(state_by_code.get(code, True)),
+            "kind": next((item["kind"] for item in TIME_WINDOW_RULE_DEFINITIONS if item["code"] == code), "notification"),
+            "windows": list(TIME_WINDOW_RULE_WINDOWS_BY_CODE.get(code, ())),
+            "updated_at_utc": updated_at_by_code.get(code) or None,
+        }
+        for code in TIME_WINDOW_RULE_CODES
+    ]
+    return {
+        "updated_at": datetime.now(UTC).isoformat(),
+        "count": len(items),
+        "items": items,
+    }
+
+
+@app.put("/api/time-window-rules/{rule_code}")
+async def put_time_window_rule(rule_code: str, payload: TimeWindowRuleStatePayload) -> dict[str, object]:
+    normalized_code = str(rule_code or "").strip()
+    if normalized_code not in TIME_WINDOW_RULE_CODES:
+        raise HTTPException(status_code=404, detail="Unknown time window rule")
+    updated = await asyncio.to_thread(
+        upsert_time_window_rule_state,
+        storage_db_path,
+        rule_code=normalized_code,
+        enabled=bool(payload.enabled),
+        updated_at_utc=datetime.now(UTC).isoformat(),
+    )
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to persist time window rule state")
+    return {
+        **updated,
+        "windows": list(TIME_WINDOW_RULE_WINDOWS_BY_CODE.get(normalized_code, ())),
+    }
+
+
 @app.post("/api/dashboard/notifications/dismiss")
 async def dismiss_dashboard_notification(payload: NotificationDismissRequest) -> dict[str, object]:
     notification_key = str(payload.notification_key or "").strip()
@@ -7453,6 +7578,7 @@ async def storage_usage_range(
     end_at = _parse_iso_utc_datetime(end_utc, field_name="end_utc")
     if start_at >= end_at:
         raise HTTPException(status_code=400, detail="start_utc must be earlier than end_utc")
+    _, timezone_name = _tesla_grid_support_now_local()
     return await asyncio.to_thread(
         compute_usage_between,
         storage_db_path,
@@ -7460,6 +7586,11 @@ async def storage_usage_range(
         start_at_utc=start_at,
         end_at_utc=end_at,
         sample_interval_seconds=_sample_interval_for_system(normalized),
+        local_timezone_name=timezone_name,
+        grid_import_window_start_hour=FREE_ENERGY_WINDOW_START_HOUR,
+        grid_import_window_end_hour=FREE_ENERGY_WINDOW_END_HOUR,
+        grid_export_window_start_hour=EXPORT_WINDOW_START_HOUR,
+        grid_export_window_end_hour=EXPORT_WINDOW_END_HOUR,
     )
 
 
@@ -7784,9 +7915,13 @@ async def get_tesla_control_state() -> dict[str, object]:
     _ensure_ha_configured()
     try:
         states = await _tesla_control_states()
+        control_state = _build_tesla_control_state(states)
         return {
             "system": "tesla",
-            "control_state": _build_tesla_control_state(states),
+            "control_state": {
+                **control_state,
+                "feedback": _resolve_tesla_control_feedback(control_state),
+            },
             "observation": _build_tesla_observation_payload(states),
         }
     except httpx.HTTPStatusError as exc:
@@ -7803,9 +7938,32 @@ async def get_tesla_control_state() -> dict[str, object]:
 @app.post("/api/tesla/control/charging")
 async def post_tesla_control_charging(payload: TeslaChargingTogglePayload) -> dict[str, object]:
     _ensure_ha_configured()
+    requested_at_utc = datetime.now(UTC).isoformat()
     try:
-        return await _tesla_set_charging(payload.enabled)
+        await _set_tesla_control_feedback(
+            phase="requesting",
+            target_enabled=payload.enabled,
+            requested_at_utc=requested_at_utc,
+        )
+        result = await _tesla_set_charging(payload.enabled)
+        control_state = result.get("control_state")
+        control_state_map = control_state if isinstance(control_state, dict) else {}
+        result["control_state"] = {
+            **control_state_map,
+            "feedback": await _set_tesla_control_feedback(
+                phase="awaiting_vehicle",
+                target_enabled=payload.enabled,
+                requested_at_utc=requested_at_utc,
+            ),
+        }
+        return result
     except httpx.HTTPStatusError as exc:
+        await _set_tesla_control_feedback(
+            phase="failed",
+            target_enabled=payload.enabled,
+            requested_at_utc=requested_at_utc,
+            error=f"Home Assistant API returned {exc.response.status_code}",
+        )
         detail = {
             "message": "Home Assistant API returned an error",
             "status_code": exc.response.status_code,
@@ -7813,6 +7971,22 @@ async def post_tesla_control_charging(payload: TeslaChargingTogglePayload) -> di
         }
         raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
+        await _set_tesla_control_feedback(
+            phase="failed",
+            target_enabled=payload.enabled,
+            requested_at_utc=requested_at_utc,
+            error=f"Failed to reach Home Assistant: {exc}",
+        )
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+    except HTTPException as exc:
+        await _set_tesla_control_feedback(
+            phase="failed",
+            target_enabled=payload.enabled,
+            requested_at_utc=requested_at_utc,
+            error=str(exc.detail),
+        )
+        raise
+    except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 

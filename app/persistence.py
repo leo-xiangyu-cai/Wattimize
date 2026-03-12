@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import Column, Float, Integer, String, create_engine, desc, func, inspect, select, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -185,6 +186,15 @@ class NotificationEntryRow(Base):
     dismissed_at_utc = Column(String)
     dismissed_at_epoch = Column(Float)
     payload_json = Column(String)
+
+
+class TimeWindowRuleStateRow(Base):
+    __tablename__ = "time_window_rule_states"
+
+    rule_code = Column(String, primary_key=True)
+    enabled = Column(Integer, nullable=False)
+    updated_at_utc = Column(String, nullable=False)
+    updated_at_epoch = Column(Float, nullable=False, index=True)
 
 
 class RawRequestResultRow(Base):
@@ -1086,6 +1096,92 @@ def dismiss_notification_entry(
         return False
 
 
+def get_time_window_rule_states(
+    db_path: DatabaseTarget,
+    *,
+    rule_codes: list[str] | tuple[str, ...],
+    default_enabled: bool = True,
+) -> dict[str, bool]:
+    normalized_codes = [str(code or "").strip() for code in rule_codes if str(code or "").strip()]
+    states = {code: bool(default_enabled) for code in normalized_codes}
+    if not normalized_codes:
+        return states
+    if not _db_exists(db_path):
+        return states
+    try:
+        with _session_scope(db_path) as session:
+            rows = session.scalars(
+                select(TimeWindowRuleStateRow).where(TimeWindowRuleStateRow.rule_code.in_(tuple(normalized_codes)))
+            ).all()
+    except SQLAlchemyError:
+        return states
+    for row in rows:
+        code = str(row.rule_code or "").strip()
+        if code:
+            states[code] = bool(row.enabled)
+    return states
+
+
+def list_time_window_rule_state_rows(
+    db_path: DatabaseTarget,
+) -> list[dict[str, object]]:
+    if not _db_exists(db_path):
+        return []
+    try:
+        with _session_scope(db_path) as session:
+            rows = session.scalars(
+                select(TimeWindowRuleStateRow).order_by(desc(TimeWindowRuleStateRow.updated_at_epoch))
+            ).all()
+    except SQLAlchemyError:
+        return []
+    return [
+        {
+            "rule_code": str(row.rule_code or ""),
+            "enabled": bool(row.enabled),
+            "updated_at_utc": str(row.updated_at_utc or ""),
+            "updated_at_epoch": float(row.updated_at_epoch or 0.0),
+        }
+        for row in rows
+    ]
+
+
+def upsert_time_window_rule_state(
+    db_path: DatabaseTarget,
+    *,
+    rule_code: str,
+    enabled: bool,
+    updated_at_utc: str,
+) -> dict[str, object] | None:
+    normalized_code = str(rule_code or "").strip()
+    if not normalized_code:
+        return None
+    updated_at = _parse_iso_to_utc(updated_at_utc)
+    try:
+        with _session_scope(db_path) as session:
+            row = session.get(TimeWindowRuleStateRow, normalized_code)
+            if row is None:
+                row = TimeWindowRuleStateRow(
+                    rule_code=normalized_code,
+                    enabled=1 if enabled else 0,
+                    updated_at_utc=updated_at.isoformat(),
+                    updated_at_epoch=updated_at.timestamp(),
+                )
+                session.add(row)
+                session.flush()
+            else:
+                row.enabled = 1 if enabled else 0
+                row.updated_at_utc = updated_at.isoformat()
+                row.updated_at_epoch = updated_at.timestamp()
+        return {
+            "rule_code": normalized_code,
+            "enabled": bool(enabled),
+            "updated_at_utc": updated_at.isoformat(),
+            "updated_at_epoch": updated_at.timestamp(),
+        }
+    except SQLAlchemyError:
+        return None
+
+
 def insert_sample(db_path: DatabaseTarget, sample: EnergySample) -> None:
     assembled_at_utc = sample.assembled_at_utc.astimezone(UTC)
     with _session_scope(db_path) as session:
@@ -1336,7 +1432,48 @@ def _integrate_usage_rows(
     sample_interval_seconds: float,
     end_label: str | None = None,
     end_value: str | None = None,
+    local_timezone_name: str | None = None,
+    grid_import_window_start_hour: int | None = None,
+    grid_import_window_end_hour: int | None = None,
+    grid_export_window_start_hour: int | None = None,
+    grid_export_window_end_hour: int | None = None,
 ) -> dict[str, object]:
+    try:
+        local_tz = ZoneInfo(local_timezone_name) if local_timezone_name else datetime.now().astimezone().tzinfo
+    except ZoneInfoNotFoundError:
+        local_tz = datetime.now().astimezone().tzinfo
+    import_window_start = grid_import_window_start_hour
+    import_window_end = grid_import_window_end_hour
+    export_window_start = grid_export_window_start_hour
+    export_window_end = grid_export_window_end_hour
+
+    def split_interval_by_local_window(start_ts: float, duration_seconds: float, start_hour: int | None, end_hour: int | None) -> tuple[float, float]:
+        if (
+            local_tz is None
+            or start_hour is None
+            or end_hour is None
+            or duration_seconds <= 0
+            or start_hour == end_hour
+        ):
+            return 0.0, max(duration_seconds, 0.0)
+        interval_start = datetime.fromtimestamp(start_ts, UTC)
+        interval_end = interval_start + timedelta(seconds=duration_seconds)
+        current = interval_start
+        window_seconds = 0.0
+        while current < interval_end:
+            local_current = current.astimezone(local_tz)
+            next_midnight_local = datetime.combine(local_current.date() + timedelta(days=1), time.min, tzinfo=local_tz)
+            window_start_local = datetime.combine(local_current.date(), time(hour=start_hour), tzinfo=local_tz)
+            window_end_local = datetime.combine(local_current.date(), time(hour=end_hour), tzinfo=local_tz)
+            segment_end = min(interval_end, next_midnight_local.astimezone(UTC))
+            overlap_start = max(current, window_start_local.astimezone(UTC))
+            overlap_end = min(segment_end, window_end_local.astimezone(UTC))
+            if overlap_end > overlap_start:
+                window_seconds += (overlap_end - overlap_start).total_seconds()
+            current = segment_end
+        window_seconds = max(0.0, min(duration_seconds, window_seconds))
+        return window_seconds, max(0.0, duration_seconds - window_seconds)
+
     if len(rows) < 2:
         payload = {
             "system": system,
@@ -1352,6 +1489,16 @@ def _integrate_usage_rows(
                 "battery_charge": 0.0,
                 "battery_discharge": 0.0,
             },
+            "breakdown_kwh": {
+                "grid_import": {
+                    "window": 0.0,
+                    "other": 0.0,
+                },
+                "grid_export": {
+                    "window": 0.0,
+                    "other": 0.0,
+                }
+            },
             "quality": {"note": "Not enough samples to integrate."},
         }
         if end_label and end_value is not None:
@@ -1361,7 +1508,11 @@ def _integrate_usage_rows(
     home_load_wh = 0.0
     solar_wh = 0.0
     grid_import_wh = 0.0
+    grid_import_window_wh = 0.0
+    grid_import_other_wh = 0.0
     grid_export_wh = 0.0
+    grid_export_window_wh = 0.0
+    grid_export_other_wh = 0.0
     battery_charge_wh = 0.0
     battery_discharge_wh = 0.0
     observed_dts = [
@@ -1389,8 +1540,14 @@ def _integrate_usage_rows(
             grid = float(grid_w)
             if grid > 0:
                 grid_import_wh += grid * dt / 3600.0
+                window_seconds, other_seconds = split_interval_by_local_window(float(ts), dt, import_window_start, import_window_end)
+                grid_import_window_wh += grid * window_seconds / 3600.0
+                grid_import_other_wh += grid * other_seconds / 3600.0
             elif grid < 0:
                 grid_export_wh += (-grid) * dt / 3600.0
+                window_seconds, other_seconds = split_interval_by_local_window(float(ts), dt, export_window_start, export_window_end)
+                grid_export_window_wh += (-grid) * window_seconds / 3600.0
+                grid_export_other_wh += (-grid) * other_seconds / 3600.0
         if battery_w is not None:
             battery = float(battery_w)
             if battery > 0:
@@ -1411,6 +1568,16 @@ def _integrate_usage_rows(
             "grid_export": round(grid_export_wh / 1000.0, 4),
             "battery_charge": round(battery_charge_wh / 1000.0, 4),
             "battery_discharge": round(battery_discharge_wh / 1000.0, 4),
+        },
+        "breakdown_kwh": {
+            "grid_import": {
+                "window": round(grid_import_window_wh / 1000.0, 4),
+                "other": round(grid_import_other_wh / 1000.0, 4),
+            },
+            "grid_export": {
+                "window": round(grid_export_window_wh / 1000.0, 4),
+                "other": round(grid_export_other_wh / 1000.0, 4),
+            }
         },
         "quality": {
             "integration": "left-rectangle",
@@ -1824,6 +1991,11 @@ def compute_usage_between(
     start_at_utc: datetime,
     end_at_utc: datetime,
     sample_interval_seconds: float,
+    local_timezone_name: str | None = None,
+    grid_import_window_start_hour: int | None = None,
+    grid_import_window_end_hour: int | None = None,
+    grid_export_window_start_hour: int | None = None,
+    grid_export_window_end_hour: int | None = None,
 ) -> dict[str, object]:
     start_ts = start_at_utc.astimezone(UTC).timestamp()
     end_ts = end_at_utc.astimezone(UTC).timestamp()
@@ -1839,4 +2011,9 @@ def compute_usage_between(
         end_value=end_at_utc.isoformat(),
         expected=expected,
         sample_interval_seconds=sample_interval_seconds,
+        local_timezone_name=local_timezone_name,
+        grid_import_window_start_hour=grid_import_window_start_hour,
+        grid_import_window_end_hour=grid_import_window_end_hour,
+        grid_export_window_start_hour=grid_export_window_start_hour,
+        grid_export_window_end_hour=grid_export_window_end_hour,
     )
