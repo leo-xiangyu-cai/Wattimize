@@ -73,6 +73,18 @@ const I18N = {
     notificationMatrixCurrentWindowBadge: "Current Window",
     notificationMatrixExpandWindow: "Expand window",
     notificationMatrixCollapseWindow: "Collapse window",
+    notificationMatrixProgressWatching: "Watching",
+    notificationMatrixProgressConditionMet: "Condition met now",
+    notificationMatrixProgressNotified: "Already notified",
+    notificationMatrixProgressNoData: "Waiting for live data",
+    notificationMatrixProgressWindowTracking: "Only tracked during this window",
+    notificationMatrixProgressCurrent: "Current {value}",
+    notificationMatrixProgressTriggerAtMost: "Trigger <= {value}",
+    notificationMatrixProgressTriggerAtLeast: "Trigger >= {value}",
+    notificationMatrixProgressTriggerAbove: "Trigger > {value}",
+    notificationMatrixProgressRemaining: "{value} remaining",
+    notificationMatrixProgressAboveThreshold: "{value} above threshold",
+    notificationMatrixProgressBelowThreshold: "{value} below threshold",
     notificationMatrixWindowFreeEnergyTitle: "Free Energy Window",
     notificationMatrixWindowFreeEnergySummary: "11:00-14:00. Worker mainly controls Tesla charging current here and does not emit a dedicated notification.",
     notificationMatrixWindowAfterFreeShoulderTitle: "After-Free Shoulder",
@@ -628,6 +640,18 @@ const I18N = {
     notificationMatrixCurrentWindowBadge: "当前窗口",
     notificationMatrixExpandWindow: "展开窗口",
     notificationMatrixCollapseWindow: "折叠窗口",
+    notificationMatrixProgressWatching: "监控中",
+    notificationMatrixProgressConditionMet: "当前已满足条件",
+    notificationMatrixProgressNotified: "已通知",
+    notificationMatrixProgressNoData: "等待实时数据",
+    notificationMatrixProgressWindowTracking: "只在这个窗口内跟踪",
+    notificationMatrixProgressCurrent: "当前 {value}",
+    notificationMatrixProgressTriggerAtMost: "触发条件 <= {value}",
+    notificationMatrixProgressTriggerAtLeast: "触发条件 >= {value}",
+    notificationMatrixProgressTriggerAbove: "触发条件 > {value}",
+    notificationMatrixProgressRemaining: "还差 {value}",
+    notificationMatrixProgressAboveThreshold: "高于阈值 {value}",
+    notificationMatrixProgressBelowThreshold: "低于阈值 {value}",
     notificationMatrixWindowFreeEnergyTitle: "免费电时段",
     notificationMatrixWindowFreeEnergySummary: "11:00-14:00。这个窗口里 worker 主要调整 Tesla 充电行为，不单独发通知。",
     notificationMatrixWindowAfterFreeShoulderTitle: "免费电后肩时段",
@@ -4104,6 +4128,7 @@ function renderSummary(payload) {
   renderDashboardNotifications(stateCache.lastDashboardNotifications);
   renderCombinedEnergyFlow(combinedFlow, tesla);
   renderCombinedDebug(combinedFlow, collectorStatus);
+  renderNotificationMatrix();
 }
 
 function dashboardNotificationLevelText(level) {
@@ -4171,7 +4196,7 @@ function renderNotificationMatrix() {
   const root = document.getElementById("notificationMatrixPanels");
   if (!root) return;
   root.innerHTML = "";
-  const currentWindowId = getCurrentNotificationMatrixWindowId();
+  const currentWindowId = getCurrentNotificationMatrixWindowId(stateCache.lastSummary);
   if (!notificationMatrixCollapseInitialized) {
     notificationMatrixCollapseState = {};
     for (const windowItem of NOTIFICATION_MATRIX_WINDOWS) {
@@ -4188,6 +4213,7 @@ function renderNotificationMatrix() {
     const listHtml = notifications.length
       ? notifications.map((item) => {
         const level = String(item.level || "info").trim().toLowerCase();
+        const progress = getNotificationMatrixProgress(item, windowItem, stateCache.lastSummary);
         return `
           <article class="notification-rule-item level-${escapeHtml(level)}">
             <label class="notification-rule-check" aria-label="${escapeHtml(t(item.titleKey))}">
@@ -4200,6 +4226,7 @@ function renderNotificationMatrix() {
               </div>
               <p class="notification-rule-title">${escapeHtml(t(item.titleKey))}</p>
               <p class="notification-rule-trigger">${escapeHtml(t(item.triggerKey))}</p>
+              ${renderNotificationMatrixProgress(progress)}
             </div>
           </article>
         `;
@@ -4244,7 +4271,12 @@ function renderNotificationMatrix() {
   }
 }
 
-function getCurrentNotificationMatrixWindowId(now = new Date()) {
+function getCurrentNotificationMatrixWindowId(summary = null, now = new Date()) {
+  const combined = summary?.collectorStatus?.systems?.combined || {};
+  const middayWindow = String(combined?.last_midday_window_check?.window_mode || "").trim();
+  if (middayWindow && middayWindow !== "off") return middayWindow;
+  const sajWatchWindow = String(combined?.last_saj_battery_watch_check?.window_mode || "").trim();
+  if (sajWatchWindow && sajWatchWindow !== "off") return sajWatchWindow;
   const hour = now.getHours();
   if (hour >= 11 && hour < 14) return "free_energy";
   if (hour >= 14 && hour < 16) return "after_free_shoulder";
@@ -4257,6 +4289,220 @@ function getCurrentNotificationMatrixWindowId(now = new Date()) {
 function resetNotificationMatrixCollapseState() {
   notificationMatrixCollapseState = {};
   notificationMatrixCollapseInitialized = false;
+}
+
+function renderNotificationMatrixProgress(progress) {
+  if (!progress) return "";
+  const width = Math.max(0, Math.min(100, Number(progress.ratio ?? 0) * 100));
+  const markerRatio = Number(progress.markerRatio);
+  const markerHtml = Number.isFinite(markerRatio) && markerRatio > 0 && markerRatio < 0.995
+    ? `<span class="notification-rule-progress-marker${progress.markerLevel ? ` level-${escapeHtml(progress.markerLevel)}` : ""}" style="left: ${(Math.max(0, Math.min(1, markerRatio)) * 100).toFixed(1)}%"></span>`
+    : "";
+  return `
+    <div class="notification-rule-progress">
+      <div class="notification-rule-progress-topline">
+        <span class="notification-rule-progress-state">${escapeHtml(progress.statusText || t("notificationMatrixProgressWatching"))}</span>
+        <span class="notification-rule-progress-gap">${escapeHtml(progress.deltaText || "")}</span>
+      </div>
+      <div class="notification-rule-progress-metrics">
+        <span>${escapeHtml(progress.currentText || "-")}</span>
+        <span>${escapeHtml(progress.triggerText || "-")}</span>
+      </div>
+      <div class="notification-rule-progress-bar" aria-hidden="true">
+        <span class="notification-rule-progress-fill" style="width: ${width.toFixed(1)}%"></span>
+        ${markerHtml}
+      </div>
+    </div>
+  `;
+}
+
+function getNotificationMatrixProgress(item, windowItem, summary) {
+  const code = String(item?.code || "").trim();
+  const combinedSystems = summary?.collectorStatus?.systems?.combined || {};
+  const live = summary?.combinedFlow?.notification_metrics || {};
+  const midday = combinedSystems.last_midday_window_check || {};
+  const sajWatch = combinedSystems.last_saj_battery_watch_check || {};
+  const batteryFull = combinedSystems.last_battery_full_notification_check || {};
+  if (code === "solplanet_low_available_capacity") {
+    const current = Number(live?.solplanet_battery_energy_kwh);
+    return buildThresholdProgress({
+      current,
+      threshold: 25,
+      kind: "kwh",
+      direction: "down",
+      currentText: formatNotificationCurrent("kwh", current),
+      triggerText: t("notificationMatrixProgressTriggerAtMost", { value: formatNotificationValue("kwh", 25) }),
+    });
+  }
+  if (code === "solplanet_low_battery" || code === "solplanet_low_battery_post_export_peak") {
+    const current = Number(live?.solplanet_battery_soc_percent);
+    return buildThresholdProgress({
+      current,
+      threshold: 20,
+      kind: "percent",
+      direction: "down",
+      barMax: 100,
+      markerRatio: 0.2,
+      markerLevel: "alarm",
+      currentText: formatNotificationCurrent("percent", current),
+      triggerText: t("notificationMatrixProgressTriggerAtMost", { value: formatNotificationValue("percent", 20) }),
+    });
+  }
+  if (code === "grid_import_started" || code === "grid_import_started_post_export_peak") {
+    const current = Math.max(Number(live?.grid_w) || 0, 0);
+    const met = current > 0;
+    return {
+      ratio: met ? 1 : 0,
+      statusText: t(met ? "notificationMatrixProgressConditionMet" : "notificationMatrixProgressWatching"),
+      currentText: formatNotificationCurrent("watts", current),
+      triggerText: t("notificationMatrixProgressTriggerAbove", { value: formatNotificationValue("watts", 0) }),
+      deltaText: "",
+    };
+  }
+  if (code === "solar_surplus_export_energy_reached_5000" || code === "solar_surplus_export_energy_reached_9000") {
+    const threshold = code.endsWith("_5000") ? 5 : 9;
+    const tracking = midday?.solar_surplus_export_tracking || null;
+    const notifiedMap = tracking?.threshold_notified_map || {};
+    const notified = Boolean(notifiedMap?.[String(threshold * 1000)]);
+    const current = Number(tracking?.total_export_kwh);
+    if (!Number.isFinite(current)) {
+      return {
+        ratio: 0,
+        statusText: t("notificationMatrixProgressNoData"),
+        currentText: t("notificationMatrixProgressCurrent", { value: "-" }),
+        triggerText: t("notificationMatrixProgressTriggerAtLeast", { value: formatNotificationValue("kwh", threshold) }),
+        deltaText: t("notificationMatrixProgressWindowTracking"),
+      };
+    }
+    return buildThresholdProgress({
+      current,
+      threshold,
+      kind: "kwh",
+      direction: "up",
+      barMax: threshold,
+      notified,
+      currentText: formatNotificationCurrent("kwh", current),
+      triggerText: t("notificationMatrixProgressTriggerAtLeast", { value: formatNotificationValue("kwh", threshold) }),
+    });
+  }
+  if (code === "saj_battery_watch_50_percent" || code === "saj_battery_watch_20_percent") {
+    const threshold = code.includes("_50_") ? 50 : 20;
+    const current = Number(live?.saj_battery_soc_percent);
+    const reminderState = sajWatch?.notification_state || {};
+    const notified = threshold === 50
+      ? Boolean(reminderState?.reminder_50_sent)
+      : Boolean(reminderState?.reminder_20_sent);
+    return buildThresholdProgress({
+      current,
+      threshold,
+      kind: "percent",
+      direction: "down",
+      barMax: 100,
+      markerRatio: threshold / 100,
+      markerLevel: threshold <= 20 ? "alarm" : "warning",
+      notified,
+      currentText: formatNotificationCurrent("percent", current),
+      triggerText: t("notificationMatrixProgressTriggerAtMost", { value: formatNotificationValue("percent", threshold) }),
+    });
+  }
+  if (code === "saj_battery_full" || code === "solplanet_battery_full") {
+    const current = code === "saj_battery_full"
+      ? Number(live?.saj_battery_soc_percent)
+      : Number(live?.solplanet_battery_soc_percent);
+    const state = batteryFull?.notification_state || {};
+    const notified = code === "saj_battery_full"
+      ? Boolean(state?.saj_full)
+      : Boolean(state?.solplanet_full);
+    return buildThresholdProgress({
+      current,
+      threshold: 100,
+      kind: "percent",
+      direction: "up",
+      barMax: 100,
+      notified,
+      currentText: formatNotificationCurrent("percent", current),
+      triggerText: t("notificationMatrixProgressTriggerAtLeast", { value: formatNotificationValue("percent", 100) }),
+    });
+  }
+  return {
+    ratio: 0,
+    statusText: t("notificationMatrixProgressNoData"),
+    currentText: t("notificationMatrixProgressCurrent", { value: "-" }),
+    triggerText: "-",
+    deltaText: "",
+  };
+}
+
+function buildThresholdProgress({
+  current,
+  threshold,
+  kind,
+  direction,
+  barMax = null,
+  markerRatio = null,
+  markerLevel = "",
+  notified = false,
+  currentText,
+  triggerText,
+}) {
+  if (!Number.isFinite(current)) {
+    return {
+      ratio: 0,
+      statusText: t("notificationMatrixProgressNoData"),
+      currentText: t("notificationMatrixProgressCurrent", { value: "-" }),
+      triggerText,
+      deltaText: "",
+      markerRatio,
+      markerLevel,
+    };
+  }
+  const normalizedBarMax = Number.isFinite(Number(barMax)) ? Math.max(Number(barMax), 1) : Math.max(Number(threshold), 1);
+  if (direction === "up") {
+    const remaining = Math.max(threshold - current, 0);
+    const met = current >= threshold;
+    return {
+      ratio: Math.max(0, Math.min(1, current / normalizedBarMax)),
+      statusText: t(notified ? "notificationMatrixProgressNotified" : met ? "notificationMatrixProgressConditionMet" : "notificationMatrixProgressWatching"),
+      currentText,
+      triggerText,
+      deltaText: met
+        ? t("notificationMatrixProgressConditionMet")
+        : t("notificationMatrixProgressRemaining", { value: formatNotificationDelta(current, threshold, kind) || formatNotificationValue(kind, remaining) }),
+      markerRatio,
+      markerLevel,
+    };
+  }
+  const met = current <= threshold;
+  const gap = Math.abs(current - threshold);
+  return {
+    ratio: Math.max(0, Math.min(1, current / normalizedBarMax)),
+    statusText: t(notified ? "notificationMatrixProgressNotified" : met ? "notificationMatrixProgressConditionMet" : "notificationMatrixProgressWatching"),
+    currentText,
+    triggerText,
+    deltaText: met
+      ? t("notificationMatrixProgressBelowThreshold", { value: formatNotificationDelta(current, threshold, kind) })
+      : t("notificationMatrixProgressAboveThreshold", { value: formatNotificationDelta(current, threshold, kind) || formatNotificationValue(kind, gap) }),
+    markerRatio,
+    markerLevel,
+  };
+}
+
+function formatNotificationCurrent(kind, value) {
+  return t("notificationMatrixProgressCurrent", { value: formatNotificationValue(kind, value) });
+}
+
+function formatNotificationValue(kind, value) {
+  if (!Number.isFinite(Number(value))) return "-";
+  if (kind === "percent") return `${formatTrimmedDecimal(Number(value), 1)}%`;
+  if (kind === "kwh") return formatEnergyKwhText(Number(value));
+  if (kind === "watts") return wattsToKwText(Number(value), 1);
+  return String(value);
+}
+
+function formatNotificationDelta(current, threshold, kind) {
+  if (!Number.isFinite(Number(current)) || !Number.isFinite(Number(threshold))) return "";
+  const diff = Math.abs(Number(threshold) - Number(current));
+  return formatNotificationValue(kind, diff);
 }
 
 async function dismissDashboardNotification(notificationKey) {

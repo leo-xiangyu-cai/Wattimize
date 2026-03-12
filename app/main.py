@@ -1228,6 +1228,12 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
                 "can_stop": tesla_control_state_map.get("can_stop"),
             },
         },
+        "notification_metrics": {
+            "grid_w": _to_number(metrics.get("grid_w")),
+            "saj_battery_soc_percent": _to_number(metrics.get("battery1_soc_percent")),
+            "solplanet_battery_soc_percent": _to_number(metrics.get("battery2_soc_percent")),
+            "solplanet_battery_energy_kwh": _to_number(metrics.get("battery2_energy_kwh")),
+        },
         "meta": {
             "source_type": ((flow.get("source") if isinstance(flow.get("source"), dict) else {}).get("type")),
             "storage_backed": bool(flow.get("storage_backed")),
@@ -2608,6 +2614,64 @@ async def _run_midday_window_check(
         current_actual_amps = _to_number(charge_state.get("current_amps"))
         connection_state = str(charge_state.get("connection_state") or "").strip().lower()
         status_text = str(charge_state.get("status_text") or "").strip().lower()
+        combined_status = collector_status.setdefault("combined", {})
+
+        if window_mode == "export_window":
+            pv_w = _to_number(metrics_map.get("pv_w"))
+            load_w = _to_number(metrics_map.get("load_w"))
+            saj_soc_percent = _to_number(metrics_map.get("battery1_soc_percent"))
+            solplanet_soc_percent = _to_number(metrics_map.get("battery2_soc_percent"))
+            current_grid_export_w = max(-float(grid_w), 0.0)
+            base_grid_without_tesla_w = float(grid_w) - tesla_charge_power_w
+            export_without_tesla_w = max(-base_grid_without_tesla_w, 0.0)
+            solar_excess_vs_load_w = (
+                max(float(pv_w) - float(load_w), 0.0)
+                if pv_w is not None and load_w is not None
+                else None
+            )
+            can_start_from_soc = (
+                solplanet_soc_percent is not None
+                and solplanet_soc_percent >= TESLA_SOLAR_SURPLUS_START_SOLPLANET_SOC_PERCENT
+            )
+            can_continue_from_soc = (
+                solplanet_soc_percent is not None
+                and solplanet_soc_percent >= TESLA_SOLAR_SURPLUS_STOP_SOLPLANET_SOC_PERCENT
+            )
+            export_signal_active = (
+                current_grid_export_w >= TESLA_SOLAR_SURPLUS_MIN_EXPORT_W
+                or export_without_tesla_w >= TESLA_SOLAR_SURPLUS_MIN_EXPORT_W
+            )
+            solar_signal_active = (
+                solar_excess_vs_load_w is not None
+                and solar_excess_vs_load_w >= TESLA_SOLAR_SURPLUS_MIN_EXPORT_W
+            )
+
+            result["current_grid_export_w"] = round(current_grid_export_w, 1)
+            result["base_grid_without_tesla_w"] = round(base_grid_without_tesla_w, 1)
+            result["base_export_without_tesla_w"] = round(export_without_tesla_w, 1)
+            result["export_window"] = {
+                "pv_w": pv_w,
+                "load_w": load_w,
+                "solar_excess_vs_load_w": round(solar_excess_vs_load_w, 1) if solar_excess_vs_load_w is not None else None,
+                "saj_soc_percent": saj_soc_percent,
+                "solplanet_soc_percent": solplanet_soc_percent,
+                "start_soc_percent": TESLA_SOLAR_SURPLUS_START_SOLPLANET_SOC_PERCENT,
+                "stop_soc_percent": TESLA_SOLAR_SURPLUS_STOP_SOLPLANET_SOC_PERCENT,
+                "min_export_signal_w": TESLA_SOLAR_SURPLUS_MIN_EXPORT_W,
+                "export_signal_active": export_signal_active,
+                "solar_signal_active": solar_signal_active,
+                "soc_start_allowed": can_start_from_soc,
+                "soc_continue_allowed": can_continue_from_soc,
+                "dashboard_mapping": {
+                    "battery1_soc_percent": "saj_battery_soc",
+                    "battery2_soc_percent": "solplanet_battery_soc",
+                },
+            }
+            result["solar_surplus_export_tracking"] = _update_solar_surplus_export_energy_tracking(
+                combined_status=combined_status,
+                now_local=now_local,
+                current_grid_export_w=current_grid_export_w,
+            )
 
         if connection_state == "unplugged":
             result["skipped"] = "tesla_unplugged"
@@ -2915,7 +2979,6 @@ async def _run_midday_window_check(
                         "until notification handling is implemented."
                     ),
                 })
-            combined_status = collector_status.setdefault("combined", {})
             was_importing = bool(combined_status.get("grid_import_active"))
             is_importing = current_grid_import_w > 0.0
             if is_importing and not was_importing:
@@ -2930,7 +2993,8 @@ async def _run_midday_window_check(
                     ),
                 })
             combined_status["grid_import_active"] = is_importing
-            export_tracking = _update_solar_surplus_export_energy_tracking(
+            export_tracking = result.get("solar_surplus_export_tracking")
+            export_tracking = export_tracking if isinstance(export_tracking, dict) else _update_solar_surplus_export_energy_tracking(
                 combined_status=combined_status,
                 now_local=now_local,
                 current_grid_export_w=current_grid_export_w,
