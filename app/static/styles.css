@@ -3483,11 +3483,14 @@ td {
 
 .notification-matrix-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
+  max-width: 980px;
+  margin: 0 auto;
 }
 
 .notification-window-panel {
+  position: relative;
   padding: 14px;
   border: 1px solid #d7dfc2;
   border-radius: 12px;
@@ -3496,16 +3499,95 @@ td {
   box-shadow: 0 8px 18px rgba(75, 88, 41, 0.06);
 }
 
+.notification-window-panel.is-current-window {
+  border-color: #8ea63a;
+  background:
+    linear-gradient(180deg, rgba(246, 251, 225, 0.98), rgba(234, 244, 204, 0.96));
+  box-shadow: 0 16px 30px rgba(116, 138, 39, 0.18);
+}
+
+.notification-window-panel.is-current-window::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  border-radius: 12px 0 0 12px;
+  background: linear-gradient(180deg, #b7cb56, #7d9427);
+}
+
 .notification-window-panel-header {
   display: grid;
   gap: 4px;
-  margin-bottom: 10px;
+}
+
+.notification-window-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .notification-window-title {
   margin: 0;
   font-size: 16px;
   font-weight: 700;
+}
+
+.notification-window-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.notification-window-current-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #8ea63a, #748a27);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: 0 8px 16px rgba(116, 138, 39, 0.22);
+}
+
+.notification-window-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #cdd7ac;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.notification-window-toggle:hover {
+  background: #f7faea;
+  border-color: #9eb24a;
+}
+
+.notification-window-toggle-chevron {
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid #61732d;
+  border-bottom: 2px solid #61732d;
+  transform: rotate(45deg);
+  transition: transform 140ms ease;
+}
+
+.notification-window-toggle.is-collapsed .notification-window-toggle-chevron {
+  transform: rotate(-45deg);
+}
+
+.notification-window-body {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .notification-window-time {

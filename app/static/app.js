@@ -70,6 +70,9 @@ const I18N = {
     notificationMatrixIntro: "Each panel shows the worker notifications configured for that time window. Checkboxes are currently fixed on because the system behavior is already enabled.",
     notificationMatrixNoNotifications: "No dedicated notification is configured for this window at the moment.",
     notificationMatrixAlwaysNote: "This watch is always active and is shown separately from the 24-hour time-window schedule.",
+    notificationMatrixCurrentWindowBadge: "Current Window",
+    notificationMatrixExpandWindow: "Expand window",
+    notificationMatrixCollapseWindow: "Collapse window",
     notificationMatrixWindowFreeEnergyTitle: "Free Energy Window",
     notificationMatrixWindowFreeEnergySummary: "11:00-14:00. Worker mainly controls Tesla charging current here and does not emit a dedicated notification.",
     notificationMatrixWindowAfterFreeShoulderTitle: "After-Free Shoulder",
@@ -90,8 +93,10 @@ const I18N = {
     notificationRuleSolplanetLowBatteryTrigger: "Triggers when Solplanet SOC drops below 20% during the export window.",
     notificationRuleGridImportStartedTitle: "Grid import started during export",
     notificationRuleGridImportStartedTrigger: "Triggers once when grid import changes from inactive to active during the export window.",
-    notificationRuleSolarSurplusExportEnergyReachedTitle: "Export energy threshold reached",
-    notificationRuleSolarSurplusExportEnergyReachedTrigger: "Triggers once when exported energy in the export window reaches 9 kWh.",
+    notificationRuleSolarSurplusExportEnergyReached5000Title: "Export energy reached 5 kWh",
+    notificationRuleSolarSurplusExportEnergyReached5000Trigger: "Triggers once when exported energy in the export window reaches 5 kWh.",
+    notificationRuleSolarSurplusExportEnergyReached9000Title: "Export energy reached 9 kWh",
+    notificationRuleSolarSurplusExportEnergyReached9000Trigger: "Triggers once when exported energy in the export window reaches 9 kWh.",
     notificationRuleSolplanetLowBatteryPostExportPeakTitle: "Solplanet battery is low in the expensive period",
     notificationRuleSolplanetLowBatteryPostExportPeakTrigger: "Triggers when Solplanet SOC drops below 20% during the post-export peak window.",
     notificationRuleGridImportStartedPostExportPeakTitle: "Grid import started in the expensive period",
@@ -620,6 +625,9 @@ const I18N = {
     notificationMatrixIntro: "每个面板展示该时间窗口下 worker 已配置的通知。当前复选框固定为开启，因为系统行为已经默认启用。",
     notificationMatrixNoNotifications: "这个时间窗口当前没有单独配置专门通知。",
     notificationMatrixAlwaysNote: "这个监控始终开启，单独展示，不属于 24 小时时间窗口切分的一部分。",
+    notificationMatrixCurrentWindowBadge: "当前窗口",
+    notificationMatrixExpandWindow: "展开窗口",
+    notificationMatrixCollapseWindow: "折叠窗口",
     notificationMatrixWindowFreeEnergyTitle: "免费电时段",
     notificationMatrixWindowFreeEnergySummary: "11:00-14:00。这个窗口里 worker 主要调整 Tesla 充电行为，不单独发通知。",
     notificationMatrixWindowAfterFreeShoulderTitle: "免费电后肩时段",
@@ -640,8 +648,10 @@ const I18N = {
     notificationRuleSolplanetLowBatteryTrigger: "当 export 时段内 Solplanet SOC 低于 20% 时触发。",
     notificationRuleGridImportStartedTitle: "Export 时段开始从电网取电",
     notificationRuleGridImportStartedTrigger: "当 export 时段内电网状态从未取电切换到开始取电时触发一次。",
-    notificationRuleSolarSurplusExportEnergyReachedTitle: "Export 能量达到阈值",
-    notificationRuleSolarSurplusExportEnergyReachedTrigger: "当 export 时段累计外送电量达到 9 kWh 时触发一次。",
+    notificationRuleSolarSurplusExportEnergyReached5000Title: "Export 能量达到 5 kWh",
+    notificationRuleSolarSurplusExportEnergyReached5000Trigger: "当 export 时段累计外送电量达到 5 kWh 时触发一次。",
+    notificationRuleSolarSurplusExportEnergyReached9000Title: "Export 能量达到 9 kWh",
+    notificationRuleSolarSurplusExportEnergyReached9000Trigger: "当 export 时段累计外送电量达到 9 kWh 时触发一次。",
     notificationRuleSolplanetLowBatteryPostExportPeakTitle: "高价时段 Solplanet 电量过低",
     notificationRuleSolplanetLowBatteryPostExportPeakTrigger: "当 export 后高价时段内 Solplanet SOC 低于 20% 时触发。",
     notificationRuleGridImportStartedPostExportPeakTitle: "高价时段开始从电网取电",
@@ -1492,9 +1502,15 @@ const NOTIFICATION_MATRIX_WINDOWS = [
       },
       {
         level: "alarm",
-        code: "solar_surplus_export_energy_reached",
-        titleKey: "notificationRuleSolarSurplusExportEnergyReachedTitle",
-        triggerKey: "notificationRuleSolarSurplusExportEnergyReachedTrigger",
+        code: "solar_surplus_export_energy_reached_5000",
+        titleKey: "notificationRuleSolarSurplusExportEnergyReached5000Title",
+        triggerKey: "notificationRuleSolarSurplusExportEnergyReached5000Trigger",
+      },
+      {
+        level: "alarm",
+        code: "solar_surplus_export_energy_reached_9000",
+        titleKey: "notificationRuleSolarSurplusExportEnergyReached9000Title",
+        triggerKey: "notificationRuleSolarSurplusExportEnergyReached9000Trigger",
       },
     ],
   },
@@ -1588,6 +1604,8 @@ let samplingChartLastPayload = null;
 let samplingChartHandlersBound = false;
 let samplingRangeApplyingFromBrush = false;
 let samplingLegendSyncing = false;
+let notificationMatrixCollapseState = {};
+let notificationMatrixCollapseInitialized = false;
 const tabLoadState = {
   dashboard: { inFlight: false },
   notificationMatrix: { inFlight: false },
@@ -4153,9 +4171,19 @@ function renderNotificationMatrix() {
   const root = document.getElementById("notificationMatrixPanels");
   if (!root) return;
   root.innerHTML = "";
+  const currentWindowId = getCurrentNotificationMatrixWindowId();
+  if (!notificationMatrixCollapseInitialized) {
+    notificationMatrixCollapseState = {};
+    for (const windowItem of NOTIFICATION_MATRIX_WINDOWS) {
+      notificationMatrixCollapseState[windowItem.id] = windowItem.id !== currentWindowId;
+    }
+    notificationMatrixCollapseInitialized = true;
+  }
   for (const windowItem of NOTIFICATION_MATRIX_WINDOWS) {
     const panel = document.createElement("article");
-    panel.className = "notification-window-panel";
+    const isCurrentWindow = windowItem.id === currentWindowId;
+    const isCollapsed = Boolean(notificationMatrixCollapseState[windowItem.id]);
+    panel.className = `notification-window-panel${isCurrentWindow ? " is-current-window" : ""}`;
     const notifications = Array.isArray(windowItem.notifications) ? windowItem.notifications : [];
     const listHtml = notifications.length
       ? notifications.map((item) => {
@@ -4180,15 +4208,55 @@ function renderNotificationMatrix() {
 
     panel.innerHTML = `
       <header class="notification-window-panel-header">
-        <h3 class="notification-window-title">${escapeHtml(t(windowItem.titleKey))}</h3>
+        <div class="notification-window-title-row">
+          <h3 class="notification-window-title">${escapeHtml(t(windowItem.titleKey))}</h3>
+          <div class="notification-window-header-actions">
+            ${isCurrentWindow ? `<span class="notification-window-current-badge">${escapeHtml(t("notificationMatrixCurrentWindowBadge"))}</span>` : ""}
+            <button
+              type="button"
+              class="notification-window-toggle${isCollapsed ? " is-collapsed" : ""}"
+              data-window-id="${escapeHtml(windowItem.id)}"
+              aria-expanded="${isCollapsed ? "false" : "true"}"
+              aria-label="${escapeHtml(t(isCollapsed ? "notificationMatrixExpandWindow" : "notificationMatrixCollapseWindow"))}"
+            >
+              <span class="notification-window-toggle-chevron" aria-hidden="true"></span>
+            </button>
+          </div>
+        </div>
+      </header>
+      <div class="notification-window-body${isCollapsed ? " hidden" : ""}">
         <span class="notification-window-time">${escapeHtml(String(windowItem.schedule || "-"))}</span>
         <p class="notification-window-summary">${escapeHtml(t(windowItem.summaryKey))}</p>
         ${windowItem.noteKey ? `<p class="notification-window-note">${escapeHtml(t(windowItem.noteKey))}</p>` : ""}
-      </header>
-      <div class="notification-window-list">${listHtml}</div>
+        <div class="notification-window-list">${listHtml}</div>
+      </div>
     `;
+    const toggleButton = panel.querySelector(".notification-window-toggle");
+    if (toggleButton) {
+      toggleButton.addEventListener("click", () => {
+        const windowId = String(toggleButton.getAttribute("data-window-id") || "").trim();
+        if (!windowId) return;
+        notificationMatrixCollapseState[windowId] = !Boolean(notificationMatrixCollapseState[windowId]);
+        renderNotificationMatrix();
+      });
+    }
     root.appendChild(panel);
   }
+}
+
+function getCurrentNotificationMatrixWindowId(now = new Date()) {
+  const hour = now.getHours();
+  if (hour >= 11 && hour < 14) return "free_energy";
+  if (hour >= 14 && hour < 16) return "after_free_shoulder";
+  if (hour >= 16 && hour < 18) return "after_free_peak";
+  if (hour >= 18 && hour < 20) return "export_window";
+  if (hour >= 20 && hour < 23) return "post_export_peak";
+  return "overnight_shoulder";
+}
+
+function resetNotificationMatrixCollapseState() {
+  notificationMatrixCollapseState = {};
+  notificationMatrixCollapseInitialized = false;
 }
 
 async function dismissDashboardNotification(notificationKey) {
@@ -7995,6 +8063,7 @@ function setAutoRefresh(seconds) {
 }
 
 function setActiveTab(tab, load = true) {
+  const previousTab = currentTab;
   currentTab =
     tab === "notificationMatrix" ||
     tab === "solplanetRaw" ||
@@ -8007,6 +8076,9 @@ function setActiveTab(tab, load = true) {
     tab === "workerFailureLog"
       ? tab
       : "dashboard";
+  if (currentTab === "notificationMatrix" && previousTab !== "notificationMatrix") {
+    resetNotificationMatrixCollapseState();
+  }
   localStorage.setItem("activeTab", currentTab);
 
   const dashboardView = document.getElementById("dashboardView");

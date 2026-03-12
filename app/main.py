@@ -137,7 +137,7 @@ TESLA_SOLAR_SURPLUS_MIN_EXPORT_W = 150.0
 SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT = 20.0
 SOLPLANET_LOW_AVAILABLE_CAPACITY_NOTIFICATION_THRESHOLD_KWH = 25.0
 BATTERY_FULL_NOTIFICATION_SOC_PERCENT = 100.0
-SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH = 9_000.0
+SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLDS_WH: tuple[float, ...] = (5_000.0, 9_000.0)
 TESLA_CURRENT_MISMATCH_RESTART_MIN_DELTA_A = 2.0
 TESLA_CURRENT_MISMATCH_RESTART_COOLDOWN_SECONDS = 300.0
 WORKER_PENDING_LOG_TIMEOUT_SECONDS = 60.0
@@ -177,6 +177,14 @@ WORKER_LOG_LEGACY_STATUSES: tuple[str, ...] = (
     "operation",
     "nop",
 )
+
+
+def _solar_surplus_export_energy_notification_code(threshold_wh: float) -> str:
+    return f"solar_surplus_export_energy_reached_{int(round(threshold_wh))}"
+
+
+def _is_solar_surplus_export_energy_notification_code(code: object) -> bool:
+    return str(code or "").strip().startswith("solar_surplus_export_energy_reached_")
 
 app = FastAPI(title="Wattimize API", version="0.1.0")
 static_dir = Path(__file__).parent / "static"
@@ -2097,7 +2105,7 @@ def _worker_notification_trigger_text(notification_map: dict[str, object]) -> st
                 else ""
             )
         )
-    if code == "solar_surplus_export_energy_reached":
+    if _is_solar_surplus_export_energy_notification_code(code):
         return (
             f"window_export={_fmt_result_number(notification_map.get('current_export_total_kwh'), 3, 'kWh')}, "
             f"threshold={_fmt_result_number(notification_map.get('threshold_kwh'), 3, 'kWh')}"
@@ -2313,12 +2321,25 @@ def _update_solar_surplus_export_energy_tracking(
     last_window_key = str(combined_status.get("solar_surplus_export_window_key") or "").strip()
     last_tracked_at_text = str(combined_status.get("solar_surplus_export_last_tracked_at") or "").strip()
     total_export_wh = float(combined_status.get("solar_surplus_export_total_wh") or 0.0)
-    threshold_notified = bool(combined_status.get("solar_surplus_export_threshold_notified"))
+    threshold_notified_map = combined_status.get("solar_surplus_export_threshold_notified_map")
+    if isinstance(threshold_notified_map, dict):
+        normalized_threshold_notified_map = {
+            str(key): bool(value) for key, value in threshold_notified_map.items()
+        }
+    else:
+        legacy_notified = bool(combined_status.get("solar_surplus_export_threshold_notified"))
+        normalized_threshold_notified_map = {
+            str(int(round(threshold_wh))): legacy_notified
+            for threshold_wh in SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLDS_WH
+        }
     added_export_wh = 0.0
 
     if last_window_key != window_key:
         total_export_wh = 0.0
-        threshold_notified = False
+        normalized_threshold_notified_map = {
+            str(int(round(threshold_wh))): False
+            for threshold_wh in SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLDS_WH
+        }
         last_tracked_at_text = ""
 
     current_utc = datetime.now(UTC)
@@ -2343,16 +2364,20 @@ def _update_solar_surplus_export_energy_tracking(
     combined_status["solar_surplus_export_window_key"] = window_key
     combined_status["solar_surplus_export_last_tracked_at"] = current_utc.isoformat()
     combined_status["solar_surplus_export_total_wh"] = round(total_export_wh, 3)
-    combined_status["solar_surplus_export_threshold_notified"] = threshold_notified
+    combined_status["solar_surplus_export_threshold_notified_map"] = normalized_threshold_notified_map
+    combined_status["solar_surplus_export_threshold_notified"] = any(normalized_threshold_notified_map.values())
     return {
         "window_key": window_key,
         "interval_seconds": round(dt_seconds, 1),
         "added_export_wh": round(added_export_wh, 3),
         "total_export_wh": round(total_export_wh, 3),
         "total_export_kwh": round(total_export_wh / 1000.0, 4),
-        "threshold_wh": SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH,
-        "threshold_kwh": round(SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH / 1000.0, 3),
-        "threshold_notified": threshold_notified,
+        "thresholds_wh": list(SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLDS_WH),
+        "thresholds_kwh": [
+            round(threshold_wh / 1000.0, 3)
+            for threshold_wh in SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLDS_WH
+        ],
+        "threshold_notified_map": normalized_threshold_notified_map,
     }
 
 
@@ -2912,26 +2937,33 @@ async def _run_midday_window_check(
             )
             result["solar_surplus_export_tracking"] = export_tracking
             previous_total_export_wh = float(export_tracking["total_export_wh"]) - float(export_tracking["added_export_wh"])
-            if (
-                previous_total_export_wh < SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH
-                and float(export_tracking["total_export_wh"]) >= SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH
-                and not bool(combined_status.get("solar_surplus_export_threshold_notified"))
-            ):
-                _append_worker_notification(result, {
-                    "level": "alarm",
-                    "code": "solar_surplus_export_energy_reached",
-                    "target": "grid_export_energy",
-                    "window": _window_schedule_text("export_window"),
-                    "current_export_total_wh": round(float(export_tracking["total_export_wh"]), 1),
-                    "current_export_total_kwh": round(float(export_tracking["total_export_wh"]) / 1000.0, 4),
-                    "threshold_wh": SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH,
-                    "threshold_kwh": round(SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLD_WH / 1000.0, 3),
-                    "message": (
-                        "Exported energy during the export window reached the configured "
-                        "threshold; add one alarm reminder to worklog."
-                    ),
-                })
-                combined_status["solar_surplus_export_threshold_notified"] = True
+            threshold_notified_map = combined_status.get("solar_surplus_export_threshold_notified_map")
+            if not isinstance(threshold_notified_map, dict):
+                threshold_notified_map = {}
+            for threshold_wh in SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLDS_WH:
+                threshold_key = str(int(round(threshold_wh)))
+                if (
+                    previous_total_export_wh < threshold_wh
+                    and float(export_tracking["total_export_wh"]) >= threshold_wh
+                    and not bool(threshold_notified_map.get(threshold_key))
+                ):
+                    _append_worker_notification(result, {
+                        "level": "alarm",
+                        "code": _solar_surplus_export_energy_notification_code(threshold_wh),
+                        "target": f"grid_export_energy_{threshold_key}",
+                        "window": _window_schedule_text("export_window"),
+                        "current_export_total_wh": round(float(export_tracking["total_export_wh"]), 1),
+                        "current_export_total_kwh": round(float(export_tracking["total_export_wh"]) / 1000.0, 4),
+                        "threshold_wh": threshold_wh,
+                        "threshold_kwh": round(threshold_wh / 1000.0, 3),
+                        "message": (
+                            "Exported energy during the export window reached the configured "
+                            "threshold; add one alarm reminder to worklog."
+                        ),
+                    })
+                    threshold_notified_map[threshold_key] = True
+            combined_status["solar_surplus_export_threshold_notified_map"] = threshold_notified_map
+            combined_status["solar_surplus_export_threshold_notified"] = any(threshold_notified_map.values())
 
             desired = _choose_tesla_solar_surplus_target_from_options(
                 base_grid_without_tesla_w,
@@ -6238,11 +6270,17 @@ def _worker_control_result_text(
         export_tracking = payload.get("solar_surplus_export_tracking")
         export_tracking_map = export_tracking if isinstance(export_tracking, dict) else {}
         if export_tracking_map:
+            thresholds_kwh = export_tracking_map.get("thresholds_kwh")
+            threshold_text = (
+                ", ".join(_fmt_result_number(value, 3, "kWh") for value in thresholds_kwh)
+                if isinstance(thresholds_kwh, list) and thresholds_kwh
+                else _fmt_result_number(export_tracking_map.get("threshold_kwh"), 3, "kWh")
+            )
             extra_parts.append(
                 "window_export "
                 f"total={_fmt_result_number(export_tracking_map.get('total_export_kwh'), 3, 'kWh')}, "
                 f"added={_fmt_result_number(export_tracking_map.get('added_export_wh'), 0, 'Wh')}, "
-                f"threshold={_fmt_result_number(export_tracking_map.get('threshold_kwh'), 3, 'kWh')}"
+                f"threshold={threshold_text}"
             )
         if steps_text and steps_text != "-":
             extra_parts.append(f"detail {action_type} ({steps_text})")
@@ -6288,7 +6326,7 @@ def _worker_control_result_text(
                     f"tariff={_fmt_result_number(notification_map.get('tariff_p_per_kwh'), 1, 'p/kWh')}"
                 )
                 continue
-            if code == "solar_surplus_export_energy_reached":
+            if _is_solar_surplus_export_energy_notification_code(code):
                 extra_parts.append(
                     "notification "
                     f"{code}: "
