@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import io
 import json
 import re
@@ -275,6 +274,14 @@ def _session_factory(db_path: DatabaseTarget) -> sessionmaker[Session]:
     return factory
 
 
+def dispose_db_connections(db_path: DatabaseTarget) -> None:
+    key = _normalize_target(db_path)
+    _SESSION_FACTORY_CACHE.pop(key, None)
+    engine = _ENGINE_CACHE.pop(key, None)
+    if engine is not None:
+        engine.dispose()
+
+
 @contextmanager
 def _session_scope(db_path: DatabaseTarget) -> Any:
     session = _session_factory(db_path)()
@@ -445,6 +452,36 @@ def init_db(db_path: DatabaseTarget) -> None:
 
     engine = _create_engine_for_target(db_path)
     Base.metadata.create_all(engine)
+
+
+def export_database_bytes(db_path: DatabaseTarget) -> bytes:
+    sqlite_path = _sqlite_file_path(db_path)
+    if sqlite_path is None:
+        raise ValueError("Database export only supports local SQLite files")
+    if not sqlite_path.exists():
+        init_db(db_path)
+    return sqlite_path.read_bytes()
+
+
+def import_database_bytes(db_path: DatabaseTarget, payload: bytes) -> dict[str, object]:
+    sqlite_path = _sqlite_file_path(db_path)
+    if sqlite_path is None:
+        raise ValueError("Database import only supports local SQLite files")
+    if not payload:
+        raise ValueError("Uploaded database file is empty")
+    if not payload.startswith(b"SQLite format 3\x00"):
+        raise ValueError("Uploaded file is not a valid SQLite database")
+
+    sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = sqlite_path.with_name(f"{sqlite_path.name}.importing")
+    dispose_db_connections(db_path)
+    temp_path.write_bytes(payload)
+    temp_path.replace(sqlite_path)
+    dispose_db_connections(db_path)
+    return {
+        "db_path": str(sqlite_path),
+        "db_size_bytes": sqlite_path.stat().st_size,
+    }
 
     inspector = inspect(engine)
     worker_columns = {column["name"] for column in inspector.get_columns("worker_api_logs")}

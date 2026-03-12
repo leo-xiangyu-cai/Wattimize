@@ -1,12 +1,12 @@
-.PHONY: help docker docker-load inspect dev dev-logs dev-down
+.PHONY: help docker docker-load inspect dev dev-logs dev-down deploy-nas
 
 IMAGE = wattimize
 TAG = amd64-latest
-TIMESTAMP ?= $(shell date +%Y%m%d_%H%M%S)
-VERSION_TAG = amd64-$(TIMESTAMP)
+TIMESTAMP := $(or $(TIMESTAMP),$(shell date +%Y%m%d_%H%M%S))
+VERSION_TAG := amd64-$(TIMESTAMP)
 PLATFORM = linux/amd64
 OUTPUT_DIR = dist/docker-images
-TAR = $(OUTPUT_DIR)/wattimize_amd64_$(TIMESTAMP).tar
+TAR := $(OUTPUT_DIR)/wattimize_amd64_$(TIMESTAMP).tar
 BUILDER = wattimize-builder
 
 help:
@@ -17,6 +17,7 @@ help:
 	@echo "  make dev         Start local docker compose in hot-reload mode"
 	@echo "  make dev-logs    Follow logs for wattimize-api"
 	@echo "  make dev-down    Stop local docker compose services"
+	@echo "  make deploy-nas  Build and deploy to TerraMaster NAS over SSH"
 
 docker:
 	@mkdir -p $(OUTPUT_DIR)
@@ -53,3 +54,6 @@ dev-logs:
 
 dev-down:
 	docker compose down
+
+deploy-nas:
+	./scripts/deploy-nas.sh

@@ -21,12 +21,14 @@ Use the web config page:
 - If config is missing, the page shows a setup dialog.
 - Required fields: `HA_URL`, `HA_TOKEN`.
 - Optional field: `SOLPLANET_DONGLE_HOST`.
+- The config dialog can auto-discover `SOLPLANET_INVERTER_SN` and `SOLPLANET_BATTERY_SN` from the dongle CGI API.
 - Adjustable sampling fields: `SAJ_SAMPLE_INTERVAL_SECONDS`, `SOLPLANET_SAMPLE_INTERVAL_SECONDS` (choices: `5/10/30/60/300`).
 
-Config file path:
-- Local default: `data/config.json`
-- Docker default: `/app/data/config.json`
-- Override with `WATTIMIZE_CONFIG_PATH`
+Config storage:
+- Stored in SQLite table `app_config`
+- Local default DB: `data/energy_samples.sqlite3`
+- Docker default DB path is controlled by `WATTIMIZE_DB_PATH`
+- Existing legacy `config.json` is auto-migrated on first load
 
 Persistence config (optional):
 - `WATTIMIZE_DB_PATH` (default: `data/energy_samples.sqlite3`)
@@ -80,8 +82,9 @@ curl -s "http://<wattimize-host>:18000/api/storage/daily-usage?system=saj" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/samples?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z&page=1&page_size=20" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/series?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z&max_points=500" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/usage-range?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z" | jq
-curl -s "http://<wattimize-host>:18000/api/storage/export.csv" -o energy_samples.csv
-curl -s -X POST "http://<wattimize-host>:18000/api/storage/import.csv?replace_existing=true" -F "file=@energy_samples.csv" | jq
+curl -s http://<wattimize-host>:18000/api/database/export.sqlite3 -o wattimize.sqlite3
+curl -s -X POST http://<wattimize-host>:18000/api/database/import.sqlite3 -F "file=@wattimize.sqlite3" | jq
+curl -s -X POST http://<wattimize-host>:18000/api/config/solplanet/discover -H 'Content-Type: application/json' -d '{"solplanet_dongle_host":"192.168.1.10"}' | jq
 ```
 
 `/api/energy-flow/solplanet` behavior:
@@ -97,13 +100,25 @@ docker compose up -d --build
 curl -s http://<wattimize-host>:18000/api/saj/entities/core | jq
 ```
 
+Build and deploy to TerraMaster NAS over SSH:
+
+```bash
+make deploy-nas
+```
+
+Supported overrides for `make deploy-nas`:
+- `NAS_HOST`, `NAS_PORT`, `NAS_USER`, `SSH_KEY`
+- `CONTAINER_NAME`, `IMAGE_NAME`, `IMAGE_REPOSITORY`
+- `NAS_DATA_DIR`, `HOST_PORT`, `CONTAINER_PORT`, `TZ_VALUE`
+- `DOCKER_BIN`, `RETENTION_DAYS`
+
 First-run configuration:
 - Open `http://NAS_IP:18000/`.
-- If `config.json` is missing, the page shows a config dialog.
-- Config stores: `HA_URL`, `HA_TOKEN`, `SOLPLANET_DONGLE_HOST`, `SAJ_SAMPLE_INTERVAL_SECONDS`, `SOLPLANET_SAMPLE_INTERVAL_SECONDS`.
+- If config is missing, the page shows a config dialog.
+- Config stores: `HA_URL`, `HA_TOKEN`, `SOLPLANET_DONGLE_HOST`, `SOLPLANET_INVERTER_SN`, `SOLPLANET_BATTERY_SN`, `SAJ_SAMPLE_INTERVAL_SECONDS`, `SOLPLANET_SAMPLE_INTERVAL_SECONDS`.
 - Other values are backend constants (entity ids, port/scheme/ssl/cache/timeout), except the two sampling interval fields.
-- Saved config is written to `/app/data/config.json` in the container by default.
-- You can override config file path with `WATTIMIZE_CONFIG_PATH`.
+- Saved config is written into SQLite table `app_config`.
+- The database path can be overridden with `WATTIMIZE_DB_PATH`.
 
 ## 6) Built-in SQLite Sampling
 
@@ -112,3 +127,4 @@ First-run configuration:
 - Default Solplanet sampling frequency is every 60 seconds (`WATTIMIZE_SOLPLANET_SAMPLE_INTERVAL_SECONDS`).
 - Every sample stores current `pv_w/grid_w/battery_w/load_w/soc/inverter_status/balance` and raw flow payload.
 - Daily usage endpoint integrates power snapshots into kWh (UTC day).
+- The frontend can export and import the full SQLite database from the Database tab.

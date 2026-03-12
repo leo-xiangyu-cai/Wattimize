@@ -28,6 +28,40 @@ async function readErrorMessage(response) {
   return text;
 }
 
+function formatBinarySize(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value < 0) return "-";
+  if (value < 1024) return `${Math.round(value)} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function xhrRequest(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(options.method || "GET", url, true);
+    xhr.responseType = options.responseType || "";
+    const headers = options.headers || {};
+    for (const [name, value] of Object.entries(headers)) {
+      xhr.setRequestHeader(name, value);
+    }
+    if (typeof options.onDownloadProgress === "function") {
+      xhr.addEventListener("progress", (event) => options.onDownloadProgress(event, xhr));
+    }
+    if (xhr.upload && typeof options.onUploadProgress === "function") {
+      xhr.upload.addEventListener("progress", (event) => options.onUploadProgress(event, xhr));
+    }
+    if (xhr.upload && typeof options.onUploadComplete === "function") {
+      xhr.upload.addEventListener("load", () => options.onUploadComplete(xhr));
+    }
+    xhr.addEventListener("load", () => resolve(xhr));
+    xhr.addEventListener("error", () => reject(new Error("Network request failed")));
+    xhr.addEventListener("abort", () => reject(new Error("Request aborted")));
+    xhr.send(options.body);
+  });
+}
+
 const I18N = {
   en: {
     subtitle: "SAJ + Solplanet monitoring panel",
@@ -39,6 +73,7 @@ const I18N = {
     configBtn: "Config",
     configCloseBtn: "Close",
     configSaveBtn: "Save",
+    configAutoDiscoverBtn: "Auto Fetch Inverter / Battery SN",
     configModalTitle: "Initial Setup",
     configModalDesc: "Fill Home Assistant connection info first. It takes effect immediately after saving.",
     configHaUrlLabel: "HA URL",
@@ -60,9 +95,12 @@ const I18N = {
     configStatusCheckFailed: "Config status check failed: {error}",
     configLoadFailed: "Failed to load config: {error}",
     configSaving: "Saving...",
+    configAutoDiscovering: "Discovering...",
+    configAutoDiscovered: "Inverter and battery SN loaded",
+    configAutoDiscoverFailed: "Auto fetch failed: {error}",
     configSaved: "Saved",
     configSaveFailed: "Save failed: {error}",
-    configMustSaveFirst: "Configuration is not complete yet. Please save first.",
+    configMustSaveFirst: "Configuration is not complete yet. Complete setup first.",
     refreshBtn: "Refresh",
     dashboardTab: "Dashboard",
     notificationMatrixTab: "Notification",
@@ -143,6 +181,22 @@ const I18N = {
     databaseTotal: "Total {total} rows",
     databasePageInfo: "Page {page}/{totalPages} (showing {count})",
     databaseEmpty: "Select a table to view data.",
+    databaseTransferExportTitle: "Exporting database",
+    databaseTransferImportTitle: "Importing database",
+    databaseTransferPreparing: "Preparing...",
+    databaseTransferProcessing: "Processing...",
+    databaseTransferPercent: "{value}%",
+    databaseTransferDownloaded: "Downloaded {loaded} / {total}",
+    databaseTransferUploaded: "Uploaded {loaded} / {total}",
+    databaseTransferExportStarting: "Preparing export file...",
+    databaseTransferExportStreaming: "Downloading database file...",
+    databaseTransferExportFinishing: "Finalizing file...",
+    databaseTransferExportDone: "Export complete. Download should start shortly.",
+    databaseTransferImportUploading: "Uploading database file...",
+    databaseTransferImportApplying: "Replacing local database. Please wait...",
+    databaseTransferImportRefreshing: "Refreshing page data...",
+    databaseTransferImportDone: "Import complete.",
+    databaseTransferFailed: "Failed",
     sajControlTitle: "SAJ Control",
     solplanetControlTitle: "Solplanet Control",
     solplanetControlLimitsTitle: "Power Limits",
@@ -363,17 +417,20 @@ const I18N = {
     samplingSystemLabel: "System",
     samplingSystemOverall: "Overall",
     samplingRangeModeLabel: "Range",
-    samplingRangeDay: "Day",
-    samplingRangeWeek: "Week",
-    samplingRangeMonth: "Month",
+    samplingRangeDay: "Today",
+    samplingRangeWeek: "This week",
+    samplingRangeMonth: "This month",
     samplingRangeRelative: "Relative",
     samplingRangeCustomDate: "Custom Date",
     samplingRangeCustomDateTime: "Custom Date + Time",
     samplingWeekDisplay: "Week {week} ({start} ~ {end})",
     samplingMonthYear: "{year}",
+    samplingMonthDisplay: "{month} {year}",
     samplingDayLabel: "Day",
     samplingWeekLabel: "Week",
     samplingMonthLabel: "Month",
+    samplingArrowPrev: "Previous",
+    samplingArrowNext: "Next",
     samplingRelativeLabel: "Relative Range",
     samplingRelativePlaceholder: "-3h",
     samplingRelativeHelp: "Use values like -15m, -3h, -2d, -1mo. Range is from now backwards.",
@@ -428,12 +485,12 @@ const I18N = {
     samplingTableSoc: "SOC(%)",
     samplingTableBalance: "Balance(W)",
     samplingTableInverter: "Inverter",
-    samplingExportBtn: "Export CSV",
-    samplingImportBtn: "Import CSV",
-    samplingExporting: "Exporting...",
-    samplingImporting: "Importing...",
-    samplingImportConfirmReplace: "Import will replace all existing sampling records. Continue?",
-    samplingImportDone: "Import completed: {count} rows",
+    databaseExportBtn: "Export Database",
+    databaseImportBtn: "Import Database",
+    databaseExporting: "Exporting...",
+    databaseImporting: "Importing...",
+    databaseImportConfirmReplace: "Import will replace the current database file. Continue?",
+    databaseImportDone: "Database import completed",
     workerLogsTitle: "Worker API Logs",
     workerLogsCategoryLabel: "Category",
     workerLogsCategoryAll: "All",
@@ -527,8 +584,8 @@ const I18N = {
     pageInfo: "Page {page}/{totalPages} (showing {count})",
     pageDash: "Page -",
     loadFailed: "Load failed: {error}",
-    samplingExportFailed: "Export failed: {error}",
-    samplingImportFailed: "Import failed: {error}",
+    databaseExportFailed: "Database export failed: {error}",
+    databaseImportFailed: "Database import failed: {error}",
     inverterRunning: "Running",
     inverterOffline: "Offline",
     inverterStandby: "Standby",
@@ -611,6 +668,7 @@ const I18N = {
     configBtn: "配置",
     configCloseBtn: "关闭",
     configSaveBtn: "保存配置",
+    configAutoDiscoverBtn: "自动获取 Inverter / Battery SN",
     configModalTitle: "首次配置",
     configModalDesc: "请先填写 Home Assistant 连接信息，保存后立即生效。",
     configHaUrlLabel: "HA URL",
@@ -632,9 +690,12 @@ const I18N = {
     configStatusCheckFailed: "配置状态检查失败: {error}",
     configLoadFailed: "读取配置失败: {error}",
     configSaving: "保存中...",
+    configAutoDiscovering: "自动获取中...",
+    configAutoDiscovered: "逆变器和电池 SN 已写入",
+    configAutoDiscoverFailed: "自动获取失败: {error}",
     configSaved: "保存成功",
     configSaveFailed: "保存失败: {error}",
-    configMustSaveFirst: "当前还未完成配置，请先保存",
+    configMustSaveFirst: "当前配置还不完整，请先完成配置",
     refreshBtn: "刷新",
     dashboardTab: "总览",
     notificationMatrixTab: "通知",
@@ -715,6 +776,22 @@ const I18N = {
     databaseTotal: "共 {total} 行",
     databasePageInfo: "第 {page}/{totalPages} 页（当前 {count} 行）",
     databaseEmpty: "请选择一个数据表查看数据。",
+    databaseTransferExportTitle: "正在导出数据库",
+    databaseTransferImportTitle: "正在导入数据库",
+    databaseTransferPreparing: "准备中...",
+    databaseTransferProcessing: "处理中...",
+    databaseTransferPercent: "{value}%",
+    databaseTransferDownloaded: "已下载 {loaded} / {total}",
+    databaseTransferUploaded: "已上传 {loaded} / {total}",
+    databaseTransferExportStarting: "正在准备导出文件...",
+    databaseTransferExportStreaming: "正在下载数据库文件...",
+    databaseTransferExportFinishing: "正在完成文件保存...",
+    databaseTransferExportDone: "导出完成，浏览器应很快开始下载。",
+    databaseTransferImportUploading: "正在上传数据库文件...",
+    databaseTransferImportApplying: "正在替换本地数据库，请稍候...",
+    databaseTransferImportRefreshing: "正在刷新页面数据...",
+    databaseTransferImportDone: "导入完成。",
+    databaseTransferFailed: "失败",
     sajControlTitle: "SAJ 管理",
     solplanetControlTitle: "Solplanet 管理",
     solplanetControlLimitsTitle: "功率限制",
@@ -935,17 +1012,20 @@ const I18N = {
     samplingSystemLabel: "系统",
     samplingSystemOverall: "综合",
     samplingRangeModeLabel: "范围",
-    samplingRangeDay: "天",
-    samplingRangeWeek: "周",
-    samplingRangeMonth: "月",
+    samplingRangeDay: "今日",
+    samplingRangeWeek: "本周",
+    samplingRangeMonth: "本月",
     samplingRangeRelative: "相对时间",
     samplingRangeCustomDate: "自定义日期",
     samplingRangeCustomDateTime: "自定义日期+时间",
     samplingWeekDisplay: "第{week}周（{start} ~ {end}）",
     samplingMonthYear: "{year}",
+    samplingMonthDisplay: "{year}年{month}",
     samplingDayLabel: "日期",
     samplingWeekLabel: "周",
     samplingMonthLabel: "月份",
+    samplingArrowPrev: "上一项",
+    samplingArrowNext: "下一项",
     samplingRelativeLabel: "相对范围",
     samplingRelativePlaceholder: "-3h",
     samplingRelativeHelp: "支持 -15m、-3h、-2d、-1mo 这种写法，表示从当前时间往前回溯。",
@@ -1000,12 +1080,12 @@ const I18N = {
     samplingTableSoc: "SOC(%)",
     samplingTableBalance: "平衡(W)",
     samplingTableInverter: "逆变器",
-    samplingExportBtn: "导出 CSV",
-    samplingImportBtn: "导入 CSV",
-    samplingExporting: "导出中...",
-    samplingImporting: "导入中...",
-    samplingImportConfirmReplace: "导入会覆盖现有采样数据，是否继续？",
-    samplingImportDone: "导入完成：{count} 条",
+    databaseExportBtn: "导出数据库",
+    databaseImportBtn: "导入数据库",
+    databaseExporting: "导出中...",
+    databaseImporting: "导入中...",
+    databaseImportConfirmReplace: "导入会覆盖当前数据库文件，是否继续？",
+    databaseImportDone: "数据库导入完成",
     workerLogsTitle: "Worker API 日志",
     workerLogsCategoryLabel: "分类",
     workerLogsCategoryAll: "全部",
@@ -1099,8 +1179,8 @@ const I18N = {
     pageInfo: "第 {page}/{totalPages} 页（当前 {count} 条）",
     pageDash: "第 - 页",
     loadFailed: "加载失败：{error}",
-    samplingExportFailed: "导出失败：{error}",
-    samplingImportFailed: "导入失败：{error}",
+    databaseExportFailed: "数据库导出失败：{error}",
+    databaseImportFailed: "数据库导入失败：{error}",
     inverterRunning: "运行中",
     inverterOffline: "离线",
     inverterStandby: "待机",
@@ -1297,6 +1377,10 @@ const SAMPLING_OVERALL_SERIES = [
   { key: "solplanet_battery_charge_w", labelKey: "samplingOverallSeriesSolplanetBatteryCharge", color: "#9a3412" },
   { key: "solplanet_battery_discharge_w", labelKey: "samplingOverallSeriesSolplanetBatteryDischarge", color: "#ef4444" },
 ];
+
+const SAMPLING_SERIES_META_BY_KEY = Object.fromEntries(
+  [...SAMPLING_SERIES, ...SAMPLING_OVERALL_SERIES].map((item) => [item.key, item]),
+);
 const SOLPLANET_RAW_FIELD_HELP = {
   getdevdata_device_2: {
     flg: { zh: "数据有效标记（1=有效）", en: "Data valid flag (1=valid)" },
@@ -1649,8 +1733,14 @@ let samplingChartFocusSeries = null;
 let samplingChartLastPayload = null;
 let samplingChartHandlersBound = false;
 let samplingTotalsChart = null;
+let samplingTotalsHoverIndex = null;
 let samplingRangeApplyingFromBrush = false;
 let samplingLegendSyncing = false;
+let samplingBrushGlobalHandlersBound = false;
+const samplingBrushState = {
+  active: false,
+  pendingRange: null,
+};
 let notificationMatrixCollapseState = {};
 let notificationMatrixCollapseInitialized = false;
 const tabLoadState = {
@@ -1675,6 +1765,19 @@ const samplingRangeState = {
   startDateTime: "",
   endDateTime: "",
 };
+
+function getSelectedSamplingSystem() {
+  return "overall";
+}
+const databaseTransferState = {
+  visible: false,
+  title: "",
+  message: "",
+  percentText: "",
+  ratio: 0,
+  status: "idle",
+};
+let databaseTransferTimerId = null;
 
 function getAutoRefreshSeconds() {
   const saved = Number(localStorage.getItem(AUTO_REFRESH_KEY));
@@ -1760,6 +1863,64 @@ function setHtml(id, html) {
     el.innerHTML = html;
     syncDataKindBadgeTooltip(el);
   }
+}
+
+function renderDatabaseTransferState() {
+  const container = document.getElementById("databaseTransferStatus");
+  const title = document.getElementById("databaseTransferTitle");
+  const percent = document.getElementById("databaseTransferPercent");
+  const message = document.getElementById("databaseTransferMessage");
+  const bar = document.getElementById("databaseTransferBar");
+  const fill = document.getElementById("databaseTransferFill");
+  if (!container || !title || !percent || !message || !bar || !fill) return;
+  container.classList.toggle("hidden", !databaseTransferState.visible);
+  title.textContent = databaseTransferState.title || "-";
+  percent.textContent = databaseTransferState.percentText || t("databaseTransferPreparing");
+  message.textContent = databaseTransferState.message || "-";
+  bar.classList.remove("indeterminate", "done", "failed");
+  if (databaseTransferState.status === "done") bar.classList.add("done");
+  if (databaseTransferState.status === "failed") bar.classList.add("failed");
+  const width = Math.max(0, Math.min(100, Number(databaseTransferState.ratio || 0) * 100));
+  fill.style.width = `${width.toFixed(1)}%`;
+}
+
+function setDatabaseTransferState(patch) {
+  Object.assign(databaseTransferState, patch, { visible: true });
+  if (!patch.percentText) {
+    databaseTransferState.percentText = t("databaseTransferPercent", {
+      value: Math.round(Math.max(0, Math.min(100, Number(databaseTransferState.ratio || 0) * 100))),
+    });
+  }
+  renderDatabaseTransferState();
+}
+
+function stopDatabaseTransferAutoProgress() {
+  if (databaseTransferTimerId) {
+    window.clearInterval(databaseTransferTimerId);
+    databaseTransferTimerId = null;
+  }
+}
+
+function startDatabaseTransferAutoProgress(targetRatio, step = 0.01, intervalMs = 180) {
+  stopDatabaseTransferAutoProgress();
+  databaseTransferTimerId = window.setInterval(() => {
+    const nextRatio = Math.min(targetRatio, Number(databaseTransferState.ratio || 0) + step);
+    setDatabaseTransferState({ ratio: nextRatio });
+    if (nextRatio >= targetRatio) {
+      stopDatabaseTransferAutoProgress();
+    }
+  }, intervalMs);
+}
+
+function clearDatabaseTransferState() {
+  stopDatabaseTransferAutoProgress();
+  databaseTransferState.visible = false;
+  databaseTransferState.title = "";
+  databaseTransferState.message = "";
+  databaseTransferState.percentText = "";
+  databaseTransferState.ratio = 0;
+  databaseTransferState.status = "idle";
+  renderDatabaseTransferState();
 }
 
 function setNodeSourceTip(id, tipText) {
@@ -2108,6 +2269,17 @@ function fillConfigForm(payload = {}) {
   );
 }
 
+function hasConfigValue(value) {
+  return typeof value === "string" ? value.trim().length > 0 : Boolean(value);
+}
+
+function isConfigComplete(payload = {}) {
+  return hasConfigValue(payload.ha_url)
+    && hasConfigValue(payload.ha_token)
+    && hasConfigValue(payload.solplanet_inverter_sn)
+    && hasConfigValue(payload.solplanet_battery_sn);
+}
+
 function buildConfigPayloadFromForm() {
   const sajInterval = Number(document.getElementById("cfgSajSampleIntervalSeconds").value);
   const solplanetInterval = Number(document.getElementById("cfgSolplanetSampleIntervalSeconds").value);
@@ -2125,16 +2297,15 @@ function buildConfigPayloadFromForm() {
 async function ensureConfigReady() {
   const saveMsg = document.getElementById("configSaveMsg");
   try {
-    const status = await fetchJson("/api/config/status", { timeoutMs: 5000 });
-    if (status.configured) {
+    const current = await fetchJson("/api/config", { timeoutMs: 5000 });
+    fillConfigForm(current);
+    if (isConfigComplete(current)) {
       configReady = true;
       setConfigModalVisible(false);
       return true;
     }
     configReady = false;
     setConfigModalVisible(true);
-    const current = await fetchJson("/api/config", { timeoutMs: 5000 });
-    fillConfigForm(current);
     if (saveMsg) saveMsg.textContent = t("configNeedSave");
     return false;
   } catch (err) {
@@ -4742,6 +4913,35 @@ async function applyChartSelectionRange(startMs, endMs) {
   }
 }
 
+function stageSamplingBrushRange(areas) {
+  if (!samplingBrushState.active) return;
+  samplingBrushState.pendingRange = extractBrushTimeRange(areas);
+}
+
+function clearSamplingBrushState({ clearChart = false } = {}) {
+  samplingBrushState.active = false;
+  samplingBrushState.pendingRange = null;
+  if (clearChart && samplingChart) {
+    samplingChart.dispatchAction({ type: "brush", areas: [] });
+  }
+}
+
+function bindSamplingBrushGlobalHandlers() {
+  if (samplingBrushGlobalHandlersBound) return;
+  const finishBrushSelection = () => {
+    if (!samplingBrushState.active) return;
+    const range = samplingBrushState.pendingRange;
+    clearSamplingBrushState({ clearChart: true });
+    if (!range) return;
+    void applyChartSelectionRange(range.startMs, range.endMs);
+  };
+  window.addEventListener("pointerup", finishBrushSelection);
+  window.addEventListener("mouseup", finishBrushSelection);
+  window.addEventListener("pointercancel", () => clearSamplingBrushState({ clearChart: true }));
+  window.addEventListener("blur", () => clearSamplingBrushState({ clearChart: true }));
+  samplingBrushGlobalHandlersBound = true;
+}
+
 function getLocalDateText(offsetDays = 0) {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
@@ -4788,6 +4988,41 @@ function getWeekInfo(anchorDateText) {
     sunday: localDateText(sunday),
     startUtc: monday.toISOString(),
     endUtc: endExclusive.toISOString(),
+  };
+}
+
+function getDayInfo(dayText) {
+  const fallback = getLocalDateText();
+  const parts = localDateParts(dayText || fallback);
+  const target = parts
+    ? new Date(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0)
+    : new Date();
+  const yyyy = target.getFullYear();
+  const mm = String(target.getMonth() + 1).padStart(2, "0");
+  const dd = String(target.getDate()).padStart(2, "0");
+  const normalized = `${yyyy}-${mm}-${dd}`;
+  const endUtc = normalized === getLocalDateText() ? new Date().toISOString() : toUtcIsoFromDateEndExclusive(normalized);
+  return {
+    day: normalized,
+    startUtc: toUtcIsoFromDateOnly(normalized),
+    endUtc,
+    label: normalized,
+  };
+}
+
+function getMonthInfo(monthText, yearText) {
+  const now = new Date();
+  const year = Number(yearText || now.getFullYear());
+  const month = Math.max(1, Math.min(12, Number(monthText || `${now.getMonth() + 1}`) || 1));
+  const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
+  const end = new Date(year, month, 1, 0, 0, 0, 0);
+  return {
+    year,
+    month,
+    startUtc: start.toISOString(),
+    endUtc: end.toISOString(),
+    label: `${year}-${String(month).padStart(2, "0")}`,
+    display: t("samplingMonthDisplay", { year, month: monthLabel(month) }),
   };
 }
 
@@ -4845,14 +5080,12 @@ function getSamplingRange() {
     };
   }
   if (mode === "month") {
-    const safeMonth = Math.max(1, Math.min(12, monthNumber || 1));
-    const start = new Date(monthYear, safeMonth - 1, 1, 0, 0, 0, 0);
-    const end = new Date(monthYear, safeMonth, 1, 0, 0, 0, 0);
+    const info = getMonthInfo(monthNumber, monthYear);
     return {
       mode,
-      startUtc: start.toISOString(),
-      endUtc: end.toISOString(),
-      label: `${monthYear}-${String(safeMonth).padStart(2, "0")}`,
+      startUtc: info.startUtc,
+      endUtc: info.endUtc,
+      label: info.label,
     };
   }
   if (mode === "relative") {
@@ -4894,13 +5127,12 @@ function getSamplingRange() {
       invalid: !startUtc || !endUtc || startUtc >= endUtc,
     };
   }
-  const startUtc = toUtcIsoFromDateOnly(dayText);
-  const endUtc = dayText === getLocalDateText() ? new Date().toISOString() : toUtcIsoFromDateEndExclusive(dayText);
+  const info = getDayInfo(dayText);
   return {
     mode: "day",
-    startUtc,
-    endUtc,
-    label: dayText,
+    startUtc: info.startUtc,
+    endUtc: info.endUtc,
+    label: info.label,
   };
 }
 
@@ -4909,33 +5141,46 @@ function renderSamplingRangeInputContainer() {
   const container = document.getElementById("samplingRangeInputContainer");
   if (!container) return;
 
-  if (mode === "week") {
+  if (mode === "day") {
+    const info = getDayInfo(samplingRangeState.day || getLocalDateText());
+    samplingRangeState.day = info.day;
+    container.innerHTML = `
+      <label>
+        ${t("samplingDayLabel")}
+        <div class="sampling-week-nav">
+          <button id="samplingDayPrevBtn" type="button" class="btn secondary" aria-label="${escapeHtml(t("samplingArrowPrev"))}">&#x2039;</button>
+          <div id="samplingDayDisplayText" class="sampling-week-display">${escapeHtml(info.label)}</div>
+          <button id="samplingDayNextBtn" type="button" class="btn secondary" aria-label="${escapeHtml(t("samplingArrowNext"))}">&#x203A;</button>
+        </div>
+        <div id="samplingDayField" class="sampling-field">
+          <input id="samplingDayInput" type="date" value="${samplingRangeState.day || ""}" />
+        </div>
+      </label>
+    `;
+  } else if (mode === "week") {
     const info = getWeekInfo(samplingRangeState.week || getLocalDateText());
     samplingRangeState.week = info.anchor;
     container.innerHTML = `
       <label>
         ${t("samplingWeekLabel")}
         <div class="sampling-week-nav">
-          <button id="samplingWeekPrevBtn" type="button" class="btn secondary">${t("prevBtn")}</button>
-          <div id="samplingWeekDisplayText" class="sampling-week-display">${t("samplingWeekDisplay", { week: info.week, start: info.monday, end: info.sunday })}</div>
-          <button id="samplingWeekNextBtn" type="button" class="btn secondary">${t("nextBtn")}</button>
+          <button id="samplingWeekPrevBtn" type="button" class="btn secondary" aria-label="${escapeHtml(t("samplingArrowPrev"))}">&#x2039;</button>
+          <div id="samplingWeekDisplayText" class="sampling-week-display">${escapeHtml(t("samplingWeekDisplay", { week: info.week, start: info.monday, end: info.sunday }))}</div>
+          <button id="samplingWeekNextBtn" type="button" class="btn secondary" aria-label="${escapeHtml(t("samplingArrowNext"))}">&#x203A;</button>
         </div>
       </label>
     `;
   } else if (mode === "month") {
-    const year = Number(samplingRangeState.monthYear || new Date().getFullYear());
-    const selectedMonth = Number(samplingRangeState.month || `${new Date().getMonth() + 1}`);
-    const monthOptions = Array.from({ length: 12 }, (_, i) => i + 1)
-      .map((m) => `<option value="${m}"${m === selectedMonth ? " selected" : ""}>${monthLabel(m)}</option>`)
-      .join("");
+    const info = getMonthInfo(samplingRangeState.month, samplingRangeState.monthYear);
+    samplingRangeState.month = String(info.month);
+    samplingRangeState.monthYear = info.year;
     container.innerHTML = `
       <label>
         ${t("samplingMonthLabel")}
-        <div class="sampling-month-row">
-          <span class="muted">${t("samplingMonthYear", { year })}</span>
-          <div id="samplingMonthField" class="sampling-field">
-            <select id="samplingMonthInput">${monthOptions}</select>
-          </div>
+        <div class="sampling-week-nav sampling-month-nav">
+          <button id="samplingMonthPrevBtn" type="button" class="btn secondary" aria-label="${escapeHtml(t("samplingArrowPrev"))}">&#x2039;</button>
+          <div id="samplingMonthDisplayText" class="sampling-week-display">${escapeHtml(info.display)}</div>
+          <button id="samplingMonthNextBtn" type="button" class="btn secondary" aria-label="${escapeHtml(t("samplingArrowNext"))}">&#x203A;</button>
         </div>
       </label>
     `;
@@ -4982,15 +5227,6 @@ function renderSamplingRangeInputContainer() {
         </label>
       </div>
     `;
-  } else {
-    container.innerHTML = `
-      <label data-i18n="samplingDayLabel">
-        ${t("samplingDayLabel")}
-        <div id="samplingDayField" class="sampling-field">
-          <input id="samplingDayInput" type="date" value="${samplingRangeState.day || ""}" />
-        </div>
-      </label>
-    `;
   }
 
   bindSamplingRangeInputEvents();
@@ -5015,6 +5251,28 @@ function bindSamplingRangeInputEvents() {
     }
   };
 
+  if (mode === "day") {
+    const prevBtn = document.getElementById("samplingDayPrevBtn");
+    const nextBtn = document.getElementById("samplingDayNextBtn");
+    const moveDay = async (deltaDays) => {
+      const parts = localDateParts(samplingRangeState.day || getLocalDateText());
+      const current = parts
+        ? new Date(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0)
+        : new Date();
+      current.setDate(current.getDate() + deltaDays);
+      samplingRangeState.day = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`;
+      renderSamplingRangeInputContainer();
+      samplingPager.page = 1;
+      await loadSampling();
+    };
+    if (prevBtn) prevBtn.addEventListener("click", async () => moveDay(-1));
+    if (nextBtn) nextBtn.addEventListener("click", async () => moveDay(1));
+    bindPicker("samplingDayField", "samplingDayInput", (v) => {
+      samplingRangeState.day = v;
+    });
+    return;
+  }
+
   if (mode === "week") {
     const prevBtn = document.getElementById("samplingWeekPrevBtn");
     const nextBtn = document.getElementById("samplingWeekNextBtn");
@@ -5034,9 +5292,20 @@ function bindSamplingRangeInputEvents() {
     return;
   }
   if (mode === "month") {
-    bindPicker("samplingMonthField", "samplingMonthInput", (v) => {
-      samplingRangeState.month = v;
-    });
+    const prevBtn = document.getElementById("samplingMonthPrevBtn");
+    const nextBtn = document.getElementById("samplingMonthNextBtn");
+    const moveMonth = async (deltaMonths) => {
+      const info = getMonthInfo(samplingRangeState.month, samplingRangeState.monthYear);
+      const current = new Date(info.year, info.month - 1, 1, 0, 0, 0, 0);
+      current.setMonth(current.getMonth() + deltaMonths);
+      samplingRangeState.monthYear = current.getFullYear();
+      samplingRangeState.month = String(current.getMonth() + 1);
+      renderSamplingRangeInputContainer();
+      samplingPager.page = 1;
+      await loadSampling();
+    };
+    if (prevBtn) prevBtn.addEventListener("click", async () => moveMonth(-1));
+    if (nextBtn) nextBtn.addEventListener("click", async () => moveMonth(1));
     return;
   }
   if (mode === "relative") {
@@ -5082,16 +5351,11 @@ function bindSamplingRangeInputEvents() {
     });
     return;
   }
-  bindPicker("samplingDayField", "samplingDayInput", (v) => {
-    samplingRangeState.day = v;
-  });
 }
 
 function buildSamplingUrl() {
   const params = new URLSearchParams();
-  const system = document.getElementById("samplingSystemSelect")?.value || "";
   const range = getSamplingRange();
-  if (system && system !== "overall") params.set("system", system);
   if (range.startUtc) params.set("start_utc", range.startUtc);
   if (range.endUtc) params.set("end_utc", range.endUtc);
   params.set("page", String(samplingPager.page));
@@ -5661,7 +5925,7 @@ function renderWorkerFailureLogPage(payload, { appendOlder = false } = {}) {
 function renderSamplingStatus(status) {
   const sizeMb = status?.db_size_bytes ? (Number(status.db_size_bytes) / (1024 * 1024)).toFixed(2) : "0.00";
   const estMb = status?.estimated_mb_per_day_total ?? 0;
-  const selectedSystem = document.getElementById("samplingSystemSelect")?.value || "overall";
+  const selectedSystem = getSelectedSamplingSystem();
   let interval = status?.sample_interval_seconds;
   if (selectedSystem === "saj" && status?.saj_sample_interval_seconds !== undefined) {
     interval = status.saj_sample_interval_seconds;
@@ -5724,6 +5988,28 @@ function formatSamplingSystemLabel(system) {
 
 function getSamplingChartSeriesMeta(system) {
   return system === "overall" ? SAMPLING_OVERALL_SERIES : SAMPLING_SERIES;
+}
+
+function normalizeSamplingFocusSeries(system) {
+  const chartSeriesMeta = getSamplingChartSeriesMeta(system);
+  if (samplingChartFocusSeries && !chartSeriesMeta.some((meta) => meta.key === samplingChartFocusSeries)) {
+    samplingChartFocusSeries = null;
+  }
+  return chartSeriesMeta;
+}
+
+function getSamplingSeriesColor(seriesKey, fallback = "#6b7f72") {
+  return SAMPLING_SERIES_META_BY_KEY[seriesKey]?.color || fallback;
+}
+
+function setSamplingFocusSeries(nextKey) {
+  samplingChartFocusSeries = samplingChartFocusSeries === nextKey ? null : nextKey;
+  if (samplingChartLastPayload) renderSamplingChart(samplingChartLastPayload);
+  if (stateCache.lastSamplingUsageBySystem) {
+    const range = getSamplingRange();
+    const system = getSelectedSamplingSystem();
+    renderSamplingTotals(stateCache.lastSamplingUsageBySystem, system, range.label);
+  }
 }
 
 function combineSamplingUsageForOverall(usageBySystem) {
@@ -5856,6 +6142,7 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         title: t("samplingOverallMetricPv"),
         value: (sajHasData ? Number(sajEnergy.solar_generation || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.solar_generation || 0) : 0),
         kind: "pv",
+        seriesKey: "pv_total_w",
         scope: t("samplingTotalsScopeOverall"),
         layout: "single",
       },
@@ -5864,9 +6151,11 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         leftLabel: t("samplingOverallMetricGridImport"),
         leftValue: (sajHasData ? Number(sajEnergy.grid_import || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.grid_import || 0) : 0),
         leftKind: "import",
+        leftSeriesKey: "grid_import_w",
         rightLabel: t("samplingOverallMetricGridExport"),
         rightValue: (sajHasData ? Number(sajEnergy.grid_export || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.grid_export || 0) : 0),
         rightKind: "export",
+        rightSeriesKey: "grid_export_w",
         scope: t("samplingTotalsScopeOverall"),
         layout: "dual",
       },
@@ -5875,9 +6164,11 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         leftLabel: t("samplingOverallMetricBatteryCharge"),
         leftValue: sajHasData ? Number(sajEnergy.battery_charge || 0) : 0,
         leftKind: "charge",
+        leftSeriesKey: "saj_battery_charge_w",
         rightLabel: t("samplingOverallMetricBatteryDischarge"),
         rightValue: sajHasData ? Number(sajEnergy.battery_discharge || 0) : 0,
         rightKind: "discharge",
+        rightSeriesKey: "saj_battery_discharge_w",
         scope: t("samplingTotalsScopeOverall"),
         layout: "dual",
       },
@@ -5886,9 +6177,11 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         leftLabel: t("samplingOverallMetricBatteryCharge"),
         leftValue: solplanetHasData ? Number(solplanetEnergy.battery_charge || 0) : 0,
         leftKind: "charge",
+        leftSeriesKey: "solplanet_battery_charge_w",
         rightLabel: t("samplingOverallMetricBatteryDischarge"),
         rightValue: solplanetHasData ? Number(solplanetEnergy.battery_discharge || 0) : 0,
         rightKind: "discharge",
+        rightSeriesKey: "solplanet_battery_discharge_w",
         scope: t("samplingTotalsScopeOverall"),
         layout: "dual",
       },
@@ -5906,6 +6199,7 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         title: t("samplingOverallMetricPv"),
         value: selectedHasData ? Number(selectedEnergy.solar_generation || 0) : 0,
         kind: "pv",
+        seriesKey: "pv_w",
         scope: t("samplingTotalsScopeSystem", { system: selectedLabel }),
         layout: "single",
       },
@@ -5914,9 +6208,11 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         leftLabel: t("samplingOverallMetricGridImport"),
         leftValue: selectedHasData ? Number(selectedEnergy.grid_import || 0) : 0,
         leftKind: "import",
+        leftSeriesKey: "grid_w",
         rightLabel: t("samplingOverallMetricGridExport"),
         rightValue: selectedHasData ? Number(selectedEnergy.grid_export || 0) : 0,
         rightKind: "export",
+        rightSeriesKey: "grid_w",
         scope: t("samplingTotalsScopeSystem", { system: selectedLabel }),
         layout: "dual",
       },
@@ -5924,6 +6220,7 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         title: t("samplingOverallMetricBatteryCharge"),
         value: selectedHasData ? Number(selectedEnergy.battery_charge || 0) : 0,
         kind: "charge",
+        seriesKey: "battery_w",
         scope: t("samplingTotalsScopeSystem", { system: selectedLabel }),
         layout: "single",
       },
@@ -5931,6 +6228,7 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         title: t("samplingOverallMetricBatteryDischarge"),
         value: selectedHasData ? Number(selectedEnergy.battery_discharge || 0) : 0,
         kind: "discharge",
+        seriesKey: "battery_w",
         scope: t("samplingTotalsScopeSystem", { system: selectedLabel }),
         layout: "single",
       },
@@ -6028,20 +6326,27 @@ function ensureSamplingChart() {
   if (!canvas) return null;
   if (typeof window.echarts === "undefined") return null;
   samplingChart = window.echarts.init(canvas, null, { renderer: "canvas" });
+  bindSamplingBrushGlobalHandlers();
   if (!samplingChartHandlersBound) {
+    const zr = samplingChart.getZr();
+    if (zr) {
+      zr.on("mousedown", (event) => {
+        if (Number(event?.button ?? 0) !== 0) return;
+        samplingBrushState.active = true;
+        samplingBrushState.pendingRange = null;
+      });
+    }
     samplingChart.on("click", (params) => {
       if (params?.componentType !== "series") return;
       const picked = params.seriesName || params.name;
       if (!picked) return;
-      samplingChartFocusSeries = samplingChartFocusSeries === picked ? null : picked;
-      if (samplingChartLastPayload) renderSamplingChart(samplingChartLastPayload);
+      setSamplingFocusSeries(picked);
     });
     samplingChart.on("legendselectchanged", (params) => {
       if (samplingLegendSyncing) return;
       const picked = params?.name;
       if (!picked) return;
-      samplingChartFocusSeries = samplingChartFocusSeries === picked ? null : picked;
-      if (samplingChartLastPayload) renderSamplingChart(samplingChartLastPayload);
+      setSamplingFocusSeries(picked);
       // Keep all legend items selected; focus is controlled by line styles, not hide/show.
       if (samplingChart) {
         samplingLegendSyncing = true;
@@ -6052,12 +6357,14 @@ function ensureSamplingChart() {
     samplingChart.on("restore", () => {
       samplingChartFocusSeries = null;
       if (samplingChartLastPayload) renderSamplingChart(samplingChartLastPayload);
+      if (stateCache.lastSamplingUsageBySystem) {
+        const range = getSamplingRange();
+        const system = getSelectedSamplingSystem();
+        renderSamplingTotals(stateCache.lastSamplingUsageBySystem, system, range.label);
+      }
     });
     const applyFromAreas = (areas) => {
-      const range = extractBrushTimeRange(areas);
-      if (!range) return;
-      if (samplingChart) samplingChart.dispatchAction({ type: "brush", areas: [] });
-      void applyChartSelectionRange(range.startMs, range.endMs);
+      stageSamplingBrushRange(areas);
     };
     samplingChart.on("brushEnd", (event) => {
       applyFromAreas(event?.areas);
@@ -6084,10 +6391,7 @@ function renderSamplingChart(seriesPayload) {
   const chart = ensureSamplingChart();
   if (!chart) return;
   const items = Array.isArray(seriesPayload?.items) ? seriesPayload.items : [];
-  const chartSeriesMeta = getSamplingChartSeriesMeta(seriesPayload?.system || (document.getElementById("samplingSystemSelect")?.value || "overall"));
-  if (samplingChartFocusSeries && !chartSeriesMeta.some((meta) => meta.key === samplingChartFocusSeries)) {
-    samplingChartFocusSeries = null;
-  }
+  const chartSeriesMeta = normalizeSamplingFocusSeries(seriesPayload?.system || getSelectedSamplingSystem());
   const startMs = new Date(seriesPayload?.start_at_utc || "").getTime();
   const endMs = new Date(seriesPayload?.end_at_utc || "").getTime();
   const xMin = Number.isFinite(startMs) ? startMs : null;
@@ -6262,6 +6566,51 @@ function ensureSamplingTotalsChart() {
   return samplingTotalsChart;
 }
 
+function renderSamplingTotalsChartOverlay(chart, rows, hasData) {
+  const host = document.getElementById("samplingTotalsChartCanvas");
+  if (!host) return;
+  let overlay = host.querySelector(".sampling-totals-chart-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.className = "sampling-totals-chart-overlay";
+    host.appendChild(overlay);
+  }
+  if (!hasData || !rows.length) {
+    overlay.innerHTML = "";
+    overlay.classList.add("hidden");
+    return;
+  }
+  overlay.classList.remove("hidden");
+  overlay.innerHTML = "";
+  const setHoveredLane = (nextIndex) => {
+    if (samplingTotalsHoverIndex === nextIndex) return;
+    samplingTotalsHoverIndex = nextIndex;
+    overlay.querySelectorAll(".sampling-totals-chart-lane").forEach((laneNode, laneIndex) => {
+      laneNode.classList.toggle("is-hovered", laneIndex === nextIndex);
+    });
+  };
+  rows.forEach((row, index) => {
+    const lane = document.createElement("button");
+    lane.type = "button";
+    lane.className = "sampling-totals-chart-lane";
+    lane.style.top = `${(index / rows.length) * 100}%`;
+    lane.style.height = `${100 / rows.length}%`;
+    lane.style.setProperty("--sampling-hover-accent", getSamplingSeriesColor(row.seriesKey, "#d7e5dc"));
+    if (samplingTotalsHoverIndex === index) lane.classList.add("is-hovered");
+    lane.addEventListener("mouseenter", () => {
+      setHoveredLane(index);
+    });
+    lane.addEventListener("mouseleave", () => {
+      setHoveredLane(null);
+    });
+    lane.addEventListener("click", () => {
+      if (!row?.seriesKey) return;
+      setSamplingFocusSeries(row.seriesKey);
+    });
+    overlay.appendChild(lane);
+  });
+}
+
 function buildSamplingTotalsChartRows(cards) {
   const rows = [];
   for (const card of Array.isArray(cards) ? cards : []) {
@@ -6278,17 +6627,20 @@ function buildSamplingTotalsChartRows(cards) {
         label: `${card.leftLabel || ""}${suffix}`.trim(),
         value: Math.max(Number(card.leftValue || 0), 0),
         kind: card.leftKind,
+        seriesKey: card.leftSeriesKey || null,
       });
       rows.push({
         label: `${card.rightLabel || ""}${suffix}`.trim(),
         value: Math.max(Number(card.rightValue || 0), 0),
         kind: card.rightKind,
+        seriesKey: card.rightSeriesKey || null,
       });
     } else {
       rows.push({
         label: card.title,
         value: Math.max(Number(card.value || 0), 0),
         kind: card.kind,
+        seriesKey: card.seriesKey || null,
       });
     }
   }
@@ -6298,10 +6650,14 @@ function buildSamplingTotalsChartRows(cards) {
 function renderSamplingTotalsChart(cards) {
   const chart = ensureSamplingTotalsChart();
   if (!chart) return;
+  chart.__cards = cards;
   const rows = buildSamplingTotalsChartRows(cards);
+  chart.__rows = rows;
+  if (samplingTotalsHoverIndex !== null && (samplingTotalsHoverIndex < 0 || samplingTotalsHoverIndex >= rows.length)) {
+    samplingTotalsHoverIndex = null;
+  }
   const hasData = rows.some((row) => Number(row.value || 0) !== 0);
   const labels = rows.map((row) => row.label);
-  const values = rows.map((row) => row.value);
   const maxAbs = Math.max(0, ...rows.map((row) => Math.abs(Number(row.value || 0))));
   chart.setOption(
     {
@@ -6326,12 +6682,9 @@ function renderSamplingTotalsChart(cards) {
         axisLabel: { color: "#395346", fontSize: 12, fontWeight: 700 },
       },
       tooltip: {
-        trigger: "axis",
-        axisPointer: { type: "shadow" },
+        trigger: "item",
         formatter: (params) => {
-          const list = Array.isArray(params) ? params : [];
-          if (!list.length) return "";
-          const idx = Number(list[0]?.dataIndex || 0);
+          const idx = Number(params?.dataIndex || 0);
           const row = rows[idx];
           if (!row) return "";
           return `${escapeHtml(row.label)}<br/>${formatEnergyKwhText(row.value)}`;
@@ -6352,23 +6705,25 @@ function renderSamplingTotalsChart(cards) {
         {
           type: "bar",
           barWidth: 12,
-          data: values,
+          data: rows.map((row) => ({
+            value: row.value,
+            itemStyle: {
+              color: getSamplingSeriesColor(row.seriesKey, "#6b7f72"),
+              opacity: !samplingChartFocusSeries || samplingChartFocusSeries === row.seriesKey ? 1 : 0.3,
+            },
+          })),
           itemStyle: {
             borderRadius: [999, 999, 999, 999],
-            color: (params) => {
-              const row = rows[params.dataIndex];
-              if (row?.kind === "import") return "#4f8df7";
-              if (row?.kind === "export") return "#8b5cf6";
-              if (row?.kind === "pv") return "#f59e0b";
-              if (row?.kind === "charge") return "#d97706";
-              return "#22c55e";
-            },
           },
+          emphasis: { disabled: true },
           label: {
             show: true,
             position: "right",
             distance: 8,
-            color: "#5b6d63",
+            color: ({ dataIndex }) => {
+              const row = rows[dataIndex];
+              return !samplingChartFocusSeries || samplingChartFocusSeries === row?.seriesKey ? "#415449" : "#9ca9a1";
+            },
             fontSize: 11,
             formatter: ({ value }) => (Number(value) ? `${formatTrimmedDecimal(Math.abs(Number(value)), 2)} kWh` : ""),
           },
@@ -6379,17 +6734,19 @@ function renderSamplingTotalsChart(cards) {
             lineStyle: { color: "rgba(82, 104, 92, 0.18)", width: 2 },
             data: [{ xAxis: 0 }],
           },
-          emphasis: { disabled: true },
+          cursor: "pointer",
         },
       ],
     },
     true,
   );
+  renderSamplingTotalsChartOverlay(chart, rows, hasData);
 }
 
 function renderSamplingTotals(usageBySystem, selectedSystem, rangeLabel, options = {}) {
   const body = document.getElementById("samplingTotalsBody");
   if (!body) return;
+  normalizeSamplingFocusSeries(selectedSystem);
   const systemText = formatSamplingSystemLabel(selectedSystem);
   const summary = buildSamplingTotalsSummary(usageBySystem, selectedSystem);
   const cards = Array.isArray(summary?.cards) ? summary.cards : [];
@@ -6440,22 +6797,30 @@ function renderSamplingTotals(usageBySystem, selectedSystem, rangeLabel, options
           if (card.layout === "dual") {
             const leftValueText = card.leftValue > 0 ? formatEnergyKwhText(card.leftValue) : "-";
             const rightValueText = card.rightValue > 0 ? formatEnergyKwhText(card.rightValue) : "-";
+            const leftActive = samplingChartFocusSeries && samplingChartFocusSeries === card.leftSeriesKey;
+            const rightActive = samplingChartFocusSeries && samplingChartFocusSeries === card.rightSeriesKey;
+            const anyActive = leftActive || rightActive;
+            const dimmed = samplingChartFocusSeries && !anyActive ? " is-dimmed" : "";
+            const activeSeriesKey = leftActive ? card.leftSeriesKey : rightActive ? card.rightSeriesKey : card.leftSeriesKey;
+            const cardStyle = `--sampling-accent:${getSamplingSeriesColor(activeSeriesKey)};--sampling-left-accent:${getSamplingSeriesColor(card.leftSeriesKey)};--sampling-right-accent:${getSamplingSeriesColor(card.rightSeriesKey)};`;
+            const leftStyle = `--sampling-accent:${getSamplingSeriesColor(card.leftSeriesKey)};`;
+            const rightStyle = `--sampling-accent:${getSamplingSeriesColor(card.rightSeriesKey)};`;
             return `
-              <article class="sampling-total-card sampling-total-card-dual">
+              <article class="sampling-total-card sampling-total-card-dual${anyActive ? " is-active" : ""}${dimmed}" style="${escapeHtml(cardStyle)}">
                 <div class="sampling-total-card-head">
                   <span class="sampling-total-card-title">${escapeHtml(card.title)}</span>
                   <span class="sampling-total-card-scope">${escapeHtml(card.scope)}</span>
                 </div>
                 <div class="sampling-total-dual-values">
-                  <div class="sampling-total-dual-value is-left">
+                  <button class="sampling-total-dual-value is-left${leftActive ? " is-active" : ""}" type="button" data-sampling-focus-series="${escapeHtml(card.leftSeriesKey || "")}" style="${escapeHtml(leftStyle)}">
                     <span class="sampling-total-dual-label">${escapeHtml(card.leftLabel || "")}</span>
                     <span class="sampling-total-dual-number">${escapeHtml(leftValueText)}</span>
-                  </div>
+                  </button>
                   <div class="sampling-total-dual-divider"></div>
-                  <div class="sampling-total-dual-value is-right">
+                  <button class="sampling-total-dual-value is-right${rightActive ? " is-active" : ""}" type="button" data-sampling-focus-series="${escapeHtml(card.rightSeriesKey || "")}" style="${escapeHtml(rightStyle)}">
                     <span class="sampling-total-dual-label">${escapeHtml(card.rightLabel || "")}</span>
                     <span class="sampling-total-dual-number">${escapeHtml(rightValueText)}</span>
-                  </div>
+                  </button>
                 </div>
                 <div class="sampling-total-balance-track">
                   <div class="sampling-total-balance-center"></div>
@@ -6466,13 +6831,16 @@ function renderSamplingTotals(usageBySystem, selectedSystem, rangeLabel, options
             `;
           }
           const valueText = card.value > 0 ? formatEnergyKwhText(card.value) : "-";
+          const active = samplingChartFocusSeries && samplingChartFocusSeries === card.seriesKey;
+          const dimmed = samplingChartFocusSeries && !active ? " is-dimmed" : "";
+          const style = `--sampling-accent:${getSamplingSeriesColor(card.seriesKey)};`;
           return `
-            <article class="sampling-total-card is-${escapeHtml(card.kind)}">
+            <article class="sampling-total-card is-${escapeHtml(card.kind)}${active ? " is-active" : ""}${dimmed}" style="${escapeHtml(style)}">
               <div class="sampling-total-card-head">
                 <span class="sampling-total-card-title">${escapeHtml(card.title)}</span>
                 <span class="sampling-total-card-scope">${escapeHtml(card.scope)}</span>
               </div>
-              <div class="sampling-total-card-value">${escapeHtml(valueText)}</div>
+              <button class="sampling-total-card-value sampling-total-card-value-btn${active ? " is-active" : ""}" type="button" data-sampling-focus-series="${escapeHtml(card.seriesKey || "")}" style="${escapeHtml(style)}">${escapeHtml(valueText)}</button>
               <div class="sampling-total-card-track">
                 <div class="sampling-total-fill is-${escapeHtml(card.kind)}" style="width:${widthPct(card.value)}%;"></div>
               </div>
@@ -6505,6 +6873,13 @@ function renderSamplingTotals(usageBySystem, selectedSystem, rangeLabel, options
         : ""
     }
   `;
+  body.querySelectorAll("[data-sampling-focus-series]").forEach((node) => {
+    node.addEventListener("click", () => {
+      const seriesKey = node.getAttribute("data-sampling-focus-series");
+      if (!seriesKey) return;
+      setSamplingFocusSeries(seriesKey);
+    });
+  });
 }
 
 function getRawCardMode(key) {
@@ -8337,30 +8712,70 @@ async function loadSajRaw() {
   await loadRawPanel(SAJ_RAW_APIS, stateCache.lastSajRaw, "sajRawBody", "sajRawMeta", "sajRawUpdatedAt");
 }
 
-function setSamplingActionBusy(busy, exporting = false, importing = false) {
-  const exportBtn = document.getElementById("samplingExportBtn");
-  const importBtn = document.getElementById("samplingImportBtn");
+function setDatabaseActionBusy(busy, exporting = false, importing = false) {
+  const exportBtn = document.getElementById("databaseExportBtn");
+  const importBtn = document.getElementById("databaseImportBtn");
   if (exportBtn) {
     exportBtn.disabled = busy;
-    exportBtn.textContent = exporting ? t("samplingExporting") : t("samplingExportBtn");
+    exportBtn.textContent = exporting ? t("databaseExporting") : t("databaseExportBtn");
   }
   if (importBtn) {
     importBtn.disabled = busy;
-    importBtn.textContent = importing ? t("samplingImporting") : t("samplingImportBtn");
+    importBtn.textContent = importing ? t("databaseImporting") : t("databaseImportBtn");
   }
 }
 
-async function exportSamplingCsv() {
-  setSamplingActionBusy(true, true, false);
+async function exportDatabaseFile() {
+  setDatabaseActionBusy(true, true, false);
   try {
-    const response = await fetch("/api/storage/export.csv", { method: "GET" });
-    if (!response.ok) {
-      const message = await readErrorMessage(response);
-      throw new Error(message);
+    setDatabaseTransferState({
+      title: t("databaseTransferExportTitle"),
+      message: t("databaseTransferExportStarting"),
+      ratio: 0.04,
+      status: "loading",
+    });
+    startDatabaseTransferAutoProgress(0.18, 0.01, 220);
+    const xhr = await xhrRequest("/api/database/export.sqlite3", {
+      method: "GET",
+      responseType: "blob",
+      onDownloadProgress: (event, req) => {
+        const totalHeader = Number(req.getResponseHeader("Content-Length") || 0);
+        const total = event.lengthComputable ? event.total : totalHeader;
+        if (total > 0) {
+          const ratio = Math.max(0, Math.min(1, event.loaded / total));
+          setDatabaseTransferState({
+            title: t("databaseTransferExportTitle"),
+            message: t("databaseTransferDownloaded", {
+              loaded: formatBinarySize(event.loaded),
+              total: formatBinarySize(total),
+            }),
+            ratio,
+            status: "loading",
+          });
+          return;
+        }
+        setDatabaseTransferState({
+          title: t("databaseTransferExportTitle"),
+          message: t("databaseTransferExportStreaming"),
+          ratio: Math.max(Number(databaseTransferState.ratio || 0), 0.2),
+          status: "loading",
+        });
+        startDatabaseTransferAutoProgress(0.82, 0.015, 220);
+      },
+    });
+    stopDatabaseTransferAutoProgress();
+    if (xhr.status < 200 || xhr.status >= 300) {
+      throw new Error(xhr.statusText || `HTTP ${xhr.status}`);
     }
-    const blob = await response.blob();
-    const filenameMatch = (response.headers.get("Content-Disposition") || "").match(/filename=\"([^\"]+)\"/);
-    const filename = filenameMatch?.[1] || "energy_samples.csv";
+    const blob = xhr.response;
+    setDatabaseTransferState({
+      title: t("databaseTransferExportTitle"),
+      message: t("databaseTransferExportFinishing"),
+      ratio: 1,
+      status: "done",
+    });
+    const filenameMatch = (xhr.getResponseHeader("Content-Disposition") || "").match(/filename=\"([^\"]+)\"/);
+    const filename = filenameMatch?.[1] || "wattimize.sqlite3";
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -8369,43 +8784,133 @@ async function exportSamplingCsv() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+    window.setTimeout(() => {
+      clearDatabaseTransferState();
+    }, 1200);
   } catch (err) {
-    window.alert(t("samplingExportFailed", { error: String(err) }));
+    stopDatabaseTransferAutoProgress();
+    setDatabaseTransferState({
+      title: t("databaseTransferExportTitle"),
+      message: String(err),
+      percentText: t("databaseTransferFailed"),
+      ratio: 1,
+      status: "failed",
+    });
+    window.alert(t("databaseExportFailed", { error: String(err) }));
   } finally {
-    setSamplingActionBusy(false, false, false);
+    setDatabaseActionBusy(false, false, false);
   }
 }
 
-async function importSamplingCsv(file) {
+async function importDatabaseFile(file) {
   if (!file) return;
-  if (!window.confirm(t("samplingImportConfirmReplace"))) return;
-  setSamplingActionBusy(true, false, true);
+  if (!window.confirm(t("databaseImportConfirmReplace"))) return;
+  setDatabaseActionBusy(true, false, true);
   try {
     const formData = new FormData();
     formData.append("file", file);
-    const response = await fetch("/api/storage/import.csv?replace_existing=true", {
+    setDatabaseTransferState({
+      title: t("databaseTransferImportTitle"),
+      message: t("databaseTransferImportUploading"),
+      ratio: 0.02,
+      status: "loading",
+    });
+    startDatabaseTransferAutoProgress(0.12, 0.008, 220);
+    const xhr = await xhrRequest("/api/database/import.sqlite3", {
       method: "POST",
       body: formData,
+      responseType: "text",
+      onUploadProgress: (event) => {
+        if (event.lengthComputable && event.total > 0) {
+          const ratio = Math.max(0, Math.min(0.9, (event.loaded / event.total) * 0.9));
+          setDatabaseTransferState({
+            title: t("databaseTransferImportTitle"),
+            message: t("databaseTransferUploaded", {
+              loaded: formatBinarySize(event.loaded),
+              total: formatBinarySize(event.total),
+            }),
+            ratio,
+            status: "loading",
+          });
+          return;
+        }
+        setDatabaseTransferState({
+          title: t("databaseTransferImportTitle"),
+          message: t("databaseTransferImportUploading"),
+          ratio: Math.max(Number(databaseTransferState.ratio || 0), 0.18),
+          status: "loading",
+        });
+        startDatabaseTransferAutoProgress(0.78, 0.012, 200);
+      },
+      onUploadComplete: () => {
+        stopDatabaseTransferAutoProgress();
+        setDatabaseTransferState({
+          title: t("databaseTransferImportTitle"),
+          message: t("databaseTransferImportApplying"),
+          ratio: 0.9,
+          status: "loading",
+        });
+        startDatabaseTransferAutoProgress(0.96, 0.004, 280);
+      },
     });
-    if (!response.ok) {
-      const message = await readErrorMessage(response);
+    if (xhr.status < 200 || xhr.status >= 300) {
+      let message = xhr.responseText || `HTTP ${xhr.status}`;
+      try {
+        const parsed = JSON.parse(xhr.responseText || "{}");
+        if (typeof parsed?.detail === "string") message = parsed.detail;
+      } catch (_err) {
+        // Keep raw response text.
+      }
       throw new Error(message);
     }
-    const payload = await response.json();
-    window.alert(t("samplingImportDone", { count: payload.imported_rows || 0 }));
+    JSON.parse(xhr.responseText || "{}");
+    stopDatabaseTransferAutoProgress();
+    setDatabaseTransferState({
+      title: t("databaseTransferImportTitle"),
+      message: t("databaseTransferImportRefreshing"),
+      ratio: 0.95,
+      status: "loading",
+    });
+    startDatabaseTransferAutoProgress(0.98, 0.003, 240);
+    databasePager.page = 1;
     samplingPager.page = 1;
+    stateCache.lastDatabaseTables = null;
+    stateCache.lastDatabasePage = null;
+    stateCache.lastSampling = null;
+    stateCache.lastSamplingSeries = null;
+    stateCache.lastStorageStatus = null;
+    await loadDatabase();
     await loadSampling();
+    stopDatabaseTransferAutoProgress();
+    setDatabaseTransferState({
+      title: t("databaseTransferImportTitle"),
+      message: t("databaseTransferImportDone"),
+      ratio: 1,
+      status: "done",
+    });
+    window.alert(t("databaseImportDone"));
+    window.setTimeout(() => {
+      clearDatabaseTransferState();
+    }, 1200);
   } catch (err) {
-    window.alert(t("samplingImportFailed", { error: String(err) }));
+    stopDatabaseTransferAutoProgress();
+    setDatabaseTransferState({
+      title: t("databaseTransferImportTitle"),
+      message: String(err),
+      percentText: t("databaseTransferFailed"),
+      ratio: 1,
+      status: "failed",
+    });
+    window.alert(t("databaseImportFailed", { error: String(err) }));
   } finally {
-    setSamplingActionBusy(false, false, false);
-    const input = document.getElementById("samplingImportFileInput");
+    setDatabaseActionBusy(false, false, false);
+    const input = document.getElementById("databaseImportFileInput");
     if (input) input.value = "";
   }
 }
 
 async function loadSampling() {
-  const system = document.getElementById("samplingSystemSelect")?.value || "overall";
+  const system = getSelectedSamplingSystem();
   const overallMode = system === "overall";
   const range = getSamplingRange();
   if (!range.startUtc || !range.endUtc || range.invalid) {
@@ -8551,7 +9056,7 @@ function rerenderSamplingViewFromCache() {
   }
   if (stateCache.lastSamplingUsageBySystem) {
     const range = getSamplingRange();
-    const system = document.getElementById("samplingSystemSelect")?.value || "overall";
+    const system = getSelectedSamplingSystem();
     renderSamplingTotals(stateCache.lastSamplingUsageBySystem, system, range.label);
   }
   if (stateCache.lastSamplingPage) renderSamplingPage(stateCache.lastSamplingPage);
@@ -8561,7 +9066,7 @@ function rerenderSamplingViewFromCache() {
     setText(
       "samplingChartMeta",
       t("samplingChartMeta", {
-        system: formatSamplingSystemLabel(payload.system || (document.getElementById("samplingSystemSelect")?.value || "overall")),
+        system: formatSamplingSystemLabel(payload.system || getSelectedSamplingSystem()),
         range: range.label,
         count: payload.count || 0,
       }),
@@ -8895,11 +9400,6 @@ bindChangeIfPresent("databaseTableSelect", async () => {
   await loadDatabase();
 });
 
-bindChangeIfPresent("samplingSystemSelect", async () => {
-  samplingPager.page = 1;
-  await loadSampling();
-});
-
 bindChangeIfPresent("samplingRangeModeSelect", async () => {
   renderSamplingRangeInputContainer();
   samplingPager.page = 1;
@@ -8909,11 +9409,11 @@ bindChangeIfPresent("samplingRangeModeSelect", async () => {
 bindChangeIfPresent("samplingSmoothModeSelect", () => {
   if (samplingChartLastPayload) renderSamplingChart(samplingChartLastPayload);
 });
-bindClickIfPresent("samplingExportBtn", () => {
-  void exportSamplingCsv();
+bindClickIfPresent("databaseExportBtn", () => {
+  void exportDatabaseFile();
 });
-bindClickIfPresent("samplingImportBtn", () => {
-  const fileInput = document.getElementById("samplingImportFileInput");
+bindClickIfPresent("databaseImportBtn", () => {
+  const fileInput = document.getElementById("databaseImportFileInput");
   if (!fileInput) return;
   if (typeof fileInput.showPicker === "function") {
     fileInput.showPicker();
@@ -8923,13 +9423,13 @@ bindClickIfPresent("samplingImportBtn", () => {
 });
 
 {
-  const input = document.getElementById("samplingImportFileInput");
+  const input = document.getElementById("databaseImportFileInput");
   if (input) {
     input.addEventListener("change", (event) => {
       const target = event.target;
       const file = target?.files?.[0];
       if (!file) return;
-      void importSamplingCsv(file);
+      void importDatabaseFile(file);
     });
   }
 }
@@ -9190,10 +9690,14 @@ for (const key of WEEKDAY_ORDER) {
           timeoutMs: 10000,
         });
         fillConfigForm(result);
-        configReady = true;
-        setConfigModalVisible(false);
-        if (saveMsg) saveMsg.textContent = t("configSaved");
-        void loadCurrentTab();
+        configReady = isConfigComplete(result);
+        if (configReady) {
+          setConfigModalVisible(false);
+          if (saveMsg) saveMsg.textContent = t("configSaved");
+          void loadCurrentTab();
+        } else if (saveMsg) {
+          saveMsg.textContent = t("configMustSaveFirst");
+        }
       } catch (err) {
         configReady = false;
         if (saveMsg) saveMsg.textContent = t("configSaveFailed", { error: String(err) });
@@ -9210,6 +9714,27 @@ bindClickIfPresent("configCloseBtn", () => {
   }
   setConfigModalVisible(false);
   if (saveMsg) saveMsg.textContent = "-";
+});
+
+bindClickIfPresent("configAutoDiscoverBtn", async () => {
+  const saveMsg = document.getElementById("configSaveMsg");
+  if (saveMsg) saveMsg.textContent = t("configAutoDiscovering");
+  try {
+    const result = await fetchJson("/api/config/solplanet/discover", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        solplanet_dongle_host: document.getElementById("cfgDongleHost").value.trim(),
+      }),
+      timeoutMs: 15000,
+    });
+    fillConfigForm(result);
+    configReady = isConfigComplete(result);
+    if (saveMsg) saveMsg.textContent = t("configAutoDiscovered");
+  } catch (err) {
+    configReady = false;
+    if (saveMsg) saveMsg.textContent = t("configAutoDiscoverFailed", { error: String(err) });
+  }
 });
 
 window.addEventListener("resize", () => {

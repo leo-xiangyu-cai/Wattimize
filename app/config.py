@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,6 +35,9 @@ CONST_SOLPLANET_REQUEST_TIMEOUT_SECONDS = 30.0
 ALLOWED_SAMPLE_INTERVAL_SECONDS: tuple[int, ...] = (5, 10, 30, 60, 300)
 CONST_SAJ_SAMPLE_INTERVAL_SECONDS = 5
 CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS = 60
+CONFIG_TABLE_NAME = "app_config"
+CONFIG_SINGLETON_KEY = "global"
+DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "energy_samples.sqlite3"
 
 
 @dataclass(frozen=True)
@@ -67,18 +71,43 @@ def normalize_sample_interval_seconds(value: object, default: int) -> int:
 
 
 def get_config_path() -> Path:
+    configured = os.getenv("WATTIMIZE_DB_PATH", "").strip()
+    if configured:
+        if configured.startswith("sqlite:///"):
+            return Path(configured.removeprefix("sqlite:///"))
+        return Path(configured)
+    return DEFAULT_DB_PATH
+
+
+def _legacy_config_path() -> Path:
     configured = os.getenv("WATTIMIZE_CONFIG_PATH", "").strip()
     if configured:
         return Path(configured)
     container_default = Path("/app/data/config.json")
     if Path("/app").exists():
         return container_default
-    project_default = Path(__file__).resolve().parent.parent / "data" / "config.json"
-    return project_default
+    return Path(__file__).resolve().parent.parent / "data" / "config.json"
 
 
-def read_config_file() -> dict[str, object]:
+def _connect_config_db() -> sqlite3.Connection:
     path = get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {CONFIG_TABLE_NAME} (
+            config_key TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL,
+            updated_at_utc TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    return conn
+
+
+def _read_legacy_config_file() -> dict[str, object]:
+    path = _legacy_config_path()
     if not path.exists():
         return {}
     try:
@@ -88,8 +117,37 @@ def read_config_file() -> dict[str, object]:
     return data if isinstance(data, dict) else {}
 
 
-def config_file_exists() -> bool:
-    return get_config_path().exists()
+def read_config_db() -> dict[str, object]:
+    try:
+        with _connect_config_db() as conn:
+            row = conn.execute(
+                f"SELECT payload_json FROM {CONFIG_TABLE_NAME} WHERE config_key = ?",
+                (CONFIG_SINGLETON_KEY,),
+            ).fetchone()
+    except sqlite3.Error:
+        return {}
+    if not row or not row[0]:
+        return {}
+    try:
+        payload = json.loads(str(row[0]))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_config_db(payload: dict[str, object]) -> None:
+    with _connect_config_db() as conn:
+        conn.execute(
+            f"""
+            INSERT INTO {CONFIG_TABLE_NAME} (config_key, payload_json, updated_at_utc)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(config_key) DO UPDATE SET
+                payload_json = excluded.payload_json,
+                updated_at_utc = CURRENT_TIMESTAMP
+            """,
+            (CONFIG_SINGLETON_KEY, json.dumps(payload, ensure_ascii=False, indent=2)),
+        )
+        conn.commit()
 
 
 def _env_values() -> dict[str, object]:
@@ -133,7 +191,14 @@ def _build_settings(raw: dict[str, object]) -> Settings:
 
 
 def load_settings() -> Settings:
-    merged = {**_env_values(), **read_config_file()}
+    db_values = read_config_db()
+    if not db_values:
+        legacy_values = _read_legacy_config_file()
+        if legacy_values:
+            normalized_legacy = _build_settings(legacy_values)
+            db_values = settings_to_dict(normalized_legacy)
+            _write_config_db(db_values)
+    merged = {**_env_values(), **db_values}
     return _build_settings(merged)
 
 
@@ -155,13 +220,7 @@ def save_settings(payload: dict[str, object]) -> Settings:
     base = settings_to_dict(load_settings())
     base.update(payload)
     normalized = _build_settings(base)
-
-    path = get_config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(settings_to_dict(normalized), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    _write_config_db(settings_to_dict(normalized))
     return normalized
 
 

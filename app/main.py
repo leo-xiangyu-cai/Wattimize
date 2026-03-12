@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import traceback
 from urllib.parse import urlparse
 from collections import Counter
@@ -19,7 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 
@@ -28,12 +29,10 @@ from app.config import (
     CONST_SAJ_SAMPLE_INTERVAL_SECONDS,
     CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS,
     Settings,
-    config_file_exists,
     get_config_path,
     get_missing_required_fields_from_payload,
     load_settings,
     normalize_sample_interval_seconds,
-    read_config_file,
     save_settings,
     settings_to_dict,
 )
@@ -47,8 +46,9 @@ from app.persistence import (
     compute_daily_usage,
     compute_usage_between,
     dismiss_notification_entry,
+    dispose_db_connections,
     expire_pending_worker_api_logs,
-    export_samples_csv,
+    export_database_bytes,
     finalize_pending_worker_api_logs_for_round,
     get_latest_raw_request_result,
     get_realtime_kv_by_prefix,
@@ -57,7 +57,7 @@ from app.persistence import (
     get_storage_status,
     insert_raw_request_result,
     insert_worker_api_log,
-    import_samples_csv,
+    import_database_bytes,
     init_db,
     insert_sample,
     list_active_notification_entries,
@@ -191,6 +191,9 @@ static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+INDEX_CACHE_PLACEHOLDER = "__WATTIMIZE_STATIC_VERSION__"
+static_asset_version = "dev"
+
 solplanet_flow_cache: dict[str, object] = {"payload": None, "at_monotonic": 0.0}
 solplanet_flow_lock = asyncio.Lock()
 solplanet_context_cache: dict[str, object] = {"payload": None, "at_monotonic": 0.0}
@@ -262,6 +265,30 @@ collector_status: dict[str, dict[str, object]] = {
         "failure_count": 0,
     },
 }
+
+
+def _compute_static_asset_version() -> str:
+    assets = [static_dir / "app.js", static_dir / "styles.css"]
+    digest = hashlib.sha256()
+    found = False
+    for asset in assets:
+        if not asset.exists():
+            continue
+        found = True
+        digest.update(asset.name.encode("utf-8"))
+        digest.update(asset.read_bytes())
+    if not found:
+        return "dev"
+    return digest.hexdigest()[:12]
+
+
+def _render_index_html() -> str:
+    index_file = static_dir / "index.html"
+    html = index_file.read_text(encoding="utf-8")
+    version = static_asset_version or "dev"
+    html = html.replace("/static/styles.css", f"/static/styles.css?v={version}")
+    html = html.replace("/static/app.js", f"/static/app.js?v={version}")
+    return html
 collector_endpoint_state: dict[str, dict[str, dict[str, object]]] = {
     "saj": {
         endpoint: {
@@ -793,6 +820,21 @@ class ConfigPayload(BaseModel):
     solplanet_dongle_host: str = Field(default="")
     saj_sample_interval_seconds: int = Field(default=CONST_SAJ_SAMPLE_INTERVAL_SECONDS)
     solplanet_sample_interval_seconds: int = Field(default=CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS)
+
+
+class SolplanetDiscoverPayload(BaseModel):
+    solplanet_dongle_host: str = Field(default="")
+
+
+def _missing_config_fields(payload: dict[str, object]) -> list[str]:
+    missing = get_missing_required_fields_from_payload(payload)
+    inverter_sn = str(payload.get("solplanet_inverter_sn") or "").strip()
+    battery_sn = str(payload.get("solplanet_battery_sn") or "").strip()
+    if not inverter_sn:
+        missing.append("solplanet_inverter_sn")
+    if not battery_sn:
+        missing.append("solplanet_battery_sn")
+    return missing
 
 
 SAJ_SLOT_MIN = 1
@@ -3573,7 +3615,9 @@ async def _run_tesla_home_assistant_collection(
     error_text: str | None = None
     try:
         states = await _tesla_control_states()
+        control_state = _build_tesla_control_state(states)
         observation = _build_tesla_observation_payload(states)
+        result["control_state"] = control_state
         result["observation"] = observation
         if int(observation.get("observed_entity_count") or 0) <= 0:
             result["skipped"] = "tesla_entities_unavailable"
@@ -4930,10 +4974,7 @@ def _reset_solplanet_caches() -> None:
 
 
 def _missing_required_config() -> list[str]:
-    if not config_file_exists():
-        return ["ha_url", "ha_token"]
-    file_payload = read_config_file()
-    return get_missing_required_fields_from_payload(file_payload)
+    return _missing_config_fields(settings_to_dict(settings))
 
 
 def _ensure_ha_configured() -> None:
@@ -5801,6 +5842,57 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
                 "timezone": _kv_value(kv_map, system=system, key="raw.tesla.timezone"),
                 "window_active": _kv_value(kv_map, system=system, key="raw.tesla.window_active"),
                 "task_mode": _kv_value(kv_map, system=system, key="raw.tesla.task_mode"),
+                "control_state": {
+                    "available": _kv_value(kv_map, system=system, key="raw.tesla.control_state.available"),
+                    "control_mode": _kv_value(kv_map, system=system, key="raw.tesla.control_state.control_mode"),
+                    "charging_enabled": _kv_value(kv_map, system=system, key="raw.tesla.control_state.charging_enabled"),
+                    "charge_requested_enabled": _kv_value(
+                        kv_map, system=system, key="raw.tesla.control_state.charge_requested_enabled"
+                    ),
+                    "can_start": _kv_value(kv_map, system=system, key="raw.tesla.control_state.can_start"),
+                    "can_stop": _kv_value(kv_map, system=system, key="raw.tesla.control_state.can_stop"),
+                    "switch_entity": {
+                        "entity_id": _kv_value(kv_map, system=system, key="raw.tesla.control_state.switch_entity.entity_id"),
+                        "friendly_name": _kv_value(
+                            kv_map, system=system, key="raw.tesla.control_state.switch_entity.friendly_name"
+                        ),
+                        "state": _kv_value(kv_map, system=system, key="raw.tesla.control_state.switch_entity.state"),
+                        "unit": _kv_value(kv_map, system=system, key="raw.tesla.control_state.switch_entity.unit"),
+                        "last_updated": _kv_value(
+                            kv_map, system=system, key="raw.tesla.control_state.switch_entity.last_updated"
+                        ),
+                    },
+                    "start_button_entity": {
+                        "entity_id": _kv_value(
+                            kv_map, system=system, key="raw.tesla.control_state.start_button_entity.entity_id"
+                        ),
+                        "friendly_name": _kv_value(
+                            kv_map, system=system, key="raw.tesla.control_state.start_button_entity.friendly_name"
+                        ),
+                        "state": _kv_value(
+                            kv_map, system=system, key="raw.tesla.control_state.start_button_entity.state"
+                        ),
+                        "unit": _kv_value(kv_map, system=system, key="raw.tesla.control_state.start_button_entity.unit"),
+                        "last_updated": _kv_value(
+                            kv_map, system=system, key="raw.tesla.control_state.start_button_entity.last_updated"
+                        ),
+                    },
+                    "stop_button_entity": {
+                        "entity_id": _kv_value(
+                            kv_map, system=system, key="raw.tesla.control_state.stop_button_entity.entity_id"
+                        ),
+                        "friendly_name": _kv_value(
+                            kv_map, system=system, key="raw.tesla.control_state.stop_button_entity.friendly_name"
+                        ),
+                        "state": _kv_value(
+                            kv_map, system=system, key="raw.tesla.control_state.stop_button_entity.state"
+                        ),
+                        "unit": _kv_value(kv_map, system=system, key="raw.tesla.control_state.stop_button_entity.unit"),
+                        "last_updated": _kv_value(
+                            kv_map, system=system, key="raw.tesla.control_state.stop_button_entity.last_updated"
+                        ),
+                    },
+                },
                 "observation": {
                     "battery": {
                         "level_percent": metrics.get("tesla_battery_soc_percent"),
@@ -7111,6 +7203,47 @@ async def database_table_rows(
     return payload
 
 
+@app.get("/api/database/export.sqlite3")
+async def database_export_sqlite() -> Response:
+    db_bytes = await asyncio.to_thread(export_database_bytes, storage_db_path)
+    exported_at = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    headers = {"Content-Disposition": f'attachment; filename="wattimize_{exported_at}.sqlite3"'}
+    return Response(content=db_bytes, media_type="application/vnd.sqlite3", headers=headers)
+
+
+@app.post("/api/database/import.sqlite3")
+async def database_import_sqlite(file: UploadFile = File(...)) -> dict[str, object]:
+    raw = await file.read()
+    async with runtime_lock:
+        await _stop_collector()
+        try:
+            result = await asyncio.to_thread(import_database_bytes, storage_db_path, raw)
+            await asyncio.to_thread(dispose_db_connections, storage_db_path)
+            await asyncio.to_thread(migrate_worker_log_legacy_statuses, storage_db_path)
+            await asyncio.to_thread(
+                backfill_notification_entries_from_worker_logs,
+                storage_db_path,
+                system=NOTIFICATION_LOG_SYSTEM,
+                service=NOTIFICATION_SUMMARY_SERVICE,
+                active_statuses=(WORKER_LOG_STATUS_SEND, "notification", "notified", "alarmed"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(status_code=507, detail=f"Database import failed: {exc}") from exc
+        except sqlite3.Error as exc:
+            raise HTTPException(status_code=500, detail=f"Database import failed: {exc}") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Database import failed: {exc}") from exc
+        finally:
+            await _start_collector()
+
+    status = await asyncio.to_thread(get_storage_status, storage_db_path, sample_interval_seconds)
+    status["saj_sample_interval_seconds"] = sample_interval_seconds
+    status["solplanet_sample_interval_seconds"] = solplanet_sample_interval_seconds
+    return {"ok": True, **result, "storage_status": status}
+
+
 @app.get("/api/worker/logs")
 async def worker_logs(
     page: int = Query(default=1, ge=1),
@@ -7330,35 +7463,6 @@ async def storage_usage_range(
     )
 
 
-@app.get("/api/storage/export.csv")
-async def storage_export_csv() -> Response:
-    csv_text = await asyncio.to_thread(export_samples_csv, storage_db_path)
-    exported_at = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    headers = {"Content-Disposition": f'attachment; filename="energy_samples_{exported_at}.csv"'}
-    return Response(content=csv_text, media_type="text/csv; charset=utf-8", headers=headers)
-
-
-@app.post("/api/storage/import.csv")
-async def storage_import_csv(
-    file: UploadFile = File(...),
-    replace_existing: bool = Query(default=True, description="clear existing rows before import"),
-) -> dict[str, object]:
-    raw = await file.read()
-    try:
-        csv_text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded") from exc
-
-    try:
-        result = await asyncio.to_thread(import_samples_csv, storage_db_path, csv_text, replace_existing=replace_existing)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    status = await asyncio.to_thread(get_storage_status, storage_db_path, sample_interval_seconds)
-    status["saj_sample_interval_seconds"] = sample_interval_seconds
-    status["solplanet_sample_interval_seconds"] = solplanet_sample_interval_seconds
-    return {"ok": True, **result, "storage_status": status}
-
 
 @app.get("/api/config/status")
 async def config_status() -> dict[str, object]:
@@ -7407,11 +7511,67 @@ async def put_config(payload: ConfigPayload) -> dict[str, object]:
     return response
 
 
+@app.post("/api/config/solplanet/discover")
+async def discover_solplanet_config(payload: SolplanetDiscoverPayload) -> dict[str, object]:
+    dongle_host = str(payload.solplanet_dongle_host or "").strip() or str(settings.solplanet_dongle_host or "").strip()
+    if not dongle_host:
+        raise HTTPException(status_code=400, detail="solplanet_dongle_host is required")
+
+    client = solplanet_client if dongle_host == str(settings.solplanet_dongle_host or "").strip() else SolplanetCgiClient(
+        host=dongle_host,
+        port=settings.solplanet_dongle_port,
+        scheme=settings.solplanet_dongle_scheme,
+        verify_ssl=settings.solplanet_verify_ssl,
+        timeout_seconds=settings.solplanet_request_timeout_seconds,
+        request_logger=_handle_outbound_request_log,
+    )
+    try:
+        inverter_info = await asyncio.wait_for(
+            client.get_inverter_info(),
+            timeout=settings.solplanet_request_timeout_seconds,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to discover Solplanet SN: {exc}") from exc
+    finally:
+        if client is not solplanet_client:
+            await client.aclose()
+
+    context = _extract_solplanet_context(inverter_info)
+    inverter_sn = str(context.get("inverter_sn") or "").strip()
+    battery_sn = str(context.get("battery_sn") or "").strip()
+    if not inverter_sn or not battery_sn:
+        raise HTTPException(
+            status_code=502,
+            detail="Solplanet API did not return both inverter and battery SN values",
+        )
+
+    _set_solplanet_runtime_context(context)
+    persisted = await asyncio.to_thread(
+        save_settings,
+        {
+            "solplanet_dongle_host": dongle_host,
+            "solplanet_inverter_sn": inverter_sn,
+            "solplanet_battery_sn": battery_sn,
+        },
+    )
+    await _replace_runtime(persisted)
+    _set_solplanet_runtime_context(context)
+
+    response = settings_to_dict(settings)
+    response["configured"] = len(_missing_required_config()) == 0
+    response["config_path"] = str(get_config_path())
+    response["discovered"] = {
+        "solplanet_inverter_sn": inverter_sn,
+        "solplanet_battery_sn": battery_sn,
+    }
+    return response
+
+
 @app.get("/")
 async def frontend_index() -> Response:
     index_file = static_dir / "index.html"
     if index_file.exists():
-        return FileResponse(index_file)
+        return Response(content=_render_index_html(), media_type="text/html; charset=utf-8")
     return JSONResponse(
         status_code=503,
         content={
@@ -8211,6 +8371,8 @@ async def on_shutdown() -> None:
 
 @app.on_event("startup")
 async def on_startup() -> None:
+    global static_asset_version
+    static_asset_version = await asyncio.to_thread(_compute_static_asset_version)
     await asyncio.to_thread(init_db, storage_db_path)
     await asyncio.to_thread(migrate_worker_log_legacy_statuses, storage_db_path)
     await asyncio.to_thread(

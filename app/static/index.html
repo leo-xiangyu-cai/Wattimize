@@ -181,7 +181,7 @@
             <span id="sajRawUpdatedAt" class="muted">-</span>
           </div>
           <p id="sajRawMeta" class="muted">-</p>
-          <div id="sajRawBody" class="raw-grid"></div>
+          <div id="sajRawBody" class="raw-grid raw-grid-single"></div>
         </section>
       </section>
 
@@ -192,14 +192,6 @@
             <span id="samplingUpdatedAt" class="muted">-</span>
           </div>
           <div id="samplingFilterBar" class="sampling-top-filters">
-            <label data-i18n="samplingSystemLabel">
-              System
-              <select id="samplingSystemSelect">
-                <option value="saj">SAJ</option>
-                <option value="solplanet">Solplanet</option>
-                <option value="overall" data-i18n="samplingSystemOverall" selected>Overall</option>
-              </select>
-            </label>
             <label data-i18n="samplingRangeModeLabel">
               Range
               <select id="samplingRangeModeSelect">
@@ -212,11 +204,6 @@
               </select>
             </label>
             <div id="samplingRangeInputContainer"></div>
-          </div>
-          <div class="sampling-actions">
-            <button id="samplingExportBtn" class="btn sampling-action-btn" type="button" data-i18n="samplingExportBtn">Export CSV</button>
-            <button id="samplingImportBtn" class="btn sampling-action-btn" type="button" data-i18n="samplingImportBtn">Import CSV</button>
-            <input id="samplingImportFileInput" type="file" accept=".csv,text/csv" class="hidden" hidden />
           </div>
           <p id="samplingStorageMeta" class="muted hidden" hidden aria-hidden="true">-</p>
           <p id="samplingDailyMeta" class="muted hidden" hidden aria-hidden="true">-</p>
@@ -241,10 +228,10 @@
               <h3 data-i18n="samplingTotalsTitle">Trend Totals</h3>
             </div>
             <p id="samplingTotalsMeta" class="muted">-</p>
-            <div id="samplingTotalsBody" class="sampling-totals-bars"></div>
             <div class="sampling-totals-chart-wrap">
               <div id="samplingTotalsChartCanvas" class="sampling-totals-chart"></div>
             </div>
+            <div id="samplingTotalsBody" class="sampling-totals-bars"></div>
           </section>
           <p id="samplingCount" class="muted">-</p>
           <div class="pager">
@@ -336,6 +323,21 @@
                 <option value="" data-i18n="databaseTablePlaceholder">Select a table</option>
               </select>
             </label>
+          </div>
+          <div class="sampling-actions">
+            <button id="databaseExportBtn" class="btn sampling-action-btn" type="button" data-i18n="databaseExportBtn">Export Database</button>
+            <button id="databaseImportBtn" class="btn sampling-action-btn" type="button" data-i18n="databaseImportBtn">Import Database</button>
+            <input id="databaseImportFileInput" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/octet-stream" class="hidden" hidden />
+          </div>
+          <div id="databaseTransferStatus" class="database-transfer hidden" aria-live="polite">
+            <div class="database-transfer-topline">
+              <strong id="databaseTransferTitle">-</strong>
+              <span id="databaseTransferPercent" class="muted">-</span>
+            </div>
+            <div id="databaseTransferBar" class="database-transfer-bar" aria-hidden="true">
+              <div id="databaseTransferFill" class="database-transfer-fill"></div>
+            </div>
+            <p id="databaseTransferMessage" class="muted">-</p>
           </div>
           <p id="databaseMeta" class="muted">-</p>
           <p id="databaseCount" class="muted">-</p>
@@ -451,6 +453,7 @@
             </select>
           </label>
           <div class="config-actions">
+            <button id="configAutoDiscoverBtn" type="button" class="btn secondary" data-i18n="configAutoDiscoverBtn">自动获取 Inverter / Battery SN</button>
             <button id="configCloseBtn" type="button" class="btn secondary" data-i18n="configCloseBtn">关闭</button>
             <button id="configSaveBtn" type="submit" class="btn" data-i18n="configSaveBtn">保存配置</button>
             <span id="configSaveMsg" class="muted">-</span>
