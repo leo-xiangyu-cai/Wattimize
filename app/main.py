@@ -2349,6 +2349,31 @@ def _update_solar_surplus_export_energy_tracking(
         last_tracked_at_text = ""
 
     current_utc = datetime.now(UTC)
+    restored_from_storage = False
+    if not last_tracked_at_text:
+        window_start_local = now_local.replace(
+            hour=EXPORT_WINDOW_START_HOUR,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        restored_usage = compute_usage_between(
+            storage_db_path,
+            system="combined",
+            start_at_utc=window_start_local.astimezone(UTC),
+            end_at_utc=current_utc,
+            sample_interval_seconds=_sample_interval_for_system("combined"),
+        )
+        energy_map = restored_usage.get("energy_kwh")
+        energy_usage = energy_map if isinstance(energy_map, dict) else {}
+        restored_export_kwh = _to_number(energy_usage.get("grid_export")) or 0.0
+        total_export_wh = max(restored_export_kwh * 1000.0, 0.0)
+        normalized_threshold_notified_map = {
+            str(int(round(threshold_wh))): total_export_wh >= threshold_wh
+            for threshold_wh in SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLDS_WH
+        }
+        restored_from_storage = True
+
     if last_tracked_at_text:
         try:
             last_tracked_at = datetime.fromisoformat(last_tracked_at_text.replace("Z", "+00:00"))
@@ -2378,6 +2403,7 @@ def _update_solar_surplus_export_energy_tracking(
         "added_export_wh": round(added_export_wh, 3),
         "total_export_wh": round(total_export_wh, 3),
         "total_export_kwh": round(total_export_wh / 1000.0, 4),
+        "restored_from_storage": restored_from_storage,
         "thresholds_wh": list(SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLDS_WH),
         "thresholds_kwh": [
             round(threshold_wh / 1000.0, 3)
