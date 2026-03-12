@@ -8365,7 +8365,7 @@ async function loadCurrentTab(fromAutoRefresh = false) {
 
 function tabHasCachedData(tab) {
   if (tab === "dashboard") return Boolean(stateCache.lastSummary);
-  if (tab === "notificationMatrix") return true;
+  if (tab === "notificationMatrix") return Boolean(stateCache.lastSummary);
   if (tab === "rawData") {
     if (rawDataSystem === "saj") return SAJ_RAW_APIS.some((api) => stateCache.lastSajRaw?.[api.key]?.payload !== undefined);
     if (solplanetRawMode === "table") return stateCache.lastSolplanetKv?.phase && stateCache.lastSolplanetKv.phase !== "idle";
@@ -8387,7 +8387,11 @@ async function loadTabWithGuard(tab, fromAutoRefresh = false) {
   if (slot) slot.inFlight = true;
   try {
     if (tabKey === "notificationMatrix") {
-      renderNotificationMatrix();
+      if (!stateCache.lastSummary || fromAutoRefresh) {
+        await loadSummary();
+      } else {
+        renderNotificationMatrix();
+      }
       return true;
     }
     if (tabKey === "rawData") {
