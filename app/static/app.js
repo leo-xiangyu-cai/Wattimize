@@ -4895,7 +4895,7 @@ function getSamplingRange() {
     };
   }
   const startUtc = toUtcIsoFromDateOnly(dayText);
-  const endUtc = toUtcIsoFromDateEndExclusive(dayText);
+  const endUtc = dayText === getLocalDateText() ? new Date().toISOString() : toUtcIsoFromDateEndExclusive(dayText);
   return {
     mode: "day",
     startUtc,
