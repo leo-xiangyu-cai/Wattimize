@@ -1648,6 +1648,7 @@ let samplingChart = null;
 let samplingChartFocusSeries = null;
 let samplingChartLastPayload = null;
 let samplingChartHandlersBound = false;
+let samplingTotalsChart = null;
 let samplingRangeApplyingFromBrush = false;
 let samplingLegendSyncing = false;
 let notificationMatrixCollapseState = {};
@@ -5841,6 +5842,103 @@ function buildSamplingTotalsRows(usageBySystem, selectedSystem) {
   ];
 }
 
+function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
+  const sajUsage = usageBySystem?.saj || null;
+  const solplanetUsage = usageBySystem?.solplanet || null;
+  const sajEnergy = sajUsage?.energy_kwh || {};
+  const solplanetEnergy = solplanetUsage?.energy_kwh || {};
+  const sajHasData = Number(sajUsage?.samples || 0) >= 2;
+  const solplanetHasData = Number(solplanetUsage?.samples || 0) >= 2;
+
+  if (selectedSystem === "overall") {
+    const cards = [
+      {
+        title: t("samplingOverallMetricPv"),
+        value: (sajHasData ? Number(sajEnergy.solar_generation || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.solar_generation || 0) : 0),
+        kind: "pv",
+        scope: t("samplingTotalsScopeOverall"),
+        layout: "single",
+      },
+      {
+        title: t("samplingTotalsGridTitle"),
+        leftLabel: t("samplingOverallMetricGridImport"),
+        leftValue: (sajHasData ? Number(sajEnergy.grid_import || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.grid_import || 0) : 0),
+        leftKind: "import",
+        rightLabel: t("samplingOverallMetricGridExport"),
+        rightValue: (sajHasData ? Number(sajEnergy.grid_export || 0) : 0) + (solplanetHasData ? Number(solplanetEnergy.grid_export || 0) : 0),
+        rightKind: "export",
+        scope: t("samplingTotalsScopeOverall"),
+        layout: "dual",
+      },
+      {
+        title: t("samplingTotalsScopeSajBattery"),
+        leftLabel: t("samplingOverallMetricBatteryCharge"),
+        leftValue: sajHasData ? Number(sajEnergy.battery_charge || 0) : 0,
+        leftKind: "charge",
+        rightLabel: t("samplingOverallMetricBatteryDischarge"),
+        rightValue: sajHasData ? Number(sajEnergy.battery_discharge || 0) : 0,
+        rightKind: "discharge",
+        scope: t("samplingTotalsScopeOverall"),
+        layout: "dual",
+      },
+      {
+        title: t("samplingTotalsScopeSolplanetBattery"),
+        leftLabel: t("samplingOverallMetricBatteryCharge"),
+        leftValue: solplanetHasData ? Number(solplanetEnergy.battery_charge || 0) : 0,
+        leftKind: "charge",
+        rightLabel: t("samplingOverallMetricBatteryDischarge"),
+        rightValue: solplanetHasData ? Number(solplanetEnergy.battery_discharge || 0) : 0,
+        rightKind: "discharge",
+        scope: t("samplingTotalsScopeOverall"),
+        layout: "dual",
+      },
+    ];
+    return { cards, split: [] };
+  }
+
+  const selectedUsage = selectedSystem === "solplanet" ? solplanetUsage : sajUsage;
+  const selectedEnergy = selectedUsage?.energy_kwh || {};
+  const selectedHasData = Number(selectedUsage?.samples || 0) >= 2;
+  const selectedLabel = formatSamplingSystemLabel(selectedSystem);
+  return {
+    cards: [
+      {
+        title: t("samplingOverallMetricPv"),
+        value: selectedHasData ? Number(selectedEnergy.solar_generation || 0) : 0,
+        kind: "pv",
+        scope: t("samplingTotalsScopeSystem", { system: selectedLabel }),
+        layout: "single",
+      },
+      {
+        title: t("samplingTotalsGridTitle"),
+        leftLabel: t("samplingOverallMetricGridImport"),
+        leftValue: selectedHasData ? Number(selectedEnergy.grid_import || 0) : 0,
+        leftKind: "import",
+        rightLabel: t("samplingOverallMetricGridExport"),
+        rightValue: selectedHasData ? Number(selectedEnergy.grid_export || 0) : 0,
+        rightKind: "export",
+        scope: t("samplingTotalsScopeSystem", { system: selectedLabel }),
+        layout: "dual",
+      },
+      {
+        title: t("samplingOverallMetricBatteryCharge"),
+        value: selectedHasData ? Number(selectedEnergy.battery_charge || 0) : 0,
+        kind: "charge",
+        scope: t("samplingTotalsScopeSystem", { system: selectedLabel }),
+        layout: "single",
+      },
+      {
+        title: t("samplingOverallMetricBatteryDischarge"),
+        value: selectedHasData ? Number(selectedEnergy.battery_discharge || 0) : 0,
+        kind: "discharge",
+        scope: t("samplingTotalsScopeSystem", { system: selectedLabel }),
+        layout: "single",
+      },
+    ],
+    split: [],
+  };
+}
+
 function pickActiveOverallValue(latest, ts, maxGapMs, key) {
   if (!latest) return 0;
   if (!Number.isFinite(ts - latest.ts) || ts - latest.ts > maxGapMs) return 0;
@@ -6155,13 +6253,156 @@ function renderSamplingChart(seriesPayload) {
   });
 }
 
+function ensureSamplingTotalsChart() {
+  if (samplingTotalsChart) return samplingTotalsChart;
+  const canvas = document.getElementById("samplingTotalsChartCanvas");
+  if (!canvas) return null;
+  if (typeof window.echarts === "undefined") return null;
+  samplingTotalsChart = window.echarts.init(canvas, null, { renderer: "canvas" });
+  return samplingTotalsChart;
+}
+
+function buildSamplingTotalsChartRows(cards) {
+  const rows = [];
+  for (const card of Array.isArray(cards) ? cards : []) {
+    if (card.layout === "dual") {
+      const suffix =
+        card.title === t("samplingTotalsGridTitle")
+          ? ""
+          : card.title === t("samplingTotalsScopeSajBattery")
+            ? " (SAJ)"
+            : card.title === t("samplingTotalsScopeSolplanetBattery")
+              ? " (Solplanet)"
+              : "";
+      rows.push({
+        label: `${card.leftLabel || ""}${suffix}`.trim(),
+        value: Math.max(Number(card.leftValue || 0), 0),
+        kind: card.leftKind,
+      });
+      rows.push({
+        label: `${card.rightLabel || ""}${suffix}`.trim(),
+        value: Math.max(Number(card.rightValue || 0), 0),
+        kind: card.rightKind,
+      });
+    } else {
+      rows.push({
+        label: card.title,
+        value: Math.max(Number(card.value || 0), 0),
+        kind: card.kind,
+      });
+    }
+  }
+  return rows;
+}
+
+function renderSamplingTotalsChart(cards) {
+  const chart = ensureSamplingTotalsChart();
+  if (!chart) return;
+  const rows = buildSamplingTotalsChartRows(cards);
+  const hasData = rows.some((row) => Number(row.value || 0) !== 0);
+  const labels = rows.map((row) => row.label);
+  const values = rows.map((row) => row.value);
+  const maxAbs = Math.max(0, ...rows.map((row) => Math.abs(Number(row.value || 0))));
+  chart.setOption(
+    {
+      animation: false,
+      grid: { left: 220, right: 72, top: 6, bottom: 6, containLabel: false },
+      xAxis: {
+        type: "value",
+        min: 0,
+        max: maxAbs > 0 ? maxAbs : 1,
+        splitNumber: 2,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { show: false },
+        axisLabel: { show: false },
+      },
+      yAxis: {
+        type: "category",
+        inverse: true,
+        data: labels,
+        axisTick: { show: false },
+        axisLine: { show: false },
+        axisLabel: { color: "#395346", fontSize: 12, fontWeight: 700 },
+      },
+      tooltip: {
+        trigger: "axis",
+        axisPointer: { type: "shadow" },
+        formatter: (params) => {
+          const list = Array.isArray(params) ? params : [];
+          if (!list.length) return "";
+          const idx = Number(list[0]?.dataIndex || 0);
+          const row = rows[idx];
+          if (!row) return "";
+          return `${escapeHtml(row.label)}<br/>${formatEnergyKwhText(row.value)}`;
+        },
+      },
+      visualMap: [],
+      graphic: hasData
+        ? []
+        : [
+            {
+              type: "text",
+              left: "center",
+              top: "middle",
+              style: { text: t("samplingTotalsNoData"), fill: "#6b7f72", fontSize: 13 },
+            },
+          ],
+      series: [
+        {
+          type: "bar",
+          barWidth: 12,
+          data: values,
+          itemStyle: {
+            borderRadius: [999, 999, 999, 999],
+            color: (params) => {
+              const row = rows[params.dataIndex];
+              if (row?.kind === "import") return "#4f8df7";
+              if (row?.kind === "export") return "#8b5cf6";
+              if (row?.kind === "pv") return "#f59e0b";
+              if (row?.kind === "charge") return "#d97706";
+              return "#22c55e";
+            },
+          },
+          label: {
+            show: true,
+            position: "right",
+            distance: 8,
+            color: "#5b6d63",
+            fontSize: 11,
+            formatter: ({ value }) => (Number(value) ? `${formatTrimmedDecimal(Math.abs(Number(value)), 2)} kWh` : ""),
+          },
+          markLine: {
+            silent: true,
+            symbol: "none",
+            label: { show: false },
+            lineStyle: { color: "rgba(82, 104, 92, 0.18)", width: 2 },
+            data: [{ xAxis: 0 }],
+          },
+          emphasis: { disabled: true },
+        },
+      ],
+    },
+    true,
+  );
+}
+
 function renderSamplingTotals(usageBySystem, selectedSystem, rangeLabel, options = {}) {
   const body = document.getElementById("samplingTotalsBody");
   if (!body) return;
   const systemText = formatSamplingSystemLabel(selectedSystem);
-  const rows = buildSamplingTotalsRows(usageBySystem, selectedSystem);
-  const hasData = rows.some((row) => Number(row.leftValue || 0) > 0 || Number(row.rightValue || 0) > 0);
-  const maxValue = Math.max(0, ...rows.map((row) => Number(row.leftValue || 0)), ...rows.map((row) => Number(row.rightValue || 0)));
+  const summary = buildSamplingTotalsSummary(usageBySystem, selectedSystem);
+  const cards = Array.isArray(summary?.cards) ? summary.cards : [];
+  const split = Array.isArray(summary?.split) ? summary.split : [];
+  const hasData = cards.some((card) =>
+    card.layout === "dual" ? Number(card.leftValue || 0) > 0 || Number(card.rightValue || 0) > 0 : Number(card.value || 0) > 0,
+  );
+  const maxValue = Math.max(
+    0,
+    ...cards.map((card) =>
+      card.layout === "dual" ? Math.max(Number(card.leftValue || 0), Number(card.rightValue || 0)) : Number(card.value || 0),
+    ),
+  );
 
   if (options.metaText !== undefined) {
     setText("samplingTotalsMeta", options.metaText);
@@ -6174,14 +6415,17 @@ function renderSamplingTotals(usageBySystem, selectedSystem, rangeLabel, options
     );
   }
 
-  if (!rows.length) {
+  if (!cards.length) {
+    renderSamplingTotalsChart([]);
     body.innerHTML = `<div class="sampling-total-empty">${escapeHtml(t("samplingTotalsNoData"))}</div>`;
     return;
   }
   if (!hasData) {
+    renderSamplingTotalsChart([]);
     body.innerHTML = `<div class="sampling-total-empty">${escapeHtml(t("samplingTotalsNoData"))}</div>`;
     return;
   }
+  renderSamplingTotalsChart(cards);
 
   const widthPct = (value) => {
     const n = Number(value || 0);
@@ -6190,52 +6434,76 @@ function renderSamplingTotals(usageBySystem, selectedSystem, rangeLabel, options
   };
 
   body.innerHTML = `
-    <div class="sampling-total-panel">
-      ${rows
-        .map((row) => {
-          const items = [
-            {
-              label: row.leftLabel,
-              value: Number(row.leftValue || 0),
-              kind: row.leftKind,
-            },
-            {
-              label: row.rightLabel,
-              value: Number(row.rightValue || 0),
-              kind: row.rightKind,
-            },
-          ].filter((item) => item.label);
-          return `
-            <div class="sampling-total-row">
-              <div class="sampling-total-head">
-                <div class="sampling-total-head-main">
-                  <span class="sampling-total-scope">${escapeHtml(row.scope)}</span>
-                  <span class="sampling-total-title">${escapeHtml(row.title)}</span>
+    <div class="sampling-total-grid">
+      ${cards
+        .map((card) => {
+          if (card.layout === "dual") {
+            const leftValueText = card.leftValue > 0 ? formatEnergyKwhText(card.leftValue) : "-";
+            const rightValueText = card.rightValue > 0 ? formatEnergyKwhText(card.rightValue) : "-";
+            return `
+              <article class="sampling-total-card sampling-total-card-dual">
+                <div class="sampling-total-card-head">
+                  <span class="sampling-total-card-title">${escapeHtml(card.title)}</span>
+                  <span class="sampling-total-card-scope">${escapeHtml(card.scope)}</span>
                 </div>
+                <div class="sampling-total-dual-values">
+                  <div class="sampling-total-dual-value is-left">
+                    <span class="sampling-total-dual-label">${escapeHtml(card.leftLabel || "")}</span>
+                    <span class="sampling-total-dual-number">${escapeHtml(leftValueText)}</span>
+                  </div>
+                  <div class="sampling-total-dual-divider"></div>
+                  <div class="sampling-total-dual-value is-right">
+                    <span class="sampling-total-dual-label">${escapeHtml(card.rightLabel || "")}</span>
+                    <span class="sampling-total-dual-number">${escapeHtml(rightValueText)}</span>
+                  </div>
+                </div>
+                <div class="sampling-total-balance-track">
+                  <div class="sampling-total-balance-center"></div>
+                  <div class="sampling-total-balance-fill is-left is-${escapeHtml(card.leftKind)}" style="width:${widthPct(card.leftValue)}%;"></div>
+                  <div class="sampling-total-balance-fill is-right is-${escapeHtml(card.rightKind)}" style="width:${widthPct(card.rightValue)}%;"></div>
+                </div>
+              </article>
+            `;
+          }
+          const valueText = card.value > 0 ? formatEnergyKwhText(card.value) : "-";
+          return `
+            <article class="sampling-total-card is-${escapeHtml(card.kind)}">
+              <div class="sampling-total-card-head">
+                <span class="sampling-total-card-title">${escapeHtml(card.title)}</span>
+                <span class="sampling-total-card-scope">${escapeHtml(card.scope)}</span>
               </div>
-              <div class="sampling-total-bars">
-                ${items
-                  .map((item) => {
-                    const valueText = item.value > 0 ? formatEnergyKwhText(item.value) : "-";
-                    return `
-                      <div class="sampling-total-bar-item">
-                        <div class="sampling-total-bar-meta">
-                          <span class="sampling-total-bar-name">${escapeHtml(item.label || "")}</span>
-                          <span class="sampling-total-bar-value">${escapeHtml(valueText)}</span>
-                        </div>
-                        <div class="sampling-total-bar-track">
-                          <div class="sampling-total-fill is-${escapeHtml(item.kind)}" style="width:${widthPct(item.value)}%;"></div>
-                        </div>
-                      </div>
-                    `;
-                  })
-                  .join("")}
+              <div class="sampling-total-card-value">${escapeHtml(valueText)}</div>
+              <div class="sampling-total-card-track">
+                <div class="sampling-total-fill is-${escapeHtml(card.kind)}" style="width:${widthPct(card.value)}%;"></div>
               </div>
-            </div>
+            </article>
           `;
         })
         .join("")}
     </div>
+    ${
+      split.length
+        ? `
+          <div class="sampling-total-split">
+            ${split
+              .map((item) => `
+                <div class="sampling-total-split-row">
+                  <span class="sampling-total-split-scope">${escapeHtml(item.scope)}</span>
+                  <div class="sampling-total-split-values">
+                    <span class="sampling-total-split-pill is-charge">${escapeHtml(t("samplingOverallMetricBatteryCharge"))}: ${escapeHtml(
+                      item.charge > 0 ? formatEnergyKwhText(item.charge) : "-",
+                    )}</span>
+                    <span class="sampling-total-split-pill is-discharge">${escapeHtml(t("samplingOverallMetricBatteryDischarge"))}: ${escapeHtml(
+                      item.discharge > 0 ? formatEnergyKwhText(item.discharge) : "-",
+                    )}</span>
+                  </div>
+                </div>
+              `)
+              .join("")}
+          </div>
+        `
+        : ""
+    }
   `;
 }
 
@@ -8946,6 +9214,7 @@ bindClickIfPresent("configCloseBtn", () => {
 
 window.addEventListener("resize", () => {
   if (samplingChart) samplingChart.resize();
+  if (samplingTotalsChart) samplingTotalsChart.resize();
   refreshFlowDiagrams();
 });
 

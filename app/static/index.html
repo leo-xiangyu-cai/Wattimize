@@ -218,8 +218,8 @@
             <button id="samplingImportBtn" class="btn sampling-action-btn" type="button" data-i18n="samplingImportBtn">Import CSV</button>
             <input id="samplingImportFileInput" type="file" accept=".csv,text/csv" class="hidden" hidden />
           </div>
-          <p id="samplingStorageMeta" class="muted">-</p>
-          <p id="samplingDailyMeta" class="muted">-</p>
+          <p id="samplingStorageMeta" class="muted hidden" hidden aria-hidden="true">-</p>
+          <p id="samplingDailyMeta" class="muted hidden" hidden aria-hidden="true">-</p>
           <section class="sampling-chart-card">
             <div class="section-header">
               <h3 data-i18n="samplingChartTitle">Power Trend</h3>
@@ -242,6 +242,9 @@
             </div>
             <p id="samplingTotalsMeta" class="muted">-</p>
             <div id="samplingTotalsBody" class="sampling-totals-bars"></div>
+            <div class="sampling-totals-chart-wrap">
+              <div id="samplingTotalsChartCanvas" class="sampling-totals-chart"></div>
+            </div>
           </section>
           <p id="samplingCount" class="muted">-</p>
           <div class="pager">
