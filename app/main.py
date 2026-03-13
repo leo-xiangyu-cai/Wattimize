@@ -11,7 +11,7 @@ import traceback
 from urllib.parse import urlparse
 from collections import Counter
 from contextvars import ContextVar
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from time import monotonic
 from typing import Callable, Literal
@@ -118,6 +118,18 @@ TESLA_CONTROL_FEEDBACK_KV_PREFIX = "ui.tesla_control_feedback."
 TESLA_CONTROL_FEEDBACK_PENDING_TIMEOUT_SECONDS = 15.0
 TESLA_CONTROL_FEEDBACK_SUCCESS_TTL_SECONDS = 4.0
 TESLA_CONTROL_FEEDBACK_FAILURE_TTL_SECONDS = 30.0
+BATTERY_CAPACITY_KWH = {
+    "saj": 15.0,
+    "solplanet": 40.0,
+}
+BATTERY_MIN_DISCHARGE_SOC_PERCENT = {
+    "saj": 20.0,
+    "solplanet": 10.0,
+}
+TESLA_POST_EXPORT_FORECAST_WINDOW_START_HOUR = 20
+TESLA_POST_EXPORT_FORECAST_WINDOW_END_HOUR = 11
+TESLA_POST_EXPORT_FORECAST_HISTORY_DAYS = 3
+TESLA_POST_EXPORT_FORECAST_MIN_COVERAGE_RATIO = 0.5
 FREE_ENERGY_WINDOW_START_HOUR = 11
 FREE_ENERGY_WINDOW_END_HOUR = 14
 FREE_ENERGY_WINDOW_SELF_CONSUMPTION_START_MINUTE = 50
@@ -1408,6 +1420,7 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
     tesla_control_state = tesla_raw.get("control_state")
     tesla_control_state_map = tesla_control_state if isinstance(tesla_control_state, dict) else {}
     tesla_control_feedback = _resolve_tesla_control_feedback(tesla_control_state_map)
+    tesla_charge_forecast = _build_tesla_charge_headroom_forecast(metrics)
 
     return {
         "system": "combined",
@@ -1439,6 +1452,7 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
                 "can_stop": tesla_control_state_map.get("can_stop"),
                 "feedback": tesla_control_feedback,
             },
+            "charge_forecast": tesla_charge_forecast,
         },
         "notification_metrics": {
             "grid_w": _to_number(metrics.get("grid_w")),
@@ -1494,6 +1508,123 @@ def _energy_to_kwh(value: float | None, unit: str | None) -> float | None:
     if normalized in ("mwh", "mw·h", "mw h"):
         return value * 1000.0
     return None
+
+
+def _battery_usable_energy_kwh(system: str, soc_percent: object) -> float | None:
+    capacity_kwh = BATTERY_CAPACITY_KWH.get(system)
+    min_discharge_soc = BATTERY_MIN_DISCHARGE_SOC_PERCENT.get(system, 0.0)
+    soc = _to_number(soc_percent)
+    if capacity_kwh is None or soc is None:
+        return None
+    clamped_soc = max(0.0, min(100.0, soc))
+    usable_soc = max(0.0, clamped_soc - min_discharge_soc)
+    return round((capacity_kwh * usable_soc) / 100.0, 4)
+
+
+def _build_tesla_charge_headroom_forecast(metrics: dict[str, object]) -> dict[str, object] | None:
+    now_local, timezone_name = _tesla_grid_support_now_local()
+    local_tz = now_local.tzinfo
+    if local_tz is None:
+        return None
+
+    usable_battery_values = [
+        _battery_usable_energy_kwh("saj", metrics.get("battery1_soc_percent")),
+        _battery_usable_energy_kwh("solplanet", metrics.get("battery2_soc_percent")),
+    ]
+    usable_battery_total_kwh = round(sum(value for value in usable_battery_values if value is not None), 4)
+    has_current_battery_state = any(value is not None for value in usable_battery_values)
+    history_windows: list[dict[str, object]] = []
+    anchor_date = now_local.date()
+    for _ in range(TESLA_POST_EXPORT_FORECAST_HISTORY_DAYS):
+        window_end_local = datetime.combine(
+            anchor_date,
+            time(hour=TESLA_POST_EXPORT_FORECAST_WINDOW_END_HOUR),
+            tzinfo=local_tz,
+        )
+        if window_end_local >= now_local:
+            anchor_date -= timedelta(days=1)
+            window_end_local = datetime.combine(
+                anchor_date,
+                time(hour=TESLA_POST_EXPORT_FORECAST_WINDOW_END_HOUR),
+                tzinfo=local_tz,
+            )
+        window_start_local = datetime.combine(
+            anchor_date - timedelta(days=1),
+            time(hour=TESLA_POST_EXPORT_FORECAST_WINDOW_START_HOUR),
+            tzinfo=local_tz,
+        )
+        usage = compute_usage_between(
+            storage_db_path,
+            system="combined",
+            start_at_utc=window_start_local.astimezone(UTC),
+            end_at_utc=window_end_local.astimezone(UTC),
+            sample_interval_seconds=_sample_interval_for_system("combined"),
+            local_timezone_name=timezone_name,
+            grid_import_window_start_hour=FREE_ENERGY_WINDOW_START_HOUR,
+            grid_import_window_end_hour=FREE_ENERGY_WINDOW_END_HOUR,
+            grid_export_window_start_hour=EXPORT_WINDOW_START_HOUR,
+            grid_export_window_end_hour=EXPORT_WINDOW_END_HOUR,
+        )
+        energy_map = usage.get("energy_kwh")
+        energy_usage = energy_map if isinstance(energy_map, dict) else {}
+        quality_map = usage.get("quality")
+        quality = quality_map if isinstance(quality_map, dict) else {}
+        configured_interval_seconds = _to_number(quality.get("configured_interval_seconds"))
+        observed_interval_seconds = _to_number(quality.get("observed_interval_seconds"))
+        effective_coverage_ratio = _to_number(usage.get("coverage_ratio"))
+        if (
+            effective_coverage_ratio is not None
+            and configured_interval_seconds is not None
+            and configured_interval_seconds > 0
+            and observed_interval_seconds is not None
+            and observed_interval_seconds > configured_interval_seconds
+        ):
+            effective_coverage_ratio = round(
+                effective_coverage_ratio * (observed_interval_seconds / configured_interval_seconds),
+                4,
+            )
+        history_windows.append(
+            {
+                "start_at_local": window_start_local.isoformat(),
+                "end_at_local": window_end_local.isoformat(),
+                "home_load_kwh": _to_number(energy_usage.get("home_load")),
+                "coverage_ratio": _to_number(usage.get("coverage_ratio")),
+                "effective_coverage_ratio": effective_coverage_ratio,
+                "samples": int(_to_number(usage.get("samples")) or 0),
+            }
+        )
+        anchor_date -= timedelta(days=1)
+
+    valid_home_loads = [
+        float(item["home_load_kwh"])
+        for item in history_windows
+        if item.get("home_load_kwh") is not None
+        and int(item.get("samples") or 0) >= 2
+        and (
+            item.get("effective_coverage_ratio") is None
+            or float(item.get("effective_coverage_ratio") or 0.0) >= TESLA_POST_EXPORT_FORECAST_MIN_COVERAGE_RATIO
+        )
+    ]
+    average_home_load_kwh = round(sum(valid_home_loads) / len(valid_home_loads), 4) if valid_home_loads else None
+    estimated_tesla_charge_kwh = (
+        round(max(usable_battery_total_kwh - average_home_load_kwh, 0.0), 4)
+        if average_home_load_kwh is not None and has_current_battery_state
+        else None
+    )
+    return {
+        "window": {
+            "start_hour": TESLA_POST_EXPORT_FORECAST_WINDOW_START_HOUR,
+            "end_hour": TESLA_POST_EXPORT_FORECAST_WINDOW_END_HOUR,
+        },
+        "history_days": TESLA_POST_EXPORT_FORECAST_HISTORY_DAYS,
+        "days_used": len(valid_home_loads),
+        "usable_battery_total_kwh": usable_battery_total_kwh,
+        "average_home_load_kwh": average_home_load_kwh,
+        "estimated_tesla_charge_kwh": estimated_tesla_charge_kwh,
+        "timezone": timezone_name,
+        "insufficient_history": len(valid_home_loads) < TESLA_POST_EXPORT_FORECAST_HISTORY_DAYS,
+        "history_windows": history_windows,
+    }
 
 
 def _find_state_by_entity_ids(

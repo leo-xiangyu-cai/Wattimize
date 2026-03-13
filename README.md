@@ -132,7 +132,7 @@ First-run configuration:
 - SQLite writes and worker log persistence now retry on transient database failures before surfacing an error in collector status.
 - Daily usage endpoint integrates power snapshots into kWh (UTC day).
 - `system=combined` is available on range usage and trend series endpoints for the frontend overall view.
-- The Sampling tab includes total cards and chart overlays that split window-specific energy from the full selected range.
+- The `History` tab combines range selection with an energy breakdown card, a power timeline chart, and compact date/week/month context for the selected window.
 - The frontend can export and import the full SQLite database from the Database tab.
 
 ## 7) Time Window Rules And Tesla Control
@@ -141,4 +141,6 @@ First-run configuration:
 - Rule state is stored in SQLite and exposed through `GET /api/time-window-rules` and `PUT /api/time-window-rules/{rule_code}`.
 - SAJ profile automation and Tesla charge automation respect these rule switches before issuing control actions.
 - Tesla manual start/stop now returns UI feedback states so the dashboard can show pending, success, and failure confirmation after `/api/tesla/control/charging`.
+- The combined dashboard now includes a Tesla overnight headroom estimate derived from recent combined home-load history and current battery SOC.
+- Dashboard auto-refresh defaults to 30 seconds, keeps the last summary cached locally, and shows background refresh state while new data is loading.
 - The combined dashboard lets you click the Solplanet inverter node to read and update the live Solplanet `Pin` charging limit.

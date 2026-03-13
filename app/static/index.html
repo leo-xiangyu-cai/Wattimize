@@ -26,8 +26,8 @@
             <span data-i18n="autoRefreshLabel">Auto Refresh</span>
             <select id="autoRefreshSelect">
               <option value="0" data-i18n="autoRefreshOff">Off</option>
-              <option value="5" data-i18n="autoRefresh5s">Every 5s</option>
-              <option value="10" data-i18n="autoRefresh10s">Every 10s</option>
+              <option value="30" data-i18n="autoRefresh30s">Every 30s</option>
+              <option value="60" data-i18n="autoRefresh60s">Every 60s</option>
             </select>
           </label>
           <button id="refreshBtn" class="btn" data-i18n="refreshBtn">Refresh</button>
@@ -38,14 +38,14 @@
         <button id="tabDashboard" class="tab-btn active" type="button" data-tab="dashboard" data-i18n="dashboardTab" role="tab" aria-selected="true" aria-controls="dashboardView">
           Dashboard
         </button>
+        <button id="tabSampling" class="tab-btn" type="button" data-tab="sampling" data-i18n="samplingTab" role="tab" aria-selected="false" aria-controls="samplingView" tabindex="-1">
+          History
+        </button>
         <button id="tabNotificationMatrix" class="tab-btn" type="button" data-tab="notificationMatrix" data-i18n="notificationMatrixTab" role="tab" aria-selected="false" aria-controls="notificationMatrixView" tabindex="-1">
           Time Window
         </button>
         <button id="tabRawData" class="tab-btn" type="button" data-tab="rawData" data-i18n="rawDataTab" role="tab" aria-selected="false" aria-controls="rawDataView" tabindex="-1">
           Raw Data
-        </button>
-        <button id="tabSampling" class="tab-btn" type="button" data-tab="sampling" data-i18n="samplingTab" role="tab" aria-selected="false" aria-controls="samplingView" tabindex="-1">
-          Sampling
         </button>
         <button id="tabDatabase" class="tab-btn" type="button" data-tab="database" data-i18n="databaseTab" role="tab" aria-selected="false" aria-controls="databaseView" tabindex="-1">
           Database
@@ -76,8 +76,8 @@
                 SAJ solar/grid + SAJ/Solplanet batteries, dual inverters in parallel
               </p>
               <div class="flow-meta">
-                <span id="combined-loadingSpinner" class="loading-spinner is-hidden" aria-hidden="true"></span>
                 <span id="combined-updatedAt" class="muted">-</span>
+                <span id="combined-loadingSpinner" class="loading-spinner is-hidden" aria-hidden="true"></span>
               </div>
               <div id="energyFlowCombined" class="flow-board combined-flow-board diagram-host" data-diagram="combined"></div>
               <section id="sajDashboardProfilePopover" class="saj-profile-popover hidden" aria-hidden="true">
@@ -191,35 +191,39 @@
             <h2 data-i18n="samplingTitle">Sampling Records</h2>
             <span id="samplingUpdatedAt" class="muted">-</span>
           </div>
-          <div id="samplingFilterBar" class="sampling-top-filters">
-            <label data-i18n="samplingRangeModeLabel">
-              Range
-              <select id="samplingRangeModeSelect">
-                <option value="day" data-i18n="samplingRangeDay">Day</option>
-                <option value="week" data-i18n="samplingRangeWeek">Week</option>
-                <option value="month" data-i18n="samplingRangeMonth">Month</option>
-                <option value="relative" data-i18n="samplingRangeRelative">Relative</option>
-                <option value="custom_date" data-i18n="samplingRangeCustomDate">Custom Date</option>
-                <option value="custom_datetime" data-i18n="samplingRangeCustomDateTime">Custom Date + Time</option>
-              </select>
-            </label>
-            <div id="samplingRangeInputContainer"></div>
-          </div>
           <p id="samplingStorageMeta" class="muted hidden" hidden aria-hidden="true">-</p>
           <p id="samplingDailyMeta" class="muted hidden" hidden aria-hidden="true">-</p>
-          <section class="sampling-chart-card sampling-totals-card">
-            <div class="section-header">
-              <h3 data-i18n="samplingTotalsTitle">Trend Totals</h3>
+          <div class="sampling-overview-grid">
+            <section class="sampling-chart-card sampling-totals-card">
+              <div class="section-header">
+                <h3 data-i18n="samplingTotalsTitle">Energy Breakdown</h3>
+              </div>
+              <p id="samplingTotalsMeta" class="muted">-</p>
+              <div class="sampling-totals-chart-wrap">
+                <div id="samplingTotalsChartCanvas" class="sampling-totals-chart"></div>
+              </div>
+            </section>
+            <div id="samplingFilterBar" class="sampling-top-filters">
+              <label data-i18n="samplingRangeModeLabel">
+                Range
+                <div class="sampling-range-mode-row">
+                  <select id="samplingRangeModeSelect">
+                    <option value="day" data-i18n="samplingRangeDay">Day</option>
+                    <option value="week" data-i18n="samplingRangeWeek">Week</option>
+                    <option value="month" data-i18n="samplingRangeMonth">Month</option>
+                    <option value="relative" data-i18n="samplingRangeRelative">Relative</option>
+                    <option value="custom_date" data-i18n="samplingRangeCustomDate">Custom Date</option>
+                    <option value="custom_datetime" data-i18n="samplingRangeCustomDateTime">Custom Date + Time</option>
+                  </select>
+                  <button id="samplingRangeJumpBtn" type="button" class="btn secondary sampling-range-mode-jump hidden" hidden></button>
+                </div>
+              </label>
+              <div id="samplingRangeInputContainer"></div>
             </div>
-            <p id="samplingTotalsMeta" class="muted">-</p>
-            <div class="sampling-totals-chart-wrap">
-              <div id="samplingTotalsChartCanvas" class="sampling-totals-chart"></div>
-            </div>
-            <div id="samplingTotalsBody" class="sampling-totals-bars"></div>
-          </section>
-          <section class="sampling-chart-card">
+          </div>
+          <section class="sampling-chart-card sampling-power-card">
             <div class="section-header">
-              <h3 data-i18n="samplingChartTitle">Power Trend</h3>
+              <h3 data-i18n="samplingChartTitle">Power Timeline</h3>
               <label class="sampling-smoothness-select">
                 <span data-i18n="samplingSmoothLabel">Smoothing</span>
                 <select id="samplingSmoothModeSelect">
