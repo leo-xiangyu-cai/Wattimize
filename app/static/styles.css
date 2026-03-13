@@ -2678,6 +2678,16 @@ td {
   text-underline-offset: 3px;
 }
 
+.efd-node.efd-node-id-combined-inverter2Node {
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.efd-node.efd-node-id-combined-inverter2Node:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 28px rgba(52, 87, 74, 0.16);
+}
+
 .efd-node.efd-node-tesla {
   position: relative;
   overflow: hidden;

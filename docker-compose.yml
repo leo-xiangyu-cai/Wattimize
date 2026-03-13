@@ -2,6 +2,8 @@ services:
   wattimize-api:
     build: .
     container_name: wattimize-api
+    environment:
+      WATTIMIZE_DB_PATH: /app/data/recovery/energy_samples.recovered.sqlite3
     ports:
       - "18000:8000"
     volumes:

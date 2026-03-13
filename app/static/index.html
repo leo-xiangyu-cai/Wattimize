@@ -373,6 +373,35 @@
       </section>
     </main>
 
+    <div id="solplanetPinModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="solplanetPinModalTitle">
+      <div class="modal-card">
+        <div class="section-header">
+          <h2 id="solplanetPinModalTitle" data-i18n="solplanetDashboardPinModalTitle">Solplanet Charging Power</h2>
+          <button id="solplanetPinModalCloseBtn" class="btn secondary" type="button" data-i18n="closeBtn">Close</button>
+        </div>
+        <p id="solplanetPinModalMeta" class="muted" data-i18n="solplanetDashboardPinModalIntro">
+          Set the current Solplanet charging limit (Pin) to verify manual control first.
+        </p>
+        <div class="config-form">
+          <label data-i18n="solplanetDashboardPinCurrentLabel">
+            Current Pin (W)
+            <input id="solplanetPinCurrentValue" type="text" value="-" readonly />
+          </label>
+          <label data-i18n="solplanetDashboardPinTargetLabel">
+            Target Pin (W)
+            <input id="solplanetPinTargetInput" type="number" min="0" max="20000" step="100" value="0" />
+          </label>
+        </div>
+        <p id="solplanetPinModalStatus" class="muted">-</p>
+        <div class="config-actions">
+          <button id="solplanetPinPreset0Btn" class="btn secondary" type="button">0W</button>
+          <button id="solplanetPinPreset3000Btn" class="btn secondary" type="button">3000W</button>
+          <button id="solplanetPinPreset5000Btn" class="btn secondary" type="button">5000W</button>
+          <button id="solplanetPinApplyBtn" class="btn" type="button" data-i18n="solplanetDashboardPinApplyBtn">Apply Pin</button>
+        </div>
+      </div>
+    </div>
+
     <div id="workerLogDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="workerLogDetailModalTitle">
       <div class="modal-card worker-log-detail-modal-card">
         <div class="section-header">

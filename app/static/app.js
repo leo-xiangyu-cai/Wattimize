@@ -2,18 +2,26 @@ async function fetchJson(url, options = {}) {
   const timeoutMs = Number(options.timeoutMs || 8000);
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
-  const response = await fetch(url, {
-    method: options.method || "GET",
-    headers: options.headers || {},
-    body: options.body,
-    signal: controller.signal,
-  });
-  window.clearTimeout(timeoutId);
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `HTTP ${response.status}`);
+  try {
+    const response = await fetch(url, {
+      method: options.method || "GET",
+      headers: options.headers || {},
+      body: options.body,
+      signal: controller.signal,
+    });
+    window.clearTimeout(timeoutId);
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || `HTTP ${response.status}`);
+    }
+    return response.json();
+  } catch (err) {
+    window.clearTimeout(timeoutId);
+    if (err?.name === "AbortError") {
+      throw new Error(`Request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
   }
-  return response.json();
 }
 
 async function readErrorMessage(response) {
@@ -136,8 +144,8 @@ const I18N = {
     notificationMatrixWindowAfterFreeShoulderSummary: "14:00-16:00. Worker watches Solplanet battery headroom before the export period.",
     notificationMatrixWindowAfterFreePeakTitle: "After-Free Peak",
     notificationMatrixWindowAfterFreePeakSummary: "16:00-18:00. Worker keeps watching Solplanet battery headroom before export pricing starts.",
-    notificationMatrixWindowExportTitle: "Export Window",
-    notificationMatrixWindowExportSummary: "18:00-20:00. Worker tracks export behavior and low-battery/import alarms while Tesla charging follows surplus logic.",
+    notificationMatrixWindowExportTitle: "ZeroHero Window",
+    notificationMatrixWindowExportSummary: "18:00-20:00. Worker tracks ZeroHero Window export behavior and low-battery/import alarms while Tesla charging follows surplus logic.",
     notificationMatrixWindowPostExportPeakTitle: "Post-Export Peak",
     notificationMatrixWindowPostExportPeakSummary: "20:00-23:00. Worker tries to avoid expensive import and raises early warnings when that risk appears.",
     notificationMatrixWindowOvernightTitle: "Overnight Shoulder",
@@ -156,7 +164,7 @@ const I18N = {
     notificationRuleTeslaAfterFreeShoulderTrigger: "Start when Solplanet SOC reaches 95%, stop when it falls below 90%, otherwise hold the current state.",
     notificationRuleTeslaAfterFreePeakTitle: "Tesla charging keeps following Solplanet SOC before export pricing",
     notificationRuleTeslaAfterFreePeakTrigger: "Start when Solplanet SOC reaches 95%, stop when it falls below 90%, otherwise hold the current state.",
-    notificationRuleTeslaExportWindowTitle: "Tesla charging uses solar surplus during export window",
+    notificationRuleTeslaExportWindowTitle: "Tesla charging uses solar surplus during ZeroHero Window",
     notificationRuleTeslaExportWindowTrigger: "Use solar surplus and Solplanet SOC thresholds to decide charging state and current while avoiding unnecessary grid import.",
     notificationRuleTeslaPostExportPeakTitle: "Tesla charging is forced off in expensive period",
     notificationRuleTeslaPostExportPeakTrigger: "During 20:00-23:00 the worker stops Tesla charging to avoid expensive grid import.",
@@ -167,14 +175,14 @@ const I18N = {
     notificationMatrixTeslaCurrent: "Tesla {actual} / set {configured}",
     notificationRuleSolplanetLowAvailableCapacityTitle: "Solplanet available capacity is low",
     notificationRuleSolplanetLowAvailableCapacityTrigger: "Triggers when Solplanet available capacity drops below 25 kWh during this window.",
-    notificationRuleSolplanetLowBatteryTitle: "Solplanet battery is low during export",
-    notificationRuleSolplanetLowBatteryTrigger: "Triggers when Solplanet SOC drops below 20% during the export window.",
-    notificationRuleGridImportStartedTitle: "Grid import started during export",
-    notificationRuleGridImportStartedTrigger: "Triggers once when grid import changes from inactive to active during the export window.",
+    notificationRuleSolplanetLowBatteryTitle: "Solplanet battery is low during ZeroHero Window",
+    notificationRuleSolplanetLowBatteryTrigger: "Triggers when Solplanet SOC drops below 20% during ZeroHero Window.",
+    notificationRuleGridImportStartedTitle: "Grid import started during ZeroHero Window",
+    notificationRuleGridImportStartedTrigger: "Triggers once when grid import changes from inactive to active during ZeroHero Window.",
     notificationRuleSolarSurplusExportEnergyReached5000Title: "Export energy reached 5 kWh",
-    notificationRuleSolarSurplusExportEnergyReached5000Trigger: "Triggers once when exported energy in the export window reaches 5 kWh.",
+    notificationRuleSolarSurplusExportEnergyReached5000Trigger: "Triggers once when exported energy in ZeroHero Window reaches 5 kWh.",
     notificationRuleSolarSurplusExportEnergyReached9000Title: "Export energy reached 9 kWh",
-    notificationRuleSolarSurplusExportEnergyReached9000Trigger: "Triggers once when exported energy in the export window reaches 9 kWh.",
+    notificationRuleSolarSurplusExportEnergyReached9000Trigger: "Triggers once when exported energy in ZeroHero Window reaches 9 kWh.",
     notificationRuleSolplanetLowBatteryPostExportPeakTitle: "Solplanet battery is low in the expensive period",
     notificationRuleSolplanetLowBatteryPostExportPeakTrigger: "Triggers when Solplanet SOC drops below 20% during the post-export peak window.",
     notificationRuleGridImportStartedPostExportPeakTitle: "Grid import started in the expensive period",
@@ -258,6 +266,16 @@ const I18N = {
     solplanetControlPopupRestartSummary: "Backend API loop has been force restarted.",
     solplanetControlPopupResultTitle: "Result JSON",
     solplanetControlFetchMeta: "Last fetch: {time} · state API {stateMs} ms · live API {liveMs} ms · total {totalMs} ms",
+    solplanetDashboardPinModalTitle: "Solplanet Charging Power",
+    solplanetDashboardPinModalIntro: "Set the Solplanet charging limit (Pin) here first, so we can verify manual control works before automating it.",
+    solplanetDashboardPinCurrentLabel: "Current Pin (W)",
+    solplanetDashboardPinTargetLabel: "Target Pin (W)",
+    solplanetDashboardPinApplyBtn: "Apply Pin",
+    solplanetDashboardPinLoading: "Loading current Solplanet control state...",
+    solplanetDashboardPinReady: "Current battery charge power {power}. You can now apply a new Pin.",
+    solplanetDashboardPinApplying: "Applying Solplanet Pin...",
+    solplanetDashboardPinApplied: "Pin updated to {pin}W.",
+    solplanetDashboardPinOpenHint: "Click the Solplanet inverter node to adjust charging power.",
     sajControlModeTitle: "Working Mode",
     sajControlModeExplain: "Mode code mapping may differ by firmware. Test 0~8 against app labels.",
     sajControlModeReadback: "mode_input={modeInput}, mode_sensor={modeSensor}, inverter_mode={inverterMode}",
@@ -773,8 +791,8 @@ const I18N = {
     notificationMatrixWindowAfterFreeShoulderSummary: "14:00-16:00。这个窗口里 worker 主要观察 Solplanet 电池余量，为后续 export 时段做准备。",
     notificationMatrixWindowAfterFreePeakTitle: "免费电后峰前时段",
     notificationMatrixWindowAfterFreePeakSummary: "16:00-18:00。这个窗口继续观察 Solplanet 电池余量，确保 export 时段前有足够储能。",
-    notificationMatrixWindowExportTitle: "Export 时段",
-    notificationMatrixWindowExportSummary: "18:00-20:00。这个窗口会跟踪外送行为，同时监控低电量和电网反向转正向导入告警。",
+    notificationMatrixWindowExportTitle: "ZeroHero 时段",
+    notificationMatrixWindowExportSummary: "18:00-20:00。这个窗口会跟踪 ZeroHero 时段内的外送行为，同时监控低电量和电网反向转正向导入告警。",
     notificationMatrixWindowPostExportPeakTitle: "Export 后高价时段",
     notificationMatrixWindowPostExportPeakSummary: "20:00-23:00。这个窗口会尽量避免高价购电，并在风险出现时尽早提醒。",
     notificationMatrixWindowOvernightTitle: "夜间肩时段",
@@ -793,7 +811,7 @@ const I18N = {
     notificationRuleTeslaAfterFreeShoulderTrigger: "Solplanet SOC 到 95% 开始充，低于 90% 停止，区间内维持当前状态。",
     notificationRuleTeslaAfterFreePeakTitle: "峰前时段 Tesla 继续跟随 Solplanet SOC 规则",
     notificationRuleTeslaAfterFreePeakTrigger: "Solplanet SOC 到 95% 开始充，低于 90% 停止，区间内维持当前状态。",
-    notificationRuleTeslaExportWindowTitle: "Export 时段 Tesla 按太阳能富余充电",
+    notificationRuleTeslaExportWindowTitle: "ZeroHero 时段 Tesla 按太阳能富余充电",
     notificationRuleTeslaExportWindowTrigger: "结合太阳能富余和 Solplanet SOC 阈值来决定 Tesla 的充电状态和充电电流，尽量避免不必要的电网取电。",
     notificationRuleTeslaPostExportPeakTitle: "高价时段强制关闭 Tesla 充电",
     notificationRuleTeslaPostExportPeakTrigger: "20:00-23:00 期间，worker 会停止 Tesla 充电，避免高价电网取电。",
@@ -804,14 +822,14 @@ const I18N = {
     notificationMatrixTeslaCurrent: "Tesla 实际 {actual} / 设定 {configured}",
     notificationRuleSolplanetLowAvailableCapacityTitle: "Solplanet 可用电量过低",
     notificationRuleSolplanetLowAvailableCapacityTrigger: "当这个窗口内 Solplanet 可用容量低于 25 kWh 时触发。",
-    notificationRuleSolplanetLowBatteryTitle: "Export 时段 Solplanet 电量过低",
-    notificationRuleSolplanetLowBatteryTrigger: "当 export 时段内 Solplanet SOC 低于 20% 时触发。",
-    notificationRuleGridImportStartedTitle: "Export 时段开始从电网取电",
-    notificationRuleGridImportStartedTrigger: "当 export 时段内电网状态从未取电切换到开始取电时触发一次。",
-    notificationRuleSolarSurplusExportEnergyReached5000Title: "Export 能量达到 5 kWh",
-    notificationRuleSolarSurplusExportEnergyReached5000Trigger: "当 export 时段累计外送电量达到 5 kWh 时触发一次。",
-    notificationRuleSolarSurplusExportEnergyReached9000Title: "Export 能量达到 9 kWh",
-    notificationRuleSolarSurplusExportEnergyReached9000Trigger: "当 export 时段累计外送电量达到 9 kWh 时触发一次。",
+    notificationRuleSolplanetLowBatteryTitle: "ZeroHero 时段 Solplanet 电量过低",
+    notificationRuleSolplanetLowBatteryTrigger: "当 ZeroHero 时段内 Solplanet SOC 低于 20% 时触发。",
+    notificationRuleGridImportStartedTitle: "ZeroHero 时段开始从电网取电",
+    notificationRuleGridImportStartedTrigger: "当 ZeroHero 时段内电网状态从未取电切换到开始取电时触发一次。",
+    notificationRuleSolarSurplusExportEnergyReached5000Title: "ZeroHero 能量达到 5 kWh",
+    notificationRuleSolarSurplusExportEnergyReached5000Trigger: "当 ZeroHero 时段累计外送电量达到 5 kWh 时触发一次。",
+    notificationRuleSolarSurplusExportEnergyReached9000Title: "ZeroHero 能量达到 9 kWh",
+    notificationRuleSolarSurplusExportEnergyReached9000Trigger: "当 ZeroHero 时段累计外送电量达到 9 kWh 时触发一次。",
     notificationRuleSolplanetLowBatteryPostExportPeakTitle: "高价时段 Solplanet 电量过低",
     notificationRuleSolplanetLowBatteryPostExportPeakTrigger: "当 export 后高价时段内 Solplanet SOC 低于 20% 时触发。",
     notificationRuleGridImportStartedPostExportPeakTitle: "高价时段开始从电网取电",
@@ -895,6 +913,16 @@ const I18N = {
     solplanetControlPopupRestartSummary: "后台 API 循环已强制重启。",
     solplanetControlPopupResultTitle: "返回结果 JSON",
     solplanetControlFetchMeta: "最近拉取: {time} · 状态接口 {stateMs} ms · 实时接口 {liveMs} ms · 总耗时 {totalMs} ms",
+    solplanetDashboardPinModalTitle: "Solplanet 充电功率",
+    solplanetDashboardPinModalIntro: "先在这里手动设置 Solplanet 的充电上限 Pin，确认手动控制链路是通的，再做自动化。",
+    solplanetDashboardPinCurrentLabel: "当前 Pin (W)",
+    solplanetDashboardPinTargetLabel: "目标 Pin (W)",
+    solplanetDashboardPinApplyBtn: "应用 Pin",
+    solplanetDashboardPinLoading: "正在读取 Solplanet 当前控制状态...",
+    solplanetDashboardPinReady: "当前电池充电功率 {power}。现在可以手动下发新的 Pin。",
+    solplanetDashboardPinApplying: "正在应用 Solplanet Pin...",
+    solplanetDashboardPinApplied: "Pin 已更新为 {pin}W。",
+    solplanetDashboardPinOpenHint: "点击 Solplanet inverter 节点可手动调整充电功率。",
     sajControlModeTitle: "工作模式",
     sajControlModeExplain: "mode code 与名称可能因固件不同，请按 APP 对照测试 0~8。",
     sajControlModeReadback: "mode_input={modeInput}, mode_sensor={modeSensor}, inverter_mode={inverterMode}",
@@ -1661,6 +1689,7 @@ const stateCache = {
   },
 };
 let teslaControlBusy = false;
+let solplanetPinModalBusy = false;
 const TESLA_CONTROL_CONFIRM_POLL_MS = 1500;
 const TESLA_CONTROL_CONFIRM_TIMEOUT_MS = 15000;
 const TESLA_CONTROL_FEEDBACK_CLEAR_MS = 4000;
@@ -1669,6 +1698,35 @@ let teslaControlFeedbackTimerId = null;
 const timeWindowRuleBusy = new Set();
 
 const NOTIFICATION_MATRIX_WINDOWS = [
+  {
+    id: "overnight_shoulder",
+    schedule: "23:00-11:00(+1d)",
+    titleKey: "notificationMatrixWindowOvernightTitle",
+    summaryKey: "notificationMatrixWindowOvernightSummary",
+    rules: [
+      {
+        kind: "operation",
+        level: "info",
+        code: "saj_profile_self_consumption",
+        titleKey: "notificationRuleSajProfileSelfConsumptionTitle",
+        triggerKey: "notificationRuleSajProfileSelfConsumptionTrigger",
+      },
+      {
+        kind: "notification",
+        level: "warning",
+        code: "saj_battery_watch_50_percent",
+        titleKey: "notificationRuleSajBatteryWatch50Title",
+        triggerKey: "notificationRuleSajBatteryWatch50Trigger",
+      },
+      {
+        kind: "notification",
+        level: "alarm",
+        code: "saj_battery_watch_20_percent",
+        titleKey: "notificationRuleSajBatteryWatch20Title",
+        triggerKey: "notificationRuleSajBatteryWatch20Trigger",
+      },
+    ],
+  },
   {
     id: "free_energy",
     schedule: "11:00-14:00",
@@ -1818,35 +1876,6 @@ const NOTIFICATION_MATRIX_WINDOWS = [
         code: "grid_import_started_post_export_peak",
         titleKey: "notificationRuleGridImportStartedPostExportPeakTitle",
         triggerKey: "notificationRuleGridImportStartedPostExportPeakTrigger",
-      },
-    ],
-  },
-  {
-    id: "overnight_shoulder",
-    schedule: "23:00-11:00(+1d)",
-    titleKey: "notificationMatrixWindowOvernightTitle",
-    summaryKey: "notificationMatrixWindowOvernightSummary",
-    rules: [
-      {
-        kind: "operation",
-        level: "info",
-        code: "saj_profile_self_consumption",
-        titleKey: "notificationRuleSajProfileSelfConsumptionTitle",
-        triggerKey: "notificationRuleSajProfileSelfConsumptionTrigger",
-      },
-      {
-        kind: "notification",
-        level: "warning",
-        code: "saj_battery_watch_50_percent",
-        titleKey: "notificationRuleSajBatteryWatch50Title",
-        triggerKey: "notificationRuleSajBatteryWatch50Trigger",
-      },
-      {
-        kind: "notification",
-        level: "alarm",
-        code: "saj_battery_watch_20_percent",
-        titleKey: "notificationRuleSajBatteryWatch20Title",
-        triggerKey: "notificationRuleSajBatteryWatch20Trigger",
       },
     ],
   },
@@ -3784,34 +3813,72 @@ function pickTeslaMetricEntity(items, metricKind) {
   return scored[0]?.item || null;
 }
 
-function formatTeslaCurrentValue(actualValue, configuredValue, unit) {
+function isTeslaActivelyCharging({ actualValue = null, chargingPowerValue = null, connectionState = null } = {}) {
+  const normalizedConnectionState = String(connectionState || "").trim().toLowerCase();
+  if (normalizedConnectionState === "charging") return true;
+  if (normalizedConnectionState === "plugged_not_charging" || normalizedConnectionState === "unplugged") return false;
   const actualNumeric = toFiniteNumber(actualValue);
-  const configuredNumeric = toFiniteNumber(configuredValue);
-  const unitText = String(unit || "").trim();
-  const normalizedUnit = currentLang === "zh" && unitText.toLowerCase() === "a"
-    ? "安"
-    : (unitText || (currentLang === "zh" ? "安" : "A"));
-  if (actualNumeric === null && configuredNumeric === null) return `${t("teslaChargingCurrentLabel")} -`;
-  const actualText = actualNumeric === null ? "-" : `${actualNumeric.toFixed(1)}${normalizedUnit}`;
-  const configuredText = configuredNumeric === null ? "-" : `${configuredNumeric.toFixed(1)}${normalizedUnit}`;
-  return `${t("teslaChargingCurrentLabel")} ${t("teslaChargingCurrentActualLabel")} ${actualText} · ${t("teslaChargingCurrentConfiguredLabel")} ${configuredText}`;
+  if (actualNumeric !== null) return actualNumeric > 0;
+  const chargingPowerNumeric = toFiniteNumber(chargingPowerValue);
+  if (chargingPowerNumeric !== null) return chargingPowerNumeric > 0;
+  return null;
 }
 
-function formatTeslaCurrentValueHtml(actualValue, configuredValue, unit, kind) {
+function buildTeslaCurrentDisplay(actualValue, configuredValue, unit, { connectionState = null, chargingPowerValue = null } = {}) {
   const actualNumeric = toFiniteNumber(actualValue);
   const configuredNumeric = toFiniteNumber(configuredValue);
+  const hasConnectionState = String(connectionState || "").trim().length > 0;
+  const connectionText = hasConnectionState ? formatTeslaConnectionText(connectionState) : null;
   const unitText = String(unit || "").trim();
   const normalizedUnit = currentLang === "zh" && unitText.toLowerCase() === "a"
     ? "安"
     : (unitText || (currentLang === "zh" ? "安" : "A"));
+  if (actualNumeric === null && configuredNumeric === null) {
+    return {
+      actualText: "-",
+      secondaryText: null,
+      showConfigured: false,
+      connectionText,
+    };
+  }
   const actualText = actualNumeric === null ? "-" : `${actualNumeric.toFixed(1)}${normalizedUnit}`;
   const configuredText = configuredNumeric === null ? "-" : `${configuredNumeric.toFixed(1)}${normalizedUnit}`;
+  const chargingActive = isTeslaActivelyCharging({ actualValue: actualNumeric, chargingPowerValue, connectionState });
+  const showConfigured = chargingActive === true && configuredNumeric !== null;
+  return {
+    actualText,
+    secondaryText: showConfigured ? configuredText : connectionText,
+    showConfigured,
+    connectionText,
+  };
+}
+
+function formatTeslaCurrentValue(actualValue, configuredValue, unit, options = {}) {
+  const display = buildTeslaCurrentDisplay(actualValue, configuredValue, unit, options);
+  if (display.actualText === "-" && !display.secondaryText) return `${t("teslaChargingCurrentLabel")} -`;
+  if (display.showConfigured) {
+    return `${t("teslaChargingCurrentLabel")} ${t("teslaChargingCurrentActualLabel")} ${display.actualText} · ${t("teslaChargingCurrentConfiguredLabel")} ${display.secondaryText}`;
+  }
+  if (display.secondaryText) {
+    return `${t("teslaChargingCurrentLabel")} ${t("teslaChargingCurrentActualLabel")} ${display.actualText} · ${display.secondaryText}`;
+  }
+  return `${t("teslaChargingCurrentLabel")} ${t("teslaChargingCurrentActualLabel")} ${display.actualText}`;
+}
+
+function formatTeslaCurrentValueHtml(actualValue, configuredValue, unit, kind, options = {}) {
+  const display = buildTeslaCurrentDisplay(actualValue, configuredValue, unit, options);
   const letter = dataKindBadgeLetter(kind);
   const tooltip = dataKindTooltipText(kind);
+  const secondaryLabel = display.showConfigured
+    ? t("teslaChargingCurrentConfiguredLabel")
+    : "";
+  const secondaryLineText = display.showConfigured
+    ? `${secondaryLabel} ${display.secondaryText}`
+    : (display.secondaryText || "");
   return (
     `<span class="data-kind-value tesla-current-stack">` +
-    `<span class="data-kind-main tesla-current-line">${escapeHtml(t("teslaChargingCurrentActualLabel"))} ${escapeHtml(actualText)}</span>` +
-    `<span class="data-kind-main tesla-current-line">${escapeHtml(t("teslaChargingCurrentConfiguredLabel"))} ${escapeHtml(configuredText)}</span>` +
+    `<span class="data-kind-main tesla-current-line">${escapeHtml(t("teslaChargingCurrentActualLabel"))} ${escapeHtml(display.actualText)}</span>` +
+    `<span class="data-kind-main tesla-current-line">${escapeHtml(secondaryLineText)}</span>` +
     `<span class="data-kind-badge data-kind-${escapeHtml(kind)}" data-kind="${escapeHtml(kind)}" data-tooltip="${escapeHtml(tooltip)}" title="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}">${escapeHtml(letter)}</span>` +
     `</span>`
   );
@@ -4433,7 +4500,10 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   );
   setHtml(
     "combined-teslaChargingCurrentValue",
-    formatTeslaCurrentValueHtml(teslaCurrentA, teslaConfiguredCurrentA, teslaInfo?.currentUnit || "A", dataKinds.teslaCurrent),
+    formatTeslaCurrentValueHtml(teslaCurrentA, teslaConfiguredCurrentA, teslaInfo?.currentUnit || "A", dataKinds.teslaCurrent, {
+      connectionState: teslaInfo?.teslaConnectionState,
+      chargingPowerValue: teslaInfo?.chargingW,
+    }),
   );
   setText("combined-teslaConnectionValue", formatTeslaConnectionSummary(teslaInfo));
   renderTeslaControlStatus(teslaInfo);
@@ -4454,6 +4524,11 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   if (sajModeTrigger) {
     sajModeTrigger.classList.add("is-clickable");
     sajModeTrigger.setAttribute("title", t("sajProfilePanelKicker"));
+  }
+  const solplanetTrigger = document.getElementById("combined-inverter2State");
+  if (solplanetTrigger) {
+    solplanetTrigger.classList.add("is-clickable");
+    solplanetTrigger.setAttribute("title", t("solplanetDashboardPinOpenHint"));
   }
 
   setNodeSourceTip("combined-solarPowerValue", formatMetricSourceText("saj", "solar", sources.solar));
@@ -5099,9 +5174,9 @@ function getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWi
   return {
     ratio: Number.isFinite(actualCurrent) ? Math.max(0, Math.min(1, actualCurrent / 32)) : 0,
     statusText,
-    currentText: t("notificationMatrixTeslaCurrent", {
-      actual: formatTeslaAmpText(actualCurrent),
-      configured: formatTeslaAmpText(configuredCurrent),
+    currentText: formatTeslaCurrentValue(actualCurrent, configuredCurrent, "A", {
+      connectionState: metrics?.tesla_connection_state || before?.connection_state || null,
+      chargingPowerValue: metrics?.tesla_charge_power_w,
     }),
     triggerText,
     deltaText,
@@ -9021,6 +9096,92 @@ function renderSolplanetControlFromCache() {
   renderSolplanetModeSignals();
 }
 
+function setSolplanetPinModalVisible(visible) {
+  const modal = document.getElementById("solplanetPinModal");
+  if (!modal) return;
+  modal.classList.toggle("hidden", !visible);
+}
+
+function setSolplanetPinModalBusy(busy) {
+  solplanetPinModalBusy = Boolean(busy);
+  const ids = [
+    "solplanetPinApplyBtn",
+    "solplanetPinPreset0Btn",
+    "solplanetPinPreset3000Btn",
+    "solplanetPinPreset5000Btn",
+  ];
+  for (const id of ids) {
+    const button = document.getElementById(id);
+    if (button) button.disabled = solplanetPinModalBusy;
+  }
+  const input = document.getElementById("solplanetPinTargetInput");
+  if (input) input.disabled = solplanetPinModalBusy;
+}
+
+function renderSolplanetPinModalState(controlPayload = null) {
+  const state = controlPayload?.control_state || controlPayload?.state || null;
+  const currentPin = Number(state?.limits?.pin);
+  const currentPinText = Number.isFinite(currentPin) ? `${Math.round(currentPin)} W` : "-";
+  const currentEl = document.getElementById("solplanetPinCurrentValue");
+  if (currentEl) currentEl.value = currentPinText;
+
+  const targetInput = document.getElementById("solplanetPinTargetInput");
+  if (targetInput && Number.isFinite(currentPin)) {
+    targetInput.value = String(Math.round(currentPin));
+  }
+
+  const battery2W = Number(stateCache.lastSummary?.combinedFlow?.metrics?.battery2_w);
+  const chargingW = Number.isFinite(battery2W) && battery2W < 0 ? Math.abs(battery2W) : 0;
+  setText("solplanetPinModalStatus", t("solplanetDashboardPinReady", { power: `${Math.round(chargingW)}W` }));
+}
+
+async function openSolplanetPinModal() {
+  setSolplanetPinModalVisible(true);
+  setSolplanetPinModalBusy(true);
+  setText("solplanetPinModalStatus", t("solplanetDashboardPinLoading"));
+  try {
+    const payload = await fetchJson("/api/solplanet/control/state", { timeoutMs: 15000 });
+    stateCache.lastSolplanetControl = payload;
+    renderSolplanetPinModalState(payload);
+  } catch (err) {
+    setText("solplanetPinModalStatus", t("solplanetControlLoadFailed", { error: String(err) }));
+  } finally {
+    setSolplanetPinModalBusy(false);
+  }
+}
+
+async function applySolplanetDashboardPin() {
+  if (solplanetPinModalBusy) return;
+  const targetInput = document.getElementById("solplanetPinTargetInput");
+  const pin = Math.max(0, Math.min(20000, Math.trunc(Number(targetInput?.value || "0"))));
+  setSolplanetPinModalBusy(true);
+  setText("solplanetPinModalStatus", t("solplanetDashboardPinApplying"));
+  try {
+    const payload = await fetchJson("/api/solplanet/control/limits", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+      timeoutMs: 45000,
+    });
+    stateCache.lastSolplanetControl = payload;
+    if (payload?.state) {
+      renderSolplanetPinModalState(payload);
+    }
+    const readbackError = String(payload?.readback_error || "").trim();
+    setText(
+      "solplanetPinModalStatus",
+      readbackError
+        ? `${t("solplanetDashboardPinApplied", { pin })} (${readbackError})`
+        : t("solplanetDashboardPinApplied", { pin }),
+    );
+    void loadSummary();
+  } catch (err) {
+    setText("solplanetPinModalStatus", t("solplanetControlApplyFailed", { error: String(err) }));
+  } finally {
+    setSolplanetPinModalBusy(false);
+  }
+}
+
 async function loadSolplanetControl() {
   setSolplanetControlLoading(true);
   const requestStartedAt = Date.now();
@@ -10101,6 +10262,14 @@ bindClickIfPresent("workerLogDetailCloseBtn", () => {
   setWorkerLogDetailModalVisible(false);
 });
 {
+  const modal = document.getElementById("solplanetPinModal");
+  if (modal) {
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) setSolplanetPinModalVisible(false);
+    });
+  }
+}
+{
   const modal = document.getElementById("workerLogDetailModal");
   if (modal) {
     modal.addEventListener("click", (event) => {
@@ -10121,6 +10290,10 @@ bindClickIfPresent("databaseRowDetailCloseBtn", () => {
 }
 window.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  const solplanetPinModal = document.getElementById("solplanetPinModal");
+  if (solplanetPinModal && !solplanetPinModal.classList.contains("hidden")) {
+    setSolplanetPinModalVisible(false);
+  }
   const modal = document.getElementById("workerLogDetailModal");
   if (modal && !modal.classList.contains("hidden")) {
     setWorkerLogDetailModalVisible(false);
@@ -10210,6 +10383,24 @@ bindClickIfPresent("solplanetRawSettingApplyBtn", () => {
 });
 bindClickIfPresent("solplanetRestartApiBtn", () => {
   void restartSolplanetBackendApi();
+});
+bindClickIfPresent("solplanetPinModalCloseBtn", () => {
+  setSolplanetPinModalVisible(false);
+});
+bindClickIfPresent("solplanetPinApplyBtn", () => {
+  void applySolplanetDashboardPin();
+});
+bindClickIfPresent("solplanetPinPreset0Btn", () => {
+  const input = document.getElementById("solplanetPinTargetInput");
+  if (input) input.value = "0";
+});
+bindClickIfPresent("solplanetPinPreset3000Btn", () => {
+  const input = document.getElementById("solplanetPinTargetInput");
+  if (input) input.value = "3000";
+});
+bindClickIfPresent("solplanetPinPreset5000Btn", () => {
+  const input = document.getElementById("solplanetPinTargetInput");
+  if (input) input.value = "5000";
 });
 bindChangeIfPresent("solplanetScheduleDayInput", () => {
   renderSolplanetControlSlotsTable();
@@ -10392,6 +10583,10 @@ window.addEventListener("resize", () => {
 document.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
+  if (target.closest(".efd-node-id-combined-inverter2Node")) {
+    void openSolplanetPinModal();
+    return;
+  }
   if (target.closest("#combined-inverter1State")) {
     toggleSajDashboardProfilePopover();
     return;

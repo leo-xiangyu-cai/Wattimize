@@ -121,6 +121,7 @@ First-run configuration:
 - Other values are backend constants (entity ids, port/scheme/ssl/cache/timeout), except the two sampling interval fields.
 - Saved config is written into SQLite table `app_config`.
 - The database path can be overridden with `WATTIMIZE_DB_PATH`.
+- The checked-in `docker-compose.yml` now points `WATTIMIZE_DB_PATH` at `/app/data/recovery/energy_samples.recovered.sqlite3`.
 
 ## 6) Built-in SQLite Sampling
 
@@ -128,6 +129,7 @@ First-run configuration:
 - Default SAJ sampling frequency is every 5 seconds (`WATTIMIZE_SAMPLE_INTERVAL_SECONDS`).
 - Default Solplanet sampling frequency is every 60 seconds (`WATTIMIZE_SOLPLANET_SAMPLE_INTERVAL_SECONDS`).
 - Every sample stores current `pv_w/grid_w/battery_w/load_w/soc/inverter_status/balance` and raw flow payload.
+- SQLite writes and worker log persistence now retry on transient database failures before surfacing an error in collector status.
 - Daily usage endpoint integrates power snapshots into kWh (UTC day).
 - `system=combined` is available on range usage and trend series endpoints for the frontend overall view.
 - The Sampling tab includes total cards and chart overlays that split window-specific energy from the full selected range.
@@ -139,3 +141,4 @@ First-run configuration:
 - Rule state is stored in SQLite and exposed through `GET /api/time-window-rules` and `PUT /api/time-window-rules/{rule_code}`.
 - SAJ profile automation and Tesla charge automation respect these rule switches before issuing control actions.
 - Tesla manual start/stop now returns UI feedback states so the dashboard can show pending, success, and failure confirmation after `/api/tesla/control/charging`.
+- The combined dashboard lets you click the Solplanet inverter node to read and update the live Solplanet `Pin` charging limit.

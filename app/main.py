@@ -136,7 +136,7 @@ SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_LOW_SOC_PERCENT = 20.0
 POST_EXPORT_PEAK_WINDOW_TARIFF_P_PER_KWH = 53.0
 TESLA_GRID_SUPPORT_TARGET_MIN_W = 14_000.0
 TESLA_GRID_SUPPORT_TARGET_MAX_W = 15_000.0
-TESLA_GRID_SUPPORT_HARD_MAX_W = 15_000.0
+TESLA_GRID_SUPPORT_HARD_MAX_W = 15_500.0
 TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A: tuple[int, ...] = (10, 15)
 TESLA_SOLAR_SURPLUS_START_SOLPLANET_SOC_PERCENT = 95.0
 TESLA_SOLAR_SURPLUS_STOP_SOLPLANET_SOC_PERCENT = 90.0
@@ -148,6 +148,9 @@ SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLDS_WH: tuple[float, ...] = (5_0
 TESLA_CURRENT_MISMATCH_RESTART_MIN_DELTA_A = 2.0
 TESLA_CURRENT_MISMATCH_RESTART_COOLDOWN_SECONDS = 300.0
 WORKER_PENDING_LOG_TIMEOUT_SECONDS = 60.0
+SAMPLE_PERSIST_MAX_ATTEMPTS = 5
+SAMPLE_PERSIST_ATTEMPT_TIMEOUT_SECONDS = 5.0
+SAMPLE_PERSIST_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (0.2, 0.5, 1.0, 2.0)
 BATTERY_FULL_NOTIFICATION_STATE_PREFIX = "notification_state."
 SAJ_BATTERY_FULL_ACTIVE_KEY = f"{BATTERY_FULL_NOTIFICATION_STATE_PREFIX}saj_battery_full_active"
 SOLPLANET_BATTERY_FULL_ACTIVE_KEY = f"{BATTERY_FULL_NOTIFICATION_STATE_PREFIX}solplanet_battery_full_active"
@@ -267,6 +270,11 @@ collector_status: dict[str, dict[str, object]] = {
         "last_success_at": None,
         "last_error_at": None,
         "last_error": None,
+        "last_persistence_error_at": None,
+        "last_persistence_error": None,
+        "last_persistence_error_operation": None,
+        "last_persistence_error_attempts": 0,
+        "last_persistence_error_round_id": None,
         "last_duration_ms": None,
         "success_count": 0,
         "failure_count": 0,
@@ -281,6 +289,11 @@ collector_status: dict[str, dict[str, object]] = {
         "last_success_at": None,
         "last_error_at": None,
         "last_error": None,
+        "last_persistence_error_at": None,
+        "last_persistence_error": None,
+        "last_persistence_error_operation": None,
+        "last_persistence_error_attempts": 0,
+        "last_persistence_error_round_id": None,
         "last_duration_ms": None,
         "success_count": 0,
         "failure_count": 0,
@@ -295,6 +308,11 @@ collector_status: dict[str, dict[str, object]] = {
         "last_success_at": None,
         "last_error_at": None,
         "last_error": None,
+        "last_persistence_error_at": None,
+        "last_persistence_error": None,
+        "last_persistence_error_operation": None,
+        "last_persistence_error_attempts": 0,
+        "last_persistence_error_round_id": None,
         "last_duration_ms": None,
         "success_count": 0,
         "failure_count": 0,
@@ -384,6 +402,106 @@ def _append_worker_failure_log(
             fh.write("\n".join(lines))
     except Exception as log_exc:  # noqa: BLE001
         logger.warning("Failed to append worker failure log: %s", log_exc)
+
+
+def _is_retryable_sqlite_error(error: BaseException) -> bool:
+    if isinstance(error, sqlite3.Error):
+        return True
+    cause = getattr(error, "__cause__", None)
+    if isinstance(cause, sqlite3.Error):
+        return True
+    text = str(error).strip().lower()
+    return bool(text) and any(
+        token in text
+        for token in (
+            "sqlite",
+            "disk i/o error",
+            "database is locked",
+            "database is busy",
+            "unable to open database file",
+        )
+    )
+
+
+async def _run_db_call_with_retry(
+    func: Callable[..., object],
+    *args: object,
+    operation_name: str,
+    trace_system: str,
+    trace_round_id: str | None = None,
+    max_attempts: int = SAMPLE_PERSIST_MAX_ATTEMPTS,
+    attempt_timeout_seconds: float = SAMPLE_PERSIST_ATTEMPT_TIMEOUT_SECONDS,
+    retry_backoff_seconds: tuple[float, ...] = SAMPLE_PERSIST_RETRY_BACKOFF_SECONDS,
+    extra_failure_context: dict[str, object] | None = None,
+    **kwargs: object,
+) -> object:
+    safe_attempts = max(1, int(max_attempts))
+    last_error: BaseException | None = None
+    for attempt in range(1, safe_attempts + 1):
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(func, *args, **kwargs),
+                timeout=max(0.1, float(attempt_timeout_seconds)),
+            )
+        except Exception as exc:  # noqa: BLE001
+            retryable = _is_retryable_sqlite_error(exc) or isinstance(exc, asyncio.TimeoutError)
+            failure_context = {
+                "operation_name": operation_name,
+                "attempt": attempt,
+                "max_attempts": safe_attempts,
+                "retryable": retryable,
+            }
+            if trace_round_id:
+                failure_context["round_id"] = trace_round_id
+            if extra_failure_context:
+                failure_context.update(extra_failure_context)
+            _append_worker_failure_log(
+                trace_system,
+                stage=f"{operation_name}_attempt_{attempt}",
+                error=exc,
+                extra=failure_context,
+            )
+            last_error = exc
+            if not retryable or attempt >= safe_attempts:
+                break
+            if attempt == 1:
+                try:
+                    await asyncio.to_thread(dispose_db_connections, storage_db_path)
+                except Exception as dispose_exc:  # noqa: BLE001
+                    _append_worker_failure_log(
+                        trace_system,
+                        stage=f"{operation_name}_dispose_connections",
+                        error=dispose_exc,
+                        extra={"round_id": trace_round_id} if trace_round_id else None,
+                    )
+            backoff_index = min(attempt - 1, len(retry_backoff_seconds) - 1)
+            await asyncio.sleep(retry_backoff_seconds[backoff_index])
+    assert last_error is not None
+    raise last_error
+
+
+def _record_persistence_failure(
+    system: str,
+    *,
+    operation_name: str,
+    error: BaseException,
+    round_id: str | None = None,
+    attempts: int = SAMPLE_PERSIST_MAX_ATTEMPTS,
+) -> None:
+    status = collector_status.setdefault(system, {})
+    status["last_persistence_error_at"] = datetime.now(UTC).isoformat()
+    status["last_persistence_error"] = f"{type(error).__name__}: {error}"
+    status["last_persistence_error_operation"] = operation_name
+    status["last_persistence_error_attempts"] = attempts
+    status["last_persistence_error_round_id"] = round_id
+
+
+def _clear_persistence_failure(system: str) -> None:
+    status = collector_status.setdefault(system, {})
+    status["last_persistence_error"] = None
+    status["last_persistence_error_operation"] = None
+    status["last_persistence_error_attempts"] = 0
+    status["last_persistence_error_round_id"] = None
 
 
 def _read_worker_failure_log(*, limit: int = 100, before: int = 0) -> dict[str, object]:
@@ -520,7 +638,18 @@ def _worker_round_log_plan(round_number: int, round_id: str, requested_at_utc: s
 async def _insert_worker_round_log_plan(round_number: int, round_id: str, requested_at_utc: str) -> None:
     plan = _worker_round_log_plan(round_number, round_id, requested_at_utc)
     for item in plan:
-        await asyncio.to_thread(insert_worker_api_log, storage_db_path, **item)
+        item_payload = dict(item)
+        item_system = str(item_payload.pop("system", "") or "combined")
+        await _run_db_call_with_retry(
+            insert_worker_api_log,
+            storage_db_path,
+            operation_name="worker_round_log_plan",
+            trace_system=item_system,
+            trace_round_id=round_id,
+            extra_failure_context={"service": str(item_payload.get("service") or "")},
+            system=item_system,
+            **item_payload,
+        )
 
 
 def _handle_outbound_request_log(event: dict[str, object]) -> None:
@@ -2358,13 +2487,99 @@ def _build_notification_summary_payload(
     return status, bool(source.get("log_ok", True)), payload, error_text
 
 
+def _operation_check_name(source: dict[str, object]) -> str:
+    target = str(source.get("target") or "").strip().lower()
+    if target == "battery_full_watch":
+        return "battery_full_watch"
+    service_window = str(source.get("service_window") or "").strip().lower()
+    if service_window:
+        return service_window
+    window_mode = str(source.get("window_mode") or "").strip().lower()
+    if window_mode in ("free_energy", "after_free_shoulder", "after_free_peak", "export_window", "post_export_peak"):
+        return "midday_window_check"
+    return target or window_mode or "worker_check"
+
+
+def _operation_check_summary(source: dict[str, object]) -> dict[str, object]:
+    action = source.get("action")
+    action_map = action if isinstance(action, dict) else {}
+    decision = source.get("decision")
+    decision_map = decision if isinstance(decision, dict) else {}
+    check: dict[str, object] = {
+        "check": _operation_check_name(source),
+        "target": source.get("target"),
+        "service_window": source.get("service_window"),
+        "service_window_schedule": source.get("service_window_schedule"),
+        "window_mode": source.get("window_mode"),
+        "window_schedule": source.get("window_schedule"),
+        "window_active": bool(source.get("window_active")),
+        "log_status": source.get("log_status"),
+        "decision_reason": source.get("decision_reason"),
+        "action": action_map,
+        "decision": decision_map,
+    }
+    if source.get("skipped") is not None:
+        check["skipped"] = source.get("skipped")
+    if source.get("error") is not None:
+        check["error"] = source.get("error")
+
+    details: dict[str, object] = {}
+    for key in (
+        "current_grid_import_w",
+        "current_grid_export_w",
+        "base_grid_without_tesla_w",
+        "available_current_options_amps",
+        "candidates",
+        "tesla_rule_code",
+        "tesla_rule_enabled",
+        "tesla_state_before",
+        "saj_profile_guard",
+        "after_free_shoulder",
+        "after_free_peak",
+        "export_window",
+        "post_export_peak",
+        "battery1_soc_percent",
+        "battery2_soc_percent",
+        "notification_state",
+        "thresholds_soc_percent",
+        "threshold_soc_percent",
+    ):
+        value = source.get(key)
+        if value is not None:
+            details[key] = value
+    if details:
+        check["details"] = details
+
+    why_not_applied = None
+    log_status = str(source.get("log_status") or "").strip().lower()
+    action_type = str(action_map.get("type") or "").strip().lower()
+    action_reason = str(action_map.get("reason") or "").strip()
+    if log_status == "outside_window":
+        why_not_applied = "outside_window"
+    elif log_status == "skipped":
+        why_not_applied = str(source.get("skipped") or action_reason or "skipped")
+    elif log_status == "failed":
+        why_not_applied = str(source.get("error") or source.get("log_error_text") or "failed")
+    elif action_type in ("", "noop"):
+        why_not_applied = action_reason or str(source.get("decision_reason") or "noop")
+    if why_not_applied:
+        check["why_not_applied"] = why_not_applied
+    return check
+
+
 def _build_operation_summary_payload(
     source: dict[str, object],
     *,
     actions: list[dict[str, object]] | None = None,
+    check_sources: list[dict[str, object]] | None = None,
 ) -> tuple[str, bool, dict[str, object], str | None]:
     action_list = list(actions or _worker_action_list(source))
     action_map = action_list[-1] if action_list else {}
+    checks = [
+        _operation_check_summary(item)
+        for item in (check_sources or [source])
+        if isinstance(item, dict)
+    ]
     status = WORKER_LOG_STATUS_APPLIED if any(str(item.get("type") or "").strip().lower() not in ("", "noop") for item in action_list) else WORKER_LOG_STATUS_NOOP
     payload = {
         "record_kind": "operation",
@@ -2380,6 +2595,7 @@ def _build_operation_summary_payload(
         ],
         "actions": action_list,
         "action": action_map,
+        "checks": checks,
     }
     error_text = str(source.get("log_error_text") or "").strip() or None
     return status, bool(source.get("log_ok", True)), payload, error_text
@@ -2564,14 +2780,24 @@ def _choose_tesla_grid_support_target(base_grid_w: float) -> dict[str, object]:
             for amps in TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
         ],
     ]
-    valid_candidates = [
+    charge_candidates = [candidate for candidate in candidates if str(candidate.get("mode")) == "charge"]
+    target_candidates = [
         candidate
-        for candidate in candidates
+        for candidate in charge_candidates
         if float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_TARGET_MAX_W
     ]
-    if not valid_candidates:
-        return candidates[0]
-    return max(valid_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
+    if target_candidates:
+        return max(target_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
+
+    hard_cap_candidates = [
+        candidate
+        for candidate in charge_candidates
+        if float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_HARD_MAX_W
+    ]
+    if hard_cap_candidates:
+        return max(hard_cap_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
+
+    return candidates[0]
 
 
 def _choose_tesla_grid_support_target_from_options(
@@ -2590,14 +2816,24 @@ def _choose_tesla_grid_support_target_from_options(
             for amps in charge_current_options_a
         ],
     ]
-    valid_candidates = [
+    charge_candidates = [candidate for candidate in candidates if str(candidate.get("mode")) == "charge"]
+    target_candidates = [
         candidate
-        for candidate in candidates
+        for candidate in charge_candidates
         if float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_TARGET_MAX_W
     ]
-    if not valid_candidates:
-        return candidates[0]
-    return max(valid_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
+    if target_candidates:
+        return max(target_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
+
+    hard_cap_candidates = [
+        candidate
+        for candidate in charge_candidates
+        if float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_HARD_MAX_W
+    ]
+    if hard_cap_candidates:
+        return max(hard_cap_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
+
+    return candidates[0]
 
 
 def _choose_tesla_solar_surplus_target_from_options(
@@ -2665,15 +2901,9 @@ def _tesla_available_charge_current_options(charge_state: dict[str, object]) -> 
     supported_values = tuple(range(min_i, max_i + 1, step_i))
     if not supported_values:
         return TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
-
-    preferred_values = tuple(
-        amps
-        for amps in TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
-        if min_i <= amps <= max_i and ((amps - min_i) % step_i == 0)
-    )
-    if preferred_values:
-        return preferred_values
-
+    # Use the vehicle-reported full current range so the controller can ramp
+    # down below 10A instead of falling back to "off" as soon as 10A exceeds
+    # the grid cap.
     return supported_values
 
 
@@ -3227,7 +3457,12 @@ async def _run_midday_window_check(
         result["base_grid_without_tesla_w"] = round(base_grid_w, 1)
         desired = _choose_tesla_grid_support_target_from_options(base_grid_w, available_current_options)
         result["decision"] = desired
-        result["decision_reason"] = "selected_max_safe_candidate_under_grid_cap"
+        desired_predicted_grid_w = float(desired.get("predicted_grid_w") or 0.0)
+        result["decision_reason"] = (
+            "selected_max_safe_candidate_under_target_grid_cap"
+            if desired_predicted_grid_w <= TESLA_GRID_SUPPORT_TARGET_MAX_W
+            else "selected_max_safe_candidate_within_hard_grid_cap_buffer"
+        )
 
         desired_amps = int(desired["charge_current_amps"])
         current_grid_import_w = float(result["current_grid_import_w"])
@@ -5754,13 +5989,21 @@ def _flatten_payload_to_kv(
     out_rows.append((attribute, json.dumps(value, ensure_ascii=False), source))
 
 
-async def _store_realtime_kv_snapshot(system: str, flow: dict[str, object]) -> None:
+async def _store_realtime_kv_snapshot(system: str, flow: dict[str, object], *, round_id: str | None = None) -> None:
     rows: list[tuple[str, str, str]] = []
     _flatten_payload_to_kv(system=system, path="", value=flow, out_rows=rows)
 
     updated_at = str(flow.get("updated_at") or datetime.now(UTC).isoformat())
     rows.append((f"{system}.update_time", json.dumps(updated_at, ensure_ascii=False), "collector"))
-    await asyncio.to_thread(upsert_realtime_kv, storage_db_path, rows)
+    await _run_db_call_with_retry(
+        upsert_realtime_kv,
+        storage_db_path,
+        rows,
+        operation_name="store_realtime_kv_snapshot",
+        trace_system=system,
+        trace_round_id=round_id,
+        extra_failure_context={"row_count": len(rows)},
+    )
 
 
 def _kv_value(
@@ -6094,10 +6337,51 @@ async def _get_energy_flow_from_realtime_kv(system: str) -> dict[str, object]:
     return _build_flow_from_kv(system, kv_map)
 
 
+async def _get_live_energy_flow(system: str) -> dict[str, object]:
+    if system == "saj":
+        _ensure_ha_configured()
+        states = await ha_client.all_states()
+        return _build_energy_flow_payload("saj", states)
+    if system == "solplanet":
+        return await _get_solplanet_flow_cached()
+    if system == "combined":
+        _ensure_ha_configured()
+        saj_flow = await _get_live_energy_flow("saj")
+        solplanet_flow = await _get_live_energy_flow("solplanet")
+        tesla_states = await _tesla_control_states()
+        tesla_control_state = _build_tesla_control_state(tesla_states)
+        tesla_observation = _build_tesla_observation_payload(tesla_states)
+        tesla_result = {
+            "executed_at_utc": datetime.now(UTC).isoformat(),
+            "control_state": tesla_control_state,
+            "observation": tesla_observation,
+        }
+        return _build_combined_flow_payload(saj_flow, solplanet_flow, tesla_result)
+    raise HTTPException(status_code=400, detail=f"Unsupported system: {system}")
+
+
 async def _store_flow_sample(system: str, flow: dict[str, object], *, round_id: str) -> None:
     sample = _sample_from_flow(system, flow, round_id=round_id)
-    await asyncio.to_thread(insert_sample, storage_db_path, sample)
-    await _store_realtime_kv_snapshot(system, flow)
+    try:
+        await _run_db_call_with_retry(
+            insert_sample,
+            storage_db_path,
+            sample,
+            operation_name="store_flow_sample",
+            trace_system=system,
+            trace_round_id=round_id,
+            extra_failure_context={"sample_system": system},
+        )
+        _clear_persistence_failure(system)
+    except Exception as exc:  # noqa: BLE001
+        _record_persistence_failure(
+            system,
+            operation_name="store_flow_sample",
+            error=exc,
+            round_id=round_id,
+        )
+        raise
+    await _store_realtime_kv_snapshot(system, flow, round_id=round_id)
 
 
 async def _collect_for_system(system: str, *, round_number: int, round_id: str, round_started_at_utc: str) -> dict[str, object]:
@@ -6241,6 +6525,7 @@ def _collector_sleep_seconds(now_monotonic: float) -> float:
 async def _await_round_request_log_settlement(
     round_id: str,
     *,
+    system: str,
     services: tuple[str, ...],
     settle_timeout_seconds: float = 2.0,
     poll_interval_seconds: float = 0.05,
@@ -6248,23 +6533,34 @@ async def _await_round_request_log_settlement(
 ) -> int:
     deadline = monotonic() + max(0.0, settle_timeout_seconds)
     while monotonic() < deadline:
-        pending_count = await asyncio.to_thread(
+        pending_count = await _run_db_call_with_retry(
             count_pending_worker_api_logs,
             storage_db_path,
+            operation_name="worker_log_settlement_count",
+            trace_system=system,
+            trace_round_id=round_id,
+            extra_failure_context={"services": ",".join(services)},
             round_id=round_id,
             services=services,
         )
         if pending_count <= 0:
+            _clear_persistence_failure(system)
             return 0
         await asyncio.sleep(poll_interval_seconds)
-    return await asyncio.to_thread(
+    result = await _run_db_call_with_retry(
         finalize_pending_worker_api_logs_for_round,
         storage_db_path,
+        operation_name="worker_log_settlement_finalize",
+        trace_system=system,
+        trace_round_id=round_id,
+        extra_failure_context={"services": ",".join(services)},
         round_id=round_id,
         services=services,
         status=WORKER_LOG_STATUS_TIMEOUT,
         error_text=timeout_error_text,
     )
+    _clear_persistence_failure(system)
+    return int(result)
 
 
 def _fmt_result_number(value: object, digits: int = 1, unit: str | None = None) -> str:
@@ -6327,6 +6623,37 @@ def _worker_control_result_text(
         window_schedule = _worker_window_label(payload)
         detail = _worker_operation_detail_text(payload)
         decision_reason = str(payload.get("decision_reason") or "-")
+        checks = payload.get("checks")
+        check_list = [item for item in checks if isinstance(item, dict)] if isinstance(checks, list) else []
+        check_parts: list[str] = []
+        for check in check_list:
+            check_name = str(check.get("check") or "check")
+            why_not_applied = str(check.get("why_not_applied") or "").strip()
+            action = check.get("action")
+            action_map = action if isinstance(action, dict) else {}
+            decision = check.get("decision")
+            decision_map = decision if isinstance(decision, dict) else {}
+            detail_parts = []
+            if why_not_applied:
+                detail_parts.append(f"why={why_not_applied}")
+            if decision_map.get("mode") is not None:
+                detail_parts.append(f"mode={decision_map.get('mode')}")
+            if decision_map.get("charge_current_amps") is not None:
+                detail_parts.append(f"target={_fmt_result_number(decision_map.get('charge_current_amps'), 0, 'A')}")
+            details = check.get("details")
+            details_map = details if isinstance(details, dict) else {}
+            if details_map.get("current_grid_import_w") is not None:
+                detail_parts.append(f"grid={_fmt_result_number(details_map.get('current_grid_import_w'), 0, 'W')}")
+            if details_map.get("available_current_options_amps") is not None:
+                options = details_map.get("available_current_options_amps")
+                if isinstance(options, list) and options:
+                    detail_parts.append(f"options={','.join(str(int(item)) for item in options if item is not None)}A")
+            if details_map.get("battery2_soc_percent") is not None:
+                detail_parts.append(f"solplanet_soc={_fmt_result_number(details_map.get('battery2_soc_percent'), 0, '%')}")
+            action_reason = str(action_map.get("reason") or "").strip()
+            if action_reason and action_reason != why_not_applied:
+                detail_parts.append(f"action_reason={action_reason}")
+            check_parts.append(f"{check_name}({', '.join(detail_parts)})" if detail_parts else check_name)
         if status == WORKER_LOG_STATUS_APPLIED:
             return (
                 f"Operation {status}: "
@@ -6337,6 +6664,7 @@ def _worker_control_result_text(
             f"Operation {status}: "
             f"window={window_mode}, schedule={window_schedule}, "
             f"reason={decision_reason if decision_reason != '-' else detail}"
+            + (f"; checks={' | '.join(check_parts)}" if check_parts else "")
         )
     if service == OVERNIGHT_SHOULDER_SERVICE:
         service_window_schedule = str(payload.get("service_window_schedule") or _window_schedule_text("overnight_shoulder"))
@@ -6741,6 +7069,11 @@ async def _persist_worker_summary_logs(
     operation_status, operation_ok, operation_payload, operation_error_text = _build_operation_summary_payload(
         source,
         actions=all_actions,
+        check_sources=[
+            item
+            for item in (midday_result, saj_watch_result, battery_full_result)
+            if isinstance(item, dict)
+        ],
     )
     operation_payload["decision_reasons"] = all_decision_reasons
     if all_decision_reasons and not operation_payload.get("decision_reason"):
@@ -6765,7 +7098,16 @@ async def _collector_loop() -> None:
         round_number = collector_round_number
         round_started_at_utc = datetime.now(UTC).isoformat()
         round_id = f"round-{round_number}-{int(datetime.fromisoformat(round_started_at_utc).timestamp() * 1000)}"
-        await _insert_worker_round_log_plan(round_number, round_id, round_started_at_utc)
+        try:
+            await _insert_worker_round_log_plan(round_number, round_id, round_started_at_utc)
+            _clear_persistence_failure("combined")
+        except Exception as exc:  # noqa: BLE001
+            _record_persistence_failure(
+                "combined",
+                operation_name="worker_round_log_plan",
+                error=exc,
+                round_id=round_id,
+            )
         round_tasks: dict[str, asyncio.Task[dict[str, object]]] = {}
         started_monotonic_by_system: dict[str, float] = {}
         for system in POLLED_SYSTEMS:
@@ -6818,13 +7160,22 @@ async def _collector_loop() -> None:
                         status["client_recreate_error_at"] = datetime.now(UTC).isoformat()
                         status["client_recreate_error"] = f"{type(recreate_exc).__name__}: {recreate_exc}"
 
-        source_pending_timeouts = await _await_round_request_log_settlement(
-            round_id,
-            services=("home_assistant", "solplanet_cgi"),
-            timeout_error_text="worker_source_request_timeout",
-        )
-        if source_pending_timeouts:
-            collector_status.setdefault("combined", {})["last_source_pending_timeout_count"] = source_pending_timeouts
+        try:
+            source_pending_timeouts = await _await_round_request_log_settlement(
+                round_id,
+                system="combined",
+                services=("home_assistant", "solplanet_cgi"),
+                timeout_error_text="worker_source_request_timeout",
+            )
+            if source_pending_timeouts:
+                collector_status.setdefault("combined", {})["last_source_pending_timeout_count"] = source_pending_timeouts
+        except Exception as exc:  # noqa: BLE001
+            _record_persistence_failure(
+                "combined",
+                operation_name="worker_log_settlement_source",
+                error=exc,
+                round_id=round_id,
+            )
 
         combined_started_monotonic = _collector_mark_start("combined")
         combined_requested_at_utc = round_started_at_utc
@@ -7087,18 +7438,27 @@ async def _collector_loop() -> None:
             if isinstance(system_result, dict):
                 status["last_round_result"] = _compact_round_result_for_status(system_result)
 
-        timed_out_pending = await _await_round_request_log_settlement(
-            round_id,
-            services=(
-                "combined_assembly",
-                TESLA_OBSERVATION_SERVICE,
-                NOTIFICATION_SUMMARY_SERVICE,
-                OPERATION_SUMMARY_SERVICE,
-            ),
-            timeout_error_text="worker_round_incomplete",
-        )
-        if timed_out_pending:
-            collector_status.setdefault("combined", {})["last_round_timeout_count"] = timed_out_pending
+        try:
+            timed_out_pending = await _await_round_request_log_settlement(
+                round_id,
+                system="combined",
+                services=(
+                    "combined_assembly",
+                    TESLA_OBSERVATION_SERVICE,
+                    NOTIFICATION_SUMMARY_SERVICE,
+                    OPERATION_SUMMARY_SERVICE,
+                ),
+                timeout_error_text="worker_round_incomplete",
+            )
+            if timed_out_pending:
+                collector_status.setdefault("combined", {})["last_round_timeout_count"] = timed_out_pending
+        except Exception as exc:  # noqa: BLE001
+            _record_persistence_failure(
+                "combined",
+                operation_name="worker_log_settlement_round",
+                error=exc,
+                round_id=round_id,
+            )
 
         try:
             await asyncio.wait_for(
@@ -7770,7 +8130,16 @@ async def get_core_entities_by_system(system: str) -> dict[str, object]:
 @app.get("/api/energy-flow/{system}")
 async def get_energy_flow(system: str) -> dict[str, object]:
     normalized = _normalize_system_name(system)
-    flow = await _get_energy_flow_from_realtime_kv(normalized)
+    try:
+        flow = await _get_energy_flow_from_realtime_kv(normalized)
+    except HTTPException:
+        flow = await _get_live_energy_flow(normalized)
+    else:
+        if bool(flow.get("stale")):
+            try:
+                flow = await _get_live_energy_flow(normalized)
+            except HTTPException:
+                flow = await _get_energy_flow_from_storage(normalized)
     if normalized == "combined":
         return _build_public_combined_flow(flow)
     return flow
@@ -8219,13 +8588,23 @@ async def put_solplanet_control_limits(payload: SolplanetLimitsPayload) -> dict[
         raise HTTPException(status_code=400, detail="No fields to update")
     try:
         cgi_write = await _solplanet_set_schedule_payload(update_payload)
-        schedule = await _solplanet_get_schedule_with_fallback()
+        state_payload: dict[str, object] | None = None
+        readback_error: str | None = None
+        try:
+            schedule = await asyncio.wait_for(
+                _solplanet_get_schedule_with_fallback(),
+                timeout=min(5.0, float(settings.solplanet_request_timeout_seconds)),
+            )
+            state_payload = _build_solplanet_control_state(schedule)
+        except Exception as exc:  # noqa: BLE001
+            readback_error = f"{type(exc).__name__}: {exc}"
         return {
             "ok": True,
             "changed": changed,
             "request_payload": update_payload,
             "cgi_write": cgi_write,
-            "state": _build_solplanet_control_state(schedule),
+            "state": state_payload,
+            "readback_error": readback_error,
         }
     except httpx.HTTPStatusError as exc:
         detail = {
