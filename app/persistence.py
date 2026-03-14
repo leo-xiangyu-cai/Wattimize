@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
+import shutil
 import statistics
+import subprocess
+import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -36,6 +40,7 @@ WORKER_LOG_LEGACY_STATUS_MAP: dict[str, str] = {
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "energy_samples.sqlite3"
 DEFAULT_SAMPLE_INTERVAL_SECONDS = 5.0
 SQLITE_BUSY_TIMEOUT_SECONDS = 10.0
+SQLITE_INTEGRITY_CHECK_TIMEOUT_SECONDS = 120.0
 CSV_HEADERS: tuple[str, ...] = (
     "system",
     "sampled_at_utc",
@@ -63,6 +68,10 @@ SOLPLANET_ENDPOINT_TABLES: dict[str, str] = {
 }
 WORKER_API_LOG_RESULT_MAX_CHARS = 20000
 WORKER_API_LOG_PAYLOAD_MAX_CHARS = 200000
+OPERATION_RUN_STATUS_PENDING = "pending"
+OPERATION_RUN_STATUS_SUCCEEDED = "succeeded"
+OPERATION_RUN_STATUS_FAILED = "failed"
+OPERATION_RUN_STATUS_TIMEOUT = "timeout"
 
 
 @dataclass(frozen=True)
@@ -217,6 +226,44 @@ class RawRequestResultRow(Base):
     response_json = Column(String)
 
 
+class OperationDefinitionRow(Base):
+    __tablename__ = "operation_definitions"
+
+    operation_code = Column(String, primary_key=True)
+    system = Column(String, nullable=False, index=True)
+    operation_type = Column(String, nullable=False, index=True)
+    action = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    input_schema_json = Column(String)
+    output_schema_json = Column(String)
+    config_json = Column(String)
+    active = Column(Integer, nullable=False, default=1, index=True)
+    created_at_utc = Column(String, nullable=False)
+    created_at_epoch = Column(Float, nullable=False, index=True)
+    updated_at_utc = Column(String, nullable=False)
+    updated_at_epoch = Column(Float, nullable=False, index=True)
+
+
+class OperationRunRow(Base):
+    __tablename__ = "operation_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    operation_code = Column(String, nullable=False, index=True)
+    trigger_source = Column(String, nullable=False, index=True)
+    status = Column(String, nullable=False, index=True)
+    started_at_utc = Column(String, nullable=False)
+    started_at_epoch = Column(Float, nullable=False, index=True)
+    updated_at_utc = Column(String, nullable=False)
+    updated_at_epoch = Column(Float, nullable=False, index=True)
+    completed_at_utc = Column(String)
+    completed_at_epoch = Column(Float, index=True)
+    request_payload_json = Column(String)
+    previous_state_json = Column(String)
+    latest_state_json = Column(String)
+    response_payload_json = Column(String)
+    error_text = Column(String)
+
+
 _ENGINE_CACHE: dict[str, Any] = {}
 _SESSION_FACTORY_CACHE: dict[str, sessionmaker[Session]] = {}
 
@@ -243,6 +290,13 @@ def _database_url(db_path: DatabaseTarget) -> str:
     if "://" in raw:
         return raw
     return f"sqlite:///{raw}"
+
+
+def _sqlite_sidecar_paths(sqlite_path: Path) -> tuple[Path, Path]:
+    return (
+        sqlite_path.with_name(f"{sqlite_path.name}-wal"),
+        sqlite_path.with_name(f"{sqlite_path.name}-shm"),
+    )
 
 
 def _is_sqlite(db_path: DatabaseTarget) -> bool:
@@ -337,6 +391,12 @@ def _truncate_payload_text(text_value: str | None) -> str:
     tail = f"\n...[truncated {len(raw) - WORKER_API_LOG_PAYLOAD_MAX_CHARS} chars]"
     keep = max(0, WORKER_API_LOG_PAYLOAD_MAX_CHARS - len(tail))
     return f"{raw[:keep]}{tail}"
+
+
+def _json_dumps(value: object | None) -> str | None:
+    if value is None:
+        return None
+    return _truncate_payload_text(json.dumps(value, ensure_ascii=False, default=str))
 
 
 def _normalize_worker_log_status(status: str | None) -> str | None:
@@ -473,6 +533,140 @@ def export_database_bytes(db_path: DatabaseTarget) -> bytes:
     return sqlite_path.read_bytes()
 
 
+def inspect_sqlite_database(db_path: DatabaseTarget) -> dict[str, object]:
+    sqlite_path = _sqlite_file_path(db_path)
+    if sqlite_path is None:
+        raise ValueError("Database inspection only supports local SQLite files")
+    if not sqlite_path.exists():
+        return {
+            "db_path": str(sqlite_path),
+            "exists": False,
+            "ok": True,
+            "journal_mode": None,
+            "integrity_check": [],
+            "quick_check": [],
+        }
+
+    with tempfile.TemporaryDirectory(prefix="wattimize-db-check-") as temp_dir_raw:
+        temp_dir = Path(temp_dir_raw)
+        probe_path = temp_dir / sqlite_path.name
+        shutil.copy2(sqlite_path, probe_path)
+        for sidecar in _sqlite_sidecar_paths(sqlite_path):
+            if sidecar.exists():
+                shutil.copy2(sidecar, temp_dir / sidecar.name)
+
+        result = subprocess.run(
+            [
+                "sqlite3",
+                str(probe_path),
+                "PRAGMA journal_mode; PRAGMA integrity_check; PRAGMA quick_check;",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=SQLITE_INTEGRITY_CHECK_TIMEOUT_SECONDS,
+            check=False,
+        )
+    lines = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+    journal_mode = lines[0] if lines else None
+    checks = lines[1:] if lines else []
+    ok = result.returncode == 0 and checks and all(line == "ok" for line in checks)
+    return {
+        "db_path": str(sqlite_path),
+        "exists": True,
+        "ok": ok,
+        "journal_mode": journal_mode,
+        "integrity_check": checks[:-1] if len(checks) > 1 else checks,
+        "quick_check": [checks[-1]] if checks else [],
+        "returncode": result.returncode,
+        "stderr": (result.stderr or "").strip(),
+    }
+
+
+def recover_sqlite_database(db_path: DatabaseTarget, *, recovery_dir: Path | None = None) -> dict[str, object]:
+    sqlite_path = _sqlite_file_path(db_path)
+    if sqlite_path is None:
+        raise ValueError("Database recovery only supports local SQLite files")
+    if not sqlite_path.exists():
+        raise FileNotFoundError(f"Database not found: {sqlite_path}")
+
+    dispose_db_connections(db_path)
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    target_recovery_dir = recovery_dir or sqlite_path.parent / "recovery"
+    target_recovery_dir.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix="wattimize-db-recover-") as temp_dir_raw:
+        temp_dir = Path(temp_dir_raw)
+        source_copy = temp_dir / sqlite_path.name
+        shutil.copy2(sqlite_path, source_copy)
+        for sidecar in _sqlite_sidecar_paths(sqlite_path):
+            if sidecar.exists():
+                shutil.copy2(sidecar, temp_dir / sidecar.name)
+
+        sql_dump_path = target_recovery_dir / f"{sqlite_path.stem}.recover.sql"
+        recovered_path = target_recovery_dir / f"{sqlite_path.stem}.recovered.sqlite3"
+        if recovered_path.exists():
+            recovered_path.unlink()
+        for sidecar in _sqlite_sidecar_paths(recovered_path):
+            if sidecar.exists():
+                sidecar.unlink()
+
+        with sql_dump_path.open("w", encoding="utf-8") as sql_dump:
+            recover_dump = subprocess.run(
+                ["sqlite3", str(source_copy), ".recover"],
+                stdout=sql_dump,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=SQLITE_INTEGRITY_CHECK_TIMEOUT_SECONDS,
+                check=False,
+            )
+        if recover_dump.returncode != 0:
+            raise RuntimeError((recover_dump.stderr or "sqlite3 .recover failed").strip())
+
+        with sql_dump_path.open("r", encoding="utf-8") as sql_input:
+            rebuild = subprocess.run(
+                ["sqlite3", str(recovered_path)],
+                stdin=sql_input,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=SQLITE_INTEGRITY_CHECK_TIMEOUT_SECONDS,
+                check=False,
+            )
+        if rebuild.returncode != 0:
+            raise RuntimeError((rebuild.stderr or "sqlite3 rebuild failed").strip())
+
+        recovered_status = inspect_sqlite_database(recovered_path)
+        if not bool(recovered_status.get("ok")):
+            raise RuntimeError(
+                f"Recovered database integrity check failed: {recovered_status.get('integrity_check') or recovered_status.get('stderr')}"
+            )
+
+    backup_paths: list[str] = []
+    backup_db_path = target_recovery_dir / f"{sqlite_path.name}.{timestamp}.bak"
+    sqlite_path.replace(backup_db_path)
+    backup_paths.append(str(backup_db_path))
+    for sidecar in _sqlite_sidecar_paths(sqlite_path):
+        if sidecar.exists():
+            backup_sidecar_path = target_recovery_dir / f"{sidecar.name}.{timestamp}.bak"
+            sidecar.replace(backup_sidecar_path)
+            backup_paths.append(str(backup_sidecar_path))
+
+    shutil.copy2(recovered_path, sqlite_path)
+    for sidecar in _sqlite_sidecar_paths(sqlite_path):
+        if sidecar.exists():
+            sidecar.unlink()
+    dispose_db_connections(db_path)
+
+    return {
+        "db_path": str(sqlite_path),
+        "recovered_path": str(recovered_path),
+        "sql_dump_path": str(sql_dump_path),
+        "backup_paths": backup_paths,
+        "db_size_bytes": sqlite_path.stat().st_size,
+        "recovered_at_utc": datetime.now(UTC).isoformat(),
+    }
+
+
 def import_database_bytes(db_path: DatabaseTarget, payload: bytes) -> dict[str, object]:
     sqlite_path = _sqlite_file_path(db_path)
     if sqlite_path is None:
@@ -487,6 +681,9 @@ def import_database_bytes(db_path: DatabaseTarget, payload: bytes) -> dict[str, 
     dispose_db_connections(db_path)
     temp_path.write_bytes(payload)
     temp_path.replace(sqlite_path)
+    for sidecar in _sqlite_sidecar_paths(sqlite_path):
+        if sidecar.exists():
+            sidecar.unlink()
     dispose_db_connections(db_path)
     return {
         "db_path": str(sqlite_path),
@@ -694,6 +891,147 @@ def count_pending_worker_api_logs(
             return int(value or 0)
     except SQLAlchemyError:
         return 0
+
+
+def upsert_operation_definitions(
+    db_path: DatabaseTarget,
+    *,
+    definitions: list[dict[str, object]],
+) -> int:
+    normalized_definitions = [item for item in definitions if isinstance(item, dict) and str(item.get("operation_code") or "").strip()]
+    if not normalized_definitions:
+        return 0
+    updated = 0
+    now = datetime.now(UTC)
+    try:
+        with _session_scope(db_path) as session:
+            for item in normalized_definitions:
+                operation_code = str(item.get("operation_code") or "").strip()
+                row = session.get(OperationDefinitionRow, operation_code)
+                if row is None:
+                    row = OperationDefinitionRow(
+                        operation_code=operation_code,
+                        created_at_utc=now.isoformat(),
+                        created_at_epoch=now.timestamp(),
+                    )
+                    session.add(row)
+                row.system = str(item.get("system") or "unknown").strip() or "unknown"
+                row.operation_type = str(item.get("operation_type") or "manual").strip() or "manual"
+                row.action = str(item.get("action") or "unknown").strip() or "unknown"
+                row.title = str(item.get("title") or operation_code).strip() or operation_code
+                row.input_schema_json = _json_dumps(item.get("input_schema"))
+                row.output_schema_json = _json_dumps(item.get("output_schema"))
+                row.config_json = _json_dumps(item.get("config"))
+                row.active = 1 if bool(item.get("active", True)) else 0
+                row.updated_at_utc = now.isoformat()
+                row.updated_at_epoch = now.timestamp()
+                updated += 1
+        return updated
+    except SQLAlchemyError:
+        return 0
+
+
+def insert_operation_run(
+    db_path: DatabaseTarget,
+    *,
+    operation_code: str,
+    trigger_source: str,
+    started_at_utc: str,
+    status: str = OPERATION_RUN_STATUS_PENDING,
+    request_payload: object | None = None,
+    previous_state: object | None = None,
+) -> int:
+    started = _parse_iso_to_utc(started_at_utc)
+    with _session_scope(db_path) as session:
+        row = OperationRunRow(
+            operation_code=str(operation_code or "").strip(),
+            trigger_source=str(trigger_source or "manual_ui").strip() or "manual_ui",
+            status=str(status or OPERATION_RUN_STATUS_PENDING).strip() or OPERATION_RUN_STATUS_PENDING,
+            started_at_utc=started.isoformat(),
+            started_at_epoch=started.timestamp(),
+            updated_at_utc=started.isoformat(),
+            updated_at_epoch=started.timestamp(),
+            request_payload_json=_json_dumps(request_payload),
+            previous_state_json=_json_dumps(previous_state),
+        )
+        session.add(row)
+        session.flush()
+        return int(row.id)
+
+
+def update_operation_run(
+    db_path: DatabaseTarget,
+    *,
+    run_id: int,
+    status: str,
+    updated_at_utc: str | None = None,
+    latest_state: object | None = None,
+    response_payload: object | None = None,
+    error_text: str | None = None,
+    completed: bool = False,
+) -> int | None:
+    if int(run_id or 0) <= 0:
+        return None
+    updated = _parse_iso_to_utc(updated_at_utc or datetime.now(UTC).isoformat())
+    with _session_scope(db_path) as session:
+        row = session.get(OperationRunRow, int(run_id))
+        if row is None:
+            return None
+        row.status = str(status or row.status or OPERATION_RUN_STATUS_PENDING).strip() or OPERATION_RUN_STATUS_PENDING
+        row.updated_at_utc = updated.isoformat()
+        row.updated_at_epoch = updated.timestamp()
+        row.latest_state_json = _json_dumps(latest_state) if latest_state is not None else row.latest_state_json
+        row.response_payload_json = _json_dumps(response_payload) if response_payload is not None else row.response_payload_json
+        row.error_text = str(error_text or "") or None
+        if completed:
+            row.completed_at_utc = updated.isoformat()
+            row.completed_at_epoch = updated.timestamp()
+        session.flush()
+        return int(row.id)
+
+
+def get_latest_operation_runs(
+    db_path: DatabaseTarget,
+    *,
+    operation_codes: list[str] | tuple[str, ...],
+    statuses: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, dict[str, object]]:
+    codes = tuple(str(code or "").strip() for code in operation_codes if str(code or "").strip())
+    if not codes:
+        return {}
+    normalized_statuses = tuple(str(status or "").strip() for status in (statuses or []) if str(status or "").strip())
+    try:
+        with _session_scope(db_path) as session:
+            stmt = (
+                select(OperationRunRow)
+                .where(OperationRunRow.operation_code.in_(codes))
+                .order_by(desc(OperationRunRow.started_at_epoch), desc(OperationRunRow.id))
+            )
+            if normalized_statuses:
+                stmt = stmt.where(OperationRunRow.status.in_(normalized_statuses))
+            rows = session.scalars(stmt).all()
+            payload: dict[str, dict[str, object]] = {}
+            for row in rows:
+                operation_code = str(row.operation_code or "").strip()
+                if not operation_code or operation_code in payload:
+                    continue
+                payload[operation_code] = {
+                    "id": int(row.id),
+                    "operation_code": operation_code,
+                    "trigger_source": row.trigger_source,
+                    "status": row.status,
+                    "started_at_utc": row.started_at_utc,
+                    "updated_at_utc": row.updated_at_utc,
+                    "completed_at_utc": row.completed_at_utc,
+                    "request_payload": _json_loads(row.request_payload_json, default=None),
+                    "previous_state": _json_loads(row.previous_state_json, default=None),
+                    "latest_state": _json_loads(row.latest_state_json, default=None),
+                    "response_payload": _json_loads(row.response_payload_json, default=None),
+                    "error_text": row.error_text,
+                }
+            return payload
+    except SQLAlchemyError:
+        return {}
 
 
 def list_worker_api_logs(

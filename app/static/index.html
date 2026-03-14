@@ -406,6 +406,26 @@
       </div>
     </div>
 
+    <div id="teslaCurrentModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="teslaCurrentModalTitle">
+      <div class="modal-card">
+        <div class="section-header">
+          <h2 id="teslaCurrentModalTitle" data-i18n="teslaCurrentLabel">Charge current</h2>
+          <button id="teslaCurrentModalCloseBtn" class="btn secondary" type="button" data-i18n="closeBtn">Close</button>
+        </div>
+        <p id="teslaCurrentModalMeta" class="muted">-</p>
+        <div class="config-form">
+          <label data-i18n="teslaCurrentLabel">
+            Charge current
+            <input id="teslaCurrentModalInput" type="number" min="0" max="80" step="1" value="0" />
+          </label>
+        </div>
+        <p id="teslaCurrentModalStatus" class="muted">-</p>
+        <div class="config-actions">
+          <button id="teslaCurrentModalApplyBtn" class="btn" type="button" data-i18n="teslaCurrentApply">Apply</button>
+        </div>
+      </div>
+    </div>
+
     <div id="workerLogDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="workerLogDetailModalTitle">
       <div class="modal-card worker-log-detail-modal-card">
         <div class="section-header">

@@ -441,6 +441,12 @@ const I18N = {
     teslaControlBusy: "Updating...",
     teslaControlUnavailable: "Control Unavailable",
     teslaControlApplyFailed: "Tesla charging control failed: {error}",
+    teslaCurrentApplyFailed: "Tesla current update failed: {error}",
+    teslaCurrentLabel: "Charge current",
+    teslaCurrentApply: "Apply",
+    teslaCurrentApplying: "Applying...",
+    teslaCurrentModalIntro: "Update Tesla charging current.",
+    teslaCurrentModalStatusReady: "Current setpoint {value}",
     teslaControlStatusRequestStart: "Sending start request...",
     teslaControlStatusRequestStop: "Sending stop request...",
     teslaControlStatusAwaitingStart: "Start requested. Waiting for Tesla to respond.",
@@ -453,6 +459,8 @@ const I18N = {
     teslaControlStatusStopped: "Charging stopped.",
     teslaChargeForecastEstimate: "Est. Tesla headroom {value} kWh",
     teslaChargeForecastUnavailable: "Est. Tesla headroom -",
+    teslaBatteryEnergyUnavailable: "- / - kWh",
+    teslaChargeEtaUnavailable: "Est. full -",
     batteryTitle: "Battery",
     battery1Title: "Battery 1",
     battery2Title: "Battery 2",
@@ -1090,6 +1098,12 @@ const I18N = {
     teslaControlBusy: "正在更新...",
     teslaControlUnavailable: "控制不可用",
     teslaControlApplyFailed: "特斯拉充电控制失败：{error}",
+    teslaCurrentApplyFailed: "特斯拉电流设置失败：{error}",
+    teslaCurrentLabel: "充电电流",
+    teslaCurrentApply: "应用",
+    teslaCurrentApplying: "正在应用...",
+    teslaCurrentModalIntro: "修改 Tesla 充电电流。",
+    teslaCurrentModalStatusReady: "当前设定值 {value}",
     teslaControlStatusRequestStart: "正在发送开始充电请求...",
     teslaControlStatusRequestStop: "正在发送停止充电请求...",
     teslaControlStatusAwaitingStart: "已发出开始请求，等待特斯拉响应。",
@@ -1102,6 +1116,8 @@ const I18N = {
     teslaControlStatusStopped: "已停止充电。",
     teslaChargeForecastEstimate: "近3天估算：Tesla 可充 {value} kWh",
     teslaChargeForecastUnavailable: "近3天估算：Tesla 可充 -",
+    teslaBatteryEnergyUnavailable: "- / - kWh",
+    teslaChargeEtaUnavailable: "预计充满 -",
     batteryTitle: "电池",
     battery1Title: "电池 1",
     battery2Title: "电池 2",
@@ -1694,12 +1710,16 @@ const stateCache = {
   },
 };
 let teslaControlBusy = false;
+let teslaCurrentControlBusy = false;
 let solplanetPinModalBusy = false;
 const TESLA_CONTROL_CONFIRM_POLL_MS = 1500;
 const TESLA_CONTROL_CONFIRM_TIMEOUT_MS = 15000;
 const TESLA_CONTROL_FEEDBACK_CLEAR_MS = 4000;
 let teslaControlFeedback = null;
 let teslaControlFeedbackTimerId = null;
+let teslaCurrentDraftA = null;
+let teslaPendingCurrentSourceA = null;
+let teslaPendingCurrentTargetA = null;
 const timeWindowRuleBusy = new Set();
 
 const NOTIFICATION_MATRIX_WINDOWS = [
@@ -2780,6 +2800,16 @@ function formatBatterySocRateEstimate(system, batteryW) {
   );
 }
 
+function formatTeslaSocRateEstimate(totalCapacityKwh, chargingW) {
+  const capacityKwh = toFiniteNumber(totalCapacityKwh);
+  const powerW = toFiniteNumber(chargingW);
+  if (capacityKwh === null || capacityKwh <= 0 || powerW === null) return "";
+  if (Math.abs(powerW) < POWER_FLOW_ACTIVE_THRESHOLD_W) return "";
+  const percentPerHour = (Math.abs(powerW) * 100) / (capacityKwh * 1000);
+  if (!Number.isFinite(percentPerHour) || percentPerHour < 0) return "";
+  return t("batteryRateCharging", { value: formatTrimmedDecimal(percentPerHour, 1) });
+}
+
 function formatInverterConversion(inverterW, batteryW, solarInputW = null) {
   const inverterSigned = toFiniteNumber(inverterW);
   const batterySigned = toFiniteNumber(batteryW);
@@ -3074,9 +3104,11 @@ function buildCombinedDiagramSpec() {
             type: "soc",
             fillId: "combined-teslaSocFill",
             valueId: "combined-teslaSocValue",
+            rateId: "combined-teslaRateValue",
           },
           { id: "combined-teslaChargingPowerValue", className: "node-sub-value", text: "-" },
           { id: "combined-teslaChargingCurrentValue", className: "node-mini-value muted", text: "-" },
+          { id: "combined-teslaCurrentControlValue", className: "node-mini-value muted", text: "-" },
           { id: "combined-teslaChargeForecastValue", className: "node-mini-value muted tesla-charge-forecast", text: "-" },
           { type: "button", id: "combined-teslaChargingToggleBtn", className: "tesla-control-btn btn secondary", text: "-" },
         ],
@@ -3862,7 +3894,7 @@ function isTeslaActivelyCharging({ actualValue = null, chargingPowerValue = null
   return null;
 }
 
-function buildTeslaCurrentDisplay(actualValue, configuredValue, unit, { connectionState = null, chargingPowerValue = null } = {}) {
+function buildTeslaCurrentDisplay(actualValue, configuredValue, unit, { connectionState = null, chargingPowerValue = null, showConfigured = true } = {}) {
   const actualNumeric = toFiniteNumber(actualValue);
   const configuredNumeric = toFiniteNumber(configuredValue);
   const unitText = String(unit || "").trim();
@@ -3881,11 +3913,11 @@ function buildTeslaCurrentDisplay(actualValue, configuredValue, unit, { connecti
   const chargingActive = isTeslaActivelyCharging({ actualValue: actualNumeric, chargingPowerValue, connectionState });
   const effectiveConfigured = chargingActive === false ? 0 : configuredNumeric;
   const configuredText = effectiveConfigured === null ? "-" : `${effectiveConfigured.toFixed(1)}${normalizedUnit}`;
-  const showConfigured = effectiveConfigured !== null;
+  const shouldShowConfigured = showConfigured && effectiveConfigured !== null;
   return {
     actualText,
-    secondaryText: showConfigured ? configuredText : null,
-    showConfigured,
+    secondaryText: shouldShowConfigured ? configuredText : null,
+    showConfigured: shouldShowConfigured,
     connectionText: null,
   };
 }
@@ -3903,23 +3935,95 @@ function formatTeslaCurrentValue(actualValue, configuredValue, unit, options = {
 }
 
 function formatTeslaCurrentValueHtml(actualValue, configuredValue, unit, kind, options = {}) {
-  const display = buildTeslaCurrentDisplay(actualValue, configuredValue, unit, options);
+  const display = buildTeslaCurrentDisplay(actualValue, configuredValue, unit, { ...options, showConfigured: false });
   const secondaryLabel = display.showConfigured
     ? t("teslaChargingCurrentConfiguredLabel")
     : "";
   const secondaryLineText = display.showConfigured
     ? `${secondaryLabel} ${display.secondaryText}`
     : (display.secondaryText || "");
+  const voltageValue = toFiniteNumber(options?.voltageV);
+  const voltageLineText = voltageValue === null
+    ? ""
+    : `${t("teslaChargingVoltageLabel")} ${formatTrimmedDecimal(voltageValue, 0)} V`;
   return (
     `<span class="data-kind-value tesla-current-stack">` +
     `<span class="data-kind-main tesla-current-line">${escapeHtml(t("teslaChargingCurrentActualLabel"))} ${escapeHtml(display.actualText)}</span>` +
     `<span class="data-kind-main tesla-current-line">${escapeHtml(secondaryLineText)}</span>` +
+    `<span class="data-kind-main tesla-current-line">${escapeHtml(voltageLineText)}</span>` +
     `</span>`
   );
 }
 
-function formatTeslaPowerValue(watts) {
-  return `${t("teslaChargingPowerLabel")} ${formatPowerKwFromWatts(watts)}`;
+function formatTeslaBatteryEnergyValue(currentKwh, totalKwh) {
+  const current = toFiniteNumber(currentKwh);
+  const total = toFiniteNumber(totalKwh);
+  if (current === null || total === null) return t("teslaBatteryEnergyUnavailable");
+  return `${formatTrimmedDecimal(Math.max(current, 0), 1)} / ${formatTrimmedDecimal(Math.max(total, 0), 1)} kWh`;
+}
+
+function formatTeslaChargeEtaSummary(teslaInfo = null) {
+  const completionAtText = String(teslaInfo?.chargeCompletionAt || "").trim();
+  if (completionAtText) {
+    const dt = new Date(completionAtText);
+    if (!Number.isNaN(dt.getTime())) {
+      const timeText = formatBatteryRuntimeTargetTime(dt);
+      if (timeText) return t("batteryRuntimeCharging", { time: timeText });
+    }
+  }
+
+  let minutesToFull = toFiniteNumber(teslaInfo?.minutesToFull);
+  if (minutesToFull === null) {
+    const remainingKwh = toFiniteNumber(teslaInfo?.remainingToFullKwh);
+    const chargingW = toFiniteNumber(teslaInfo?.chargingW);
+    if (
+      remainingKwh !== null &&
+      chargingW !== null &&
+      chargingW >= POWER_FLOW_ACTIVE_THRESHOLD_W
+    ) {
+      minutesToFull = (remainingKwh / (chargingW / 1000)) * 60;
+    }
+  }
+
+  if (minutesToFull === null || !Number.isFinite(minutesToFull) || minutesToFull < 0) {
+    return t("teslaChargeEtaUnavailable");
+  }
+  const targetAt = new Date(Date.now() + minutesToFull * 60 * 1000);
+  const timeText = formatBatteryRuntimeTargetTime(targetAt);
+  if (!timeText) return t("teslaChargeEtaUnavailable");
+  return t("batteryRuntimeCharging", { time: timeText });
+}
+
+function formatTeslaCurrentControlHtml(teslaInfo = null) {
+  const minA = toFiniteNumber(teslaInfo?.minCurrentA);
+  const maxA = toFiniteNumber(teslaInfo?.maxCurrentA);
+  if (minA === null || maxA === null || maxA < minA) return "";
+  const fallbackValue = toFiniteNumber(teslaInfo?.configuredCurrentA) ?? toFiniteNumber(teslaInfo?.currentA) ?? minA;
+  const draftValue = teslaCurrentDraftA === null ? fallbackValue : teslaCurrentDraftA;
+  const clampedValue = Math.max(minA, Math.min(maxA, draftValue));
+  const clickable = !teslaControlBusy && !teslaCurrentControlBusy && Boolean(teslaInfo?.controlAvailable);
+  const className = clickable ? "tesla-current-trigger is-clickable" : "tesla-current-trigger";
+  let labelText = `${t("teslaChargingCurrentConfiguredLabel")} ${clampedValue.toFixed(1)}A`;
+  const configuredCurrentA = toFiniteNumber(teslaInfo?.configuredCurrentA);
+  const localPendingTargetA = toFiniteNumber(teslaPendingCurrentTargetA);
+  const localPendingSourceA = toFiniteNumber(teslaPendingCurrentSourceA);
+  const serverPendingTargetA = toFiniteNumber(teslaInfo?.pendingConfiguredTargetA);
+  const serverPendingSourceA = toFiniteNumber(teslaInfo?.pendingConfiguredSourceA);
+  const pendingTargetA = localPendingTargetA ?? serverPendingTargetA;
+  const pendingSourceA = localPendingSourceA ?? serverPendingSourceA;
+  if (
+    pendingTargetA !== null &&
+    configuredCurrentA !== null &&
+    Math.abs(configuredCurrentA - pendingTargetA) > 0.05
+  ) {
+    const sourceA = pendingSourceA === null ? configuredCurrentA : pendingSourceA;
+    labelText = `${t("teslaChargingCurrentConfiguredLabel")} ${sourceA.toFixed(1)}A -> ${pendingTargetA.toFixed(1)}A`;
+  }
+  return (
+    `<button id="combined-teslaCurrentTriggerBtn" type="button" class="${escapeHtml(className)}"${clickable ? "" : " disabled"}>` +
+    `${escapeHtml(labelText)}` +
+    `</button>`
+  );
 }
 
 function formatTeslaConnectionSummary(teslaInfo = null) {
@@ -4043,7 +4147,11 @@ function mergeTeslaControlInfo(baseInfo, controlPayload) {
     updatedAt: latestIsoTime(baseInfo?.updatedAt, controlPayload?.updated_at, charging?.entity?.last_updated, battery?.entity?.last_updated),
     currentA: toFiniteNumber(charging?.current_amps),
     configuredCurrentA: toFiniteNumber(charging?.configured_current_amps),
+    minCurrentA: toFiniteNumber(charging?.min_current_amps),
+    maxCurrentA: toFiniteNumber(charging?.max_current_amps),
+    currentStepA: toFiniteNumber(charging?.current_step_amps),
     currentUnit: "A",
+    voltageV: toFiniteNumber(charging?.voltage_v),
     socPercent: toFiniteNumber(battery?.level_percent),
     teslaConnectionState: observation?.charging?.connection_state || null,
     teslaCableConnected: typeof charging?.cable_connected === "boolean" ? charging.cable_connected : null,
@@ -4067,16 +4175,27 @@ function teslaInfoFromCombinedFlow(combinedFlow) {
   const battery = tesla?.battery || {};
   const control = tesla?.control || {};
   const chargeForecast = tesla?.charge_forecast || {};
-  return {
+  const operations = tesla?.operations || {};
+  const currentOperation = operations?.set_charge_current || null;
+  const result = {
     chargingW: toFiniteNumber(displayItems.tesla_charge_power?.value ?? charging?.power_w),
     entityId: null,
     friendlyName: null,
     updatedAt: combinedFlow?.updated_at || null,
     currentA: toFiniteNumber(displayItems.tesla_charge_current?.value ?? charging?.current_amps),
     configuredCurrentA: toFiniteNumber(displayItems.tesla_configured_current?.value ?? charging?.configured_current_amps),
+    minCurrentA: toFiniteNumber(charging?.min_current_amps),
+    maxCurrentA: toFiniteNumber(charging?.max_current_amps),
+    currentStepA: toFiniteNumber(charging?.current_step_amps),
     currentEntityId: null,
     currentUnit: "A",
+    voltageV: toFiniteNumber(charging?.voltage_v),
+    minutesToFull: toFiniteNumber(charging?.minutes_to_full),
+    chargeCompletionAt: charging?.completion_at || null,
     socPercent: toFiniteNumber(displayItems.tesla_soc?.value ?? battery?.level_percent),
+    totalCapacityKwh: toFiniteNumber(battery?.total_capacity_kwh),
+    currentEnergyKwh: toFiniteNumber(battery?.current_energy_kwh),
+    remainingToFullKwh: toFiniteNumber(battery?.remaining_to_full_kwh),
     socEntityId: null,
     teslaConnectionState: displayItems.tesla_connection_state?.value || charging?.connection_state || null,
     teslaCableConnected: typeof charging?.cable_connected === "boolean" ? charging.cable_connected : null,
@@ -4094,7 +4213,22 @@ function teslaInfoFromCombinedFlow(combinedFlow) {
     controlSwitchEntityId: null,
     controlStartButtonEntityId: null,
     controlStopButtonEntityId: null,
+    pendingConfiguredSourceA: toFiniteNumber(currentOperation?.source_amps),
+    pendingConfiguredTargetA: toFiniteNumber(currentOperation?.target_amps),
+    pendingConfiguredStartedAt: currentOperation?.started_at || null,
+    pendingConfiguredStatus: currentOperation?.status || null,
   };
+  const configuredCurrentA = toFiniteNumber(result.configuredCurrentA);
+  const pendingTargetA = toFiniteNumber(teslaPendingCurrentTargetA) ?? toFiniteNumber(result.pendingConfiguredTargetA);
+  if (
+    pendingTargetA !== null &&
+    configuredCurrentA !== null &&
+    Math.abs(configuredCurrentA - pendingTargetA) <= 0.05
+  ) {
+    teslaPendingCurrentSourceA = null;
+    teslaPendingCurrentTargetA = null;
+  }
+  return result;
 }
 
 function renderTeslaControlButton(teslaInfo = null) {
@@ -4110,8 +4244,20 @@ function renderTeslaControlButton(teslaInfo = null) {
     label = chargingEnabled ? t("teslaControlStop") : t("teslaControlStart");
   }
   button.textContent = label;
-  button.disabled = teslaControlBusy || !controlAvailable;
+  button.disabled = teslaControlBusy || teslaCurrentControlBusy || !controlAvailable;
   button.classList.toggle("active", controlAvailable && chargingEnabled);
+}
+
+function renderTeslaCurrentControl(teslaInfo = null) {
+  const el = document.getElementById("combined-teslaCurrentControlValue");
+  if (!el) return;
+  setHtml("combined-teslaCurrentControlValue", formatTeslaCurrentControlHtml(teslaInfo));
+  const triggerBtn = document.getElementById("combined-teslaCurrentTriggerBtn");
+  if (triggerBtn) {
+    triggerBtn.addEventListener("click", () => {
+      openTeslaCurrentModal();
+    });
+  }
 }
 
 function ensureTeslaCardUnifiedContent() {
@@ -4122,6 +4268,7 @@ function ensureTeslaCardUnifiedContent() {
   [
     "combined-teslaChargingPowerValue",
     "combined-teslaChargingCurrentValue",
+    "combined-teslaCurrentControlValue",
     "combined-teslaConnectionValue",
     "combined-teslaChargeForecastValue",
     "combined-teslaChargingToggleBtn",
@@ -4465,6 +4612,8 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   const teslaCurrentA = toFiniteNumber(teslaInfo?.currentA);
   const teslaConfiguredCurrentA = toFiniteNumber(teslaInfo?.configuredCurrentA);
   const teslaSoc = toFiniteNumber(teslaInfo?.socPercent);
+  const teslaCurrentEnergyKwh = toFiniteNumber(teslaInfo?.currentEnergyKwh);
+  const teslaTotalCapacityKwh = toFiniteNumber(teslaInfo?.totalCapacityKwh);
   let homeLoadW = displayHomeLoadW;
   if (homeLoadW === null && totalLoadW !== null) {
     const teslaW = teslaChargingW === null ? 0 : teslaChargingW;
@@ -4497,20 +4646,29 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   setHtml("combined-loadPowerValue", formatValueWithDataKindHtml(formatPowerKwFromWatts(homeLoadW), dataKinds.homeLoad));
   setHtml(
     "combined-teslaChargingPowerValue",
-    formatValueWithDataKindHtml(formatTeslaPowerValue(teslaChargingW), "real"),
+    formatValueWithDataKindHtml(formatTeslaBatteryEnergyValue(teslaCurrentEnergyKwh, teslaTotalCapacityKwh), "real"),
   );
   setHtml(
     "combined-teslaChargingCurrentValue",
     formatTeslaCurrentValueHtml(teslaCurrentA, teslaConfiguredCurrentA, teslaInfo?.currentUnit || "A", dataKinds.teslaCurrent, {
       connectionState: teslaInfo?.teslaConnectionState,
       chargingPowerValue: teslaInfo?.chargingW,
+      voltageV: teslaInfo?.voltageV,
     }),
   );
-  setText("combined-teslaChargeForecastValue", formatTeslaChargeForecastSummary(teslaInfo));
+  setText(
+    "combined-teslaChargeForecastValue",
+    teslaChargingW !== null && teslaChargingW >= POWER_FLOW_ACTIVE_THRESHOLD_W
+      ? formatTeslaChargeEtaSummary(teslaInfo)
+      : formatTeslaChargeForecastSummary(teslaInfo),
+  );
   const teslaForecastEl = document.getElementById("combined-teslaChargeForecastValue");
   if (teslaForecastEl) {
-    teslaForecastEl.title = formatTeslaChargeForecastSummary(teslaInfo);
-    teslaForecastEl.setAttribute("aria-label", formatTeslaChargeForecastSummary(teslaInfo));
+    const forecastText = teslaChargingW !== null && teslaChargingW >= POWER_FLOW_ACTIVE_THRESHOLD_W
+      ? formatTeslaChargeEtaSummary(teslaInfo)
+      : formatTeslaChargeForecastSummary(teslaInfo);
+    teslaForecastEl.title = forecastText;
+    teslaForecastEl.setAttribute("aria-label", forecastText);
   }
   renderBatterySocDisplay({
     system: null,
@@ -4520,7 +4678,12 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
     socFillId: "combined-teslaSocFill",
     socDataKind: dataKinds.teslaSoc,
   });
+  setText("combined-teslaRateValue", formatTeslaSocRateEstimate(teslaTotalCapacityKwh, teslaChargingW));
   ensureTeslaCardUnifiedContent();
+  if (teslaCurrentDraftA === null) {
+    teslaCurrentDraftA = teslaConfiguredCurrentA ?? teslaCurrentA ?? teslaInfo?.minCurrentA ?? null;
+  }
+  renderTeslaCurrentControl(teslaInfo);
   renderTeslaControlButton(teslaInfo);
   setText("combined-switchboardValue", "-");
   setText("combined-inverter1State", getSajDashboardModeText() || inverterStateText(inverter1Status));
@@ -4548,9 +4711,17 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   setNodeSourceTip("combined-teslaChargingCurrentValue", null);
   setNodeSourceTip(
     "combined-teslaChargeForecastValue",
-    currentLang === "zh"
-      ? "按最近 3 个已完成的 20:00 到次日 11:00 窗口平均家庭用电量估算，再扣减两块电池当前可用余量后得到。"
-      : "Estimated from the average home load across the last 3 completed 20:00 to next-day 11:00 windows, net of current usable battery energy.",
+    teslaChargingW !== null && teslaChargingW >= POWER_FLOW_ACTIVE_THRESHOLD_W
+      ? (
+        currentLang === "zh"
+          ? "优先使用 Home Assistant 的 Tesla 预计充满实体；如果没有，则按当前充电功率和剩余容量估算。"
+          : "Uses the Home Assistant Tesla completion estimate when available, otherwise estimates from current charging power and remaining capacity."
+      )
+      : (
+        currentLang === "zh"
+          ? "按最近 3 个已完成的 20:00 到次日 11:00 窗口平均家庭用电量估算，再扣减两块电池当前可用余量后得到。"
+          : "Estimated from the average home load across the last 3 completed 20:00 to next-day 11:00 windows, net of current usable battery energy."
+      ),
   );
   setNodeSourceTip("combined-teslaSocValue", null);
 
@@ -9005,6 +9176,50 @@ function setSolplanetPinModalVisible(visible) {
   modal.classList.toggle("hidden", !visible);
 }
 
+function setTeslaCurrentModalVisible(visible) {
+  const modal = document.getElementById("teslaCurrentModal");
+  if (!modal) return;
+  modal.classList.toggle("hidden", !visible);
+}
+
+function setTeslaCurrentModalBusy(busy) {
+  const input = document.getElementById("teslaCurrentModalInput");
+  const applyBtn = document.getElementById("teslaCurrentModalApplyBtn");
+  const closeBtn = document.getElementById("teslaCurrentModalCloseBtn");
+  if (input) input.disabled = Boolean(busy);
+  if (applyBtn) applyBtn.disabled = Boolean(busy);
+  if (closeBtn) closeBtn.disabled = Boolean(busy);
+}
+
+function renderTeslaCurrentModal(teslaInfo = null) {
+  const minA = toFiniteNumber(teslaInfo?.minCurrentA);
+  const maxA = toFiniteNumber(teslaInfo?.maxCurrentA);
+  const stepA = toFiniteNumber(teslaInfo?.currentStepA) || 1;
+  const fallbackValue = toFiniteNumber(teslaInfo?.configuredCurrentA) ?? toFiniteNumber(teslaInfo?.currentA) ?? minA ?? 0;
+  const draftValue = teslaCurrentDraftA === null ? fallbackValue : teslaCurrentDraftA;
+  const clampedValue = minA === null || maxA === null ? draftValue : Math.max(minA, Math.min(maxA, draftValue));
+  const input = document.getElementById("teslaCurrentModalInput");
+  if (input instanceof HTMLInputElement) {
+    if (minA !== null) input.min = String(minA);
+    if (maxA !== null) input.max = String(maxA);
+    input.step = String(stepA);
+    input.value = String(Math.round(clampedValue));
+  }
+  setText("teslaCurrentModalMeta", t("teslaCurrentModalIntro"));
+  setText("teslaCurrentModalStatus", t("teslaCurrentModalStatusReady", { value: `${Math.round(clampedValue)}A` }));
+  setTeslaCurrentModalBusy(teslaCurrentControlBusy);
+}
+
+function openTeslaCurrentModal() {
+  const teslaInfo = teslaInfoFromCombinedFlow(stateCache.lastSummary?.combinedFlow || {});
+  if (!teslaInfo?.controlAvailable) return;
+  if (teslaCurrentDraftA === null) {
+    teslaCurrentDraftA = teslaInfo?.configuredCurrentA ?? teslaInfo?.currentA ?? teslaInfo?.minCurrentA ?? null;
+  }
+  renderTeslaCurrentModal(teslaInfo);
+  setTeslaCurrentModalVisible(true);
+}
+
 function setSolplanetPinModalBusy(busy) {
   solplanetPinModalBusy = Boolean(busy);
   const ids = [
@@ -9279,6 +9494,45 @@ async function toggleTeslaCharging() {
   } finally {
     teslaControlBusy = false;
     renderTeslaControlButton(teslaInfoFromCombinedFlow(stateCache.lastSummary?.combinedFlow || {}));
+  }
+}
+
+async function applyTeslaChargeCurrent() {
+  if (teslaControlBusy || teslaCurrentControlBusy) return;
+  const teslaInfo = teslaInfoFromCombinedFlow(stateCache.lastSummary?.combinedFlow || {});
+  const minA = toFiniteNumber(teslaInfo?.minCurrentA);
+  const maxA = toFiniteNumber(teslaInfo?.maxCurrentA);
+  const fallbackValue = toFiniteNumber(teslaInfo?.configuredCurrentA) ?? toFiniteNumber(teslaInfo?.currentA);
+  const requested = teslaCurrentDraftA ?? fallbackValue;
+  if (requested === null || minA === null || maxA === null) return;
+  const amps = Math.round(Math.max(minA, Math.min(maxA, requested)));
+  teslaPendingCurrentSourceA = fallbackValue ?? amps;
+  teslaPendingCurrentTargetA = amps;
+  teslaCurrentControlBusy = true;
+  renderTeslaCurrentControl(teslaInfo);
+  renderTeslaControlButton(teslaInfo);
+  renderTeslaCurrentModal(teslaInfo);
+  try {
+    await fetchJson("/api/tesla/control/current", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amps }),
+      timeoutMs: 12000,
+    });
+    teslaCurrentDraftA = amps;
+    await loadSummary();
+    setTeslaCurrentModalVisible(false);
+  } catch (err) {
+    teslaPendingCurrentSourceA = null;
+    teslaPendingCurrentTargetA = null;
+    setText("teslaCurrentModalStatus", t("teslaCurrentApplyFailed", { error: String(err) }));
+    window.alert(t("teslaCurrentApplyFailed", { error: String(err) }));
+  } finally {
+    teslaCurrentControlBusy = false;
+    const updatedTeslaInfo = teslaInfoFromCombinedFlow(stateCache.lastSummary?.combinedFlow || {});
+    renderTeslaCurrentControl(updatedTeslaInfo);
+    renderTeslaControlButton(updatedTeslaInfo);
+    renderTeslaCurrentModal(updatedTeslaInfo);
   }
 }
 
@@ -10226,6 +10480,14 @@ bindClickIfPresent("workerLogDetailCloseBtn", () => {
   }
 }
 {
+  const modal = document.getElementById("teslaCurrentModal");
+  if (modal) {
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal && !teslaCurrentControlBusy) setTeslaCurrentModalVisible(false);
+    });
+  }
+}
+{
   const modal = document.getElementById("workerLogDetailModal");
   if (modal) {
     modal.addEventListener("click", (event) => {
@@ -10249,6 +10511,10 @@ window.addEventListener("keydown", (event) => {
   const solplanetPinModal = document.getElementById("solplanetPinModal");
   if (solplanetPinModal && !solplanetPinModal.classList.contains("hidden")) {
     setSolplanetPinModalVisible(false);
+  }
+  const teslaCurrentModal = document.getElementById("teslaCurrentModal");
+  if (teslaCurrentModal && !teslaCurrentModal.classList.contains("hidden") && !teslaCurrentControlBusy) {
+    setTeslaCurrentModalVisible(false);
   }
   const modal = document.getElementById("workerLogDetailModal");
   if (modal && !modal.classList.contains("hidden")) {
@@ -10343,8 +10609,21 @@ bindClickIfPresent("solplanetRestartApiBtn", () => {
 bindClickIfPresent("solplanetPinModalCloseBtn", () => {
   setSolplanetPinModalVisible(false);
 });
+bindClickIfPresent("teslaCurrentModalCloseBtn", () => {
+  if (teslaCurrentControlBusy) return;
+  setTeslaCurrentModalVisible(false);
+});
 bindClickIfPresent("solplanetPinApplyBtn", () => {
   void applySolplanetDashboardPin();
+});
+bindInputIfPresent("teslaCurrentModalInput", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  teslaCurrentDraftA = Number(target.value);
+  setText("teslaCurrentModalStatus", t("teslaCurrentModalStatusReady", { value: `${Math.round(Number(target.value || 0))}A` }));
+});
+bindClickIfPresent("teslaCurrentModalApplyBtn", () => {
+  void applyTeslaChargeCurrent();
 });
 bindClickIfPresent("solplanetPinPreset0Btn", () => {
   const input = document.getElementById("solplanetPinTargetInput");

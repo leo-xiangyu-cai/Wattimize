@@ -40,6 +40,10 @@ from app.home_assistant import HomeAssistantClient
 from app.persistence import (
     DEFAULT_DB_PATH,
     EnergySample,
+    OPERATION_RUN_STATUS_FAILED,
+    OPERATION_RUN_STATUS_PENDING,
+    OPERATION_RUN_STATUS_SUCCEEDED,
+    OPERATION_RUN_STATUS_TIMEOUT,
     migrate_worker_log_legacy_statuses,
     count_pending_worker_api_logs,
     backfill_notification_entries_from_worker_logs,
@@ -51,10 +55,12 @@ from app.persistence import (
     export_database_bytes,
     finalize_pending_worker_api_logs_for_round,
     get_latest_raw_request_result,
+    get_latest_operation_runs,
     get_realtime_kv_by_prefix,
     get_latest_sample,
     get_series_samples,
     get_storage_status,
+    inspect_sqlite_database,
     insert_raw_request_result,
     insert_worker_api_log,
     import_database_bytes,
@@ -69,9 +75,13 @@ from app.persistence import (
     list_realtime_kv_rows,
     list_samples,
     list_worker_api_logs,
+    insert_operation_run,
+    recover_sqlite_database,
     upsert_time_window_rule_state,
+    upsert_operation_definitions,
     upsert_notification_entries,
     update_worker_api_log,
+    update_operation_run,
     upsert_realtime_kv,
 )
 from app.solplanet_cgi import SolplanetCgiClient
@@ -118,10 +128,12 @@ TESLA_CONTROL_FEEDBACK_KV_PREFIX = "ui.tesla_control_feedback."
 TESLA_CONTROL_FEEDBACK_PENDING_TIMEOUT_SECONDS = 15.0
 TESLA_CONTROL_FEEDBACK_SUCCESS_TTL_SECONDS = 4.0
 TESLA_CONTROL_FEEDBACK_FAILURE_TTL_SECONDS = 30.0
+TESLA_OPERATION_PENDING_TIMEOUT_SECONDS = 180.0
 BATTERY_CAPACITY_KWH = {
     "saj": 15.0,
     "solplanet": 40.0,
 }
+TESLA_BATTERY_CAPACITY_KWH = 75.0
 BATTERY_MIN_DISCHARGE_SOC_PERCENT = {
     "saj": 20.0,
     "solplanet": 10.0,
@@ -168,6 +180,8 @@ SAJ_BATTERY_FULL_ACTIVE_KEY = f"{BATTERY_FULL_NOTIFICATION_STATE_PREFIX}saj_batt
 SOLPLANET_BATTERY_FULL_ACTIVE_KEY = f"{BATTERY_FULL_NOTIFICATION_STATE_PREFIX}solplanet_battery_full_active"
 TESLA_LOG_SYSTEM = "tesla"
 TESLA_OBSERVATION_SERVICE = "tesla"
+SAJ_COLLECTION_SERVICE = "saj_collection"
+SOLPLANET_COLLECTION_SERVICE = "solplanet_collection"
 NOTIFICATION_LOG_SYSTEM = "notification"
 OPERATION_LOG_SYSTEM = "operation"
 NOTIFICATION_SUMMARY_SERVICE = "notification"
@@ -186,6 +200,8 @@ WINDOW_CHECK_SERVICES: tuple[str, ...] = (
     WINDOW_CHECK_POST_EXPORT_PEAK_SERVICE,
 )
 WORKER_SUMMARY_SERVICES: tuple[tuple[str, str], ...] = (
+    ("saj", SAJ_COLLECTION_SERVICE),
+    ("solplanet", SOLPLANET_COLLECTION_SERVICE),
     ("combined", "combined_assembly"),
     (TESLA_LOG_SYSTEM, TESLA_OBSERVATION_SERVICE),
     (NOTIFICATION_LOG_SYSTEM, NOTIFICATION_SUMMARY_SERVICE),
@@ -227,6 +243,136 @@ TIME_WINDOW_RULE_WINDOWS_BY_CODE: dict[str, tuple[str, ...]] = {
     code: tuple(item["window"] for item in TIME_WINDOW_RULE_DEFINITIONS if item["code"] == code)
     for code in TIME_WINDOW_RULE_CODES
 }
+MANUAL_OPERATION_DEFINITIONS: tuple[dict[str, object], ...] = (
+    {
+        "operation_code": "tesla.manual.toggle_charging",
+        "system": "tesla",
+        "operation_type": "charging",
+        "action": "toggle",
+        "title": "Tesla Charging Toggle",
+        "input_schema": {"enabled": "boolean"},
+        "output_schema": {"control_state": "object", "observation": "object", "feedback": "object"},
+        "config": {"confirmation_mode": "ha_state_refresh"},
+    },
+    {
+        "operation_code": "tesla.manual.set_charge_current",
+        "system": "tesla",
+        "operation_type": "charging",
+        "action": "set_current",
+        "title": "Tesla Charge Current",
+        "input_schema": {"amps": "integer"},
+        "output_schema": {"control_state": "object", "observation": "object"},
+        "config": {"confirmation_mode": "ha_state_refresh"},
+    },
+    {
+        "operation_code": "saj.manual.set_working_mode",
+        "system": "saj",
+        "operation_type": "inverter_control",
+        "action": "set_working_mode",
+        "title": "SAJ Working Mode",
+        "input_schema": {"mode_code": "integer"},
+        "output_schema": {"state": "object", "changed": "array"},
+    },
+    {
+        "operation_code": "saj.manual.apply_profile",
+        "system": "saj",
+        "operation_type": "inverter_control",
+        "action": "apply_profile",
+        "title": "SAJ Control Profile",
+        "input_schema": {"profile_id": "string"},
+        "output_schema": {"state": "object"},
+    },
+    {
+        "operation_code": "saj.manual.set_charge_slot",
+        "system": "saj",
+        "operation_type": "schedule_control",
+        "action": "set_charge_slot",
+        "title": "SAJ Charge Slot",
+        "input_schema": {"slot": "integer", "payload": "object"},
+        "output_schema": {"state": "object"},
+    },
+    {
+        "operation_code": "saj.manual.set_discharge_slot",
+        "system": "saj",
+        "operation_type": "schedule_control",
+        "action": "set_discharge_slot",
+        "title": "SAJ Discharge Slot",
+        "input_schema": {"slot": "integer", "payload": "object"},
+        "output_schema": {"state": "object"},
+    },
+    {
+        "operation_code": "saj.manual.set_toggles",
+        "system": "saj",
+        "operation_type": "inverter_control",
+        "action": "set_toggles",
+        "title": "SAJ Toggle Controls",
+        "input_schema": {"payload": "object"},
+        "output_schema": {"state": "object", "changed": "array"},
+    },
+    {
+        "operation_code": "saj.manual.set_limits",
+        "system": "saj",
+        "operation_type": "power_limit_control",
+        "action": "set_limits",
+        "title": "SAJ Power Limits",
+        "input_schema": {"payload": "object"},
+        "output_schema": {"state": "object", "changed": "array"},
+    },
+    {
+        "operation_code": "saj.manual.refresh_touch",
+        "system": "saj",
+        "operation_type": "maintenance",
+        "action": "refresh_touch",
+        "title": "SAJ Passive Control Refresh",
+        "input_schema": {},
+        "output_schema": {"state": "object", "entity_id": "string", "kept_state": "boolean"},
+    },
+    {
+        "operation_code": "solplanet.manual.set_limits",
+        "system": "solplanet",
+        "operation_type": "power_limit_control",
+        "action": "set_limits",
+        "title": "Solplanet Limits",
+        "input_schema": {"payload": "object"},
+        "output_schema": {"state": "object", "changed": "array"},
+    },
+    {
+        "operation_code": "solplanet.manual.set_day_schedule",
+        "system": "solplanet",
+        "operation_type": "schedule_control",
+        "action": "set_day_schedule",
+        "title": "Solplanet Day Schedule",
+        "input_schema": {"day": "string", "slots": "array"},
+        "output_schema": {"state": "object", "changed": "array"},
+    },
+    {
+        "operation_code": "solplanet.manual.set_day_schedule_slot",
+        "system": "solplanet",
+        "operation_type": "schedule_control",
+        "action": "set_day_schedule_slot",
+        "title": "Solplanet Day Schedule Slot",
+        "input_schema": {"day": "string", "slot": "integer", "payload": "object"},
+        "output_schema": {"state": "object", "changed": "array"},
+    },
+    {
+        "operation_code": "solplanet.manual.set_raw_setting",
+        "system": "solplanet",
+        "operation_type": "advanced_control",
+        "action": "set_raw_setting",
+        "title": "Solplanet Raw Setting",
+        "input_schema": {"payload": "object"},
+        "output_schema": {"state": "object", "changed": "array"},
+    },
+    {
+        "operation_code": "backend.manual.restart_collector",
+        "system": "backend",
+        "operation_type": "maintenance",
+        "action": "restart_collector",
+        "title": "Collector Restart",
+        "input_schema": {},
+        "output_schema": {"running": "boolean", "restarted_at": "string"},
+    },
+)
 
 
 def _solar_surplus_export_energy_notification_code(threshold_wh: float) -> str:
@@ -249,6 +395,15 @@ solplanet_flow_lock = asyncio.Lock()
 solplanet_context_cache: dict[str, object] = {"payload": None, "at_monotonic": 0.0}
 solplanet_context_lock = asyncio.Lock()
 runtime_lock = asyncio.Lock()
+db_recovery_lock = asyncio.Lock()
+db_recovery_state: dict[str, object] = {
+    "in_progress": False,
+    "last_attempt_at": None,
+    "last_success_at": None,
+    "last_error_at": None,
+    "last_error": None,
+    "last_result": None,
+}
 collector_task: asyncio.Task[None] | None = None
 collector_stop_event = asyncio.Event()
 storage_db_path = Path(os.getenv("WATTIMIZE_DB_PATH", "").strip() or DEFAULT_DB_PATH)
@@ -435,6 +590,86 @@ def _is_retryable_sqlite_error(error: BaseException) -> bool:
     )
 
 
+def _sqlite_error_indicates_corruption(error: BaseException) -> bool:
+    text = str(error).strip().lower()
+    return bool(text) and any(
+        token in text
+        for token in (
+            "database disk image is malformed",
+            "disk i/o error",
+            "file is not a database",
+            "btreeinitpage",
+        )
+    )
+
+
+async def _attempt_storage_db_recovery(
+    *,
+    trigger_error: BaseException,
+    trace_system: str,
+    trace_round_id: str | None,
+    operation_name: str,
+) -> dict[str, object]:
+    async with db_recovery_lock:
+        db_recovery_state["in_progress"] = True
+        db_recovery_state["last_attempt_at"] = datetime.now(UTC).isoformat()
+        try:
+            await asyncio.to_thread(dispose_db_connections, storage_db_path)
+            inspection = await asyncio.to_thread(inspect_sqlite_database, storage_db_path)
+            if bool(inspection.get("ok")):
+                result = {
+                    "status": "inspection_ok",
+                    "inspection": inspection,
+                }
+                db_recovery_state["last_result"] = result
+                db_recovery_state["last_success_at"] = datetime.now(UTC).isoformat()
+                db_recovery_state["last_error"] = None
+                return result
+
+            recovery_dir = storage_db_path.parent / "recovery"
+            recovery_result = await asyncio.to_thread(
+                recover_sqlite_database,
+                storage_db_path,
+                recovery_dir=recovery_dir,
+            )
+            await asyncio.to_thread(init_db, storage_db_path)
+            await asyncio.to_thread(migrate_worker_log_legacy_statuses, storage_db_path)
+            result = {
+                "status": "recovered",
+                "inspection": inspection,
+                "recovery": recovery_result,
+            }
+            db_recovery_state["last_result"] = result
+            db_recovery_state["last_success_at"] = datetime.now(UTC).isoformat()
+            db_recovery_state["last_error"] = None
+            _append_worker_failure_log(
+                trace_system,
+                stage=f"{operation_name}_auto_recovery",
+                error=RuntimeError("storage_db_auto_recovered"),
+                extra={
+                    "round_id": trace_round_id,
+                    "trigger_error": f"{type(trigger_error).__name__}: {trigger_error}",
+                    "recovered_path": str((result.get("recovery") or {}).get("recovered_path") or ""),
+                },
+            )
+            return result
+        except Exception as recovery_exc:  # noqa: BLE001
+            db_recovery_state["last_error_at"] = datetime.now(UTC).isoformat()
+            db_recovery_state["last_error"] = f"{type(recovery_exc).__name__}: {recovery_exc}"
+            _append_worker_failure_log(
+                trace_system,
+                stage=f"{operation_name}_auto_recovery_failed",
+                error=recovery_exc,
+                extra={
+                    "round_id": trace_round_id,
+                    "trigger_error": f"{type(trigger_error).__name__}: {trigger_error}",
+                },
+            )
+            raise
+        finally:
+            db_recovery_state["in_progress"] = False
+
+
 async def _run_db_call_with_retry(
     func: Callable[..., object],
     *args: object,
@@ -457,11 +692,13 @@ async def _run_db_call_with_retry(
             )
         except Exception as exc:  # noqa: BLE001
             retryable = _is_retryable_sqlite_error(exc) or isinstance(exc, asyncio.TimeoutError)
+            corruption_suspected = _sqlite_error_indicates_corruption(exc)
             failure_context = {
                 "operation_name": operation_name,
                 "attempt": attempt,
                 "max_attempts": safe_attempts,
                 "retryable": retryable,
+                "corruption_suspected": corruption_suspected,
             }
             if trace_round_id:
                 failure_context["round_id"] = trace_round_id
@@ -476,6 +713,16 @@ async def _run_db_call_with_retry(
             last_error = exc
             if not retryable or attempt >= safe_attempts:
                 break
+            if corruption_suspected:
+                try:
+                    await _attempt_storage_db_recovery(
+                        trigger_error=exc,
+                        trace_system=trace_system,
+                        trace_round_id=trace_round_id,
+                        operation_name=operation_name,
+                    )
+                except Exception:
+                    break
             if attempt == 1:
                 try:
                     await asyncio.to_thread(dispose_db_connections, storage_db_path)
@@ -1099,6 +1346,10 @@ class TeslaChargingTogglePayload(BaseModel):
     enabled: bool = Field(...)
 
 
+class TeslaChargeCurrentPayload(BaseModel):
+    amps: int = Field(..., ge=0, le=80)
+
+
 class NotificationDismissRequest(BaseModel):
     notification_key: str = Field(..., min_length=1, max_length=200)
 
@@ -1421,6 +1672,17 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
     tesla_control_state_map = tesla_control_state if isinstance(tesla_control_state, dict) else {}
     tesla_control_feedback = _resolve_tesla_control_feedback(tesla_control_state_map)
     tesla_charge_forecast = _build_tesla_charge_headroom_forecast(metrics)
+    tesla_battery_soc_percent = _to_number(metrics.get("tesla_battery_soc_percent"))
+    tesla_current_energy_kwh = (
+        round((TESLA_BATTERY_CAPACITY_KWH * max(0.0, min(100.0, tesla_battery_soc_percent))) / 100.0, 4)
+        if tesla_battery_soc_percent is not None
+        else None
+    )
+    tesla_remaining_to_full_kwh = (
+        round(max(TESLA_BATTERY_CAPACITY_KWH - (tesla_current_energy_kwh or 0.0), 0.0), 4)
+        if tesla_current_energy_kwh is not None
+        else None
+    )
 
     return {
         "system": "combined",
@@ -1431,6 +1693,12 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
                 "power_w": _to_number(metrics.get("tesla_charge_power_w")),
                 "current_amps": _to_number(metrics.get("tesla_charge_current_amps")),
                 "configured_current_amps": _to_number(metrics.get("tesla_configured_current_amps")),
+                "min_current_amps": _to_number((tesla_charging_map.get("min_current_amps") if isinstance(tesla_charging_map, dict) else None)),
+                "max_current_amps": _to_number((tesla_charging_map.get("max_current_amps") if isinstance(tesla_charging_map, dict) else None)),
+                "current_step_amps": _to_number((tesla_charging_map.get("current_step_amps") if isinstance(tesla_charging_map, dict) else None)),
+                "voltage_v": _to_number((tesla_charging_map.get("voltage_v") if isinstance(tesla_charging_map, dict) else None)),
+                "minutes_to_full": _to_number((tesla_charging_map.get("minutes_to_full") if isinstance(tesla_charging_map, dict) else None)),
+                "completion_at": tesla_charging_map.get("completion_at") if isinstance(tesla_charging_map, dict) else None,
                 "connection_state": metrics.get("tesla_connection_state"),
                 "cable_connected": metrics.get("tesla_cable_connected"),
                 "requested_enabled": metrics.get("tesla_charge_requested_enabled"),
@@ -1441,7 +1709,10 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
                 ),
             },
             "battery": {
-                "level_percent": _to_number(metrics.get("tesla_battery_soc_percent")),
+                "level_percent": tesla_battery_soc_percent,
+                "total_capacity_kwh": TESLA_BATTERY_CAPACITY_KWH,
+                "current_energy_kwh": tesla_current_energy_kwh,
+                "remaining_to_full_kwh": tesla_remaining_to_full_kwh,
             },
             "control": {
                 "available": tesla_control_state_map.get("available"),
@@ -1484,6 +1755,208 @@ def _parse_iso_utc_datetime(text: str, *, field_name: str) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+
+
+async def _start_operation_history_run(
+    operation_code: str,
+    *,
+    request_payload: object | None,
+    previous_state: object | None,
+    trigger_source: str = "manual_ui",
+) -> int | None:
+    try:
+        return await asyncio.to_thread(
+            insert_operation_run,
+            storage_db_path,
+            operation_code=operation_code,
+            trigger_source=trigger_source,
+            started_at_utc=datetime.now(UTC).isoformat(),
+            status=OPERATION_RUN_STATUS_PENDING,
+            request_payload=request_payload,
+            previous_state=previous_state,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to insert operation history run", extra={"operation_code": operation_code})
+        return None
+
+
+async def _update_operation_history_run(
+    run_id: int | None,
+    *,
+    status: str,
+    latest_state: object | None = None,
+    response_payload: object | None = None,
+    error_text: str | None = None,
+    completed: bool = False,
+) -> None:
+    if int(run_id or 0) <= 0:
+        return
+    try:
+        await asyncio.to_thread(
+            update_operation_run,
+            storage_db_path,
+            run_id=int(run_id),
+            status=status,
+            updated_at_utc=datetime.now(UTC).isoformat(),
+            latest_state=latest_state,
+            response_payload=response_payload,
+            error_text=error_text,
+            completed=completed,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to update operation history run", extra={"run_id": run_id, "status": status})
+
+
+def _tesla_charging_run_status(result: dict[str, object], *, target_enabled: bool) -> str:
+    control_state = result.get("control_state")
+    control_state_map = control_state if isinstance(control_state, dict) else {}
+    charging_enabled = _to_bool(control_state_map.get("charging_enabled"))
+    requested_enabled = _to_bool(control_state_map.get("charge_requested_enabled"))
+    if charging_enabled is target_enabled or requested_enabled is target_enabled:
+        return OPERATION_RUN_STATUS_SUCCEEDED
+    return OPERATION_RUN_STATUS_PENDING
+
+
+def _tesla_current_run_status(result: dict[str, object], *, target_amps: int) -> str:
+    observation = result.get("observation")
+    observation_map = observation if isinstance(observation, dict) else {}
+    charging = observation_map.get("charging")
+    charging_map = charging if isinstance(charging, dict) else {}
+    configured_current = _to_number(charging_map.get("configured_current_amps"))
+    if configured_current is not None and abs(configured_current - float(target_amps)) < 0.05:
+        return OPERATION_RUN_STATUS_SUCCEEDED
+    return OPERATION_RUN_STATUS_PENDING
+
+
+async def _build_tesla_pending_operation_state(
+    public_flow: dict[str, object],
+) -> dict[str, dict[str, object]]:
+    rows = await asyncio.to_thread(
+        get_latest_operation_runs,
+        storage_db_path,
+        operation_codes=[
+            "tesla.manual.set_charge_current",
+            "tesla.manual.toggle_charging",
+        ],
+        statuses=[OPERATION_RUN_STATUS_PENDING],
+    )
+    if not rows:
+        return {}
+
+    tesla_map = public_flow.get("tesla")
+    tesla = tesla_map if isinstance(tesla_map, dict) else {}
+    charging_map = tesla.get("charging")
+    charging = charging_map if isinstance(charging_map, dict) else {}
+    current_configured_amps = _to_number(charging.get("configured_current_amps"))
+    current_requested_enabled = _to_bool(charging.get("requested_enabled"))
+    current_enabled = _to_bool(charging.get("enabled"))
+    now = datetime.now(UTC)
+    payload: dict[str, dict[str, object]] = {}
+
+    current_row = rows.get("tesla.manual.set_charge_current")
+    if isinstance(current_row, dict):
+        request_payload = current_row.get("request_payload")
+        request_map = request_payload if isinstance(request_payload, dict) else {}
+        previous_state = current_row.get("previous_state")
+        previous_map = previous_state if isinstance(previous_state, dict) else {}
+        previous_observation = previous_map.get("observation")
+        previous_observation_map = previous_observation if isinstance(previous_observation, dict) else {}
+        previous_charging = previous_observation_map.get("charging")
+        previous_charging_map = previous_charging if isinstance(previous_charging, dict) else {}
+        target_amps = _to_number(request_map.get("amps"))
+        source_amps = _to_number(previous_charging_map.get("configured_current_amps"))
+        started_at_text = str(current_row.get("started_at_utc") or "").strip()
+        try:
+            started_at = _parse_iso_utc_datetime(started_at_text, field_name="operation.started_at") if started_at_text else None
+        except HTTPException:
+            started_at = None
+        expired = bool(
+            started_at
+            and (now - started_at).total_seconds() >= TESLA_OPERATION_PENDING_TIMEOUT_SECONDS
+        )
+        matched = bool(
+            target_amps is not None
+            and current_configured_amps is not None
+            and abs(current_configured_amps - target_amps) <= 0.05
+        )
+        if matched:
+            await _update_operation_history_run(
+                int(current_row.get("id") or 0),
+                status=OPERATION_RUN_STATUS_SUCCEEDED,
+                latest_state={"configured_current_amps": current_configured_amps},
+                completed=True,
+            )
+        elif expired:
+            await _update_operation_history_run(
+                int(current_row.get("id") or 0),
+                status=OPERATION_RUN_STATUS_TIMEOUT,
+                latest_state={"configured_current_amps": current_configured_amps},
+                error_text="Tesla current change did not confirm before timeout",
+                completed=True,
+            )
+        elif target_amps is not None:
+            payload["set_charge_current"] = {
+                "run_id": int(current_row.get("id") or 0),
+                "status": OPERATION_RUN_STATUS_PENDING,
+                "started_at": started_at_text or None,
+                "source_amps": source_amps,
+                "target_amps": target_amps,
+            }
+
+    toggle_row = rows.get("tesla.manual.toggle_charging")
+    if isinstance(toggle_row, dict):
+        request_payload = toggle_row.get("request_payload")
+        request_map = request_payload if isinstance(request_payload, dict) else {}
+        previous_state = toggle_row.get("previous_state")
+        previous_map = previous_state if isinstance(previous_state, dict) else {}
+        previous_control = previous_map.get("control_state")
+        previous_control_map = previous_control if isinstance(previous_control, dict) else {}
+        target_enabled = _to_bool(request_map.get("enabled"))
+        source_enabled = _to_bool(previous_control_map.get("charging_enabled"))
+        started_at_text = str(toggle_row.get("started_at_utc") or "").strip()
+        try:
+            started_at = _parse_iso_utc_datetime(started_at_text, field_name="operation.started_at") if started_at_text else None
+        except HTTPException:
+            started_at = None
+        expired = bool(
+            started_at
+            and (now - started_at).total_seconds() >= TESLA_OPERATION_PENDING_TIMEOUT_SECONDS
+        )
+        matched = (
+            target_enabled is not None
+            and (current_requested_enabled is target_enabled or current_enabled is target_enabled)
+        )
+        if matched:
+            await _update_operation_history_run(
+                int(toggle_row.get("id") or 0),
+                status=OPERATION_RUN_STATUS_SUCCEEDED,
+                latest_state={
+                    "requested_enabled": current_requested_enabled,
+                    "charging_enabled": current_enabled,
+                },
+                completed=True,
+            )
+        elif expired:
+            await _update_operation_history_run(
+                int(toggle_row.get("id") or 0),
+                status=OPERATION_RUN_STATUS_TIMEOUT,
+                latest_state={
+                    "requested_enabled": current_requested_enabled,
+                    "charging_enabled": current_enabled,
+                },
+                error_text="Tesla charging toggle did not confirm before timeout",
+                completed=True,
+            )
+        elif target_enabled is not None:
+            payload["toggle_charging"] = {
+                "run_id": int(toggle_row.get("id") or 0),
+                "status": OPERATION_RUN_STATUS_PENDING,
+                "started_at": started_at_text or None,
+                "source_enabled": source_enabled,
+                "target_enabled": target_enabled,
+            }
+
+    return payload
 
 
 def _power_to_watts(value: float | None, unit: str | None) -> float | None:
@@ -1928,6 +2401,93 @@ def _pick_tesla_battery_level_entity(states: list[dict[str, object]]) -> dict[st
     return _pick_best_state(states, _score)
 
 
+def _pick_tesla_charge_completion_entity(states: list[dict[str, object]]) -> dict[str, object] | None:
+    def _score(state: dict[str, object]) -> int:
+        entity_id = str(state.get("entity_id", ""))
+        domain, _ = _split_entity_id(entity_id)
+        if domain != "sensor":
+            return 0
+        haystack = _tesla_haystack(state)
+        if "tesla" not in haystack:
+            return 0
+        if any(term in haystack for term in ("scheduled", "trip", "departure")):
+            return 0
+        score = 0
+        if "time_to_full_charge" in haystack:
+            score += 260
+        if "time to full charge" in haystack:
+            score += 250
+        if "minutes_to_full_charge" in haystack:
+            score += 240
+        if "minutes to full charge" in haystack:
+            score += 230
+        if "time_to_full" in haystack:
+            score += 220
+        if "time to full" in haystack:
+            score += 210
+        if "charge_completion" in haystack:
+            score += 205
+        if "charge complete" in haystack:
+            score += 195
+        if "full charge" in haystack:
+            score += 160
+        if "completion" in haystack:
+            score += 120
+        attrs = state.get("attributes")
+        attrs_map = attrs if isinstance(attrs, dict) else {}
+        unit = str(attrs_map.get("unit_of_measurement") or "").lower()
+        device_class = str(attrs_map.get("device_class") or "").lower()
+        if unit in ("min", "mins", "minute", "minutes", "h", "hr", "hrs", "hour", "hours"):
+            score += 80
+        if device_class == "timestamp":
+            score += 80
+        return max(score, 0)
+
+    return _pick_best_state(states, _score)
+
+
+def _parse_tesla_charge_completion(state: dict[str, object] | None) -> dict[str, object]:
+    if not isinstance(state, dict):
+        return {"minutes_to_full": None, "completion_at": None}
+    raw_state = state.get("state")
+    state_text = str(raw_state or "").strip()
+    if not state_text or state_text.lower() in ("unknown", "unavailable", "none"):
+        return {"minutes_to_full": None, "completion_at": None}
+
+    attrs = state.get("attributes")
+    attrs_map = attrs if isinstance(attrs, dict) else {}
+    unit = str(attrs_map.get("unit_of_measurement") or "").strip().lower()
+    device_class = str(attrs_map.get("device_class") or "").strip().lower()
+
+    if device_class == "timestamp":
+        try:
+            completion_at = _parse_iso_utc_datetime(state_text, field_name="tesla_charge_completion")
+            return {"minutes_to_full": None, "completion_at": completion_at.isoformat()}
+        except HTTPException:
+            return {"minutes_to_full": None, "completion_at": None}
+
+    number = _to_number(raw_state)
+    if number is None:
+        try:
+            completion_at = _parse_iso_utc_datetime(state_text, field_name="tesla_charge_completion")
+            return {"minutes_to_full": None, "completion_at": completion_at.isoformat()}
+        except HTTPException:
+            return {"minutes_to_full": None, "completion_at": None}
+
+    minutes_value: float | None = None
+    if unit in ("h", "hr", "hrs", "hour", "hours"):
+        minutes_value = number * 60.0
+    elif unit in ("min", "mins", "minute", "minutes"):
+        minutes_value = number
+    else:
+        minutes_value = number
+
+    return {
+        "minutes_to_full": round(max(minutes_value or 0.0, 0.0), 1),
+        "completion_at": None,
+    }
+
+
 def _tesla_charge_enabled_from_status(state: dict[str, object] | None) -> bool | None:
     if not isinstance(state, dict):
         return None
@@ -2005,6 +2565,7 @@ def _build_tesla_control_state(states: list[dict[str, object]]) -> dict[str, obj
 def _build_tesla_observation_payload(states: list[dict[str, object]]) -> dict[str, object]:
     control_state = _build_tesla_control_state(states)
     battery_level_state = _pick_tesla_battery_level_entity(states)
+    charge_completion_state = _pick_tesla_charge_completion_entity(states)
     charge_current_sensor = control_state.get("charge_current_sensor_entity")
     charge_current_number = control_state.get("charge_current_number_entity")
     charge_voltage_entity = control_state.get("charge_voltage_entity")
@@ -2021,6 +2582,7 @@ def _build_tesla_observation_payload(states: list[dict[str, object]]) -> dict[st
     charge_cable_state = str((charge_cable_entity or {}).get("state") or "").strip().lower()
     cable_connected = charge_cable_state in ("on", "connected", "plugged", "true")
     battery_level_percent = _to_number((battery_level_state or {}).get("state")) if isinstance(battery_level_state, dict) else None
+    charge_completion = _parse_tesla_charge_completion(charge_completion_state)
 
     connection_state = "unplugged"
     if cable_connected and charging_enabled:
@@ -2036,6 +2598,7 @@ def _build_tesla_observation_payload(states: list[dict[str, object]]) -> dict[st
         "charge_current_number_entity": charge_current_number,
         "charge_voltage_entity": charge_voltage_entity,
         "power_entity": control_state.get("power_entity"),
+        "charge_completion_entity": _compact_raw_ha_state(charge_completion_state),
     }
     observed_count = sum(1 for item in observed_entities.values() if isinstance(item, dict) and item.get("entity_id"))
 
@@ -2057,6 +2620,8 @@ def _build_tesla_observation_payload(states: list[dict[str, object]]) -> dict[st
             "current_step_amps": _to_number(control_state.get("charge_current_number_step")),
             "voltage_v": voltage_v,
             "power_w": round(charge_power_w, 1),
+            "minutes_to_full": _to_number(charge_completion.get("minutes_to_full")),
+            "completion_at": charge_completion.get("completion_at"),
         },
         "control_mode": control_state.get("control_mode"),
         "observed_entity_count": observed_count,
@@ -2130,6 +2695,18 @@ async def _tesla_set_charge_current(amps: int) -> dict[str, object]:
     entity_id = str((current_entity or {}).get("entity_id") or "")
     if not entity_id:
         raise HTTPException(status_code=400, detail="Tesla charge current number entity unavailable")
+    min_a = _to_number(control_state.get("charge_current_number_min"))
+    max_a = _to_number(control_state.get("charge_current_number_max"))
+    step_a = _to_number(control_state.get("charge_current_number_step")) or 1.0
+    if min_a is not None and amps < int(round(min_a)):
+        raise HTTPException(status_code=400, detail=f"Tesla charge current must be >= {int(round(min_a))}A")
+    if max_a is not None and amps > int(round(max_a)):
+        raise HTTPException(status_code=400, detail=f"Tesla charge current must be <= {int(round(max_a))}A")
+    if step_a > 0 and min_a is not None:
+        offset = amps - min_a
+        steps = round(offset / step_a)
+        if abs(offset - (steps * step_a)) > 1e-6:
+            raise HTTPException(status_code=400, detail=f"Tesla charge current must follow step {step_a:g}A")
     await ha_client.call_service("number", "set_value", {"entity_id": entity_id, "value": int(amps)})
     refreshed_states = await _tesla_control_states()
     refreshed_control_state = _build_tesla_control_state(refreshed_states)
@@ -2137,10 +2714,25 @@ async def _tesla_set_charge_current(amps: int) -> dict[str, object]:
         "ok": True,
         "requested_charge_current_amps": int(amps),
         "control_state": refreshed_control_state,
+        "observation": _build_tesla_observation_payload(refreshed_states),
     }
 
 
 def _tesla_control_state_charge_power_w(control_state: dict[str, object]) -> float:
+    current_entity = control_state.get("charge_current_sensor_entity")
+    current_a = _to_number(current_entity.get("state")) if isinstance(current_entity, dict) else None
+    voltage_entity = control_state.get("charge_voltage_entity")
+    voltage_v = _to_number(voltage_entity.get("state")) if isinstance(voltage_entity, dict) else None
+    if current_a is None:
+        current_number_entity = control_state.get("charge_current_number_entity")
+        current_a = _to_number(current_number_entity.get("state")) if isinstance(current_number_entity, dict) else None
+    if current_a is None or current_a <= 0:
+        current_a = None
+    if current_a is not None:
+        if voltage_v is None or voltage_v < 100:
+            voltage_v = TESLA_ASSUMED_CHARGING_VOLTAGE_V
+        return max(current_a * voltage_v, 0.0)
+
     power_entity = control_state.get("power_entity")
     power_w = _power_to_watts(
         _to_number(power_entity.get("state")) if isinstance(power_entity, dict) else None,
@@ -2158,14 +2750,7 @@ def _tesla_control_state_charge_power_w(control_state: dict[str, object]) -> flo
     if power_w is not None and power_w >= 0:
         return power_w
 
-    current_entity = control_state.get("charge_current_sensor_entity")
-    current_a = _to_number(current_entity.get("state")) if isinstance(current_entity, dict) else None
-    voltage_entity = control_state.get("charge_voltage_entity")
-    voltage_v = _to_number(voltage_entity.get("state")) if isinstance(voltage_entity, dict) else None
     if current_a is None:
-        current_number_entity = control_state.get("charge_current_number_entity")
-        current_a = _to_number(current_number_entity.get("state")) if isinstance(current_number_entity, dict) else None
-    if current_a is None or current_a <= 0:
         return 0.0
     if voltage_v is None or voltage_v < 100:
         voltage_v = TESLA_ASSUMED_CHARGING_VOLTAGE_V
@@ -6633,20 +7218,41 @@ def _collector_mark_start(system: str) -> float:
     return monotonic()
 
 
-def _collector_mark_finish(system: str, started_monotonic: float, *, error: Exception | None = None) -> None:
+def _collector_mark_finish(
+    system: str,
+    started_monotonic: float,
+    *,
+    error: Exception | None = None,
+    round_result: dict[str, object] | None = None,
+) -> None:
     now_iso = datetime.now(UTC).isoformat()
     status = collector_status.setdefault(system, {})
     status["in_progress"] = False
     status["last_finished_at"] = now_iso
     status["last_duration_ms"] = round((monotonic() - started_monotonic) * 1000, 1)
-    if error is None:
+    if error is None and bool((round_result or {}).get("stored_sample")):
         status["last_success_at"] = now_iso
         status["last_error"] = None
         status["success_count"] = int(status.get("success_count") or 0) + 1
         return
     status["last_error_at"] = now_iso
-    status["last_error"] = f"{type(error).__name__}: {error}"
+    if error is not None:
+        status["last_error"] = f"{type(error).__name__}: {error}"
+    else:
+        reason = str((round_result or {}).get("reason") or (round_result or {}).get("error") or "sample_not_stored")
+        status["last_error"] = reason
     status["failure_count"] = int(status.get("failure_count") or 0) + 1
+
+
+def _worker_collection_log_outcome(round_result: dict[str, object]) -> tuple[str, bool, str | None]:
+    if bool(round_result.get("stored_sample")):
+        return WORKER_LOG_STATUS_OK, True, None
+    if round_result.get("error"):
+        return WORKER_LOG_STATUS_FAILED, False, str(round_result.get("error") or "")
+    reason = str(round_result.get("reason") or "").strip()
+    if reason in {"missing_required_config", "endpoint_backoff", "source_flow_unavailable"}:
+        return WORKER_LOG_STATUS_SKIPPED, False, reason or None
+    return WORKER_LOG_STATUS_FAILED, False, reason or "sample_not_stored"
 
 
 def _collector_sleep_seconds(now_monotonic: float) -> float:
@@ -6732,6 +7338,20 @@ def _worker_control_result_text(
             f"voltage {_fmt_result_number(charging_map.get('voltage_v'), 0, 'V')}, "
             f"power {_fmt_result_number(charging_map.get('power_w'), 1, 'W')}"
         )
+    if service in {SAJ_COLLECTION_SERVICE, SOLPLANET_COLLECTION_SERVICE}:
+        attempted = [str(item) for item in payload.get("attempted", []) if item]
+        succeeded = [str(item) for item in payload.get("succeeded", []) if item]
+        failed = [str(item) for item in payload.get("failed", []) if item]
+        skipped = [str(item) for item in payload.get("skipped", []) if item]
+        stored_sample = bool(payload.get("stored_sample"))
+        reason = str(payload.get("reason") or error_text or "-")
+        summary = (
+            f"attempted={len(attempted)}, succeeded={len(succeeded)}, "
+            f"failed={len(failed)}, skipped={len(skipped)}, stored_sample={stored_sample}"
+        )
+        if status == WORKER_LOG_STATUS_OK:
+            return f"Collection stored new sample: {summary}"
+        return f"Collection did not store new sample: {summary}, reason={reason}"
     if service == NOTIFICATION_SUMMARY_SERVICE and str(payload.get("record_kind") or "") == "notification":
         window_mode = _worker_window_name(payload)
         window_schedule = _worker_window_label(payload)
@@ -7261,7 +7881,20 @@ async def _collector_loop() -> None:
             try:
                 result = await round_tasks[system]
                 round_results[system] = result
-                _collector_mark_finish(system, started_monotonic)
+                _collector_mark_finish(system, started_monotonic, round_result=result)
+                summary_service = SAJ_COLLECTION_SERVICE if system == "saj" else SOLPLANET_COLLECTION_SERVICE
+                summary_status, summary_ok, summary_error_text = _worker_collection_log_outcome(result)
+                await _persist_worker_control_log(
+                    round_id=round_id,
+                    system=system,
+                    service=summary_service,
+                    requested_at_utc=round_started_at_utc,
+                    started_monotonic=started_monotonic,
+                    ok=summary_ok,
+                    status=summary_status,
+                    payload=result,
+                    error_text=summary_error_text,
+                )
             except Exception as exc:  # noqa: BLE001
                 _append_worker_failure_log(
                     system,
@@ -7278,6 +7911,18 @@ async def _collector_loop() -> None:
                     "stored_sample": False,
                     "error": f"{type(exc).__name__}: {exc}",
                 }
+                summary_service = SAJ_COLLECTION_SERVICE if system == "saj" else SOLPLANET_COLLECTION_SERVICE
+                await _persist_worker_control_log(
+                    round_id=round_id,
+                    system=system,
+                    service=summary_service,
+                    requested_at_utc=round_started_at_utc,
+                    started_monotonic=started_monotonic,
+                    ok=False,
+                    status=WORKER_LOG_STATUS_FAILED,
+                    payload=round_results[system],
+                    error_text=str(round_results[system].get("error") or ""),
+                )
                 if system == "solplanet":
                     try:
                         await _recreate_solplanet_client()
@@ -7574,6 +8219,8 @@ async def _collector_loop() -> None:
                 round_id,
                 system="combined",
                 services=(
+                    SAJ_COLLECTION_SERVICE,
+                    SOLPLANET_COLLECTION_SERVICE,
                     "combined_assembly",
                     TESLA_OBSERVATION_SERVICE,
                     NOTIFICATION_SUMMARY_SERVICE,
@@ -7672,7 +8319,29 @@ async def collector_runtime_status() -> dict[str, object]:
 @app.post("/api/solplanet/control/restart-api")
 @app.post("/api/soulplanet/control/restart-api")
 async def post_restart_backend_api() -> dict[str, object]:
-    return await _restart_collector()
+    operation_run_id = await _start_operation_history_run(
+        "backend.manual.restart_collector",
+        request_payload={},
+        previous_state=None,
+    )
+    try:
+        result = await _restart_collector()
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state=result,
+            response_payload=result,
+            completed=True,
+        )
+        return result
+    except Exception as exc:  # noqa: BLE001
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"{type(exc).__name__}: {exc}",
+            completed=True,
+        )
+        raise
 
 
 @app.get("/api/storage/status")
@@ -8272,7 +8941,12 @@ async def get_energy_flow(system: str) -> dict[str, object]:
             except HTTPException:
                 flow = await _get_energy_flow_from_storage(normalized)
     if normalized == "combined":
-        return _build_public_combined_flow(flow)
+        public_flow = _build_public_combined_flow(flow)
+        tesla_pending_operations = await _build_tesla_pending_operation_state(public_flow)
+        tesla_map = public_flow.get("tesla")
+        if isinstance(tesla_map, dict):
+            tesla_map["operations"] = tesla_pending_operations
+        return public_flow
     return flow
 
 
@@ -8439,7 +9113,19 @@ async def get_tesla_control_state() -> dict[str, object]:
 async def post_tesla_control_charging(payload: TeslaChargingTogglePayload) -> dict[str, object]:
     _ensure_ha_configured()
     requested_at_utc = datetime.now(UTC).isoformat()
+    operation_run_id: int | None = None
     try:
+        initial_states = await _tesla_control_states()
+        previous_control_state = _build_tesla_control_state(initial_states)
+        previous_observation = _build_tesla_observation_payload(initial_states)
+        operation_run_id = await _start_operation_history_run(
+            "tesla.manual.toggle_charging",
+            request_payload=payload.model_dump(mode="json"),
+            previous_state={
+                "control_state": previous_control_state,
+                "observation": previous_observation,
+            },
+        )
         await _set_tesla_control_feedback(
             phase="requesting",
             target_enabled=payload.enabled,
@@ -8456,6 +9142,17 @@ async def post_tesla_control_charging(payload: TeslaChargingTogglePayload) -> di
                 requested_at_utc=requested_at_utc,
             ),
         }
+        run_status = _tesla_charging_run_status(result, target_enabled=payload.enabled)
+        await _update_operation_history_run(
+            operation_run_id,
+            status=run_status,
+            latest_state={
+                "control_state": result.get("control_state"),
+                "observation": result.get("observation"),
+            },
+            response_payload=result,
+            completed=run_status == OPERATION_RUN_STATUS_SUCCEEDED,
+        )
         return result
     except httpx.HTTPStatusError as exc:
         await _set_tesla_control_feedback(
@@ -8463,6 +9160,12 @@ async def post_tesla_control_charging(payload: TeslaChargingTogglePayload) -> di
             target_enabled=payload.enabled,
             requested_at_utc=requested_at_utc,
             error=f"Home Assistant API returned {exc.response.status_code}",
+        )
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Home Assistant API returned {exc.response.status_code}",
+            completed=True,
         )
         detail = {
             "message": "Home Assistant API returned an error",
@@ -8477,6 +9180,12 @@ async def post_tesla_control_charging(payload: TeslaChargingTogglePayload) -> di
             requested_at_utc=requested_at_utc,
             error=f"Failed to reach Home Assistant: {exc}",
         )
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Home Assistant: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
     except HTTPException as exc:
         await _set_tesla_control_feedback(
@@ -8485,8 +9194,78 @@ async def post_tesla_control_charging(payload: TeslaChargingTogglePayload) -> di
             requested_at_utc=requested_at_utc,
             error=str(exc.detail),
         )
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=str(exc.detail),
+            completed=True,
+        )
         raise
+
+
+@app.post("/api/tesla/control/current")
+async def post_tesla_control_current(payload: TeslaChargeCurrentPayload) -> dict[str, object]:
+    _ensure_ha_configured()
+    operation_run_id: int | None = None
+    try:
+        initial_states = await _tesla_control_states()
+        previous_control_state = _build_tesla_control_state(initial_states)
+        previous_observation = _build_tesla_observation_payload(initial_states)
+        operation_run_id = await _start_operation_history_run(
+            "tesla.manual.set_charge_current",
+            request_payload=payload.model_dump(mode="json"),
+            previous_state={
+                "control_state": previous_control_state,
+                "observation": previous_observation,
+            },
+        )
+        result = await _tesla_set_charge_current(int(payload.amps))
+        control_state = result.get("control_state")
+        control_state_map = control_state if isinstance(control_state, dict) else {}
+        result["control_state"] = {
+            **control_state_map,
+            "feedback": _resolve_tesla_control_feedback(control_state_map),
+        }
+        run_status = _tesla_current_run_status(result, target_amps=int(payload.amps))
+        await _update_operation_history_run(
+            operation_run_id,
+            status=run_status,
+            latest_state={
+                "control_state": result.get("control_state"),
+                "observation": result.get("observation"),
+            },
+            response_payload=result,
+            completed=run_status == OPERATION_RUN_STATUS_SUCCEEDED,
+        )
+        return result
+    except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Home Assistant API returned {exc.response.status_code}",
+            completed=True,
+        )
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Home Assistant: {exc}",
+            completed=True,
+        )
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
     except Exception as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Home Assistant: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
@@ -8510,15 +9289,36 @@ async def get_saj_control_capabilities() -> dict[str, object]:
 @app.put("/api/saj/control/working-mode")
 async def put_saj_working_mode(payload: SajWorkingModePayload) -> dict[str, object]:
     _ensure_ha_configured()
+    operation_run_id: int | None = None
     try:
+        _, initial_states_by_id = await _saj_control_states()
+        operation_run_id = await _start_operation_history_run(
+            "saj.manual.set_working_mode",
+            request_payload=payload.model_dump(mode="json"),
+            previous_state={"state": _build_saj_control_state(initial_states_by_id)},
+        )
         await _saj_set_number("number.saj_app_mode_input", payload.mode_code)
         _, states_by_id = await _saj_control_states()
-        return {
+        result = {
             "ok": True,
             "changed": [{"entity_id": "number.saj_app_mode_input", "value": payload.mode_code}],
             "state": _build_saj_control_state(states_by_id),
         }
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"state": result.get("state")},
+            response_payload=result,
+            completed=True,
+        )
+        return result
     except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Home Assistant API returned {exc.response.status_code}",
+            completed=True,
+        )
         detail = {
             "message": "Home Assistant API returned an error",
             "status_code": exc.response.status_code,
@@ -8526,15 +9326,42 @@ async def put_saj_working_mode(payload: SajWorkingModePayload) -> dict[str, obje
         }
         raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Home Assistant: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
 @app.put("/api/saj/control/profile")
 async def put_saj_control_profile(payload: SajProfilePayload) -> dict[str, object]:
     _ensure_ha_configured()
+    operation_run_id: int | None = None
     try:
-        return await _saj_apply_profile(payload.profile_id)
+        _, initial_states_by_id = await _saj_control_states()
+        operation_run_id = await _start_operation_history_run(
+            "saj.manual.apply_profile",
+            request_payload=payload.model_dump(mode="json"),
+            previous_state={"state": _build_saj_control_state(initial_states_by_id)},
+        )
+        result = await _saj_apply_profile(payload.profile_id)
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"state": result.get("state")},
+            response_payload=result,
+            completed=True,
+        )
+        return result
     except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Home Assistant API returned {exc.response.status_code}",
+            completed=True,
+        )
         detail = {
             "message": "Home Assistant API returned an error",
             "status_code": exc.response.status_code,
@@ -8542,15 +9369,42 @@ async def put_saj_control_profile(payload: SajProfilePayload) -> dict[str, objec
         }
         raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Home Assistant: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
 @app.put("/api/saj/control/charge-slots/{slot}")
 async def put_saj_charge_slot(slot: int, payload: SajSlotPayload) -> dict[str, object]:
     _ensure_ha_configured()
+    operation_run_id: int | None = None
     try:
-        return await _saj_apply_slot("charge", slot, payload)
+        _, initial_states_by_id = await _saj_control_states()
+        operation_run_id = await _start_operation_history_run(
+            "saj.manual.set_charge_slot",
+            request_payload={"slot": slot, **payload.model_dump(mode="json")},
+            previous_state={"state": _build_saj_control_state(initial_states_by_id)},
+        )
+        result = await _saj_apply_slot("charge", slot, payload)
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"state": result.get("state")},
+            response_payload=result,
+            completed=True,
+        )
+        return result
     except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Home Assistant API returned {exc.response.status_code}",
+            completed=True,
+        )
         detail = {
             "message": "Home Assistant API returned an error",
             "status_code": exc.response.status_code,
@@ -8558,15 +9412,42 @@ async def put_saj_charge_slot(slot: int, payload: SajSlotPayload) -> dict[str, o
         }
         raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Home Assistant: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
 @app.put("/api/saj/control/discharge-slots/{slot}")
 async def put_saj_discharge_slot(slot: int, payload: SajSlotPayload) -> dict[str, object]:
     _ensure_ha_configured()
+    operation_run_id: int | None = None
     try:
-        return await _saj_apply_slot("discharge", slot, payload)
+        _, initial_states_by_id = await _saj_control_states()
+        operation_run_id = await _start_operation_history_run(
+            "saj.manual.set_discharge_slot",
+            request_payload={"slot": slot, **payload.model_dump(mode="json")},
+            previous_state={"state": _build_saj_control_state(initial_states_by_id)},
+        )
+        result = await _saj_apply_slot("discharge", slot, payload)
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"state": result.get("state")},
+            response_payload=result,
+            completed=True,
+        )
+        return result
     except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Home Assistant API returned {exc.response.status_code}",
+            completed=True,
+        )
         detail = {
             "message": "Home Assistant API returned an error",
             "status_code": exc.response.status_code,
@@ -8574,6 +9455,12 @@ async def put_saj_discharge_slot(slot: int, payload: SajSlotPayload) -> dict[str
         }
         raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Home Assistant: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
@@ -8581,7 +9468,14 @@ async def put_saj_discharge_slot(slot: int, payload: SajSlotPayload) -> dict[str
 async def put_saj_control_toggles(payload: SajTogglePayload) -> dict[str, object]:
     _ensure_ha_configured()
     changed: list[dict[str, object]] = []
+    operation_run_id: int | None = None
     try:
+        _, initial_states_by_id = await _saj_control_states()
+        operation_run_id = await _start_operation_history_run(
+            "saj.manual.set_toggles",
+            request_payload=payload.model_dump(mode="json"),
+            previous_state={"state": _build_saj_control_state(initial_states_by_id)},
+        )
         if payload.charging_control is not None:
             await _saj_set_switch("switch.saj_charging_control", payload.charging_control)
             changed.append({"entity_id": "switch.saj_charging_control", "value": payload.charging_control})
@@ -8605,8 +9499,22 @@ async def put_saj_control_toggles(payload: SajTogglePayload) -> dict[str, object
             raise HTTPException(status_code=400, detail="No fields to update")
 
         _, states_by_id = await _saj_control_states()
-        return {"ok": True, "changed": changed, "state": _build_saj_control_state(states_by_id)}
+        result = {"ok": True, "changed": changed, "state": _build_saj_control_state(states_by_id)}
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"state": result.get("state")},
+            response_payload=result,
+            completed=True,
+        )
+        return result
     except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Home Assistant API returned {exc.response.status_code}",
+            completed=True,
+        )
         detail = {
             "message": "Home Assistant API returned an error",
             "status_code": exc.response.status_code,
@@ -8614,6 +9522,12 @@ async def put_saj_control_toggles(payload: SajTogglePayload) -> dict[str, object
         }
         raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Home Assistant: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
@@ -8621,7 +9535,14 @@ async def put_saj_control_toggles(payload: SajTogglePayload) -> dict[str, object
 async def put_saj_control_limits(payload: SajLimitsPayload) -> dict[str, object]:
     _ensure_ha_configured()
     changed: list[dict[str, object]] = []
+    operation_run_id: int | None = None
     try:
+        _, initial_states_by_id = await _saj_control_states()
+        operation_run_id = await _start_operation_history_run(
+            "saj.manual.set_limits",
+            request_payload=payload.model_dump(mode="json"),
+            previous_state={"state": _build_saj_control_state(initial_states_by_id)},
+        )
         if payload.battery_charge_power_limit is not None:
             await _saj_set_number("number.saj_battery_charge_power_limit_input", payload.battery_charge_power_limit)
             changed.append(
@@ -8649,8 +9570,22 @@ async def put_saj_control_limits(payload: SajLimitsPayload) -> dict[str, object]
         if not changed:
             raise HTTPException(status_code=400, detail="No fields to update")
         _, states_by_id = await _saj_control_states()
-        return {"ok": True, "changed": changed, "state": _build_saj_control_state(states_by_id)}
+        result = {"ok": True, "changed": changed, "state": _build_saj_control_state(states_by_id)}
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"state": result.get("state")},
+            response_payload=result,
+            completed=True,
+        )
+        return result
     except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Home Assistant API returned {exc.response.status_code}",
+            completed=True,
+        )
         detail = {
             "message": "Home Assistant API returned an error",
             "status_code": exc.response.status_code,
@@ -8658,6 +9593,12 @@ async def put_saj_control_limits(payload: SajLimitsPayload) -> dict[str, object]
         }
         raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Home Assistant: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
@@ -8665,16 +9606,37 @@ async def put_saj_control_limits(payload: SajLimitsPayload) -> dict[str, object]
 async def post_saj_control_refresh_touch() -> dict[str, object]:
     _ensure_ha_configured()
     entity_id = "switch.saj_passive_charge_control"
+    operation_run_id: int | None = None
     try:
+        _, initial_states_by_id = await _saj_control_states()
+        operation_run_id = await _start_operation_history_run(
+            "saj.manual.refresh_touch",
+            request_payload={},
+            previous_state={"state": _build_saj_control_state(initial_states_by_id)},
+        )
         kept_state = await _saj_touch_switch(entity_id)
         _, states_by_id = await _saj_control_states()
-        return {
+        result = {
             "ok": True,
             "entity_id": entity_id,
             "kept_state": kept_state,
             "state": _build_saj_control_state(states_by_id),
         }
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"state": result.get("state")},
+            response_payload=result,
+            completed=True,
+        )
+        return result
     except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Home Assistant API returned {exc.response.status_code}",
+            completed=True,
+        )
         detail = {
             "message": "Home Assistant API returned an error",
             "status_code": exc.response.status_code,
@@ -8682,6 +9644,12 @@ async def post_saj_control_refresh_touch() -> dict[str, object]:
         }
         raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Home Assistant: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
@@ -8709,6 +9677,7 @@ async def get_solplanet_control_state() -> dict[str, object]:
 async def put_solplanet_control_limits(payload: SolplanetLimitsPayload) -> dict[str, object]:
     changed: list[dict[str, object]] = []
     update_payload: dict[str, object] = {}
+    operation_run_id: int | None = None
     if payload.pin is not None:
         update_payload["Pin"] = payload.pin
         changed.append({"key": "Pin", "value": payload.pin})
@@ -8718,6 +9687,12 @@ async def put_solplanet_control_limits(payload: SolplanetLimitsPayload) -> dict[
     if not update_payload:
         raise HTTPException(status_code=400, detail="No fields to update")
     try:
+        previous_schedule = await _solplanet_get_schedule_with_fallback()
+        operation_run_id = await _start_operation_history_run(
+            "solplanet.manual.set_limits",
+            request_payload=payload.model_dump(mode="json"),
+            previous_state={"state": _build_solplanet_control_state(previous_schedule)},
+        )
         cgi_write = await _solplanet_set_schedule_payload(update_payload)
         state_payload: dict[str, object] | None = None
         readback_error: str | None = None
@@ -8729,7 +9704,7 @@ async def put_solplanet_control_limits(payload: SolplanetLimitsPayload) -> dict[
             state_payload = _build_solplanet_control_state(schedule)
         except Exception as exc:  # noqa: BLE001
             readback_error = f"{type(exc).__name__}: {exc}"
-        return {
+        result = {
             "ok": True,
             "changed": changed,
             "request_payload": update_payload,
@@ -8737,7 +9712,21 @@ async def put_solplanet_control_limits(payload: SolplanetLimitsPayload) -> dict[
             "state": state_payload,
             "readback_error": readback_error,
         }
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"state": state_payload},
+            response_payload=result,
+            completed=True,
+        )
+        return result
     except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Solplanet CGI returned {exc.response.status_code}",
+            completed=True,
+        )
         detail = {
             "message": "Solplanet CGI returned an error",
             "status_code": exc.response.status_code,
@@ -8745,8 +9734,20 @@ async def put_solplanet_control_limits(payload: SolplanetLimitsPayload) -> dict[
         }
         raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Solplanet CGI: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=502, detail=f"Failed to reach Solplanet CGI: {exc}") from exc
     except (TimeoutError, asyncio.TimeoutError) as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Solplanet CGI timed out: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=504, detail=f"Solplanet CGI timed out: {exc}") from exc
 
 
@@ -8755,18 +9756,39 @@ async def put_solplanet_control_limits(payload: SolplanetLimitsPayload) -> dict[
 async def put_solplanet_day_schedule(day: str, payload: SolplanetDaySchedulePayload) -> dict[str, object]:
     day_key = _normalize_solplanet_day_key(day)
     slots = _validate_solplanet_day_slots(payload.slots)
+    operation_run_id: int | None = None
     try:
+        previous_schedule = await _solplanet_get_schedule_with_fallback()
+        operation_run_id = await _start_operation_history_run(
+            "solplanet.manual.set_day_schedule",
+            request_payload={"day": day_key, **payload.model_dump(mode="json")},
+            previous_state={"state": _build_solplanet_control_state(previous_schedule)},
+        )
         request_payload = {day_key: slots}
         cgi_write = await _solplanet_set_schedule_payload(request_payload)
         schedule = await _solplanet_get_schedule_with_fallback()
-        return {
+        result = {
             "ok": True,
             "changed": [{"key": day_key, "value": slots}],
             "request_payload": request_payload,
             "cgi_write": cgi_write,
             "state": _build_solplanet_control_state(schedule),
         }
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"state": result.get("state")},
+            response_payload=result,
+            completed=True,
+        )
+        return result
     except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Solplanet CGI returned {exc.response.status_code}",
+            completed=True,
+        )
         detail = {
             "message": "Solplanet CGI returned an error",
             "status_code": exc.response.status_code,
@@ -8774,8 +9796,20 @@ async def put_solplanet_day_schedule(day: str, payload: SolplanetDaySchedulePayl
         }
         raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Solplanet CGI: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=502, detail=f"Failed to reach Solplanet CGI: {exc}") from exc
     except (TimeoutError, asyncio.TimeoutError) as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Solplanet CGI timed out: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=504, detail=f"Solplanet CGI timed out: {exc}") from exc
 
 
@@ -8784,6 +9818,7 @@ async def put_solplanet_day_schedule(day: str, payload: SolplanetDaySchedulePayl
 async def put_solplanet_day_schedule_slot(day: str, slot: int, payload: SolplanetSlotPayload) -> dict[str, object]:
     day_key = _normalize_solplanet_day_key(day)
     safe_slot = _validate_solplanet_slot(slot)
+    operation_run_id: int | None = None
     if (
         payload.enabled is None
         and payload.hour is None
@@ -8793,8 +9828,13 @@ async def put_solplanet_day_schedule_slot(day: str, slot: int, payload: Solplane
     ):
         raise HTTPException(status_code=400, detail="No fields to update")
     try:
-        schedule = await _solplanet_get_schedule_live()
-        day_slots = _solplanet_day_slots(schedule.get(day_key))
+        previous_schedule = await _solplanet_get_schedule_live()
+        operation_run_id = await _start_operation_history_run(
+            "solplanet.manual.set_day_schedule_slot",
+            request_payload={"day": day_key, "slot": safe_slot, **payload.model_dump(mode="json")},
+            previous_state={"state": _build_solplanet_control_state(previous_schedule)},
+        )
+        day_slots = _solplanet_day_slots(previous_schedule.get(day_key))
         index = safe_slot - 1
         current_decoded = _solplanet_decode_slot(day_slots[index])
         enabled = current_decoded["enabled"] if payload.enabled is None else payload.enabled
@@ -8809,14 +9849,28 @@ async def put_solplanet_day_schedule_slot(day: str, slot: int, payload: Solplane
         request_payload = {day_key: day_slots}
         cgi_write = await _solplanet_set_schedule_payload(request_payload)
         latest = await _solplanet_get_schedule_with_fallback()
-        return {
+        result = {
             "ok": True,
             "changed": [{"key": day_key, "slot": safe_slot, "value": day_slots[index]}],
             "request_payload": request_payload,
             "cgi_write": cgi_write,
             "state": _build_solplanet_control_state(latest),
         }
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"state": result.get("state")},
+            response_payload=result,
+            completed=True,
+        )
+        return result
     except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Solplanet CGI returned {exc.response.status_code}",
+            completed=True,
+        )
         detail = {
             "message": "Solplanet CGI returned an error",
             "status_code": exc.response.status_code,
@@ -8824,8 +9878,20 @@ async def put_solplanet_day_schedule_slot(day: str, slot: int, payload: Solplane
         }
         raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Solplanet CGI: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=502, detail=f"Failed to reach Solplanet CGI: {exc}") from exc
     except (TimeoutError, asyncio.TimeoutError) as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Solplanet CGI timed out: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=504, detail=f"Solplanet CGI timed out: {exc}") from exc
 
 
@@ -8834,17 +9900,38 @@ async def put_solplanet_day_schedule_slot(day: str, slot: int, payload: Solplane
 async def put_solplanet_raw_setting(payload: SolplanetRawSettingPayload) -> dict[str, object]:
     if not payload.payload:
         raise HTTPException(status_code=400, detail="payload cannot be empty")
+    operation_run_id: int | None = None
     try:
+        previous_schedule = await _solplanet_get_schedule_with_fallback()
+        operation_run_id = await _start_operation_history_run(
+            "solplanet.manual.set_raw_setting",
+            request_payload=payload.model_dump(mode="json"),
+            previous_state={"state": _build_solplanet_control_state(previous_schedule)},
+        )
         cgi_write = await _solplanet_set_schedule_payload(payload.payload)
         schedule = await _solplanet_get_schedule_with_fallback()
-        return {
+        result = {
             "ok": True,
             "changed": [{"key": "raw_payload", "value": payload.payload}],
             "request_payload": payload.payload,
             "cgi_write": cgi_write,
             "state": _build_solplanet_control_state(schedule),
         }
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"state": result.get("state")},
+            response_payload=result,
+            completed=True,
+        )
+        return result
     except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Solplanet CGI returned {exc.response.status_code}",
+            completed=True,
+        )
         detail = {
             "message": "Solplanet CGI returned an error",
             "status_code": exc.response.status_code,
@@ -8852,8 +9939,20 @@ async def put_solplanet_raw_setting(payload: SolplanetRawSettingPayload) -> dict
         }
         raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Solplanet CGI: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=502, detail=f"Failed to reach Solplanet CGI: {exc}") from exc
     except (TimeoutError, asyncio.TimeoutError) as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Solplanet CGI timed out: {exc}",
+            completed=True,
+        )
         raise HTTPException(status_code=504, detail=f"Solplanet CGI timed out: {exc}") from exc
 
 
@@ -9057,7 +10156,17 @@ async def on_shutdown() -> None:
 async def on_startup() -> None:
     global static_asset_version
     static_asset_version = await asyncio.to_thread(_compute_static_asset_version)
+    if storage_db_path.exists():
+        inspection = await asyncio.to_thread(inspect_sqlite_database, storage_db_path)
+        if not bool(inspection.get("ok")):
+            await _attempt_storage_db_recovery(
+                trigger_error=RuntimeError(f"startup_integrity_check_failed: {inspection.get('integrity_check')}"),
+                trace_system="combined",
+                trace_round_id=None,
+                operation_name="startup_db_health_check",
+            )
     await asyncio.to_thread(init_db, storage_db_path)
+    await asyncio.to_thread(upsert_operation_definitions, storage_db_path, definitions=list(MANUAL_OPERATION_DEFINITIONS))
     await asyncio.to_thread(migrate_worker_log_legacy_statuses, storage_db_path)
     await asyncio.to_thread(
         backfill_notification_entries_from_worker_logs,

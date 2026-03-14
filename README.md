@@ -84,6 +84,7 @@ curl -s "http://<wattimize-host>:18000/api/storage/samples?system=saj&start_utc=
 curl -s "http://<wattimize-host>:18000/api/storage/series?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z&max_points=500" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/usage-range?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z" | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/charging -H 'Content-Type: application/json' -d '{"enabled":true}' | jq
+curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/current -H 'Content-Type: application/json' -d '{"amps":16}' | jq
 curl -s http://<wattimize-host>:18000/api/database/export.sqlite3 -o wattimize.sqlite3
 curl -s -X POST http://<wattimize-host>:18000/api/database/import.sqlite3 -F "file=@wattimize.sqlite3" | jq
 curl -s -X POST http://<wattimize-host>:18000/api/config/solplanet/discover -H 'Content-Type: application/json' -d '{"solplanet_dongle_host":"192.168.1.10"}' | jq
@@ -130,6 +131,7 @@ First-run configuration:
 - Default Solplanet sampling frequency is every 60 seconds (`WATTIMIZE_SOLPLANET_SAMPLE_INTERVAL_SECONDS`).
 - Every sample stores current `pv_w/grid_w/battery_w/load_w/soc/inverter_status/balance` and raw flow payload.
 - SQLite writes and worker log persistence now retry on transient database failures before surfacing an error in collector status.
+- When SQLite corruption is detected, the backend now inspects the file, attempts an automatic recovery into the recovery directory, and reinitializes the runtime connection pool.
 - Daily usage endpoint integrates power snapshots into kWh (UTC day).
 - `system=combined` is available on range usage and trend series endpoints for the frontend overall view.
 - The `History` tab combines range selection with an energy breakdown card, a power timeline chart, and compact date/week/month context for the selected window.
@@ -141,6 +143,9 @@ First-run configuration:
 - Rule state is stored in SQLite and exposed through `GET /api/time-window-rules` and `PUT /api/time-window-rules/{rule_code}`.
 - SAJ profile automation and Tesla charge automation respect these rule switches before issuing control actions.
 - Tesla manual start/stop now returns UI feedback states so the dashboard can show pending, success, and failure confirmation after `/api/tesla/control/charging`.
+- Tesla manual current control is available through `POST /api/tesla/control/current`, and the combined dashboard shows pending current-change state until Home Assistant confirms it.
+- The combined Tesla card now shows battery energy, live voltage, charge ETA, and an inline current-control trigger instead of only the raw charging power number.
+- Manual inverter and backend actions now register operation definitions plus run history in SQLite so the UI can reconcile pending and completed control actions.
 - The combined dashboard now includes a Tesla overnight headroom estimate derived from recent combined home-load history and current battery SOC.
 - Dashboard auto-refresh defaults to 30 seconds, keeps the last summary cached locally, and shows background refresh state while new data is loading.
 - The combined dashboard lets you click the Solplanet inverter node to read and update the live Solplanet `Pin` charging limit.
