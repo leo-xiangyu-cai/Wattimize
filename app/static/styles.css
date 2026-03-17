@@ -4126,3 +4126,157 @@ td {
     opacity: 1;
   }
 }
+
+/* ── Weather widget ─────────────────────────────────────────────────────── */
+.weather-widget {
+  background: linear-gradient(135deg, rgba(255,255,255,0.82), rgba(220,245,232,0.72));
+  border: 1px solid rgba(118,149,129,0.22);
+  border-radius: 16px;
+  padding: 10px 16px 12px;
+  box-shadow: 0 2px 12px rgba(22,64,41,0.06);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.weather-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.weather-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent-dark);
+}
+
+.weather-updated {
+  font-size: 0.72rem;
+}
+
+/* Horizontal scroll strip */
+.weather-hourly-scroll {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 2px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(118,149,129,0.3) transparent;
+}
+
+.weather-hourly-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+.weather-hourly-scroll::-webkit-scrollbar-track { background: transparent; }
+.weather-hourly-scroll::-webkit-scrollbar-thumb {
+  background: rgba(118,149,129,0.35);
+  border-radius: 2px;
+}
+
+/* Day separator pill */
+.weather-day-sep {
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-dark);
+  background: rgba(31,122,82,0.10);
+  border: 1px solid rgba(31,122,82,0.18);
+  border-radius: 10px;
+  padding: 2px 8px;
+  margin: 0 4px;
+  white-space: nowrap;
+}
+
+.weather-day-sep-past {
+  color: var(--muted);
+  background: rgba(91,107,97,0.08);
+  border-color: rgba(91,107,97,0.18);
+}
+
+/* Individual hour chip */
+.weather-hour-chip {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 6px 5px;
+  border-radius: 10px;
+  min-width: 52px;
+  background: rgba(255,255,255,0.55);
+  border: 1px solid rgba(118,149,129,0.15);
+  transition: background 0.15s;
+}
+
+.weather-hour-chip:hover {
+  background: rgba(255,255,255,0.85);
+}
+
+.weather-hour-chip.weather-hour-now {
+  background: rgba(31,122,82,0.10);
+  border-color: rgba(31,122,82,0.35);
+}
+
+.weather-hour-chip.weather-hour-past {
+  background: rgba(240,245,241,0.45);
+  border-color: rgba(118,149,129,0.08);
+}
+
+.wh-time {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.weather-hour-now .wh-time {
+  color: var(--accent-dark);
+}
+
+.wh-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.wh-temp {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Mini bar chart for solar irradiance */
+.wh-solar-bar-wrap {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 30px;
+  width: 100%;
+}
+
+.wh-solar-bar {
+  display: block;
+  width: 10px;
+  border-radius: 3px 3px 0 0;
+  min-height: 2px;
+  transition: height 0.4s ease;
+}
+
+.wh-solar-val {
+  font-size: 0.68rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.weather-error {
+  font-size: 0.82rem;
+  color: var(--danger);
+  margin-top: 6px;
+}

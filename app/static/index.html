@@ -59,6 +59,15 @@
       </nav>
 
       <section id="dashboardView" class="view">
+        <section id="weatherWidget" class="weather-widget" aria-live="polite">
+          <div class="weather-header">
+            <span class="weather-title" data-i18n="weatherTitle">Solar Weather Forecast</span>
+            <span id="weatherUpdatedAt" class="weather-updated muted">-</span>
+          </div>
+          <div id="weatherHourlyScroll" class="weather-hourly-scroll"></div>
+          <div id="weatherError" class="weather-error hidden">-</div>
+        </section>
+
         <section id="dashboardNotificationsSection" class="dashboard-notifications hidden" aria-live="polite">
           <div class="dashboard-notifications-header">
             <h2 data-i18n="dashboardNotificationsTitle">Notifications</h2>
@@ -99,15 +108,6 @@
               </section>
               <div id="energyFlowCombinedMobile" class="mobile-flow-board" aria-live="polite"></div>
               <p id="combined-loadFormulaText" class="balance-formula muted">-</p>
-              <section class="combined-debug-panel">
-                <div class="section-header">
-                  <h3 data-i18n="combinedDebugTitle">Combined Debug</h3>
-                  <span id="combinedDebugUpdatedAt" class="muted">-</span>
-                </div>
-                <p id="combinedDebugMeta" class="muted">-</p>
-                <p id="combinedCollectorMeta" class="muted">-</p>
-                <pre id="combinedDebugPre" class="raw-pre">-</pre>
-              </section>
             </section>
           </div>
         </section>
@@ -504,6 +504,14 @@
               <option value="60" data-i18n="interval1m">1m</option>
               <option value="300" data-i18n="interval5m">5m</option>
             </select>
+          </label>
+          <label data-i18n="configWeatherLatLabel">
+            Weather Latitude
+            <input id="cfgWeatherLat" type="number" step="0.0001" placeholder="-33.8688" data-i18n-placeholder="configWeatherLatPlaceholder" />
+          </label>
+          <label data-i18n="configWeatherLonLabel">
+            Weather Longitude
+            <input id="cfgWeatherLon" type="number" step="0.0001" placeholder="151.2093" data-i18n-placeholder="configWeatherLonPlaceholder" />
           </label>
           <div class="config-actions">
             <button id="configAutoDiscoverBtn" type="button" class="btn secondary" data-i18n="configAutoDiscoverBtn">自动获取 Inverter / Battery SN</button>

@@ -91,6 +91,10 @@ const I18N = {
     configBatterySnLabel: "Solplanet Battery SN",
     configSajSampleIntervalLabel: "SAJ Sampling Interval",
     configSolplanetSampleIntervalLabel: "Solplanet Sampling Interval",
+    configWeatherLatLabel: "Weather Latitude",
+    configWeatherLonLabel: "Weather Longitude",
+    configWeatherLatPlaceholder: "e.g. -33.8688 (Sydney)",
+    configWeatherLonPlaceholder: "e.g. 151.2093 (Sydney)",
     configHaUrlPlaceholder: "http://<home-assistant-host>:8123",
     configHaTokenPlaceholder: "Long-lived access token",
     configDongleHostPlaceholder: "<solplanet-dongle-host>",
@@ -109,6 +113,15 @@ const I18N = {
     configSaved: "Saved",
     configSaveFailed: "Save failed: {error}",
     configMustSaveFirst: "Configuration is not complete yet. Complete setup first.",
+    weatherTitle: "Solar Weather Forecast",
+    weatherSolarLabel: "Solar",
+    weatherYesterday: "Yesterday",
+    weatherToday: "Today",
+    weatherTomorrow: "Tomorrow",
+    weatherSunHours: "☀ {h}h sunshine",
+    weatherTempRange: "{min}°C – {max}°C",
+    weatherSolarPct: "{pct}%",
+    weatherLoadError: "Weather unavailable: {error}",
     refreshBtn: "Refresh",
     dashboardTab: "Dashboard",
     notificationMatrixTab: "Time Window",
@@ -195,9 +208,6 @@ const I18N = {
     notificationRuleSajBatteryFullTrigger: "Triggers once when SAJ battery newly reaches 100% SOC.",
     notificationRuleSolplanetBatteryFullTitle: "Solplanet battery reached 100%",
     notificationRuleSolplanetBatteryFullTrigger: "Triggers once when Solplanet battery newly reaches 100% SOC.",
-    combinedDebugTitle: "Combined Debug",
-    combinedDebugMeta: "Source {source} · storage_backed {storageBacked} · stale {stale} · sample age {sampleAge}s · kv items {kvCount}",
-    combinedCollectorMeta: "Collector: SAJ {saj} · Solplanet {solplanet} · Combined {combined}",
     rawDataTab: "Raw Data",
     rawDataTitle: "Raw Data",
     rawDataSystemLabel: "System",
@@ -748,6 +758,10 @@ const I18N = {
     configBatterySnLabel: "Solplanet Battery SN",
     configSajSampleIntervalLabel: "SAJ 采样频率",
     configSolplanetSampleIntervalLabel: "Solplanet 采样频率",
+    configWeatherLatLabel: "天气纬度",
+    configWeatherLonLabel: "天气经度",
+    configWeatherLatPlaceholder: "例如 -33.8688（悉尼）",
+    configWeatherLonPlaceholder: "例如 151.2093（悉尼）",
     configHaUrlPlaceholder: "http://<home-assistant-host>:8123",
     configHaTokenPlaceholder: "Long-lived access token",
     configDongleHostPlaceholder: "<solplanet-dongle-host>",
@@ -766,6 +780,15 @@ const I18N = {
     configSaved: "保存成功",
     configSaveFailed: "保存失败: {error}",
     configMustSaveFirst: "当前配置还不完整，请先完成配置",
+    weatherTitle: "太阳能天气预报",
+    weatherSolarLabel: "日照",
+    weatherYesterday: "昨天",
+    weatherToday: "今天",
+    weatherTomorrow: "明天",
+    weatherSunHours: "☀ 日照 {h}h",
+    weatherTempRange: "{min}°C – {max}°C",
+    weatherSolarPct: "{pct}%",
+    weatherLoadError: "天气获取失败: {error}",
     refreshBtn: "刷新",
     dashboardTab: "总览",
     notificationMatrixTab: "Time Window",
@@ -852,9 +875,6 @@ const I18N = {
     notificationRuleSajBatteryFullTrigger: "当 SAJ 电池新达到 100% SOC 时触发一次。",
     notificationRuleSolplanetBatteryFullTitle: "Solplanet 电池达到 100%",
     notificationRuleSolplanetBatteryFullTrigger: "当 Solplanet 电池新达到 100% SOC 时触发一次。",
-    combinedDebugTitle: "整合数据调试",
-    combinedDebugMeta: "来源 {source} · storage_backed {storageBacked} · stale {stale} · 样本年龄 {sampleAge}s · KV 条数 {kvCount}",
-    combinedCollectorMeta: "采集器: SAJ {saj} · Solplanet {solplanet} · Combined {combined}",
     rawDataTab: "Raw Data",
     rawDataTitle: "Raw Data",
     rawDataSystemLabel: "系统",
@@ -1451,6 +1471,7 @@ const WORKER_LOG_HUMAN_COLUMNS = [
   "duration",
   "error_text",
   "result_text",
+  "key_metrics",
 ];
 const WORKER_LOG_RAW_COLUMNS = [
   "id",
@@ -1676,6 +1697,7 @@ const stateCache = {
   lastDashboardNotifications: null,
   lastTimeWindowRules: null,
   lastCollectorStatus: null,
+  lastNotificationSummary: null,
   lastSolplanetRaw: {},
   lastSolplanetKv: { phase: "idle", items: [], updated_at: null, error: null },
   lastSajRaw: {},
@@ -1937,9 +1959,12 @@ function getLang() {
 }
 
 let currentLang = getLang();
-let currentTab = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"].includes(localStorage.getItem("activeTab"))
-  ? localStorage.getItem("activeTab")
-  : "dashboard";
+const _hashTab = location.hash.slice(1);
+let currentTab = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"].includes(_hashTab)
+  ? _hashTab
+  : (["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"].includes(localStorage.getItem("activeTab"))
+    ? localStorage.getItem("activeTab")
+    : "dashboard");
 const ALL_TABS = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"];
 let solplanetRawMode = localStorage.getItem(SOLPLANET_RAW_MODE_KEY) === "table" ? "table" : "cards";
 let rawDataSystem = localStorage.getItem(RAW_DATA_SYSTEM_KEY) === "saj" ? "saj" : "solplanet";
@@ -2305,6 +2330,29 @@ function workerLogCellValue(item, column, statusPresentation) {
   if (column === "status") {
     return item.status || statusPresentation.text || "-";
   }
+  if (column === "key_metrics") {
+    const payload = item?.payload_json;
+    if (!payload) return "-";
+    if (item.service === "combined_assembly") {
+      const parts = {};
+      for (const sys of ["saj", "solplanet", "combined"]) {
+        const km = payload[sys]?.key_metrics;
+        if (km && typeof km === "object" && Object.keys(km).length > 0) parts[sys] = km;
+      }
+      return Object.keys(parts).length ? JSON.stringify(parts) : "-";
+    }
+    const metrics = payload?.flow?.metrics;
+    if (!metrics) return "-";
+    const KEY_FIELDS = [
+      "pv_w", "grid_w", "battery_w", "inverter_power_w",
+      "battery_soc_percent", "battery_energy_kwh", "inverter_status",
+    ];
+    const result = {};
+    for (const f of KEY_FIELDS) {
+      if (metrics[f] != null) result[f] = metrics[f];
+    }
+    return Object.keys(result).length ? JSON.stringify(result) : "-";
+  }
   if (column === "payload_json") {
     return item?.payload_json == null ? "-" : JSON.stringify(item.payload_json);
   }
@@ -2560,6 +2608,8 @@ function fillConfigForm(payload = {}) {
   document.getElementById("cfgSolplanetSampleIntervalSeconds").value = String(
     CONFIG_SAMPLE_INTERVAL_OPTIONS.includes(solplanetInterval) ? solplanetInterval : 60
   );
+  if (payload.weather_lat != null) document.getElementById("cfgWeatherLat").value = payload.weather_lat;
+  if (payload.weather_lon != null) document.getElementById("cfgWeatherLon").value = payload.weather_lon;
 }
 
 function hasConfigValue(value) {
@@ -2584,6 +2634,8 @@ function buildConfigPayloadFromForm() {
     solplanet_sample_interval_seconds: CONFIG_SAMPLE_INTERVAL_OPTIONS.includes(solplanetInterval)
       ? solplanetInterval
       : 60,
+    weather_lat: parseFloat(document.getElementById("cfgWeatherLat").value) || null,
+    weather_lon: parseFloat(document.getElementById("cfgWeatherLon").value) || null,
   };
 }
 
@@ -4888,8 +4940,6 @@ function renderSummary(payload) {
   });
   renderDashboardNotifications(stateCache.lastDashboardNotifications);
   renderCombinedEnergyFlow(combinedFlow, tesla);
-  renderCombinedDebug(combinedFlow, collectorStatus);
-  renderNotificationMatrix();
 }
 
 function dashboardNotificationLevelText(level) {
@@ -4980,7 +5030,7 @@ function renderNotificationMatrix() {
   const root = document.getElementById("notificationMatrixPanels");
   if (!root) return;
   root.innerHTML = "";
-  const currentWindowId = getCurrentNotificationMatrixWindowId(stateCache.lastSummary);
+  const currentWindowId = getCurrentNotificationMatrixWindowId(stateCache.lastNotificationSummary);
   if (!notificationMatrixCollapseInitialized) {
     notificationMatrixCollapseState = {};
     for (const windowItem of NOTIFICATION_MATRIX_WINDOWS) {
@@ -5007,7 +5057,7 @@ function renderNotificationMatrix() {
         const ruleCode = String(item.code || "").trim();
         const enabled = isTimeWindowRuleEnabled(ruleCode);
         const busy = timeWindowRuleBusy.has(ruleCode);
-        const progress = getNotificationMatrixProgress(item, windowItem, stateCache.lastSummary, { enabled, busy });
+        const progress = getNotificationMatrixProgress(item, windowItem, stateCache.lastNotificationSummary, { enabled, busy });
         return `
           <article class="notification-rule-item level-${escapeHtml(level)}${enabled ? "" : " is-disabled"}">
             <label class="notification-rule-check" aria-label="${escapeHtml(t(item.titleKey))}">
@@ -5514,62 +5564,6 @@ async function updateTimeWindowRuleState(ruleCode, enabled) {
   }
 }
 
-function formatCollectorSystemStatus(label, systemState) {
-  const state = systemState || {};
-  const review = state.last_round_review || {};
-  const result = state.last_round_result || {};
-  const successAt = formatDateTimeWithAgo(state.last_success_at || null);
-  const stored = result.stored_sample === true ? "stored" : (result.stored_sample === false ? "not-stored" : "-");
-  const reason = result.reason || result.error || "-";
-  const reviewSummary = `${Number(review.success_count || 0)}/${Number(review.attempted_count || 0)}`;
-  return `${label}: ${successAt}, review ${reviewSummary}, ${stored}, ${reason}`;
-}
-
-function renderCombinedDebug(combinedFlow, collectorStatus) {
-  const meta = combinedFlow?.meta || {};
-  const sourceType = meta?.source_type || "-";
-  const storageBacked = meta?.storage_backed ? "true" : "false";
-  const stale = meta?.stale ? `true (${meta?.stale_reason || "-"})` : "false";
-  const sampleAge = meta?.sample_age_seconds === null || meta?.sample_age_seconds === undefined
-    ? "-"
-    : formatMaybeNumber(meta.sample_age_seconds, 1);
-  const kvCount = meta?.kv_item_count === null || meta?.kv_item_count === undefined
-    ? "-"
-    : String(meta.kv_item_count);
-  setText(
-    "combinedDebugMeta",
-    t("combinedDebugMeta", {
-      source: sourceType,
-      storageBacked,
-      stale,
-      sampleAge,
-      kvCount,
-    }),
-  );
-
-  const systems = collectorStatus?.systems || {};
-  setText(
-    "combinedCollectorMeta",
-    t("combinedCollectorMeta", {
-      saj: formatCollectorSystemStatus("saj", systems.saj),
-      solplanet: formatCollectorSystemStatus("solplanet", systems.solplanet),
-      combined: formatCollectorSystemStatus("combined", systems.combined),
-    }),
-  );
-  setText("combinedDebugUpdatedAt", formatUpdatedAt(combinedFlow?.updated_at || collectorStatus?.updated_at || null));
-
-  const debugPre = document.getElementById("combinedDebugPre");
-  if (debugPre) {
-    debugPre.textContent = JSON.stringify(
-      {
-        collector_status: collectorStatus || null,
-        combined_flow: combinedFlow || null,
-      },
-      null,
-      2,
-    );
-  }
-}
 
 function formatMaybeNumber(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
@@ -6670,7 +6664,7 @@ function renderWorkerLogsRows(items) {
         column === "service" ? serviceClass :
         column === "status" ? statusPresentation.className :
         (column === "round_id" || column === "request_token" || column === "api_link") ? "worker-link" : "";
-      const isLong = column === "error_text" || column === "result_text" || column === "payload_json";
+      const isLong = column === "error_text" || column === "result_text" || column === "payload_json" || column === "key_metrics";
       if (isLong) {
         return `<td class="${escapeHtml(className)}"><pre class="worker-result-pre" title="${escapeHtml(value)}">${escapeHtml(value)}</pre></td>`;
       }
@@ -9536,6 +9530,105 @@ async function applyTeslaChargeCurrent() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Weather forecast widget — hourly scroll strip
+// ---------------------------------------------------------------------------
+
+function _solarBarColor(w) {
+  // 0 W/m² = grey, 200+ = orange-yellow gradient
+  if (!w || w <= 0) return "#ccd7ce";
+  const ratio = Math.min(1, w / 800);
+  // interpolate #f9c74f → #f3722c as ratio grows
+  const r = Math.round(249 + (243 - 249) * ratio);
+  const g = Math.round(199 + (114 - 199) * ratio);
+  const b = Math.round(79 + (44 - 79) * ratio);
+  return `rgb(${r},${g},${b})`;
+}
+
+function renderWeatherHourly(hours, days) {
+  const container = document.getElementById("weatherHourlyScroll");
+  if (!container) return;
+  container.innerHTML = "";
+
+  // Build day-label map for separator rendering
+  const dayLabels = {};
+  days.forEach((d) => {
+    if (d.is_past) dayLabels[d.date] = t("weatherYesterday");
+    else if (!dayLabels[d.date]) {
+      // first non-past = today, second = tomorrow
+      const nonPast = days.filter((x) => !x.is_past);
+      if (d.date === nonPast[0]?.date) dayLabels[d.date] = t("weatherToday");
+      else dayLabels[d.date] = t("weatherTomorrow");
+    }
+  });
+
+  let lastDate = null;
+  const maxSolar = Math.max(1, ...hours.map((h) => h.solar_w_m2 || 0));
+  let nowChip = null;
+
+  hours.forEach((hour) => {
+    // Day separator pill
+    if (hour.date && hour.date !== lastDate) {
+      lastDate = hour.date;
+      const sep = document.createElement("div");
+      sep.className = "weather-day-sep" + (hour.is_past ? " weather-day-sep-past" : "");
+      sep.textContent = dayLabels[hour.date] || hour.date;
+      container.appendChild(sep);
+    }
+
+    const isPast = Boolean(hour.is_past);
+    const isNow = Boolean(hour.is_now);
+    let cls = "weather-hour-chip";
+    if (isNow) cls += " weather-hour-now";
+    else if (isPast) cls += " weather-hour-past";
+
+    const chip = document.createElement("div");
+    chip.className = cls;
+
+    const solar = hour.solar_w_m2 ?? 0;
+    const barH = Math.round((solar / maxSolar) * 28);
+    const barColor = _solarBarColor(solar);
+    const tempStr = hour.temp != null ? `${hour.temp}°` : "-";
+    const solarStr = solar > 0 ? `${solar}W` : "—";
+
+    chip.innerHTML = `
+      <span class="wh-time">${hour.hour_label}</span>
+      <span class="wh-icon">${hour.icon}</span>
+      <span class="wh-temp">${tempStr}</span>
+      <span class="wh-solar-bar-wrap">
+        <span class="wh-solar-bar" style="height:${barH}px;background:${barColor}"></span>
+      </span>
+      <span class="wh-solar-val">${solarStr}</span>
+    `;
+    container.appendChild(chip);
+    if (isNow) nowChip = chip;
+  });
+
+  // Scroll so "now" chip is visible near the left edge
+  if (nowChip) {
+    requestAnimationFrame(() => {
+      const offset = nowChip.offsetLeft - 16;
+      container.scrollTo({ left: offset, behavior: "smooth" });
+    });
+  }
+}
+
+async function loadWeatherForecast() {
+  const errorEl = document.getElementById("weatherError");
+  if (errorEl) errorEl.classList.add("hidden");
+  try {
+    const data = await fetchJson("/api/weather/forecast", { timeoutMs: 12000 });
+    renderWeatherHourly(data.hours || [], data.days || []);
+    const fetched = data.fetched_at ? new Date(data.fetched_at).toLocaleTimeString() : "-";
+    setText("weatherUpdatedAt", fetched);
+  } catch (err) {
+    if (errorEl) {
+      errorEl.textContent = t("weatherLoadError", { error: String(err.message || err) });
+      errorEl.classList.remove("hidden");
+    }
+  }
+}
+
 async function loadSummary() {
   const requestId = ++summaryRequestId;
   const summary = stateCache.lastSummary || {
@@ -9560,6 +9653,7 @@ async function loadSummary() {
     fetchJson("/api/saj/control/profile", { timeoutMs: 8000 }),
     fetchJson("/api/dashboard/notifications", { timeoutMs: 8000 }),
     fetchJson("/api/time-window-rules", { timeoutMs: 8000 }),
+    loadWeatherForecast(),
   ]);
   if (requestId !== summaryRequestId) return;
 
@@ -9614,6 +9708,32 @@ async function loadSummary() {
       }
       renderSummary(summary);
     });
+}
+
+async function loadNotificationMatrix() {
+  const notificationSummary = { combinedFlow: { metrics: {} }, collectorStatus: null };
+  stateCache.lastNotificationSummary = notificationSummary;
+  renderNotificationMatrix();
+
+  const [collectorResult, timeWindowResult, combinedResult] = await Promise.allSettled([
+    fetchJson("/api/collector/status", { timeoutMs: 6000 }),
+    fetchJson("/api/time-window-rules", { timeoutMs: 8000 }),
+    fetchJson("/api/energy-flow/combined", { timeoutMs: 30000 }),
+  ]);
+
+  if (collectorResult.status === "fulfilled") {
+    notificationSummary.collectorStatus = collectorResult.value;
+    stateCache.lastCollectorStatus = collectorResult.value;
+  }
+  if (timeWindowResult.status === "fulfilled") {
+    stateCache.lastTimeWindowRules = timeWindowResult.value;
+  }
+  if (combinedResult.status === "fulfilled") {
+    notificationSummary.combinedFlow = { ...combinedResult.value, __load_error: false };
+  }
+
+  stateCache.lastNotificationSummary = notificationSummary;
+  renderNotificationMatrix();
 }
 
 async function loadRawPanel(apis, stateMap, bodyId, metaId, updatedId) {
@@ -10133,21 +10253,6 @@ async function loadCurrentTab(fromAutoRefresh = false) {
   return loadTabWithGuard(currentTab, fromAutoRefresh);
 }
 
-function tabHasCachedData(tab) {
-  if (tab === "dashboard") return Boolean(stateCache.lastSummary);
-  if (tab === "notificationMatrix") return Boolean(stateCache.lastSummary);
-  if (tab === "rawData") {
-    if (rawDataSystem === "saj") return SAJ_RAW_APIS.some((api) => stateCache.lastSajRaw?.[api.key]?.payload !== undefined);
-    if (solplanetRawMode === "table") return stateCache.lastSolplanetKv?.phase && stateCache.lastSolplanetKv.phase !== "idle";
-    return SOLPLANET_RAW_APIS.some((api) => stateCache.lastSolplanetRaw?.[api.key]?.payload !== undefined);
-  }
-  if (tab === "solplanetControl") return Boolean(stateCache.lastSolplanetControl);
-  if (tab === "sampling") return Boolean(stateCache.lastSamplingPage || stateCache.lastSamplingStatus || stateCache.lastSamplingSeries);
-  if (tab === "database") return Boolean(stateCache.lastDatabaseTables || stateCache.lastDatabasePage);
-  if (tab === "workerLogs") return Boolean(stateCache.lastWorkerLogsPage);
-  if (tab === "workerFailureLog") return Boolean(stateCache.lastWorkerFailureLog);
-  return false;
-}
 
 async function loadTabWithGuard(tab, fromAutoRefresh = false) {
   if (!configReady) return false;
@@ -10157,11 +10262,7 @@ async function loadTabWithGuard(tab, fromAutoRefresh = false) {
   if (slot) slot.inFlight = true;
   try {
     if (tabKey === "notificationMatrix") {
-      if (!stateCache.lastSummary || fromAutoRefresh) {
-        await loadSummary();
-      } else {
-        renderNotificationMatrix();
-      }
+      await loadNotificationMatrix();
       return true;
     }
     if (tabKey === "rawData") {
@@ -10243,6 +10344,7 @@ function setActiveTab(tab, load = true) {
     resetNotificationMatrixCollapseState();
   }
   localStorage.setItem("activeTab", currentTab);
+  location.hash = currentTab;
 
   const dashboardView = document.getElementById("dashboardView");
   const notificationMatrixView = document.getElementById("notificationMatrixView");
@@ -10306,7 +10408,7 @@ function setActiveTab(tab, load = true) {
     });
   }
 
-  if (load && !tabHasCachedData(currentTab)) {
+  if (load) {
     void loadCurrentTab();
   }
 }

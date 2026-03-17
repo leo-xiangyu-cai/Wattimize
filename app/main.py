@@ -1080,9 +1080,33 @@ def _review_round_results(results: dict[str, dict[str, object]]) -> dict[str, ob
     return review
 
 
+_COMPACT_RESULT_KEY_METRIC_FIELDS: tuple[str, ...] = (
+    "pv_w",
+    "grid_w",
+    "battery_w",
+    "battery1_w",
+    "battery2_w",
+    "load_w",
+    "inverter_power_w",
+    "inverter1_w",
+    "inverter2_w",
+    "battery_soc_percent",
+    "battery1_soc_percent",
+    "battery2_soc_percent",
+    "battery_energy_kwh",
+    "inverter_status",
+    "inverter1_status",
+    "inverter2_status",
+    "tesla_charge_power_w",
+)
+
+
 def _compact_round_result_for_status(payload: dict[str, object]) -> dict[str, object]:
     flow = payload.get("flow")
     flow_map = flow if isinstance(flow, dict) else {}
+    metrics = flow_map.get("metrics")
+    metrics_map = metrics if isinstance(metrics, dict) else {}
+    key_metrics = {k: metrics_map[k] for k in _COMPACT_RESULT_KEY_METRIC_FIELDS if metrics_map.get(k) is not None}
     return {
         "stored_sample": bool(payload.get("stored_sample")),
         "reason": payload.get("reason"),
@@ -1094,6 +1118,7 @@ def _compact_round_result_for_status(payload: dict[str, object]) -> dict[str, ob
         "failed": [str(name) for name in payload.get("failed", []) if name],
         "skipped": [str(name) for name in payload.get("skipped", []) if name],
         "flow_updated_at": flow_map.get("updated_at") if isinstance(flow_map, dict) else None,
+        "key_metrics": key_metrics or None,
     }
 
 
@@ -1243,6 +1268,8 @@ class ConfigPayload(BaseModel):
     solplanet_dongle_host: str = Field(default="")
     saj_sample_interval_seconds: int = Field(default=CONST_SAJ_SAMPLE_INTERVAL_SECONDS)
     solplanet_sample_interval_seconds: int = Field(default=CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS)
+    weather_lat: float | None = Field(default=None)
+    weather_lon: float | None = Field(default=None)
 
 
 class SolplanetDiscoverPayload(BaseModel):
@@ -1429,6 +1456,21 @@ def _to_number(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return number
+
+
+def _to_bool(value: object) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in ("true", "1", "yes", "on"):
+        return True
+    if text in ("false", "0", "no", "off"):
+        return False
+    return None
 
 
 def _data_kind_from_source(source_value: object, fallback_kind: str = "real") -> str:
@@ -5443,7 +5485,8 @@ def _build_combined_flow_payload(
     if inverter1_w is not None and inverter2_w is not None:
         total_inverter_w = inverter1_w + inverter2_w
 
-    updated_at = datetime.now(UTC).isoformat()
+    _source_times = [t for t in [saj_flow.get("updated_at"), solplanet_flow.get("updated_at")] if t]
+    updated_at = min(_source_times) if _source_times else datetime.now(UTC).isoformat()
     metrics = {
         "pv_w": total_solar_w,
         "solar_primary_w": solar_primary_w,
@@ -6504,6 +6547,7 @@ async def _replace_runtime(new_settings: Settings) -> None:
         collector_status.setdefault("solplanet", {})["interval_seconds"] = None
         collector_status.setdefault("solplanet", {})["continuous"] = True
         _reset_solplanet_caches()
+        _weather_cache.clear()
         await old_solplanet.aclose()
 
 
@@ -7148,6 +7192,32 @@ async def _collect_for_system(system: str, *, round_number: int, round_id: str, 
                     "reason": "incomplete_flow",
                     "missing_metrics": missing_metrics,
                 }
+            entities_map = flow.get("entities") or {}
+            core_entity_keys = ("pv", "grid", "battery", "load")
+            entity_times: list[datetime] = []
+            for key in core_entity_keys:
+                entity = entities_map.get(key)
+                if isinstance(entity, dict):
+                    parsed = _safe_parse_utc(str(entity.get("last_updated") or ""))
+                    if parsed:
+                        entity_times.append(parsed)
+            if entity_times:
+                most_recent_entity_update = max(entity_times)
+                ha_entity_age_seconds = (datetime.now(UTC) - most_recent_entity_update).total_seconds()
+                ha_entity_stale_threshold = max(300.0, sample_interval_seconds * 10)
+                if ha_entity_age_seconds > ha_entity_stale_threshold:
+                    return {
+                        "attempted": [endpoint],
+                        "succeeded": [endpoint],
+                        "failed": [],
+                        "skipped": [],
+                        "stored_sample": False,
+                        "flow": None,
+                        "reason": "ha_entities_stale",
+                        "ha_entity_age_seconds": round(ha_entity_age_seconds),
+                        "ha_entity_stale_threshold": ha_entity_stale_threshold,
+                        "ha_entity_last_updated": most_recent_entity_update.isoformat(),
+                    }
             await _store_flow_sample("saj", flow, round_id=round_id)
             return {
                 "attempted": [endpoint],
@@ -7351,6 +7421,13 @@ def _worker_control_result_text(
         )
         if status == WORKER_LOG_STATUS_OK:
             return f"Collection stored new sample: {summary}"
+        if reason == "ha_entities_stale":
+            age_s = payload.get("ha_entity_age_seconds")
+            last_upd = str(payload.get("ha_entity_last_updated") or "-")
+            return (
+                f"Collection did not store new sample: {summary}, reason={reason}"
+                f"; entity_age={age_s}s, last_updated={last_upd}"
+            )
         return f"Collection did not store new sample: {summary}, reason={reason}"
     if service == NOTIFICATION_SUMMARY_SERVICE and str(payload.get("record_kind") or "") == "notification":
         window_mode = _worker_window_name(payload)
@@ -7689,6 +7766,8 @@ def _worker_control_result_text(
     if service == "combined_assembly":
         combined_result = payload.get("combined")
         combined_map = combined_result if isinstance(combined_result, dict) else {}
+        combined_key_metrics = combined_map.get("key_metrics")
+        combined_km = combined_key_metrics if isinstance(combined_key_metrics, dict) else {}
         logged_at_utc = str(payload.get("combined_logged_at_utc") or "").strip()
         next_due_at_utc = str(payload.get("next_worker_round_due_at_utc") or "").strip()
         schedule_suffix = ""
@@ -7703,10 +7782,10 @@ def _worker_control_result_text(
             return f"Combined assembly skipped: {combined_map.get('reason') or error_text or '-'}{schedule_suffix}"
         return (
             "Combined assembly stored: "
-            f"grid {_fmt_result_number(combined_map.get('grid_w'), 0, 'W')}, "
-            f"load {_fmt_result_number(combined_map.get('load_w'), 0, 'W')}, "
-            f"pv {_fmt_result_number(combined_map.get('pv_w'), 0, 'W')}, "
-            f"battery {_fmt_result_number(combined_map.get('battery_w'), 0, 'W')}"
+            f"grid {_fmt_result_number(combined_km.get('grid_w'), 0, 'W')}, "
+            f"load {_fmt_result_number(combined_km.get('load_w'), 0, 'W')}, "
+            f"pv {_fmt_result_number(combined_km.get('pv_w'), 0, 'W')}, "
+            f"battery {_fmt_result_number(combined_km.get('battery_w'), 0, 'W')}"
             f"{schedule_suffix}"
         )
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
@@ -7979,15 +8058,17 @@ async def _collector_loop() -> None:
         try:
             saj_result = round_results.get("saj") or {}
             solplanet_result = round_results.get("solplanet") or {}
-            saj_flow, saj_source_detail = await _resolve_combined_source_flow("saj", saj_result)
-            solplanet_flow, solplanet_source_detail = await _resolve_combined_source_flow("solplanet", solplanet_result)
+            saj_stored = bool(saj_result.get("stored_sample"))
+            solplanet_stored = bool(solplanet_result.get("stored_sample"))
+            saj_flow = saj_result.get("flow") if saj_stored else None
+            solplanet_flow = solplanet_result.get("flow") if solplanet_stored else None
             if saj_flow and solplanet_flow:
                 combined_flow = _build_combined_flow_payload(saj_flow, solplanet_flow, tesla_observation_result)
                 combined_source = combined_flow.get("source")
                 combined_source_map = combined_source if isinstance(combined_source, dict) else {}
                 combined_source_map["source_details"] = {
-                    "saj": saj_source_detail,
-                    "solplanet": solplanet_source_detail,
+                    "saj": {"origin": "current_round", "updated_at": saj_flow.get("updated_at")},
+                    "solplanet": {"origin": "current_round", "updated_at": solplanet_flow.get("updated_at")},
                 }
                 combined_flow["source"] = combined_source_map
                 missing_metrics = _missing_required_flow_metrics("combined", combined_flow)
@@ -8001,10 +8082,6 @@ async def _collector_loop() -> None:
                         "flow": None,
                         "reason": "incomplete_flow",
                         "missing_metrics": missing_metrics,
-                        "source_details": {
-                            "saj": saj_source_detail,
-                            "solplanet": solplanet_source_detail,
-                        },
                     }
                     await _persist_worker_control_log(
                         round_id=round_id,
@@ -8032,10 +8109,6 @@ async def _collector_loop() -> None:
                         "skipped": [],
                         "stored_sample": True,
                         "flow": combined_flow,
-                        "source_details": {
-                            "saj": saj_source_detail,
-                            "solplanet": solplanet_source_detail,
-                        },
                     }
                     await _persist_worker_control_log(
                         round_id=round_id,
@@ -8055,8 +8128,8 @@ async def _collector_loop() -> None:
                     )
             else:
                 combined_reason = (
-                    f"saj={saj_source_detail.get('origin')}:{saj_source_detail.get('reason')}; "
-                    f"solplanet={solplanet_source_detail.get('origin')}:{solplanet_source_detail.get('reason')}"
+                    f"saj={'ok' if saj_stored else str(saj_result.get('reason') or 'not_stored')}; "
+                    f"solplanet={'ok' if solplanet_stored else str(solplanet_result.get('reason') or 'not_stored')}"
                 )
                 round_results["combined"] = {
                     "attempted": ["combined_assembly"],
@@ -8065,10 +8138,10 @@ async def _collector_loop() -> None:
                     "skipped": ["combined_assembly"],
                     "stored_sample": False,
                     "flow": None,
-                    "reason": "source_flow_unavailable",
+                    "reason": "source_not_stored",
                     "source_details": {
-                        "saj": saj_source_detail,
-                        "solplanet": solplanet_source_detail,
+                        "saj": {"stored_sample": saj_stored, "reason": saj_result.get("reason")},
+                        "solplanet": {"stored_sample": solplanet_stored, "reason": solplanet_result.get("reason")},
                     },
                 }
                 await _persist_worker_control_log(
@@ -8291,6 +8364,158 @@ async def _restart_collector() -> dict[str, object]:
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Weather forecast (Open-Meteo, free, no API key required)
+# ---------------------------------------------------------------------------
+
+_weather_cache: dict[str, object] = {}
+_WEATHER_CACHE_TTL_SECONDS = 1800  # 30 minutes
+_OPEN_METEO_BASE = "https://api.open-meteo.com/v1/forecast"
+
+
+def _wmo_to_condition(code: int) -> tuple[str, str]:
+    """Return (short description, icon emoji) for a WMO weather code."""
+    if code == 0:
+        return "Clear sky", "☀️"
+    if code <= 2:
+        return "Partly cloudy", "⛅"
+    if code == 3:
+        return "Overcast", "☁️"
+    if code in (45, 48):
+        return "Foggy", "🌫️"
+    if 51 <= code <= 57:
+        return "Drizzle", "🌦️"
+    if 61 <= code <= 67:
+        return "Rain", "🌧️"
+    if 71 <= code <= 77:
+        return "Snow", "❄️"
+    if 80 <= code <= 82:
+        return "Rain showers", "🌦️"
+    if 95 <= code <= 99:
+        return "Thunderstorm", "⛈️"
+    return "Unknown", "❓"
+
+
+def _solar_rating(radiation_sum_mj: float | None) -> int:
+    """Convert daily shortwave radiation sum (MJ/m²) to 0-100 solar score."""
+    if radiation_sum_mj is None:
+        return 0
+    # ~28 MJ/m² is a very sunny Sydney summer day; cap at 100
+    return min(100, round(radiation_sum_mj / 28.0 * 100))
+
+
+@app.get("/api/weather/forecast")
+async def weather_forecast() -> dict[str, object]:
+    now_ts = monotonic()
+    cached_at = float(_weather_cache.get("cached_at") or 0)
+    if _weather_cache and (now_ts - cached_at) < _WEATHER_CACHE_TTL_SECONDS:
+        return dict(_weather_cache)
+
+    lat = settings.weather_lat
+    lon = settings.weather_lon
+    tz = settings.local_timezone or "UTC"
+
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": "temperature_2m,shortwave_radiation,weather_code",
+        "daily": "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset",
+        "past_days": 1,
+        "forecast_days": 3,
+        "timezone": tz,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(_OPEN_METEO_BASE, params=params)
+            resp.raise_for_status()
+            raw = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Weather API error: {exc}") from exc
+
+    # --- daily summary (yesterday / today / tomorrow) ---
+    daily = raw.get("daily") or {}
+    d_times = daily.get("time") or []
+    d_codes = daily.get("weather_code") or []
+    d_tmax = daily.get("temperature_2m_max") or []
+    d_tmin = daily.get("temperature_2m_min") or []
+    d_sunrise = daily.get("sunrise") or []
+    d_sunset = daily.get("sunset") or []
+
+    local_tz = ZoneInfo(tz) if tz != "UTC" else UTC
+    now_local = datetime.now(local_tz)
+    today_str = now_local.strftime("%Y-%m-%d")
+    yesterday_str = (now_local - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    days = []
+    for i, d_date in enumerate(d_times):
+        if d_date not in (yesterday_str, today_str) and d_date > today_str and len(days) >= 3:
+            break
+        wmo = int(d_codes[i]) if i < len(d_codes) else 0
+        condition, icon = _wmo_to_condition(wmo)
+        days.append({
+            "date": d_date,
+            "wmo_code": wmo,
+            "condition": condition,
+            "icon": icon,
+            "temp_max": d_tmax[i] if i < len(d_tmax) else None,
+            "temp_min": d_tmin[i] if i < len(d_tmin) else None,
+            "sunrise": d_sunrise[i] if i < len(d_sunrise) else None,
+            "sunset": d_sunset[i] if i < len(d_sunset) else None,
+            "is_past": d_date < today_str,
+        })
+        if len(days) >= 3:
+            break
+
+    # --- hourly strip: from yesterday 00:00 through next 36 hours ---
+    hourly = raw.get("hourly") or {}
+    h_times: list[str] = hourly.get("time") or []
+    h_temp: list[float | None] = hourly.get("temperature_2m") or []
+    h_solar: list[float | None] = hourly.get("shortwave_radiation") or []
+    h_codes: list[int] = hourly.get("weather_code") or []
+
+    current_hour_str = now_local.strftime("%Y-%m-%dT%H:00")
+    yesterday_start = f"{yesterday_str}T00:00"
+    # cap: current hour + 36 h
+    cap_hour = (now_local + timedelta(hours=36)).strftime("%Y-%m-%dT%H:00")
+
+    hours: list[dict[str, object]] = []
+    for i, ts in enumerate(h_times):
+        if ts < yesterday_start:
+            continue
+        if ts > cap_hour:
+            break
+        wmo = int(h_codes[i]) if i < len(h_codes) else 0
+        _, icon = _wmo_to_condition(wmo)
+        temp_val = h_temp[i] if i < len(h_temp) else None
+        solar_val = h_solar[i] if i < len(h_solar) else None
+        hour_label = ts[11:16] if len(ts) >= 16 else ts  # "HH:MM"
+        date_label = ts[:10] if len(ts) >= 10 else ""
+        hours.append({
+            "time": ts,
+            "date": date_label,
+            "hour_label": hour_label,
+            "icon": icon,
+            "wmo_code": wmo,
+            "temp": round(temp_val, 1) if temp_val is not None else None,
+            "solar_w_m2": round(solar_val) if solar_val is not None else None,
+            "is_past": ts < current_hour_str,
+            "is_now": ts == current_hour_str,
+        })
+
+    result: dict[str, object] = {
+        "latitude": lat,
+        "longitude": lon,
+        "timezone": tz,
+        "days": days,
+        "hours": hours,
+        "fetched_at": datetime.now(UTC).isoformat(),
+        "cached_at": now_ts,
+    }
+    _weather_cache.clear()
+    _weather_cache.update(result)
+    return result
 
 
 @app.get("/api/collector/status")

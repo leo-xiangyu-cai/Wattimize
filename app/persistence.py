@@ -522,6 +522,9 @@ def init_db(db_path: DatabaseTarget) -> None:
 
     engine = _create_engine_for_target(db_path)
     Base.metadata.create_all(engine)
+    if _is_sqlite(db_path):
+        with engine.begin() as conn:
+            conn.execute(text("PRAGMA journal_mode=WAL;"))
 
 
 def export_database_bytes(db_path: DatabaseTarget) -> bytes:
@@ -689,24 +692,6 @@ def import_database_bytes(db_path: DatabaseTarget, payload: bytes) -> dict[str, 
         "db_path": str(sqlite_path),
         "db_size_bytes": sqlite_path.stat().st_size,
     }
-
-    inspector = inspect(engine)
-    worker_columns = {column["name"] for column in inspector.get_columns("worker_api_logs")}
-    with engine.begin() as conn:
-        if _is_sqlite(db_path):
-            conn.execute(text("PRAGMA journal_mode=WAL;"))
-        if "request_token" not in worker_columns:
-            conn.execute(text("ALTER TABLE worker_api_logs ADD COLUMN request_token VARCHAR"))
-        if "round_id" not in worker_columns:
-            conn.execute(text("ALTER TABLE worker_api_logs ADD COLUMN round_id VARCHAR"))
-        if "status" not in worker_columns:
-            conn.execute(text("ALTER TABLE worker_api_logs ADD COLUMN status VARCHAR"))
-        if "payload_json" not in worker_columns:
-            conn.execute(text("ALTER TABLE worker_api_logs ADD COLUMN payload_json VARCHAR"))
-    notification_columns = {column["name"] for column in inspector.get_columns("notifications")}
-    with engine.begin() as conn:
-        if "title" not in notification_columns:
-            conn.execute(text("ALTER TABLE notifications ADD COLUMN title VARCHAR"))
 
 
 def migrate_worker_log_legacy_statuses(db_path: DatabaseTarget) -> int:

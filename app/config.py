@@ -35,6 +35,8 @@ CONST_SOLPLANET_REQUEST_TIMEOUT_SECONDS = 30.0
 ALLOWED_SAMPLE_INTERVAL_SECONDS: tuple[int, ...] = (5, 10, 30, 60, 300)
 CONST_SAJ_SAMPLE_INTERVAL_SECONDS = 5
 CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS = 60
+CONST_WEATHER_LAT = -33.8688  # Default: Sydney, NSW, Australia
+CONST_WEATHER_LON = 151.2093
 CONFIG_TABLE_NAME = "app_config"
 CONFIG_SINGLETON_KEY = "global"
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "energy_samples.sqlite3"
@@ -58,6 +60,18 @@ class Settings:
     solplanet_request_timeout_seconds: float
     saj_sample_interval_seconds: int
     solplanet_sample_interval_seconds: int
+    weather_lat: float
+    weather_lon: float
+
+
+def _parse_float(value: object, default: float) -> float:
+    try:
+        raw = str(value).strip()
+        if raw:
+            return float(raw)
+    except (TypeError, ValueError):
+        pass
+    return default
 
 
 def normalize_sample_interval_seconds(value: object, default: int) -> int:
@@ -160,6 +174,8 @@ def _env_values() -> dict[str, object]:
         "solplanet_battery_sn": os.getenv("SOLPLANET_BATTERY_SN", "").strip(),
         "saj_sample_interval_seconds": os.getenv("WATTIMIZE_SAMPLE_INTERVAL_SECONDS", "").strip(),
         "solplanet_sample_interval_seconds": os.getenv("WATTIMIZE_SOLPLANET_SAMPLE_INTERVAL_SECONDS", "").strip(),
+        "weather_lat": os.getenv("WATTIMIZE_WEATHER_LAT", "").strip(),
+        "weather_lon": os.getenv("WATTIMIZE_WEATHER_LON", "").strip(),
     }
 
 
@@ -187,6 +203,8 @@ def _build_settings(raw: dict[str, object]) -> Settings:
             raw.get("solplanet_sample_interval_seconds"),
             CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS,
         ),
+        weather_lat=_parse_float(raw.get("weather_lat"), CONST_WEATHER_LAT),
+        weather_lon=_parse_float(raw.get("weather_lon"), CONST_WEATHER_LON),
     )
 
 
@@ -213,6 +231,8 @@ def settings_to_dict(settings: Settings) -> dict[str, object]:
         "solplanet_battery_sn": settings.solplanet_battery_sn,
         "saj_sample_interval_seconds": settings.saj_sample_interval_seconds,
         "solplanet_sample_interval_seconds": settings.solplanet_sample_interval_seconds,
+        "weather_lat": settings.weather_lat,
+        "weather_lon": settings.weather_lon,
     }
 
 
