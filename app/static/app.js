@@ -676,9 +676,10 @@ const I18N = {
     flowMetaIdle: "Idle · Updated: -",
     flowMetaLoading: "Loading · Updated: -",
     flowMetaRefreshing: "Refreshing in background · {updated}",
-    flowMetaDoneOk: "Updated · {updated}",
+    flowMetaDoneOk: "{updated}",
     flowMetaDonePartial: "Partial ({count}/6) · {updated}",
     flowMetaDoneStale: "Cached ({count}/6) · {updated}",
+    flowMetaDoneStaleCombined: "Stale snapshot, collector may be stuck ({count}/6) · {updated}",
     flowMetaFailed: "Load failed · {updated}",
     solplanetRawTitle: "Solplanet Raw API Dump",
     solplanetRawModeCards: "API Cards",
@@ -1343,9 +1344,10 @@ const I18N = {
     flowMetaIdle: "空闲 · 更新时间: -",
     flowMetaLoading: "加载中 · 更新时间: -",
     flowMetaRefreshing: "后台刷新中 · {updated}",
-    flowMetaDoneOk: "已更新 · {updated}",
+    flowMetaDoneOk: "{updated}",
     flowMetaDonePartial: "部分数据（{count}/6）· {updated}",
     flowMetaDoneStale: "缓存数据（{count}/6）· {updated}",
+    flowMetaDoneStaleCombined: "快照未更新，collector 可能卡住（{count}/6）· {updated}",
     flowMetaFailed: "加载失败 · {updated}",
     solplanetRawTitle: "Solplanet 原始接口数据",
     solplanetRawModeCards: "接口卡片",
@@ -2278,6 +2280,13 @@ function formatUpdatedAt(isoText) {
   return `${t("updatedAt")}: ${formatDateTimeWithAgo(isoText)}`;
 }
 
+function isIsoOlderThanSeconds(isoText, seconds) {
+  if (!isoText) return false;
+  const dt = new Date(isoText);
+  if (Number.isNaN(dt.getTime())) return false;
+  return (Date.now() - dt.getTime()) / 1000 > seconds;
+}
+
 function formatNoWrapText(text) {
   return String(text || "").replaceAll(" ", "\u00A0");
 }
@@ -2298,6 +2307,85 @@ function formatWorkerLogLocalTimeFromEpoch(epochSeconds) {
   const dt = new Date(raw * 1000);
   if (Number.isNaN(dt.getTime())) return "-";
   return formatDateTimeWithAgo(dt.toISOString());
+}
+
+function looksLikeIsoDateTime(value) {
+  if (typeof value !== "string") return false;
+  const text = value.trim();
+  if (!text) return false;
+  if (!/^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}/.test(text)) return false;
+  const dt = new Date(text);
+  return !Number.isNaN(dt.getTime());
+}
+
+function unwrapDatabaseStringValue(value) {
+  if (typeof value !== "string") return value;
+  const text = value.trim();
+  if (text.length < 2) return value;
+  if ((text.startsWith("\"") && text.endsWith("\"")) || (text.startsWith("'") && text.endsWith("'"))) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text.slice(1, -1);
+    }
+  }
+  return value;
+}
+
+function looksLikeEpochTime(key, value) {
+  const keyText = String(key || "").toLowerCase();
+  if (!keyText.includes("epoch") && !keyText.includes("timestamp")) return false;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0;
+}
+
+function databaseTimeToggleInfo(key, rawValue) {
+  const normalizedValue = unwrapDatabaseStringValue(rawValue);
+  if (looksLikeIsoDateTime(normalizedValue)) {
+    const rawText = String(rawValue);
+    return { rawText, localText: new Date(String(normalizedValue)).toLocaleString() };
+  }
+  if (looksLikeEpochTime(key, normalizedValue)) {
+    const numeric = Number(normalizedValue);
+    const dt = new Date(numeric * 1000);
+    if (!Number.isNaN(dt.getTime())) {
+      return { rawText: String(rawValue), localText: dt.toLocaleString() };
+    }
+  }
+  return null;
+}
+
+function renderDatabaseValueHtml(key, rawValue, options = {}) {
+  const multilineObjects = Boolean(options.multilineObjects);
+  const timeInfo = databaseTimeToggleInfo(key, rawValue);
+  if (timeInfo) {
+    return `
+      <button
+        type="button"
+        class="database-time-toggle"
+        data-raw="${escapeHtml(timeInfo.rawText)}"
+        data-local="${escapeHtml(timeInfo.localText)}"
+        data-mode="raw"
+        title="Click to toggle local time"
+      >${escapeHtml(timeInfo.rawText)}</button>
+    `;
+  }
+  const text =
+    rawValue === null || rawValue === undefined || rawValue === ""
+      ? "-"
+      : typeof rawValue === "object"
+        ? JSON.stringify(rawValue, null, multilineObjects ? 2 : 0)
+        : String(rawValue);
+  return `<span class="database-cell-text" title="${escapeHtml(text)}">${escapeHtml(text)}</span>`;
+}
+
+function toggleDatabaseTimeButton(button) {
+  const mode = button.dataset.mode === "local" ? "local" : "raw";
+  const nextMode = mode === "raw" ? "local" : "raw";
+  button.dataset.mode = nextMode;
+  button.textContent = nextMode === "local"
+    ? (button.dataset.local || "-")
+    : (button.dataset.raw || "-");
 }
 
 function getWorkerLogsTableMode() {
@@ -2501,6 +2589,7 @@ function renderSystemLoadMeta(system) {
   const updatedId = flowId(system, "updatedAt");
   const spinnerId = flowId(system, "loadingSpinner");
   const updatedText = formatUpdatedAt(meta.updatedAt);
+  const combinedLate = system === "combined" && meta.phase === "done" && isIsoOlderThanSeconds(meta.updatedAt, 120);
   let lineText = t("flowMetaIdle");
   if (meta.refreshing) {
     lineText = t("flowMetaRefreshing", { updated: updatedText });
@@ -2509,11 +2598,14 @@ function renderSystemLoadMeta(system) {
   } else if (meta.phase === "failed") {
     lineText = t("flowMetaFailed", { updated: updatedText });
   } else if (meta.phase === "done") {
-    if (meta.quality === "stale") lineText = t("flowMetaDoneStale", { count: meta.count, updated: updatedText });
-    else if (meta.quality === "partial") lineText = t("flowMetaDonePartial", { count: meta.count, updated: updatedText });
+    if (meta.quality === "partial") lineText = t("flowMetaDonePartial", { count: meta.count, updated: updatedText });
     else lineText = t("flowMetaDoneOk", { updated: updatedText });
   }
   setText(updatedId, lineText);
+  const updatedEl = document.getElementById(updatedId);
+  if (updatedEl) {
+    updatedEl.classList.toggle("flow-meta-stale", combinedLate);
+  }
   const spinner = document.getElementById(spinnerId);
   if (spinner) {
     spinner.classList.toggle("is-hidden", meta.phase !== "loading" && !meta.refreshing);
@@ -3371,7 +3463,6 @@ function setFlowEdgeMarker(id, visible) {
 
 function getFlowQuality(flowPayload, matchedEntities) {
   if (flowPayload && flowPayload.__load_error) return "failed";
-  if (flowPayload && (flowPayload.stale || flowPayload?.meta?.stale)) return "stale";
   if (matchedEntities >= 6) return "ok";
   return "partial";
 }
@@ -6245,7 +6336,7 @@ function renderDatabaseRows(payload) {
   const body = document.getElementById("databaseBody");
   if (!head || !body) return;
   const columns = Array.isArray(payload?.columns) ? payload.columns : [];
-  head.innerHTML = `<tr>${columns.map((column) => `<th>${escapeHtml(column?.name || "-")}</th>`).join("")}</tr>`;
+  head.innerHTML = `<tr>${columns.map((column) => `<th>${escapeHtml(column?.name || "-")}</th>`).join("")}<th class="database-actions-head"></th></tr>`;
   body.innerHTML = "";
   const items = Array.isArray(payload?.items) ? payload.items : [];
   for (const item of items) {
@@ -6254,15 +6345,26 @@ function renderDatabaseRows(payload) {
     tr.innerHTML = columns.map((column) => {
       const key = String(column?.name || "");
       const rawValue = item?.[key];
-      const text =
-        rawValue === null || rawValue === undefined || rawValue === ""
-          ? "-"
-          : typeof rawValue === "object"
-            ? JSON.stringify(rawValue)
-            : String(rawValue);
-      return `<td class="database-cell" title="${escapeHtml(text)}"><span class="database-cell-text">${escapeHtml(text)}</span></td>`;
-    }).join("");
-    tr.addEventListener("click", () => {
+      return `<td class="database-cell">${renderDatabaseValueHtml(key, rawValue)}</td>`;
+    }).join("") + `
+      <td class="database-actions-cell">
+        <button
+          type="button"
+          class="database-detail-button"
+          data-role="open-database-detail"
+          aria-label="Open row details"
+          title="Open row details"
+        >🔍</button>
+      </td>
+    `;
+    tr.querySelectorAll(".database-time-toggle").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleDatabaseTimeButton(button);
+      });
+    });
+    tr.querySelector('[data-role="open-database-detail"]')?.addEventListener("click", (event) => {
+      event.stopPropagation();
       openDatabaseRowDetailModal(payload, item);
     });
     body.appendChild(tr);
@@ -6311,19 +6413,18 @@ function openDatabaseRowDetailModal(payload, item) {
     body.innerHTML = columns.map((column) => {
       const key = String(column?.name || "");
       const rawValue = item?.[key];
-      const text =
-        rawValue === null || rawValue === undefined || rawValue === ""
-          ? "-"
-          : typeof rawValue === "object"
-            ? JSON.stringify(rawValue, null, 2)
-            : String(rawValue);
       return `
         <tr>
           <th>${escapeHtml(key || "-")}</th>
-          <td><div class="worker-log-detail-value">${escapeHtml(text)}</div></td>
+          <td><div class="worker-log-detail-value">${renderDatabaseValueHtml(key, rawValue, { multilineObjects: true })}</div></td>
         </tr>
       `;
     }).join("");
+    body.querySelectorAll(".database-time-toggle").forEach((button) => {
+      button.addEventListener("click", () => {
+        toggleDatabaseTimeButton(button);
+      });
+    });
   }
   setDatabaseRowDetailModalVisible(true);
 }

@@ -2031,6 +2031,17 @@ def upsert_realtime_kv(db_path: DatabaseTarget, rows: list[tuple[str, str, str]]
             existing.source = source
 
 
+def delete_realtime_kv_by_prefix(db_path: DatabaseTarget, *, prefix: str) -> int:
+    if not _db_exists(db_path):
+        return 0
+    with _session_scope(db_path) as session:
+        result = session.execute(
+            text("DELETE FROM realtime_kv WHERE attribute LIKE :pattern"),
+            {"pattern": f"{prefix}%"},
+        )
+        return int(result.rowcount or 0)
+
+
 def get_realtime_kv_by_prefix(db_path: DatabaseTarget, *, prefix: str) -> dict[str, dict[str, object]]:
     if not _db_exists(db_path):
         return {}

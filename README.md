@@ -122,7 +122,7 @@ First-run configuration:
 - Other values are backend constants (entity ids, port/scheme/ssl/cache/timeout), except the two sampling interval fields.
 - Saved config is written into SQLite table `app_config`.
 - The database path can be overridden with `WATTIMIZE_DB_PATH`.
-- The checked-in `docker-compose.yml` now points `WATTIMIZE_DB_PATH` at `/app/data/recovery/energy_samples.recovered.sqlite3`.
+- The checked-in `docker-compose.yml` points `WATTIMIZE_DB_PATH` at `/app/data/energy_samples.sqlite3`.
 
 ## 6) Built-in SQLite Sampling
 

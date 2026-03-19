@@ -1076,16 +1076,49 @@ td {
   cursor: pointer;
 }
 
-.database-row {
-  cursor: pointer;
-}
-
 .database-cell {
   max-width: 240px;
 }
 
+.database-actions-head,
+.database-actions-cell {
+  width: 52px;
+  text-align: center;
+}
+
 .database-cell-text {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.database-detail-button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--card-bg);
+  color: inherit;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.database-detail-button:hover {
+  background: var(--surface-muted);
+}
+
+.database-time-toggle {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2320,6 +2353,11 @@ td {
   align-items: center;
   gap: 8px;
   min-height: 18px;
+}
+
+.flow-meta-stale {
+  color: #9b4d16;
+  font-weight: 700;
 }
 
 .loading-spinner {

@@ -50,6 +50,7 @@ from app.persistence import (
     compute_daily_usage,
     compute_usage_between,
     dismiss_notification_entry,
+    delete_realtime_kv_by_prefix,
     dispose_db_connections,
     expire_pending_worker_api_logs,
     export_database_bytes,
@@ -1782,6 +1783,19 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
             "kv_item_count": _to_number(flow.get("kv_item_count")),
             "item_count": len(display.get("order") or []),
         },
+    }
+
+
+def _empty_combined_flow() -> dict[str, object]:
+    metrics: dict[str, object] = {}
+    return {
+        "system": "combined",
+        "updated_at": None,
+        "metrics": metrics,
+        "display": _build_combined_display(metrics),
+        "source": {"type": "realtime_kv"},
+        "storage_backed": True,
+        "kv_item_count": 0,
     }
 
 
@@ -6749,12 +6763,93 @@ def _flatten_payload_to_kv(
     out_rows.append((attribute, json.dumps(value, ensure_ascii=False), source))
 
 
-async def _store_realtime_kv_snapshot(system: str, flow: dict[str, object], *, round_id: str | None = None) -> None:
-    rows: list[tuple[str, str, str]] = []
-    _flatten_payload_to_kv(system=system, path="", value=flow, out_rows=rows)
+def _append_kv_row(rows: list[tuple[str, str, str]], attribute: str, value: object, source: str = "collector") -> None:
+    rows.append((attribute, json.dumps(value, ensure_ascii=False), source))
 
+
+COMBINED_REALTIME_METRIC_KEYS: tuple[str, ...] = (
+    "pv_w",
+    "solar_primary_w",
+    "solar_secondary_w",
+    "grid_w",
+    "battery_w",
+    "battery1_w",
+    "battery2_w",
+    "load_w",
+    "battery1_soc_percent",
+    "battery2_soc_percent",
+    "battery2_energy_kwh",
+    "inverter1_w",
+    "inverter2_w",
+    "inverter1_status",
+    "inverter2_status",
+    "balance_w",
+    "pv_source",
+    "grid_source",
+    "battery_source",
+    "battery1_source",
+    "battery2_source",
+    "load_source",
+    "inverter1_power_source",
+    "inverter2_power_source",
+    "tesla_charge_power_w",
+    "tesla_charge_current_amps",
+    "tesla_configured_current_amps",
+    "tesla_battery_soc_percent",
+    "tesla_connection_state",
+    "tesla_charge_requested_enabled",
+    "tesla_cable_connected",
+)
+
+
+def _build_combined_realtime_kv_rows(flow: dict[str, object]) -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
     updated_at = str(flow.get("updated_at") or datetime.now(UTC).isoformat())
-    rows.append((f"{system}.update_time", json.dumps(updated_at, ensure_ascii=False), "collector"))
+    _append_kv_row(rows, "combined.update_time", updated_at)
+
+    metrics_obj = flow.get("metrics")
+    metrics = metrics_obj if isinstance(metrics_obj, dict) else {}
+    for key in COMBINED_REALTIME_METRIC_KEYS:
+        if key in metrics:
+            _append_kv_row(rows, f"combined.metrics.{key}", metrics.get(key))
+
+    raw_obj = flow.get("raw")
+    raw_map = raw_obj if isinstance(raw_obj, dict) else {}
+    tesla_obj = raw_map.get("tesla")
+    tesla = tesla_obj if isinstance(tesla_obj, dict) else {}
+    control_state_obj = tesla.get("control_state")
+    control_state = control_state_obj if isinstance(control_state_obj, dict) else {}
+    observation_obj = tesla.get("observation")
+    observation = observation_obj if isinstance(observation_obj, dict) else {}
+    charging_obj = observation.get("charging")
+    charging = charging_obj if isinstance(charging_obj, dict) else {}
+
+    for key in ("available", "control_mode", "charging_enabled", "charge_requested_enabled", "can_start", "can_stop"):
+        if key in control_state:
+            _append_kv_row(rows, f"combined.raw.tesla.control_state.{key}", control_state.get(key))
+
+    if "control_mode" in observation:
+        _append_kv_row(rows, "combined.raw.tesla.observation.control_mode", observation.get("control_mode"))
+    for key in ("enabled", "min_current_amps", "max_current_amps", "current_step_amps", "status_text", "voltage_v"):
+        if key in charging:
+            _append_kv_row(rows, f"combined.raw.tesla.observation.charging.{key}", charging.get(key))
+
+    return rows
+
+
+async def _store_realtime_kv_snapshot(system: str, flow: dict[str, object], *, round_id: str | None = None) -> None:
+    if system != "combined":
+        return
+    rows = _build_combined_realtime_kv_rows(flow)
+    await _run_db_call_with_retry(
+        delete_realtime_kv_by_prefix,
+        storage_db_path,
+        prefix="combined.",
+        operation_name="delete_realtime_kv_prefix",
+        trace_system=system,
+        trace_round_id=round_id,
+        extra_failure_context={"prefix": "combined."},
+    )
     await _run_db_call_with_retry(
         upsert_realtime_kv,
         storage_db_path,
@@ -6797,10 +6892,6 @@ def _rebuild_notes_from_kv(kv_map: dict[str, dict[str, object]], *, system: str)
 def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> dict[str, object]:
     updated_at_raw = _kv_value(kv_map, system=system, key="update_time")
     updated_at = str(updated_at_raw or datetime.now(UTC).isoformat())
-    sampled_at = _safe_parse_utc(updated_at)
-    age_seconds = (datetime.now(UTC) - sampled_at).total_seconds() if sampled_at else None
-    interval = _sample_interval_for_system(system)
-    stale_after_seconds = max(15.0, interval * 2.5)
 
     metrics = {
         "pv_w": _to_number(_kv_value(kv_map, system=system, key="metrics.pv_w")),
@@ -6875,51 +6966,9 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
     }
     if system == "combined":
         flow["display"] = _build_combined_display(metrics)
-        tesla_updated_at = _kv_value(kv_map, system=system, key="source.components.tesla_updated_at")
-        flow["source"] = {
-            "type": "realtime_kv",
-            "components": {
-                "saj_updated_at": _kv_value(kv_map, system=system, key="source.components.saj_updated_at"),
-                "solplanet_updated_at": _kv_value(kv_map, system=system, key="source.components.solplanet_updated_at"),
-                "tesla_updated_at": tesla_updated_at,
-            },
-        }
-        flow["entities"] = {
-            "tesla_charge_power": {
-                "entity_id": _kv_value(kv_map, system=system, key="entities.tesla_charge_power.entity_id"),
-                "domain": _kv_value(kv_map, system=system, key="entities.tesla_charge_power.domain"),
-                "brand_guess": _kv_value(kv_map, system=system, key="entities.tesla_charge_power.brand_guess"),
-                "state": _kv_value(kv_map, system=system, key="entities.tesla_charge_power.state"),
-                "unit": _kv_value(kv_map, system=system, key="entities.tesla_charge_power.unit"),
-                "friendly_name": _kv_value(kv_map, system=system, key="entities.tesla_charge_power.friendly_name"),
-                "last_updated": _kv_value(kv_map, system=system, key="entities.tesla_charge_power.last_updated"),
-            },
-            "tesla_charge_current": {
-                "entity_id": _kv_value(kv_map, system=system, key="entities.tesla_charge_current.entity_id"),
-                "domain": _kv_value(kv_map, system=system, key="entities.tesla_charge_current.domain"),
-                "brand_guess": _kv_value(kv_map, system=system, key="entities.tesla_charge_current.brand_guess"),
-                "state": _kv_value(kv_map, system=system, key="entities.tesla_charge_current.state"),
-                "unit": _kv_value(kv_map, system=system, key="entities.tesla_charge_current.unit"),
-                "friendly_name": _kv_value(kv_map, system=system, key="entities.tesla_charge_current.friendly_name"),
-                "last_updated": _kv_value(kv_map, system=system, key="entities.tesla_charge_current.last_updated"),
-            },
-            "tesla_battery_soc": {
-                "entity_id": _kv_value(kv_map, system=system, key="entities.tesla_battery_soc.entity_id"),
-                "domain": _kv_value(kv_map, system=system, key="entities.tesla_battery_soc.domain"),
-                "brand_guess": _kv_value(kv_map, system=system, key="entities.tesla_battery_soc.brand_guess"),
-                "state": _kv_value(kv_map, system=system, key="entities.tesla_battery_soc.state"),
-                "unit": _kv_value(kv_map, system=system, key="entities.tesla_battery_soc.unit"),
-                "friendly_name": _kv_value(kv_map, system=system, key="entities.tesla_battery_soc.friendly_name"),
-                "last_updated": _kv_value(kv_map, system=system, key="entities.tesla_battery_soc.last_updated"),
-            },
-        }
         flow["raw"] = {
             "tesla": {
-                "executed_at_utc": tesla_updated_at,
-                "evaluated_at_local": _kv_value(kv_map, system=system, key="raw.tesla.evaluated_at_local"),
-                "timezone": _kv_value(kv_map, system=system, key="raw.tesla.timezone"),
-                "window_active": _kv_value(kv_map, system=system, key="raw.tesla.window_active"),
-                "task_mode": _kv_value(kv_map, system=system, key="raw.tesla.task_mode"),
+                "executed_at_utc": updated_at,
                 "control_state": {
                     "available": _kv_value(kv_map, system=system, key="raw.tesla.control_state.available"),
                     "control_mode": _kv_value(kv_map, system=system, key="raw.tesla.control_state.control_mode"),
@@ -6929,64 +6978,10 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
                     ),
                     "can_start": _kv_value(kv_map, system=system, key="raw.tesla.control_state.can_start"),
                     "can_stop": _kv_value(kv_map, system=system, key="raw.tesla.control_state.can_stop"),
-                    "switch_entity": {
-                        "entity_id": _kv_value(kv_map, system=system, key="raw.tesla.control_state.switch_entity.entity_id"),
-                        "friendly_name": _kv_value(
-                            kv_map, system=system, key="raw.tesla.control_state.switch_entity.friendly_name"
-                        ),
-                        "state": _kv_value(kv_map, system=system, key="raw.tesla.control_state.switch_entity.state"),
-                        "unit": _kv_value(kv_map, system=system, key="raw.tesla.control_state.switch_entity.unit"),
-                        "last_updated": _kv_value(
-                            kv_map, system=system, key="raw.tesla.control_state.switch_entity.last_updated"
-                        ),
-                    },
-                    "start_button_entity": {
-                        "entity_id": _kv_value(
-                            kv_map, system=system, key="raw.tesla.control_state.start_button_entity.entity_id"
-                        ),
-                        "friendly_name": _kv_value(
-                            kv_map, system=system, key="raw.tesla.control_state.start_button_entity.friendly_name"
-                        ),
-                        "state": _kv_value(
-                            kv_map, system=system, key="raw.tesla.control_state.start_button_entity.state"
-                        ),
-                        "unit": _kv_value(kv_map, system=system, key="raw.tesla.control_state.start_button_entity.unit"),
-                        "last_updated": _kv_value(
-                            kv_map, system=system, key="raw.tesla.control_state.start_button_entity.last_updated"
-                        ),
-                    },
-                    "stop_button_entity": {
-                        "entity_id": _kv_value(
-                            kv_map, system=system, key="raw.tesla.control_state.stop_button_entity.entity_id"
-                        ),
-                        "friendly_name": _kv_value(
-                            kv_map, system=system, key="raw.tesla.control_state.stop_button_entity.friendly_name"
-                        ),
-                        "state": _kv_value(
-                            kv_map, system=system, key="raw.tesla.control_state.stop_button_entity.state"
-                        ),
-                        "unit": _kv_value(kv_map, system=system, key="raw.tesla.control_state.stop_button_entity.unit"),
-                        "last_updated": _kv_value(
-                            kv_map, system=system, key="raw.tesla.control_state.stop_button_entity.last_updated"
-                        ),
-                    },
                 },
                 "observation": {
                     "battery": {
                         "level_percent": metrics.get("tesla_battery_soc_percent"),
-                        "entity": {
-                            "entity_id": _kv_value(
-                                kv_map, system=system, key="raw.tesla.observation.battery.entity.entity_id"
-                            ),
-                            "friendly_name": _kv_value(
-                                kv_map, system=system, key="raw.tesla.observation.battery.entity.friendly_name"
-                            ),
-                            "state": _kv_value(kv_map, system=system, key="raw.tesla.observation.battery.entity.state"),
-                            "unit": _kv_value(kv_map, system=system, key="raw.tesla.observation.battery.entity.unit"),
-                            "last_updated": _kv_value(
-                                kv_map, system=system, key="raw.tesla.observation.battery.entity.last_updated"
-                            ),
-                        },
                     },
                     "charging": {
                         "enabled": _kv_value(kv_map, system=system, key="raw.tesla.observation.charging.enabled"),
@@ -7014,11 +7009,6 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
                 },
             }
         }
-    if age_seconds is not None:
-        flow["sample_age_seconds"] = round(age_seconds, 1)
-        if age_seconds > stale_after_seconds:
-            flow["stale"] = True
-            flow["stale_reason"] = "realtime_kv_too_old"
     return flow
 
 
@@ -7062,17 +7052,6 @@ def _build_storage_backed_flow(system: str, sample: dict[str, object]) -> dict[s
     }
     flow["storage_backed"] = True
 
-    sampled_at = _safe_parse_utc(sampled_at_utc)
-    now = datetime.now(UTC)
-    age_seconds = (now - sampled_at).total_seconds() if sampled_at else None
-    interval = _sample_interval_for_system(system)
-    stale_after_seconds = max(15.0, interval * 2.5)
-    if age_seconds is not None:
-        flow["sample_age_seconds"] = round(age_seconds, 1)
-        if age_seconds > stale_after_seconds:
-            flow["stale"] = True
-            flow["stale_reason"] = "storage_sample_too_old"
-
     return flow
 
 
@@ -7089,11 +7068,23 @@ async def _get_energy_flow_from_storage(system: str) -> dict[str, object]:
     return _build_storage_backed_flow(system, sample)
 
 
-async def _get_energy_flow_from_realtime_kv(system: str) -> dict[str, object]:
+async def _get_energy_flow_from_realtime_kv(
+    system: str,
+    *,
+    allow_storage_fallback: bool = True,
+) -> dict[str, object]:
     prefix = f"{system}."
     kv_map = await asyncio.to_thread(get_realtime_kv_by_prefix, storage_db_path, prefix=prefix)
     if not kv_map:
-        return await _get_energy_flow_from_storage(system)
+        if allow_storage_fallback:
+            return await _get_energy_flow_from_storage(system)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "No realtime_kv snapshot available yet",
+                "system": system,
+            },
+        )
     return _build_flow_from_kv(system, kv_map)
 
 
@@ -9157,16 +9148,19 @@ async def get_core_entities_by_system(system: str) -> dict[str, object]:
 @app.get("/api/energy-flow/{system}")
 async def get_energy_flow(system: str) -> dict[str, object]:
     normalized = _normalize_system_name(system)
-    try:
-        flow = await _get_energy_flow_from_realtime_kv(normalized)
-    except HTTPException:
-        flow = await _get_live_energy_flow(normalized)
+    if normalized == "combined":
+        try:
+            flow = await _get_energy_flow_from_realtime_kv(normalized, allow_storage_fallback=False)
+        except HTTPException as exc:
+            if exc.status_code == 503:
+                flow = _empty_combined_flow()
+            else:
+                raise
     else:
-        if bool(flow.get("stale")):
-            try:
-                flow = await _get_live_energy_flow(normalized)
-            except HTTPException:
-                flow = await _get_energy_flow_from_storage(normalized)
+        try:
+            flow = await _get_energy_flow_from_realtime_kv(normalized)
+        except HTTPException:
+            flow = await _get_live_energy_flow(normalized)
     if normalized == "combined":
         public_flow = _build_public_combined_flow(flow)
         tesla_pending_operations = await _build_tesla_pending_operation_state(public_flow)
