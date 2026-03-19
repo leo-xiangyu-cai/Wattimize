@@ -8406,12 +8406,35 @@ def _solar_rating(radiation_sum_mj: float | None) -> int:
     return min(100, round(radiation_sum_mj / 28.0 * 100))
 
 
+def _weather_apply_time_flags(cached: dict[str, object]) -> dict[str, object]:
+    """Recompute is_now/is_past on every request so the 'current hour' is always accurate."""
+    tz = str(cached.get("timezone") or "UTC")
+    local_tz = ZoneInfo(tz) if tz != "UTC" else UTC
+    now_local = datetime.now(local_tz)
+    today_str = now_local.strftime("%Y-%m-%d")
+    current_hour_str = now_local.strftime("%Y-%m-%dT%H:00")
+    cap_hour = (now_local + timedelta(hours=36)).strftime("%Y-%m-%dT%H:00")
+    yesterday_start = (now_local - timedelta(days=1)).strftime("%Y-%m-%dT00:00")
+
+    raw_hours: list[dict[str, object]] = list(cached.get("hours") or [])
+    hours = [
+        {**h, "is_past": str(h.get("time") or "") < current_hour_str, "is_now": str(h.get("time") or "") == current_hour_str}
+        for h in raw_hours
+        if yesterday_start <= str(h.get("time") or "") <= cap_hour
+    ]
+
+    raw_days: list[dict[str, object]] = list(cached.get("days") or [])
+    days = [{**d, "is_past": str(d.get("date") or "") < today_str} for d in raw_days]
+
+    return {**cached, "hours": hours, "days": days}
+
+
 @app.get("/api/weather/forecast")
 async def weather_forecast() -> dict[str, object]:
     now_ts = monotonic()
     cached_at = float(_weather_cache.get("cached_at") or 0)
     if _weather_cache and (now_ts - cached_at) < _WEATHER_CACHE_TTL_SECONDS:
-        return dict(_weather_cache)
+        return _weather_apply_time_flags(dict(_weather_cache))
 
     lat = settings.weather_lat
     lon = settings.weather_lon
@@ -8443,18 +8466,11 @@ async def weather_forecast() -> dict[str, object]:
     d_sunrise = daily.get("sunrise") or []
     d_sunset = daily.get("sunset") or []
 
-    local_tz = ZoneInfo(tz) if tz != "UTC" else UTC
-    now_local = datetime.now(local_tz)
-    today_str = now_local.strftime("%Y-%m-%d")
-    yesterday_str = (now_local - timedelta(days=1)).strftime("%Y-%m-%d")
-
-    days = []
+    days_raw = []
     for i, d_date in enumerate(d_times):
-        if d_date not in (yesterday_str, today_str) and d_date > today_str and len(days) >= 3:
-            break
         wmo = int(d_codes[i]) if i < len(d_codes) else 0
         condition, icon = _wmo_to_condition(wmo)
-        days.append({
+        days_raw.append({
             "date": d_date,
             "wmo_code": wmo,
             "condition": condition,
@@ -8463,36 +8479,24 @@ async def weather_forecast() -> dict[str, object]:
             "temp_min": d_tmin[i] if i < len(d_tmin) else None,
             "sunrise": d_sunrise[i] if i < len(d_sunrise) else None,
             "sunset": d_sunset[i] if i < len(d_sunset) else None,
-            "is_past": d_date < today_str,
         })
-        if len(days) >= 3:
-            break
 
-    # --- hourly strip: from yesterday 00:00 through next 36 hours ---
+    # --- hourly strip: raw data without time-relative flags ---
     hourly = raw.get("hourly") or {}
     h_times: list[str] = hourly.get("time") or []
     h_temp: list[float | None] = hourly.get("temperature_2m") or []
     h_solar: list[float | None] = hourly.get("shortwave_radiation") or []
     h_codes: list[int] = hourly.get("weather_code") or []
 
-    current_hour_str = now_local.strftime("%Y-%m-%dT%H:00")
-    yesterday_start = f"{yesterday_str}T00:00"
-    # cap: current hour + 36 h
-    cap_hour = (now_local + timedelta(hours=36)).strftime("%Y-%m-%dT%H:00")
-
-    hours: list[dict[str, object]] = []
+    hours_raw: list[dict[str, object]] = []
     for i, ts in enumerate(h_times):
-        if ts < yesterday_start:
-            continue
-        if ts > cap_hour:
-            break
         wmo = int(h_codes[i]) if i < len(h_codes) else 0
         _, icon = _wmo_to_condition(wmo)
         temp_val = h_temp[i] if i < len(h_temp) else None
         solar_val = h_solar[i] if i < len(h_solar) else None
         hour_label = ts[11:16] if len(ts) >= 16 else ts  # "HH:MM"
         date_label = ts[:10] if len(ts) >= 10 else ""
-        hours.append({
+        hours_raw.append({
             "time": ts,
             "date": date_label,
             "hour_label": hour_label,
@@ -8500,22 +8504,20 @@ async def weather_forecast() -> dict[str, object]:
             "wmo_code": wmo,
             "temp": round(temp_val, 1) if temp_val is not None else None,
             "solar_w_m2": round(solar_val) if solar_val is not None else None,
-            "is_past": ts < current_hour_str,
-            "is_now": ts == current_hour_str,
         })
 
-    result: dict[str, object] = {
+    cached_result: dict[str, object] = {
         "latitude": lat,
         "longitude": lon,
         "timezone": tz,
-        "days": days,
-        "hours": hours,
+        "days": days_raw,
+        "hours": hours_raw,
         "fetched_at": datetime.now(UTC).isoformat(),
         "cached_at": now_ts,
     }
     _weather_cache.clear()
-    _weather_cache.update(result)
-    return result
+    _weather_cache.update(cached_result)
+    return _weather_apply_time_flags(cached_result)
 
 
 @app.get("/api/collector/status")
