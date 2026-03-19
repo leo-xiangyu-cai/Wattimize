@@ -100,6 +100,8 @@ curl -s -X POST http://<wattimize-host>:18000/api/config/solplanet/discover -H '
 ```bash
 cd /Users/caixy/Leo/Wattimize
 docker compose up -d --build
+make dev-stop
+# or: make dev-down
 curl -s http://<wattimize-host>:18000/api/saj/entities/core | jq
 ```
 

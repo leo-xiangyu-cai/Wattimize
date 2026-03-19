@@ -487,10 +487,11 @@ def list_database_table_rows(
     columns = inspector.get_columns(normalized_table)
     quoted_table = _quote_sqlite_identifier(normalized_table)
     offset = (safe_page - 1) * safe_page_size
+    order_clause = " ORDER BY assembled_at_utc DESC" if normalized_table == "assembled_flow_snapshots" else ""
     with engine.connect() as conn:
         total = int(conn.execute(text(f"SELECT COUNT(*) FROM {quoted_table}")).scalar_one())
         rows = conn.execute(
-            text(f"SELECT * FROM {quoted_table} LIMIT :limit OFFSET :offset"),
+            text(f"SELECT * FROM {quoted_table}{order_clause} LIMIT :limit OFFSET :offset"),
             {"limit": safe_page_size, "offset": offset},
         ).mappings().all()
     items = [{key: _json_safe_db_value(value) for key, value in row.items()} for row in rows]

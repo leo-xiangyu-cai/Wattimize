@@ -1,4 +1,4 @@
-.PHONY: help docker docker-load inspect dev dev-logs dev-down deploy-nas
+.PHONY: help docker docker-load inspect dev dev-stop dev-logs dev-down deploy-nas
 
 IMAGE = wattimize
 TAG = amd64-latest
@@ -15,6 +15,7 @@ help:
 	@echo "  make docker-load Load the newest TAR from $(OUTPUT_DIR) into local Docker"
 	@echo "  make inspect     Inspect image architecture/os"
 	@echo "  make dev         Start local docker compose in hot-reload mode"
+	@echo "  make dev-stop    Stop local docker compose services without removing them"
 	@echo "  make dev-logs    Follow logs for wattimize-api"
 	@echo "  make dev-down    Stop local docker compose services"
 	@echo "  make deploy-nas  Build and deploy to TerraMaster NAS over SSH"
@@ -48,6 +49,9 @@ inspect:
 
 dev:
 	docker compose up -d --build
+
+dev-stop:
+	docker compose stop
 
 dev-logs:
 	docker logs -f wattimize-api

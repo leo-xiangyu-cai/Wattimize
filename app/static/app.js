@@ -1496,7 +1496,7 @@ const WORKER_LOG_RAW_COLUMNS = [
 ];
 const PAGE_SIZE = 80;
 const SAMPLING_PAGE_SIZE = 100;
-const DATABASE_PAGE_SIZE = 50;
+const DATABASE_PAGE_SIZE = 100;
 const WORKER_FAILURE_LOG_PAGE_SIZE = 100;
 const AUTO_REFRESH_KEY = "autoRefreshSeconds";
 const SOLPLANET_RAW_MODE_KEY = "solplanetRawMode";

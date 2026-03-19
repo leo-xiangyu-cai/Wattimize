@@ -159,10 +159,7 @@ OVERNIGHT_SHOULDER_WINDOW_END_HOUR = 11
 SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_HIGH_SOC_PERCENT = 50.0
 SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_LOW_SOC_PERCENT = 20.0
 POST_EXPORT_PEAK_WINDOW_TARIFF_P_PER_KWH = 53.0
-TESLA_GRID_SUPPORT_TARGET_MIN_W = 14_000.0
-TESLA_GRID_SUPPORT_TARGET_MAX_W = 15_000.0
-TESLA_GRID_SUPPORT_HARD_MAX_W = 15_500.0
-TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A: tuple[int, ...] = (10, 15)
+TESLA_GRID_SUPPORT_TARGET_MAX_W = 16_000.0
 TESLA_SOLAR_SURPLUS_START_SOLPLANET_SOC_PERCENT = 95.0
 TESLA_SOLAR_SURPLUS_STOP_SOLPLANET_SOC_PERCENT = 90.0
 TESLA_SOLAR_SURPLUS_MIN_EXPORT_W = 150.0
@@ -417,7 +414,7 @@ request_round_ctx: ContextVar[str | None] = ContextVar("request_round_ctx", defa
 request_round_started_at_ctx: ContextVar[str | None] = ContextVar("request_round_started_at_ctx", default=None)
 sample_interval_seconds = float(settings.saj_sample_interval_seconds)
 solplanet_sample_interval_seconds = float(settings.solplanet_sample_interval_seconds)
-COLLECTOR_ROUND_SLEEP_SECONDS = 30.0
+COLLECTOR_ROUND_SLEEP_SECONDS = 60.0
 ENDPOINT_BACKOFF_MAX_SKIP_ROUNDS = 8
 SOLPLANET_ENDPOINTS: tuple[str, ...] = (
     "getdevdata_device_2",
@@ -1136,7 +1133,7 @@ def _combined_assembly_log_payload(
         "round_number": round_number,
         "round_id": round_id,
         "combined_logged_at_utc": logged_at.isoformat(),
-        "next_worker_round_due_at_utc": (logged_at + timedelta(seconds=COLLECTOR_ROUND_SLEEP_SECONDS)).isoformat(),
+        "next_worker_round_due_at_utc": _next_collector_round_due_at(logged_at).isoformat(),
         "collector_round_sleep_seconds": COLLECTOR_ROUND_SLEEP_SECONDS,
         "saj": _compact_round_result_for_status(saj_result),
         "solplanet": _compact_round_result_for_status(solplanet_result),
@@ -3539,73 +3536,33 @@ def _tesla_grid_support_now_local() -> tuple[datetime, str]:
     return fallback, str(tz_name)
 
 
-def _choose_tesla_grid_support_target(base_grid_w: float) -> dict[str, object]:
-    candidates: list[dict[str, object]] = [
-        {"mode": "off", "charge_current_amps": 0, "tesla_power_w": 0.0, "predicted_grid_w": base_grid_w},
-        *[
-            {
-                "mode": "charge",
-                "charge_current_amps": amps,
-                "tesla_power_w": float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V,
-                "predicted_grid_w": base_grid_w + (float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V),
-            }
-            for amps in TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
-        ],
-    ]
-    charge_candidates = [candidate for candidate in candidates if str(candidate.get("mode")) == "charge"]
-    target_candidates = [
-        candidate
-        for candidate in charge_candidates
-        if float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_TARGET_MAX_W
-    ]
-    if target_candidates:
-        return max(target_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
-
-    hard_cap_candidates = [
-        candidate
-        for candidate in charge_candidates
-        if float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_HARD_MAX_W
-    ]
-    if hard_cap_candidates:
-        return max(hard_cap_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
-
-    return candidates[0]
-
-
-def _choose_tesla_grid_support_target_from_options(
+def _calculate_tesla_grid_support_target(
     base_grid_w: float,
-    charge_current_options_a: tuple[int, ...],
+    charge_state: dict[str, object],
 ) -> dict[str, object]:
-    candidates: list[dict[str, object]] = [
-        {"mode": "off", "charge_current_amps": 0, "tesla_power_w": 0.0, "predicted_grid_w": base_grid_w},
-        *[
-            {
-                "mode": "charge",
-                "charge_current_amps": int(amps),
-                "tesla_power_w": float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V,
-                "predicted_grid_w": base_grid_w + (float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V),
-            }
-            for amps in charge_current_options_a
-        ],
-    ]
-    charge_candidates = [candidate for candidate in candidates if str(candidate.get("mode")) == "charge"]
-    target_candidates = [
-        candidate
-        for candidate in charge_candidates
-        if float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_TARGET_MAX_W
-    ]
-    if target_candidates:
-        return max(target_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
-
-    hard_cap_candidates = [
-        candidate
-        for candidate in charge_candidates
-        if float(candidate["predicted_grid_w"]) <= TESLA_GRID_SUPPORT_HARD_MAX_W
-    ]
-    if hard_cap_candidates:
-        return max(hard_cap_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
-
-    return candidates[0]
+    off: dict[str, object] = {"mode": "off", "charge_current_amps": 0, "tesla_power_w": 0.0, "predicted_grid_w": base_grid_w}
+    min_a = _to_number(charge_state.get("min_current_amps"))
+    max_a = _to_number(charge_state.get("max_current_amps"))
+    step_a = _to_number(charge_state.get("current_step_amps"))
+    if min_a is None or max_a is None or float(max_a) <= 0:
+        return off
+    min_i = max(int(round(float(min_a))), 1)
+    max_i = int(round(float(max_a)))
+    step_i = max(int(round(float(step_a or 1.0))), 1)
+    raw_amps = (TESLA_GRID_SUPPORT_TARGET_MAX_W - base_grid_w) / TESLA_ASSUMED_CHARGING_VOLTAGE_V
+    if raw_amps < float(min_i):
+        return off
+    snapped = (int(raw_amps) // step_i) * step_i
+    clamped = max(min_i, min(max_i, snapped))
+    if clamped < min_i:
+        return off
+    tesla_power_w = float(clamped) * TESLA_ASSUMED_CHARGING_VOLTAGE_V
+    return {
+        "mode": "charge",
+        "charge_current_amps": clamped,
+        "tesla_power_w": tesla_power_w,
+        "predicted_grid_w": base_grid_w + tesla_power_w,
+    }
 
 
 def _choose_tesla_solar_surplus_target_from_options(
@@ -3658,26 +3615,6 @@ def _tesla_observation_charge_state(observation: dict[str, object]) -> dict[str,
     }
 
 
-def _tesla_available_charge_current_options(charge_state: dict[str, object]) -> tuple[int, ...]:
-    min_a = _to_number(charge_state.get("min_current_amps"))
-    max_a = _to_number(charge_state.get("max_current_amps"))
-    step_a = _to_number(charge_state.get("current_step_amps"))
-    if min_a is None or max_a is None:
-        return TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
-    min_i = int(round(min_a))
-    max_i = int(round(max_a))
-    if min_i <= 0 or max_i < min_i:
-        return TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
-    step_i = int(round(step_a or 1))
-    step_i = max(step_i, 1)
-    supported_values = tuple(range(min_i, max_i + 1, step_i))
-    if not supported_values:
-        return TESLA_GRID_SUPPORT_CURRENT_OPTIONS_A
-    # Use the vehicle-reported full current range so the controller can ramp
-    # down below 10A instead of falling back to "off" as soon as 10A exceeds
-    # the grid cap.
-    return supported_values
-
 
 async def _run_midday_window_check(
     combined_flow: dict[str, object] | None,
@@ -3703,9 +3640,7 @@ async def _run_midday_window_check(
         "after_free_peak_window_active": window_mode == "after_free_peak",
         "export_window_active": window_mode == "export_window",
         "post_export_peak_window_active": window_mode == "post_export_peak",
-        "target_grid_min_w": TESLA_GRID_SUPPORT_TARGET_MIN_W,
         "target_grid_max_w": TESLA_GRID_SUPPORT_TARGET_MAX_W,
-        "hard_grid_max_w": TESLA_GRID_SUPPORT_HARD_MAX_W,
         "assumed_voltage_v": TESLA_ASSUMED_CHARGING_VOLTAGE_V,
     }
     status = "ok"
@@ -3763,8 +3698,6 @@ async def _run_midday_window_check(
         result["current_grid_import_w"] = round(current_grid_import_w, 1)
 
         tesla_charge_power_w = max(float(charge_state.get("power_w") or 0.0), 0.0)
-        available_current_options = _tesla_available_charge_current_options(charge_state)
-        result["available_current_options_amps"] = list(available_current_options)
         current_configured_amps = _to_number(charge_state.get("configured_current_amps"))
         current_actual_amps = _to_number(charge_state.get("current_amps"))
         connection_state = str(charge_state.get("connection_state") or "").strip().lower()
@@ -4227,13 +4160,12 @@ async def _run_midday_window_check(
 
         base_grid_w = max(float(result["current_grid_import_w"]) - tesla_charge_power_w, 0.0)
         result["base_grid_without_tesla_w"] = round(base_grid_w, 1)
-        desired = _choose_tesla_grid_support_target_from_options(base_grid_w, available_current_options)
+        desired = _calculate_tesla_grid_support_target(base_grid_w, charge_state)
         result["decision"] = desired
-        desired_predicted_grid_w = float(desired.get("predicted_grid_w") or 0.0)
         result["decision_reason"] = (
-            "selected_max_safe_candidate_under_target_grid_cap"
-            if desired_predicted_grid_w <= TESLA_GRID_SUPPORT_TARGET_MAX_W
-            else "selected_max_safe_candidate_within_hard_grid_cap_buffer"
+            "calculated_amps_within_grid_cap"
+            if desired["mode"] == "charge"
+            else "calculated_amps_below_vehicle_minimum"
         )
 
         desired_amps = int(desired["charge_current_amps"])
@@ -4283,13 +4215,12 @@ async def _run_midday_window_check(
                     current_mismatch_restart_allowed = current_mismatch_restart_needed
 
         result["candidates"] = [
+            {"mode": "off", "charge_current_amps": 0, "predicted_grid_w": round(base_grid_w, 1)},
             {
-                "mode": "off" if amps == 0 else "charge",
-                "charge_current_amps": amps,
-                "predicted_grid_w": round(base_grid_w + (float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V), 1),
-                "safe": (base_grid_w + (float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V)) <= TESLA_GRID_SUPPORT_HARD_MAX_W,
-            }
-            for amps in (0, *available_current_options)
+                "mode": desired["mode"],
+                "charge_current_amps": desired_amps,
+                "predicted_grid_w": round(base_grid_w + (float(desired_amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V), 1),
+            },
         ]
 
         if (
@@ -7317,7 +7248,15 @@ def _worker_collection_log_outcome(round_result: dict[str, object]) -> tuple[str
 
 
 def _collector_sleep_seconds(now_monotonic: float) -> float:
-    return COLLECTOR_ROUND_SLEEP_SECONDS
+    del now_monotonic
+    now = datetime.now(UTC)
+    return max((_next_collector_round_due_at(now) - now).total_seconds(), 0.0)
+
+
+def _next_collector_round_due_at(now: datetime | None = None) -> datetime:
+    current = now.astimezone(UTC) if now is not None else datetime.now(UTC)
+    current = current.replace(microsecond=0)
+    return (current + timedelta(minutes=1)).replace(second=0)
 
 
 async def _await_round_request_log_settlement(
@@ -8640,7 +8579,7 @@ async def database_tables() -> dict[str, object]:
 async def database_table_rows(
     table: str = Query(description="SQLite table name"),
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=200),
+    page_size: int = Query(default=100, ge=1, le=200),
 ) -> dict[str, object]:
     try:
         payload = await asyncio.to_thread(
