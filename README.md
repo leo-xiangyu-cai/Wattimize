@@ -99,19 +99,39 @@ curl -s -X POST http://<wattimize-host>:18000/api/config/solplanet/discover -H '
 
 ```bash
 cd /Users/caixy/Leo/Wattimize
+make status
 docker compose up -d --build
 make dev-stop
 # or: make dev-down
 curl -s http://<wattimize-host>:18000/api/saj/entities/core | jq
 ```
 
+Use `make status` any time to check whether local or NAS is currently running and whether each side has a SQLite database file.
+
+`make dev` now switches execution to local: if local is not already running, it stops the NAS container, pulls the NAS SQLite database into `./data/`, and then starts local `docker compose`. If local is already running, it treats the command as a local code refresh and skips database sync.
+
+To stop only the NAS container without starting local services:
+
+```bash
+make nas-stop
+```
+
 Build and deploy to TerraMaster NAS over SSH:
 
 ```bash
-make deploy-nas
+make nas-deploy
 ```
 
-Supported overrides for `make deploy-nas`:
+`make nas-deploy` now stops local `docker compose` services first. If the NAS container is not already running, it pushes the local SQLite database to the NAS before deploying. If the NAS container is already running, it treats the command as a code-only refresh and skips database sync.
+
+For the first sync from local to NAS while the NAS is still running, use:
+
+```bash
+make nas-stop
+make nas-deploy
+```
+
+Supported overrides for `make nas-deploy`:
 - `NAS_HOST`, `NAS_PORT`, `NAS_USER`, `SSH_KEY`
 - `CONTAINER_NAME`, `IMAGE_NAME`, `IMAGE_REPOSITORY`
 - `NAS_DATA_DIR`, `HOST_PORT`, `CONTAINER_PORT`, `TZ_VALUE`

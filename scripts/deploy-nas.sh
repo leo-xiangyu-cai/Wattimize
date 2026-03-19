@@ -1,20 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NAS_HOST="${NAS_HOST:-tnas.local}"
-NAS_PORT="${NAS_PORT:-9222}"
-NAS_USER="${NAS_USER:-leo-cai}"
-SSH_KEY="${SSH_KEY:-$HOME/.ssh/tnas_ed25519}"
-REMOTE_TAR="${REMOTE_TAR:-/tmp/wattimize.tar}"
-CONTAINER_NAME="${CONTAINER_NAME:-wattimize}"
-IMAGE_NAME="${IMAGE_NAME:-wattimize:amd64-latest}"
-IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-wattimize}"
-NAS_DATA_DIR="${NAS_DATA_DIR:-/Volume1/public/wattimize-data}"
-HOST_PORT="${HOST_PORT:-18000}"
-CONTAINER_PORT="${CONTAINER_PORT:-8000}"
-TZ_VALUE="${TZ_VALUE:-Asia/Shanghai}"
-DOCKER_BIN="${DOCKER_BIN:-/Volume1/@apps/DockerEngine/dockerd/bin/docker}"
-RETENTION_DAYS="${RETENTION_DAYS:-7}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/nas-common.sh"
+
+HEALTHCHECK_URL="${HEALTHCHECK_URL:-http://${NAS_HOST}:${HOST_PORT}/api/health}"
+HEALTHCHECK_ATTEMPTS="${HEALTHCHECK_ATTEMPTS:-30}"
+HEALTHCHECK_SLEEP_SECONDS="${HEALTHCHECK_SLEEP_SECONDS:-2}"
+
+cleanup_remote_temp() {
+  remote_exec "
+    set -euo pipefail
+    rm -f '${REMOTE_TAR}'
+    find '${NAS_DATA_DIR}' -maxdepth 1 -mindepth 1 -type d -name '.tmp-*' -exec rm -rf {} + 2>/dev/null || true
+  " >/dev/null 2>&1 || true
+}
+
+trap cleanup_remote_temp EXIT
+
+echo "Stopping local docker compose services before deployment..."
+stop_local_compose
+
+if remote_container_running; then
+  echo "NAS container is already running; skipping database push and treating this as a code-only refresh."
+else
+  bash "${SCRIPT_DIR}/push-db-to-nas.sh"
+fi
 
 echo "Building image TAR..."
 make docker
@@ -32,7 +43,7 @@ echo "Uploading ${LATEST_TAR} to ${SSH_TARGET}:${REMOTE_TAR}..."
 cat "${LATEST_TAR}" | ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "cat > '${REMOTE_TAR}'"
 
 echo "Loading image and restarting container on NAS..."
-ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "
+remote_exec "
   set -euo pipefail
   if [ ! -x '${DOCKER_BIN}' ]; then
     echo 'docker command not found at configured path: ${DOCKER_BIN}' >&2
@@ -63,6 +74,24 @@ ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "
 EOF
   '${DOCKER_BIN}' ps --filter name='${CONTAINER_NAME}'
 "
+
+echo "Waiting for health check: ${HEALTHCHECK_URL}"
+health_ok=0
+for attempt in $(seq 1 "${HEALTHCHECK_ATTEMPTS}"); do
+  if curl --fail --silent --show-error --max-time 5 "${HEALTHCHECK_URL}" >/dev/null; then
+    health_ok=1
+    break
+  fi
+  sleep "${HEALTHCHECK_SLEEP_SECONDS}"
+done
+
+if [[ "${health_ok}" -ne 1 ]]; then
+  echo "Health check failed: ${HEALTHCHECK_URL}" >&2
+  exit 1
+fi
+
+echo "Health check passed. Cleaning remote temporary files..."
+cleanup_remote_temp
 
 cutoff_file_args=("-mtime" "+${RETENTION_DAYS}")
 find dist/docker-images -type f \( -name 'wattimize_amd64_*.tar' -o -name 'wattimize_amd64_*.tar.sha256' \) "${cutoff_file_args[@]}" -delete

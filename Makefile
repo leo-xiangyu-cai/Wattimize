@@ -1,4 +1,4 @@
-.PHONY: help docker docker-load inspect dev dev-stop dev-logs dev-down deploy-nas
+.PHONY: help docker docker-load inspect status dev dev-stop dev-logs dev-down nas-stop nas-deploy
 
 IMAGE = wattimize
 TAG = amd64-latest
@@ -14,11 +14,13 @@ help:
 	@echo "  make docker      Build linux/amd64 image and export a timestamped TAR to $(OUTPUT_DIR)"
 	@echo "  make docker-load Load the newest TAR from $(OUTPUT_DIR) into local Docker"
 	@echo "  make inspect     Inspect image architecture/os"
-	@echo "  make dev         Start local docker compose in hot-reload mode"
+	@echo "  make status      Show local and NAS runtime/database status"
+	@echo "  make dev         Switch to local dev mode and sync DB from NAS when needed"
 	@echo "  make dev-stop    Stop local docker compose services without removing them"
 	@echo "  make dev-logs    Follow logs for wattimize-api"
 	@echo "  make dev-down    Stop local docker compose services"
-	@echo "  make deploy-nas  Build and deploy to TerraMaster NAS over SSH"
+	@echo "  make nas-stop    Stop the NAS container without touching local services"
+	@echo "  make nas-deploy  Build and deploy to TerraMaster NAS over SSH"
 
 docker:
 	@mkdir -p $(OUTPUT_DIR)
@@ -47,8 +49,11 @@ docker-load:
 inspect:
 	docker image inspect $(IMAGE):$(TAG) --format '{{.Architecture}}/{{.Os}}'
 
+status:
+	bash ./scripts/status.sh
+
 dev:
-	docker compose up -d --build
+	bash ./scripts/dev-local.sh
 
 dev-stop:
 	docker compose stop
@@ -59,5 +64,8 @@ dev-logs:
 dev-down:
 	docker compose down
 
-deploy-nas:
-	./scripts/deploy-nas.sh
+nas-stop:
+	bash ./scripts/stop-nas.sh
+
+nas-deploy:
+	bash ./scripts/deploy-nas.sh
