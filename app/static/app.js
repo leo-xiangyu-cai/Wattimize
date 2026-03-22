@@ -3178,7 +3178,7 @@ function buildCombinedDiagramSpec() {
     layout: "explicit",
     coordinateSystem: "bottom-left",
     fixedViewport: true,
-    showViewportFrame: true,
+    showViewportFrame: false,
     viewport: COMBINED_DIAGRAM_VIEWPORT,
     nodes: [
       {
@@ -9650,6 +9650,7 @@ function renderWeatherHourly(hours, days) {
   const container = document.getElementById("weatherHourlyScroll");
   if (!container) return;
   container.innerHTML = "";
+  container.scrollLeft = 0;
 
   // Build day-label map for separator rendering
   const dayLabels = {};
@@ -9705,11 +9706,14 @@ function renderWeatherHourly(hours, days) {
     if (isNow) nowChip = chip;
   });
 
-  // Scroll so "now" chip is visible near the left edge
+  // Keep the current-hour chip centered after each render/refresh.
   if (nowChip) {
     requestAnimationFrame(() => {
-      const offset = nowChip.offsetLeft - 16;
-      container.scrollTo({ left: offset, behavior: "smooth" });
+      nowChip.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "center",
+      });
     });
   }
 }
