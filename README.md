@@ -108,7 +108,7 @@ curl -s http://<wattimize-host>:18000/api/saj/entities/core | jq
 
 Use `make status` any time to check whether local or NAS is currently running and whether each side has a SQLite database file.
 
-`make dev` now switches execution to local: if local is not already running, it stops the NAS container, pulls the NAS SQLite database into `./data/`, and then starts local `docker compose`. If local is already running, it treats the command as a local code refresh and skips database sync.
+`make dev` now switches execution to local: if local is not already running, it stops the NAS container, pulls the NAS SQLite database into `./data/`, and then starts local `docker compose`. If local is already running, it treats the command as a local code refresh and skips database sync. After the containers start, the script waits for the local collector status endpoint to become healthy before returning.
 
 To stop only the NAS container without starting local services:
 
