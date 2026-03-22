@@ -7,3 +7,6 @@ __pycache__/
 data/
 *.tar
 dist/
+.idea/
+*.sqlite
+*.sqlite3

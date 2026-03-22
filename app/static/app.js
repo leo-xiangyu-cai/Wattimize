@@ -126,12 +126,25 @@ const I18N = {
     dashboardTab: "Dashboard",
     notificationMatrixTab: "Time Window",
     notificationMatrixTitle: "Time Window",
-    notificationMatrixIntro: "Each panel shows the active rules configured for that time window, including notifications and automated operations. Checkboxes are currently fixed on because the system behavior is already enabled.",
+    notificationMatrixIntro: "Each panel groups rules by Operation and Notification so you can quickly distinguish automated actions from alerts. Checkboxes are currently fixed on because the system behavior is already enabled.",
     notificationMatrixNoNotifications: "No rule is configured for this window at the moment.",
     notificationMatrixAlwaysNote: "This watch is always active and is shown separately from the 24-hour time-window schedule.",
     notificationMatrixCurrentWindowBadge: "Current Window",
     notificationMatrixExpandWindow: "Expand window",
     notificationMatrixCollapseWindow: "Collapse window",
+    notificationMatrixOperationConditionsTitle: "Conditions",
+    notificationMatrixOperationConditionsMatched: "{matched}/{total} matched",
+    notificationMatrixConditionMatched: "Matched",
+    notificationMatrixConditionNotMatched: "Not matched",
+    notificationMatrixConditionCurrentWindow: "Window active",
+    notificationMatrixConditionTeslaConnected: "Tesla connected",
+    notificationMatrixConditionTeslaReady: "Tesla ready",
+    notificationMatrixConditionTeslaGridCap: "Predicted grid within 15.0kW cap",
+    notificationMatrixConditionTeslaSocStart: "Solplanet SOC >= start threshold",
+    notificationMatrixConditionTeslaSocKeep: "Solplanet SOC >= keep threshold",
+    notificationMatrixConditionTeslaOvernightReserve: "Solplanet SOC > overnight reserve",
+    notificationMatrixConditionSajProfileApplied: "Target SAJ profile applied",
+    notificationMatrixConditionSajSyncCleared: "Remote sync cleared",
     notificationMatrixProgressWatching: "Watching",
     notificationMatrixProgressConditionMet: "Condition met now",
     notificationMatrixProgressNotified: "Already notified",
@@ -162,7 +175,7 @@ const I18N = {
     notificationMatrixWindowPostExportPeakTitle: "Post-Export Peak",
     notificationMatrixWindowPostExportPeakSummary: "20:00-23:00. Worker tries to avoid expensive import and raises early warnings when that risk appears.",
     notificationMatrixWindowOvernightTitle: "Overnight Shoulder",
-    notificationMatrixWindowOvernightSummary: "23:00-11:00 next day. Worker observes SAJ battery SOC and sends threshold reminders once per overnight window.",
+    notificationMatrixWindowOvernightSummary: "23:00-11:00 next day. Worker watches SAJ battery reminders and starts Tesla charging when Solplanet stays above its overnight reserve.",
     notificationMatrixWindowAlwaysTitle: "Always-On Battery Watch",
     notificationMatrixWindowAlwaysSummary: "Not part of the 24-hour window split. Worker sends a one-time notification when either battery newly reaches 100% SOC.",
     notificationMatrixRuleTypeNotification: "Notification",
@@ -177,12 +190,15 @@ const I18N = {
     notificationRuleTeslaAfterFreeShoulderTrigger: "Start when Solplanet SOC reaches 95%, stop when it falls below 90%, otherwise hold the current state.",
     notificationRuleTeslaAfterFreePeakTitle: "Tesla charging keeps following Solplanet SOC before export pricing",
     notificationRuleTeslaAfterFreePeakTrigger: "Start when Solplanet SOC reaches 95%, stop when it falls below 90%, otherwise hold the current state.",
+    notificationRuleTeslaOvernightShoulderTitle: "Tesla charging follows Solplanet reserve overnight",
+    notificationRuleTeslaOvernightShoulderTrigger: "During 23:00-11:00, start Tesla charging when Solplanet SOC stays above 10%; stop when it drops to 10% or below.",
     notificationRuleTeslaExportWindowTitle: "Tesla charging uses solar surplus during ZeroHero Window",
     notificationRuleTeslaExportWindowTrigger: "Use solar surplus and Solplanet SOC thresholds to decide charging state and current while avoiding unnecessary grid import.",
     notificationRuleTeslaPostExportPeakTitle: "Tesla charging is forced off in expensive period",
     notificationRuleTeslaPostExportPeakTrigger: "During 20:00-23:00 the worker stops Tesla charging to avoid expensive grid import.",
     notificationMatrixTeslaTriggerGridCap: "Target <= 15.0kW grid",
     notificationMatrixTeslaTriggerSolplanetSoc: "Solplanet {soc} (start >= 95%, keep >= 90%)",
+    notificationMatrixTeslaTriggerSolplanetReserve: "Solplanet {soc} (keep > 10%)",
     notificationMatrixTeslaTriggerExport: "Export {value} / surplus solar",
     notificationMatrixTeslaTriggerStop: "Target charging off",
     notificationMatrixTeslaCurrent: "Tesla {actual} / set {configured}",
@@ -794,12 +810,25 @@ const I18N = {
     dashboardTab: "总览",
     notificationMatrixTab: "Time Window",
     notificationMatrixTitle: "Time Window",
-    notificationMatrixIntro: "每个面板展示该时间窗口下 worker 已配置的全部规则，包括通知和自动 operation。当前复选框固定为开启，因为系统行为已经默认启用。",
+    notificationMatrixIntro: "每个面板会按 Operation 和 Notification 分组展示规则，这样你可以更快区分自动执行的动作和提醒通知。当前复选框固定为开启，因为系统行为已经默认启用。",
     notificationMatrixNoNotifications: "这个时间窗口当前没有配置规则。",
     notificationMatrixAlwaysNote: "这个监控始终开启，单独展示，不属于 24 小时时间窗口切分的一部分。",
     notificationMatrixCurrentWindowBadge: "当前窗口",
     notificationMatrixExpandWindow: "展开窗口",
     notificationMatrixCollapseWindow: "折叠窗口",
+    notificationMatrixOperationConditionsTitle: "条件",
+    notificationMatrixOperationConditionsMatched: "已匹配 {matched}/{total}",
+    notificationMatrixConditionMatched: "已匹配",
+    notificationMatrixConditionNotMatched: "未匹配",
+    notificationMatrixConditionCurrentWindow: "当前在这个时间窗口内",
+    notificationMatrixConditionTeslaConnected: "Tesla 已连接",
+    notificationMatrixConditionTeslaReady: "Tesla 状态可控制",
+    notificationMatrixConditionTeslaGridCap: "预测电网功率不超过 15.0kW 上限",
+    notificationMatrixConditionTeslaSocStart: "Solplanet SOC 达到启动阈值",
+    notificationMatrixConditionTeslaSocKeep: "Solplanet SOC 达到维持阈值",
+    notificationMatrixConditionTeslaOvernightReserve: "Solplanet SOC 高于夜间保底",
+    notificationMatrixConditionSajProfileApplied: "SAJ 目标模式已生效",
+    notificationMatrixConditionSajSyncCleared: "远程同步已完成",
     notificationMatrixProgressWatching: "监控中",
     notificationMatrixProgressConditionMet: "当前已满足条件",
     notificationMatrixProgressNotified: "已通知",
@@ -830,7 +859,7 @@ const I18N = {
     notificationMatrixWindowPostExportPeakTitle: "Export 后高价时段",
     notificationMatrixWindowPostExportPeakSummary: "20:00-23:00。这个窗口会尽量避免高价购电，并在风险出现时尽早提醒。",
     notificationMatrixWindowOvernightTitle: "夜间肩时段",
-    notificationMatrixWindowOvernightSummary: "23:00-次日11:00。这个窗口只观察 SAJ 电池 SOC，并在每个夜间窗口内按阈值提醒一次。",
+    notificationMatrixWindowOvernightSummary: "23:00-次日11:00。这个窗口会继续监控 SAJ 电池提醒，并在 Solplanet SOC 高于夜间保底时启动 Tesla 充电。",
     notificationMatrixWindowAlwaysTitle: "始终开启的满电监控",
     notificationMatrixWindowAlwaysSummary: "不属于 24 小时时段切分。任一电池新达到 100% SOC 时发送一次通知。",
     notificationMatrixRuleTypeNotification: "通知",
@@ -845,12 +874,15 @@ const I18N = {
     notificationRuleTeslaAfterFreeShoulderTrigger: "Solplanet SOC 到 95% 开始充，低于 90% 停止，区间内维持当前状态。",
     notificationRuleTeslaAfterFreePeakTitle: "峰前时段 Tesla 继续跟随 Solplanet SOC 规则",
     notificationRuleTeslaAfterFreePeakTrigger: "Solplanet SOC 到 95% 开始充，低于 90% 停止，区间内维持当前状态。",
+    notificationRuleTeslaOvernightShoulderTitle: "夜间肩时段 Tesla 跟随 Solplanet 保底电量规则",
+    notificationRuleTeslaOvernightShoulderTrigger: "23:00-次日11:00 期间，只要 Solplanet SOC 高于 10% 就允许 Tesla 充电；降到 10% 或以下就停止。",
     notificationRuleTeslaExportWindowTitle: "ZeroHero 时段 Tesla 按太阳能富余充电",
     notificationRuleTeslaExportWindowTrigger: "结合太阳能富余和 Solplanet SOC 阈值来决定 Tesla 的充电状态和充电电流，尽量避免不必要的电网取电。",
     notificationRuleTeslaPostExportPeakTitle: "高价时段强制关闭 Tesla 充电",
     notificationRuleTeslaPostExportPeakTrigger: "20:00-23:00 期间，worker 会停止 Tesla 充电，避免高价电网取电。",
     notificationMatrixTeslaTriggerGridCap: "目标保持电网 <= 15.0kW",
     notificationMatrixTeslaTriggerSolplanetSoc: "Solplanet {soc}（达到 95% 开始，>= 90% 维持）",
+    notificationMatrixTeslaTriggerSolplanetReserve: "Solplanet {soc}（保持 > 10%）",
     notificationMatrixTeslaTriggerExport: "当前外送 {value} / 太阳能富余",
     notificationMatrixTeslaTriggerStop: "目标为停止充电",
     notificationMatrixTeslaCurrent: "Tesla 实际 {actual} / 设定 {configured}",
@@ -1759,6 +1791,13 @@ const NOTIFICATION_MATRIX_WINDOWS = [
         code: "saj_profile_self_consumption",
         titleKey: "notificationRuleSajProfileSelfConsumptionTitle",
         triggerKey: "notificationRuleSajProfileSelfConsumptionTrigger",
+      },
+      {
+        kind: "operation",
+        level: "info",
+        code: "tesla_overnight_shoulder_control",
+        titleKey: "notificationRuleTeslaOvernightShoulderTitle",
+        triggerKey: "notificationRuleTeslaOvernightShoulderTrigger",
       },
       {
         kind: "notification",
@@ -5050,6 +5089,74 @@ function notificationMatrixRuleKindText(kind) {
     : t("notificationMatrixRuleTypeNotification");
 }
 
+function renderNotificationMatrixRuleItem(item, windowItem) {
+  const level = String(item.level || "info").trim().toLowerCase();
+  const kind = String(item.kind || "notification").trim().toLowerCase() === "operation" ? "operation" : "notification";
+  const ruleCode = String(item.code || "").trim();
+  const enabled = isTimeWindowRuleEnabled(ruleCode);
+  const busy = timeWindowRuleBusy.has(ruleCode);
+  const progress = getNotificationMatrixProgress(item, windowItem, stateCache.lastNotificationSummary, { enabled, busy });
+  return `
+    <article class="notification-rule-item kind-${escapeHtml(kind)} level-${escapeHtml(level)}${enabled ? "" : " is-disabled"}">
+      <label class="notification-rule-check" aria-label="${escapeHtml(t(item.titleKey))}">
+        <input type="checkbox" ${enabled ? "checked" : ""} ${busy ? "disabled" : ""} data-rule-code="${escapeHtml(ruleCode)}" />
+      </label>
+      <div class="notification-rule-main">
+        <div class="notification-rule-topline">
+          <span class="notification-rule-kind kind-${escapeHtml(kind)}">${escapeHtml(notificationMatrixRuleKindText(kind))}</span>
+          <span class="notification-rule-level">${escapeHtml(dashboardNotificationLevelText(level))}</span>
+          <span class="notification-rule-code">${escapeHtml(String(item.code || "-"))}</span>
+        </div>
+        <p class="notification-rule-title">${escapeHtml(t(item.titleKey))}</p>
+        <p class="notification-rule-trigger">${escapeHtml(t(item.triggerKey))}</p>
+        ${kind === "operation" ? renderNotificationMatrixOperationConditions(progress) : ""}
+        ${renderNotificationMatrixProgress(progress)}
+      </div>
+    </article>
+  `;
+}
+
+function renderNotificationMatrixOperationConditions(progress) {
+  const conditions = Array.isArray(progress?.conditions) ? progress.conditions : [];
+  if (conditions.length === 0) return "";
+  const matchedCount = conditions.filter((item) => item?.matched).length;
+  return `
+    <section class="notification-rule-conditions">
+      <div class="notification-rule-conditions-header">
+        <span class="notification-rule-conditions-title">${escapeHtml(t("notificationMatrixOperationConditionsTitle"))}</span>
+        <span class="notification-rule-conditions-summary">${escapeHtml(t("notificationMatrixOperationConditionsMatched", { matched: matchedCount, total: conditions.length }))}</span>
+      </div>
+      <div class="notification-rule-conditions-list">
+        ${conditions.map((item) => `
+          <div class="notification-rule-condition${item?.matched ? " is-matched" : " is-not-matched"}">
+            <span class="notification-rule-condition-state">${escapeHtml(t(item?.matched ? "notificationMatrixConditionMatched" : "notificationMatrixConditionNotMatched"))}</span>
+            <span class="notification-rule-condition-label">${escapeHtml(String(item?.label || "-"))}</span>
+            <span class="notification-rule-condition-value">${escapeHtml(String(item?.value || "-"))}</span>
+          </div>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderNotificationMatrixRuleGroup(kind, items, windowItem) {
+  if (!Array.isArray(items) || items.length === 0) return "";
+  const label = notificationMatrixRuleKindText(kind);
+  return `
+    <section class="notification-rule-group kind-${escapeHtml(kind)}">
+      <div class="notification-rule-group-header">
+        <div class="notification-rule-group-heading">
+          <span class="notification-rule-group-pill kind-${escapeHtml(kind)}">${escapeHtml(label)}</span>
+          <span class="notification-rule-group-count">${escapeHtml(String(items.length))}</span>
+        </div>
+      </div>
+      <div class="notification-rule-group-list">
+        ${items.map((item) => renderNotificationMatrixRuleItem(item, windowItem)).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function getTimeWindowRuleEnabledMap() {
   const items = Array.isArray(stateCache.lastTimeWindowRules?.items) ? stateCache.lastTimeWindowRules.items : [];
   const map = {};
@@ -5141,32 +5248,13 @@ function renderNotificationMatrix() {
     const isCollapsed = Boolean(notificationMatrixCollapseState[windowItem.id]);
     panel.className = `notification-window-panel${isCurrentWindow ? " is-current-window" : ""}${isCollapsed ? " is-collapsed" : ""}`;
     const rules = Array.isArray(windowItem.rules) ? windowItem.rules : [];
+    const operationRules = rules.filter((item) => String(item?.kind || "").trim().toLowerCase() === "operation");
+    const notificationRules = rules.filter((item) => String(item?.kind || "notification").trim().toLowerCase() !== "operation");
     const listHtml = rules.length
-      ? rules.map((item) => {
-        const level = String(item.level || "info").trim().toLowerCase();
-        const kind = String(item.kind || "notification").trim().toLowerCase() === "operation" ? "operation" : "notification";
-        const ruleCode = String(item.code || "").trim();
-        const enabled = isTimeWindowRuleEnabled(ruleCode);
-        const busy = timeWindowRuleBusy.has(ruleCode);
-        const progress = getNotificationMatrixProgress(item, windowItem, stateCache.lastNotificationSummary, { enabled, busy });
-        return `
-          <article class="notification-rule-item level-${escapeHtml(level)}${enabled ? "" : " is-disabled"}">
-            <label class="notification-rule-check" aria-label="${escapeHtml(t(item.titleKey))}">
-              <input type="checkbox" ${enabled ? "checked" : ""} ${busy ? "disabled" : ""} data-rule-code="${escapeHtml(ruleCode)}" />
-            </label>
-            <div class="notification-rule-main">
-              <div class="notification-rule-topline">
-                <span class="notification-rule-kind kind-${escapeHtml(kind)}">${escapeHtml(notificationMatrixRuleKindText(kind))}</span>
-                <span class="notification-rule-level">${escapeHtml(dashboardNotificationLevelText(level))}</span>
-                <span class="notification-rule-code">${escapeHtml(String(item.code || "-"))}</span>
-              </div>
-              <p class="notification-rule-title">${escapeHtml(t(item.titleKey))}</p>
-              <p class="notification-rule-trigger">${escapeHtml(t(item.triggerKey))}</p>
-              ${renderNotificationMatrixProgress(progress)}
-            </div>
-          </article>
-        `;
-      }).join("")
+      ? [
+        renderNotificationMatrixRuleGroup("operation", operationRules, windowItem),
+        renderNotificationMatrixRuleGroup("notification", notificationRules, windowItem),
+      ].filter(Boolean).join("")
       : `<div class="notification-window-empty">${escapeHtml(t("notificationMatrixNoNotifications"))}</div>`;
 
     panel.innerHTML = `
@@ -5318,8 +5406,10 @@ function getNotificationMatrixProgress(item, windowItem, summary, options = {}) 
     code === "tesla_free_energy_control"
     || code === "tesla_after_free_shoulder_control"
     || code === "tesla_after_free_peak_control"
+    || code === "tesla_overnight_shoulder_control"
   ) {
-    return getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWindowId, midday, metrics);
+    const source = code === "tesla_overnight_shoulder_control" ? sajWatch : midday;
+    return getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWindowId, source, metrics);
   }
   if (code === "solplanet_low_available_capacity") {
     const current = Number(live?.solplanet_battery_energy_kwh);
@@ -5437,35 +5527,58 @@ function getNotificationMatrixSajProfileProgress(code, windowItem, currentWindow
   const actualProfile = String(guard?.actual_profile || guard?.input_profile || guard?.selected_profile || "").trim();
   const selectedProfile = String(guard?.selected_profile || "").trim();
   const isCurrentWindow = currentWindowId === windowItem?.id;
+  const profileMatched = actualProfile === expectedProfile || selectedProfile === expectedProfile;
+  const syncCleared = !Boolean(guard?.pending_remote_sync);
   let statusText = t("notificationMatrixProgressScheduled");
   if (isCurrentWindow) {
     if (Boolean(guard?.pending_remote_sync)) {
       statusText = t("notificationMatrixProgressPendingSync");
     } else if (String(guard?.action || "").trim() === "apply_profile") {
       statusText = t("notificationMatrixProgressApplied");
-    } else if (actualProfile === expectedProfile || selectedProfile === expectedProfile) {
+    } else if (profileMatched) {
       statusText = t("notificationMatrixProgressHolding");
     }
   }
   return {
-    ratio: actualProfile === expectedProfile || selectedProfile === expectedProfile ? 1 : 0,
+    ratio: profileMatched ? 1 : 0,
     statusText,
     currentText: t("notificationMatrixProgressCurrent", { value: formatSajProfileLabel(actualProfile || selectedProfile || "-") }),
     triggerText: t("notificationMatrixProgressTarget", { value: formatSajProfileLabel(expectedProfile) }),
     deltaText: String(guard?.desired_reason || "").trim(),
+    conditions: [
+      {
+        label: t("notificationMatrixConditionCurrentWindow"),
+        value: isCurrentWindow ? t("notificationMatrixCurrentWindowBadge") : windowItem?.schedule || "-",
+        matched: isCurrentWindow,
+      },
+      {
+        label: t("notificationMatrixConditionSajProfileApplied"),
+        value: `${formatSajProfileLabel(actualProfile || selectedProfile || "-")} -> ${formatSajProfileLabel(expectedProfile)}`,
+        matched: profileMatched,
+      },
+      {
+        label: t("notificationMatrixConditionSajSyncCleared"),
+        value: Boolean(guard?.pending_remote_sync) ? t("notificationMatrixProgressPendingSync") : t("notificationMatrixProgressHolding"),
+        matched: syncCleared,
+      },
+    ],
     hideBar: true,
   };
 }
 
-function getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWindowId, midday, metrics) {
+function getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWindowId, source, metrics) {
   const isCurrentWindow = currentWindowId === windowItem?.id;
-  const action = midday?.action || {};
-  const decision = midday?.decision || {};
-  const before = midday?.tesla_state_before || {};
+  const action = source?.action || {};
+  const decision = source?.decision || {};
+  const before = source?.tesla_state_before || {};
   const actualCurrent = Number(metrics?.tesla_charge_current_amps);
   const configuredCurrent = Number(metrics?.tesla_configured_current_amps);
   const solplanetSoc = Number(metrics?.battery2_soc_percent);
-  const connectionState = formatTeslaConnectionText(metrics?.tesla_connection_state || before?.connection_state || "");
+  const rawConnectionState = String(metrics?.tesla_connection_state || before?.connection_state || "").trim().toLowerCase();
+  const connectionState = formatTeslaConnectionText(rawConnectionState);
+  const rawStatusText = String(before?.status_text || "").trim().toLowerCase();
+  const connected = Boolean(rawConnectionState) && rawConnectionState !== "unplugged";
+  const ready = rawStatusText ? !["disconnected", "unknown", "unavailable"].includes(rawStatusText) : connected;
   let statusText = t("notificationMatrixProgressScheduled");
   if (isCurrentWindow) {
     const actionType = String(action?.type || "").trim().toLowerCase();
@@ -5479,14 +5592,55 @@ function getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWi
   }
   let triggerText = "-";
   let deltaText = connectionState;
+  let conditions = [
+    {
+      label: t("notificationMatrixConditionCurrentWindow"),
+      value: isCurrentWindow ? t("notificationMatrixCurrentWindowBadge") : windowItem?.schedule || "-",
+      matched: isCurrentWindow,
+    },
+    {
+      label: t("notificationMatrixConditionTeslaConnected"),
+      value: connectionState,
+      matched: connected,
+    },
+    {
+      label: t("notificationMatrixConditionTeslaReady"),
+      value: rawStatusText || connectionState,
+      matched: ready,
+    },
+  ];
   if (code === "tesla_free_energy_control") {
     triggerText = t("notificationMatrixTeslaTriggerGridCap");
+    const predictedGrid = Number(decision?.predicted_grid_w);
+    conditions.push({
+      label: t("notificationMatrixConditionTeslaGridCap"),
+      value: Number.isFinite(predictedGrid) ? `${formatTrimmedDecimal(predictedGrid, 0)}W` : "-",
+      matched: Number.isFinite(predictedGrid) && predictedGrid <= 15000,
+    });
+  } else if (code === "tesla_overnight_shoulder_control") {
+    const socText = Number.isFinite(solplanetSoc) ? `${formatTrimmedDecimal(solplanetSoc, 1)}%` : "-";
+    triggerText = t("notificationMatrixTeslaTriggerSolplanetReserve", { soc: socText });
+    conditions.push({
+      label: t("notificationMatrixConditionTeslaOvernightReserve"),
+      value: socText,
+      matched: Number.isFinite(solplanetSoc) && solplanetSoc > 10,
+    });
   } else if (code === "tesla_after_free_shoulder_control" || code === "tesla_after_free_peak_control") {
     const socText = Number.isFinite(solplanetSoc) ? `${formatTrimmedDecimal(solplanetSoc, 1)}%` : "-";
     triggerText = t("notificationMatrixTeslaTriggerSolplanetSoc", { soc: socText });
+    conditions.push({
+      label: t("notificationMatrixConditionTeslaSocStart"),
+      value: socText,
+      matched: Number.isFinite(solplanetSoc) && solplanetSoc >= 95,
+    });
+    conditions.push({
+      label: t("notificationMatrixConditionTeslaSocKeep"),
+      value: socText,
+      matched: Number.isFinite(solplanetSoc) && solplanetSoc >= 90,
+    });
   }
-  if (String(midday?.decision_reason || "").trim() && isCurrentWindow) {
-    deltaText = String(midday.decision_reason).trim();
+  if (String(source?.decision_reason || "").trim() && isCurrentWindow) {
+    deltaText = String(source.decision_reason).trim();
   }
   return {
     ratio: Number.isFinite(actualCurrent) ? Math.max(0, Math.min(1, actualCurrent / 32)) : 0,
@@ -5497,6 +5651,7 @@ function getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWi
     }),
     triggerText,
     deltaText,
+    conditions,
     hideBar: true,
   };
 }

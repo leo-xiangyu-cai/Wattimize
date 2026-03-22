@@ -139,6 +139,7 @@ BATTERY_MIN_DISCHARGE_SOC_PERCENT = {
     "saj": 20.0,
     "solplanet": 10.0,
 }
+TESLA_OVERNIGHT_SHOULDER_MIN_SOLPLANET_SOC_PERCENT = BATTERY_MIN_DISCHARGE_SOC_PERCENT["solplanet"]
 TESLA_POST_EXPORT_FORECAST_WINDOW_START_HOUR = 20
 TESLA_POST_EXPORT_FORECAST_WINDOW_END_HOUR = 11
 TESLA_POST_EXPORT_FORECAST_HISTORY_DAYS = 3
@@ -221,6 +222,7 @@ TIME_WINDOW_RULE_DEFINITIONS: tuple[dict[str, str], ...] = (
     {"code": "saj_profile_self_consumption", "window": "export_window", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "post_export_peak", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "overnight_shoulder", "kind": "operation"},
+    {"code": "tesla_overnight_shoulder_control", "window": "overnight_shoulder", "kind": "operation"},
     {"code": "tesla_after_free_shoulder_control", "window": "after_free_shoulder", "kind": "operation"},
     {"code": "tesla_after_free_peak_control", "window": "after_free_peak", "kind": "operation"},
     {"code": "solplanet_low_available_capacity", "window": "after_free_shoulder", "kind": "notification"},
@@ -4312,6 +4314,7 @@ async def _run_midday_window_check(
 
 async def _run_saj_battery_watch_check(
     combined_flow: dict[str, object] | None,
+    tesla_observation_result: dict[str, object] | None = None,
     *,
     round_id: str | None = None,
     requested_at_utc: str | None = None,
@@ -4348,9 +4351,10 @@ async def _run_saj_battery_watch_check(
         metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
         metrics_map = metrics if isinstance(metrics, dict) else {}
         saj_soc_percent = _to_number(metrics_map.get("battery1_soc_percent"))
+        solplanet_soc_percent = _to_number(metrics_map.get("battery2_soc_percent"))
         result["saj_soc_percent"] = saj_soc_percent
         result["battery1_soc_percent"] = saj_soc_percent
-        result["battery2_soc_percent"] = _to_number(metrics_map.get("battery2_soc_percent"))
+        result["battery2_soc_percent"] = solplanet_soc_percent
         if saj_soc_percent is None:
             result["skipped"] = "combined_saj_soc_unavailable"
             status = "skipped"
@@ -4408,9 +4412,107 @@ async def _run_saj_battery_watch_check(
             "reminder_50_sent": bool(combined_status.get("saj_battery_watch_50_notified")),
             "reminder_20_sent": bool(combined_status.get("saj_battery_watch_20_notified")),
         }
-        result["decision"] = {"mode": "observe_only"}
-        result["action"] = {"type": "noop", "reason": "watching_saj_battery_soc"}
-        status = "noop"
+        tesla_rule_code = "tesla_overnight_shoulder_control"
+        tesla_rule_enabled = _is_time_window_rule_enabled(enabled_map, tesla_rule_code)
+        result["tesla_rule_code"] = tesla_rule_code
+        result["tesla_rule_enabled"] = tesla_rule_enabled
+        result["overnight_shoulder_tesla"] = {
+            "solplanet_soc_percent": solplanet_soc_percent,
+            "min_solplanet_soc_percent": TESLA_OVERNIGHT_SHOULDER_MIN_SOLPLANET_SOC_PERCENT,
+            "dashboard_mapping": {
+                "battery2_soc_percent": "solplanet_battery_soc",
+            },
+        }
+
+        observation = (
+            tesla_observation_result.get("observation")
+            if isinstance(tesla_observation_result, dict)
+            else None
+        )
+        observation_map = observation if isinstance(observation, dict) else {}
+        observed_entity_count = int(observation_map.get("observed_entity_count") or 0)
+        if observed_entity_count <= 0:
+            result["decision"] = {"mode": "observe_only", "charge_current_amps": 0, "predicted_grid_w": None}
+            result["decision_reason"] = "tesla_observation_unavailable"
+            result["action"] = {"type": "noop", "reason": "tesla_observation_unavailable"}
+            status = "noop"
+            return result
+
+        charge_state = _tesla_observation_charge_state(observation_map)
+        result["tesla_state_before"] = charge_state
+        charging_enabled = bool(charge_state.get("enabled"))
+        charge_requested_enabled = bool(charge_state.get("requested_enabled"))
+        current_configured_amps = _to_number(charge_state.get("configured_current_amps"))
+        connection_state = str(charge_state.get("connection_state") or "").strip().lower()
+        status_text = str(charge_state.get("status_text") or "").strip().lower()
+        active_or_requested = charging_enabled or charge_requested_enabled
+
+        if not tesla_rule_enabled:
+            result["decision"] = {
+                "mode": "observe_only",
+                "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
+                "predicted_grid_w": None,
+            }
+            result["decision_reason"] = "time_window_rule_disabled"
+            result["action"] = {"type": "noop", "reason": "rule_disabled"}
+            status = "noop"
+            return result
+
+        if solplanet_soc_percent is None:
+            result["decision"] = {"mode": "observe_only", "charge_current_amps": 0, "predicted_grid_w": None}
+            result["decision_reason"] = "combined_solplanet_soc_unavailable"
+            result["action"] = {"type": "noop", "reason": "combined_solplanet_soc_unavailable"}
+            status = "noop"
+            return result
+
+        if connection_state == "unplugged":
+            result["decision"] = {"mode": "observe_only", "charge_current_amps": 0, "predicted_grid_w": None}
+            result["decision_reason"] = "tesla_unplugged"
+            result["action"] = {"type": "noop", "reason": "tesla_unplugged"}
+            status = "noop"
+            return result
+
+        if status_text in ("disconnected", "unknown", "unavailable"):
+            result["decision"] = {"mode": "observe_only", "charge_current_amps": 0, "predicted_grid_w": None}
+            result["decision_reason"] = "tesla_not_ready"
+            result["tesla_status"] = status_text
+            result["action"] = {"type": "noop", "reason": "tesla_not_ready"}
+            status = "noop"
+            return result
+
+        if solplanet_soc_percent > TESLA_OVERNIGHT_SHOULDER_MIN_SOLPLANET_SOC_PERCENT:
+            result["decision"] = {
+                "mode": "charge",
+                "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
+                "predicted_grid_w": None,
+            }
+            result["decision_reason"] = "overnight_shoulder_solplanet_has_available_energy"
+            if charging_enabled:
+                result["action"] = {"type": "noop", "reason": "already_charging"}
+                status = "noop"
+                return result
+            if charge_requested_enabled:
+                await _tesla_restart_charging()
+                result["action"] = {"type": "restart_charging", "reason": "charging_requested_but_not_active"}
+            else:
+                await _tesla_set_charging(True)
+                result["action"] = {"type": "start_charging", "reason": "solplanet_soc_above_minimum"}
+            status = "applied"
+            return result
+
+        result["decision"] = {
+            "mode": "off",
+            "charge_current_amps": 0,
+            "predicted_grid_w": None,
+        }
+        result["decision_reason"] = "overnight_shoulder_solplanet_below_minimum_soc"
+        if active_or_requested:
+            await _tesla_set_charging(False)
+            result["action"] = {"type": "stop_charging", "reason": "solplanet_soc_at_or_below_minimum"}
+            status = "applied"
+        else:
+            result["action"] = {"type": "noop", "reason": "already_stopped"}
+            status = "noop"
         return result
     except Exception as exc:  # noqa: BLE001
         ok = False
@@ -7438,6 +7540,10 @@ def _worker_control_result_text(
             notification = payload.get("notification")
             if isinstance(notification, dict):
                 notification_list = [notification]
+        action = payload.get("action")
+        action_map = action if isinstance(action, dict) else {}
+        decision = payload.get("decision")
+        decision_map = decision if isinstance(decision, dict) else {}
         extra_parts = []
         for notification_map in notification_list:
             code = str(notification_map.get("code") or "warning")
@@ -7450,6 +7556,15 @@ def _worker_control_result_text(
                 )
                 continue
             extra_parts.append(f"notification {code}")
+        if payload.get("tesla_rule_code"):
+            extra_parts.append(
+                "tesla "
+                f"mode={decision_map.get('mode') or '-'}, "
+                f"action={action_map.get('type') or '-'}, "
+                f"reason={payload.get('decision_reason') or '-'}, "
+                f"solplanet_soc={_fmt_result_number(payload.get('battery2_soc_percent'), 0, '%')}, "
+                f"reserve={_fmt_result_number(TESLA_OVERNIGHT_SHOULDER_MIN_SOLPLANET_SOC_PERCENT, 0, '%')}"
+            )
         return (
             f"Overnight shoulder {'skipped' if status == 'skipped' else status}: "
             f"schedule={service_window_schedule}, active={'yes' if payload.get('window_active') else 'no'}, "
@@ -8153,6 +8268,7 @@ async def _collector_loop() -> None:
         try:
             saj_battery_watch_result = await _run_saj_battery_watch_check(
                 round_results.get("combined", {}).get("flow") if isinstance(round_results.get("combined"), dict) else None,
+                tesla_observation_result,
                 round_id=round_id,
                 requested_at_utc=round_started_at_utc,
             )

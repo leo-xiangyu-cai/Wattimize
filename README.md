@@ -164,6 +164,7 @@ First-run configuration:
 - The `Time Window` tab shows rule switches for each automation window, covering both notifications and automated operations.
 - Rule state is stored in SQLite and exposed through `GET /api/time-window-rules` and `PUT /api/time-window-rules/{rule_code}`.
 - SAJ profile automation and Tesla charge automation respect these rule switches before issuing control actions.
+- The overnight shoulder window (`23:00-11:00`) can now start Tesla charging when Solplanet SOC stays above its configured overnight reserve and stop again once it falls to that reserve.
 - Tesla manual start/stop now returns UI feedback states so the dashboard can show pending, success, and failure confirmation after `/api/tesla/control/charging`.
 - Tesla manual current control is available through `POST /api/tesla/control/current`, and the combined dashboard shows pending current-change state until Home Assistant confirms it.
 - The combined Tesla card now shows battery energy, live voltage, charge ETA, and an inline current-control trigger instead of only the raw charging power number.
