@@ -191,3 +191,7 @@ Dashboard mapping rule:
 - Preserve backward compatibility for existing endpoints when possible.
 - All code comments in submitted changes must be written in English.
 - Any user-facing UI text must support multilingual/i18n; backend/internal-only text can remain English.
+
+## 13) Local Skills
+
+- `skills/frontend-render-check`: Run the Wattimize UI locally, capture a full-page screenshot, and inspect browser console/request failures when validating rendered frontend results.

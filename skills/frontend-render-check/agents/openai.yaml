@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frontend Render Check"
+  short_description: "Capture local UI render results"
+  default_prompt: "Use $frontend-render-check to run the Wattimize UI locally, capture a screenshot, and report rendering or browser-runtime problems."
