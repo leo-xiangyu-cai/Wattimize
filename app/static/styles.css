@@ -2607,6 +2607,41 @@ td {
   color: #fff;
 }
 
+.efd-node.efd-node-id-combined-poolPumpNode {
+  justify-content: flex-start;
+  padding: 8px 10px 10px;
+}
+
+.efd-node.efd-node-id-combined-poolPumpNode .node-title {
+  font-size: 11px;
+}
+
+.efd-node.efd-node-id-combined-poolPumpNode .node-value {
+  margin-top: 6px;
+  font-size: 19px;
+}
+
+.efd-node.efd-node-id-combined-poolPumpNode .node-state {
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.efd-node.efd-node-id-combined-poolPumpNode .pool-pump-control-btn {
+  width: 100%;
+  margin-top: 6px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  min-height: 28px;
+}
+
+.efd-node.efd-node-id-combined-poolPumpNode .pool-pump-control-btn.active {
+  background: #b7383a;
+  border-color: #b7383a;
+  color: #fff;
+}
+
 .efd-node.efd-node-tesla .soc-wrap {
   position: absolute;
   inset: 54px 8px 8px 8px;
@@ -3690,6 +3725,93 @@ td {
 .dashboard-notifications-list {
   display: grid;
   gap: 10px;
+}
+
+.overnight-energy-reference {
+  display: grid;
+  gap: 12px;
+}
+
+.overnight-energy-reference-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.overnight-energy-reference-grid-main {
+  grid-template-columns: minmax(220px, 0.9fr) repeat(2, minmax(260px, 1fr));
+}
+
+.overnight-energy-reference-grid-pump {
+  grid-template-columns: minmax(320px, 1fr);
+}
+
+.overnight-energy-reference-card {
+  display: grid;
+  gap: 10px;
+}
+
+.overnight-energy-reference-grid-pump .overnight-energy-reference-card {
+  max-width: 560px;
+}
+
+.overnight-energy-reference-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.overnight-energy-reference-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(31, 122, 82, 0.12);
+  color: var(--accent-dark);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.overnight-energy-reference-badge:empty {
+  display: none;
+}
+
+.overnight-energy-reference-lines {
+  display: grid;
+  gap: 8px;
+}
+
+.overnight-energy-reference-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.overnight-energy-reference-line strong {
+  color: var(--text);
+  font-size: 17px;
+}
+
+@media (max-width: 1100px) {
+  .overnight-energy-reference-grid-main {
+    grid-template-columns: repeat(2, minmax(240px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .overnight-energy-reference-grid-main,
+  .overnight-energy-reference-grid-pump {
+    grid-template-columns: 1fr;
+  }
+
+  .overnight-energy-reference-grid-pump .overnight-energy-reference-card {
+    max-width: none;
+  }
 }
 
 .dashboard-notification-item {

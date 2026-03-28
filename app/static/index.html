@@ -111,6 +111,95 @@
             </section>
           </div>
         </section>
+        <section id="overnightEnergyReferenceSection" class="card overnight-energy-reference" aria-live="polite">
+          <div class="section-header">
+            <h2 data-i18n="overnightEnergyReferenceTitle">Overnight Battery Reference</h2>
+            <span id="overnightEnergyReferenceUpdatedAt" class="muted">-</span>
+          </div>
+          <p class="muted" data-i18n="overnightEnergyReferenceIntro">
+            Shows recent average home load and the estimated usable battery left by the next 08:00 and 11:00.
+          </p>
+          <div class="overnight-energy-reference-grid overnight-energy-reference-grid-main">
+            <article class="metric overnight-energy-reference-card">
+              <div class="label" data-i18n="overnightEnergyReferenceCurrentUsable">Current usable battery</div>
+              <div id="overnightEnergyReferenceUsableBatteryValue" class="number">-</div>
+            </article>
+            <article class="metric overnight-energy-reference-card">
+              <div class="overnight-energy-reference-card-header">
+                <div id="overnightEnergyReferencenext8Title" class="label">-</div>
+                <span id="overnightEnergyReferencenext8Badge" class="overnight-energy-reference-badge"></span>
+              </div>
+              <div class="overnight-energy-reference-lines">
+                <div class="overnight-energy-reference-line">
+                  <span data-i18n="overnightEnergyReferenceAvg3d">Avg use, last 3 windows</span>
+                  <strong id="overnightEnergyReferencenext8Avg3d">-</strong>
+                </div>
+                <div class="overnight-energy-reference-line">
+                  <span data-i18n="overnightEnergyReferenceAvg7d">Avg use, last 7 windows</span>
+                  <strong id="overnightEnergyReferencenext8Avg7d">-</strong>
+                </div>
+                <div class="overnight-energy-reference-line">
+                  <span data-i18n="overnightEnergyReferenceLeft3d">Battery left, 3-window avg</span>
+                  <strong id="overnightEnergyReferencenext8Left3d">-</strong>
+                </div>
+                <div class="overnight-energy-reference-line">
+                  <span data-i18n="overnightEnergyReferenceLeft7d">Battery left, 7-window avg</span>
+                  <strong id="overnightEnergyReferencenext8Left7d">-</strong>
+                </div>
+              </div>
+            </article>
+            <article class="metric overnight-energy-reference-card">
+              <div class="overnight-energy-reference-card-header">
+                <div id="overnightEnergyReferencenext11Title" class="label">-</div>
+                <span id="overnightEnergyReferencenext11Badge" class="overnight-energy-reference-badge"></span>
+              </div>
+              <div class="overnight-energy-reference-lines">
+                <div class="overnight-energy-reference-line">
+                  <span data-i18n="overnightEnergyReferenceAvg3d">Avg use, last 3 windows</span>
+                  <strong id="overnightEnergyReferencenext11Avg3d">-</strong>
+                </div>
+                <div class="overnight-energy-reference-line">
+                  <span data-i18n="overnightEnergyReferenceAvg7d">Avg use, last 7 windows</span>
+                  <strong id="overnightEnergyReferencenext11Avg7d">-</strong>
+                </div>
+                <div class="overnight-energy-reference-line">
+                  <span data-i18n="overnightEnergyReferenceLeft3d">Battery left, 3-window avg</span>
+                  <strong id="overnightEnergyReferencenext11Left3d">-</strong>
+                </div>
+                <div class="overnight-energy-reference-line">
+                  <span data-i18n="overnightEnergyReferenceLeft7d">Battery left, 7-window avg</span>
+                  <strong id="overnightEnergyReferencenext11Left7d">-</strong>
+                </div>
+              </div>
+            </article>
+          </div>
+          <div class="overnight-energy-reference-grid overnight-energy-reference-grid-pump">
+            <article class="metric overnight-energy-reference-card">
+              <div class="overnight-energy-reference-card-header">
+                <div class="label" data-i18n="overnightEnergyReferencePumpScenarioTitle">Pump 23:00-05:00 (6h)</div>
+                <span id="overnightEnergyReferencePumpScenarioBadge" class="overnight-energy-reference-badge"></span>
+              </div>
+              <div class="overnight-energy-reference-lines">
+                <div class="overnight-energy-reference-line">
+                  <span data-i18n="overnightEnergyReferencePumpPower">Pump power</span>
+                  <strong id="overnightEnergyReferencePumpPowerValue">-</strong>
+                </div>
+                <div class="overnight-energy-reference-line">
+                  <span data-i18n="overnightEnergyReferencePumpEnergy">Pump energy</span>
+                  <strong id="overnightEnergyReferencePumpEnergyValue">-</strong>
+                </div>
+                <div class="overnight-energy-reference-line">
+                  <span data-i18n="overnightEnergyReferenceLeft3d">Battery left, 3-window avg</span>
+                  <strong id="overnightEnergyReferencePumpLeft3d">-</strong>
+                </div>
+                <div class="overnight-energy-reference-line">
+                  <span data-i18n="overnightEnergyReferenceLeft7d">Battery left, 7-window avg</span>
+                  <strong id="overnightEnergyReferencePumpLeft7d">-</strong>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
       </section>
 
       <section id="notificationMatrixView" class="view hidden">

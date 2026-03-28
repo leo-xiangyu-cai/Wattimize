@@ -1698,29 +1698,44 @@ def _load_power_rows(
     system: str,
     start_ts: float,
     end_ts: float,
-) -> list[tuple[float, float | None, float | None, float | None, float | None]]:
+) -> list[tuple[float, float | None, float | None, float | None, float | None, float | None, float | None]]:
     if not _db_exists(db_path):
         return []
     try:
         with _session_scope(db_path) as session:
-            return [
-                (float(row[0]), row[1], row[2], row[3], row[4])
-                for row in session.execute(
-                    select(
-                        AssembledFlowSnapshotRow.assembled_at_epoch,
-                        AssembledFlowSnapshotRow.pv_w,
-                        AssembledFlowSnapshotRow.grid_w,
-                        AssembledFlowSnapshotRow.battery_w,
-                        AssembledFlowSnapshotRow.load_w,
+            rows = session.execute(
+                select(
+                    AssembledFlowSnapshotRow.assembled_at_epoch,
+                    AssembledFlowSnapshotRow.pv_w,
+                    AssembledFlowSnapshotRow.grid_w,
+                    AssembledFlowSnapshotRow.battery_w,
+                    AssembledFlowSnapshotRow.load_w,
+                    AssembledFlowSnapshotRow.flow_json,
+                )
+                .where(
+                    AssembledFlowSnapshotRow.system == system,
+                    AssembledFlowSnapshotRow.assembled_at_epoch >= start_ts,
+                    AssembledFlowSnapshotRow.assembled_at_epoch < end_ts,
+                )
+                .order_by(AssembledFlowSnapshotRow.assembled_at_epoch.asc())
+            ).all()
+            result = []
+            for row in rows:
+                payload = _json_loads(row[5], default={})
+                metrics = payload.get("metrics")
+                metrics_map = metrics if isinstance(metrics, dict) else {}
+                result.append(
+                    (
+                        float(row[0]),
+                        row[1],
+                        row[2],
+                        row[3],
+                        row[4],
+                        metrics_map.get("tesla_charge_power_w"),
+                        metrics_map.get("pool_pump_power_w"),
                     )
-                    .where(
-                        AssembledFlowSnapshotRow.system == system,
-                        AssembledFlowSnapshotRow.assembled_at_epoch >= start_ts,
-                        AssembledFlowSnapshotRow.assembled_at_epoch < end_ts,
-                    )
-                    .order_by(AssembledFlowSnapshotRow.assembled_at_epoch.asc())
-                ).all()
-            ]
+                )
+            return result
     except SQLAlchemyError:
         return []
 
@@ -1747,7 +1762,7 @@ def compute_daily_usage(
 
 
 def _integrate_usage_rows(
-    rows: list[tuple[float, float | None, float | None, float | None, float | None]],
+    rows: list[tuple[float, float | None, float | None, float | None, float | None, float | None, float | None]],
     *,
     system: str,
     start_label: str,
@@ -1761,6 +1776,8 @@ def _integrate_usage_rows(
     grid_import_window_end_hour: int | None = None,
     grid_export_window_start_hour: int | None = None,
     grid_export_window_end_hour: int | None = None,
+    exclude_tesla_load: bool = False,
+    exclude_pool_pump_load: bool = False,
 ) -> dict[str, object]:
     try:
         local_tz = ZoneInfo(local_timezone_name) if local_timezone_name else datetime.now().astimezone().tzinfo
@@ -1848,8 +1865,11 @@ def _integrate_usage_rows(
     baseline_interval_seconds = max(float(sample_interval_seconds), float(observed_interval_seconds or 0.0))
     max_dt = baseline_interval_seconds * 2.5
 
+    tesla_load_wh = 0.0
+    pool_pump_load_wh = 0.0
+
     for current_row, next_row in zip(rows, rows[1:]):
-        ts, pv_w, grid_w, battery_w, load_w = current_row
+        ts, pv_w, grid_w, battery_w, load_w, tesla_charge_power_w, pool_pump_power_w = current_row
         next_ts = next_row[0]
         dt = max(0.0, float(next_ts) - float(ts))
         if dt <= 0:
@@ -1857,7 +1877,18 @@ def _integrate_usage_rows(
         if dt > max_dt:
             dt = max_dt
         if load_w is not None and load_w > 0:
-            home_load_wh += float(load_w) * dt / 3600.0
+            adjusted_load_w = float(load_w)
+            tesla_w = max(float(tesla_charge_power_w or 0.0), 0.0)
+            pool_pump_w = max(float(pool_pump_power_w or 0.0), 0.0)
+            tesla_load_wh += tesla_w * dt / 3600.0
+            pool_pump_load_wh += pool_pump_w * dt / 3600.0
+            if exclude_tesla_load:
+                adjusted_load_w -= tesla_w
+            if exclude_pool_pump_load:
+                adjusted_load_w -= pool_pump_w
+            if adjusted_load_w < 0:
+                adjusted_load_w = 0.0
+            home_load_wh += adjusted_load_w * dt / 3600.0
         if pv_w is not None and pv_w > 0:
             solar_wh += float(pv_w) * dt / 3600.0
         if grid_w is not None:
@@ -1887,6 +1918,8 @@ def _integrate_usage_rows(
         "coverage_ratio": round((len(rows) / expected), 4) if expected > 0 else None,
         "energy_kwh": {
             "home_load": round(home_load_wh / 1000.0, 4),
+            "tesla_load": round(tesla_load_wh / 1000.0, 4),
+            "pool_pump_load": round(pool_pump_load_wh / 1000.0, 4),
             "solar_generation": round(solar_wh / 1000.0, 4),
             "grid_import": round(grid_import_wh / 1000.0, 4),
             "grid_export": round(grid_export_wh / 1000.0, 4),
@@ -2331,6 +2364,8 @@ def compute_usage_between(
     grid_import_window_end_hour: int | None = None,
     grid_export_window_start_hour: int | None = None,
     grid_export_window_end_hour: int | None = None,
+    exclude_tesla_load: bool = False,
+    exclude_pool_pump_load: bool = False,
 ) -> dict[str, object]:
     start_ts = start_at_utc.astimezone(UTC).timestamp()
     end_ts = end_at_utc.astimezone(UTC).timestamp()
@@ -2351,4 +2386,6 @@ def compute_usage_between(
         grid_import_window_end_hour=grid_import_window_end_hour,
         grid_export_window_start_hour=grid_export_window_start_hour,
         grid_export_window_end_hour=grid_export_window_end_hour,
+        exclude_tesla_load=exclude_tesla_load,
+        exclude_pool_pump_load=exclude_pool_pump_load,
     )

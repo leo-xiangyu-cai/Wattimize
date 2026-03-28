@@ -140,9 +140,12 @@ const I18N = {
     notificationMatrixConditionTeslaConnected: "Tesla connected",
     notificationMatrixConditionTeslaReady: "Tesla ready",
     notificationMatrixConditionTeslaGridCap: "Predicted grid within 15.0kW cap",
-    notificationMatrixConditionTeslaSocStart: "Solplanet SOC >= start threshold",
-    notificationMatrixConditionTeslaSocKeep: "Solplanet SOC >= keep threshold",
-    notificationMatrixConditionTeslaOvernightReserve: "Solplanet SOC > overnight reserve",
+    notificationMatrixConditionTeslaSocStart: "Solplanet SOC >= 95% start threshold",
+    notificationMatrixConditionTeslaSocKeep: "Solplanet SOC >= 90% keep threshold",
+    notificationMatrixConditionTeslaOvernightReserve: "Solplanet SOC > 10% overnight reserve",
+    notificationMatrixConditionPoolPumpSchedule: "Pump schedule",
+    notificationMatrixConditionPoolPumpRuntimeBudget: "Runtime budget",
+    notificationMatrixConditionValueCurrentNeed: "{current} (need {need})",
     notificationMatrixConditionSajProfileApplied: "Target SAJ profile applied",
     notificationMatrixConditionSajSyncCleared: "Remote sync cleared",
     notificationMatrixProgressWatching: "Watching",
@@ -175,7 +178,7 @@ const I18N = {
     notificationMatrixWindowPostExportPeakTitle: "Post-Export Peak",
     notificationMatrixWindowPostExportPeakSummary: "20:00-23:00. Worker tries to avoid expensive import and raises early warnings when that risk appears.",
     notificationMatrixWindowOvernightTitle: "Overnight Shoulder",
-    notificationMatrixWindowOvernightSummary: "23:00-11:00 next day. Worker watches SAJ battery reminders and starts Tesla charging when Solplanet stays above its overnight reserve.",
+    notificationMatrixWindowOvernightSummary: "23:00-11:00 next day. Worker watches SAJ battery reminders, starts Tesla charging when Solplanet stays above its overnight reserve, and can run the pool pump overnight within the battery budget.",
     notificationMatrixWindowAlwaysTitle: "Always-On Battery Watch",
     notificationMatrixWindowAlwaysSummary: "Not part of the 24-hour window split. Worker sends a one-time notification when either battery newly reaches 100% SOC.",
     notificationMatrixRuleTypeNotification: "Notification",
@@ -192,6 +195,8 @@ const I18N = {
     notificationRuleTeslaAfterFreePeakTrigger: "Start when Solplanet SOC reaches 95%, stop when it falls below 90%, otherwise hold the current state.",
     notificationRuleTeslaOvernightShoulderTitle: "Tesla charging follows Solplanet reserve overnight",
     notificationRuleTeslaOvernightShoulderTrigger: "During 23:00-11:00, start Tesla charging when Solplanet SOC stays above 10%; stop when it drops to 10% or below.",
+    notificationRulePoolPumpOvernightTitle: "Pool pump uses overnight battery budget",
+    notificationRulePoolPumpOvernightTrigger: "During 23:00-05:00, estimate how long the pump can run from the overnight battery forecast, then use only 80% of that available runtime.",
     notificationRuleTeslaExportWindowTitle: "Tesla charging uses solar surplus during ZeroHero Window",
     notificationRuleTeslaExportWindowTrigger: "Use solar surplus and Solplanet SOC thresholds to decide charging state and current while avoiding unnecessary grid import.",
     notificationRuleTeslaPostExportPeakTitle: "Tesla charging is forced off in expensive period",
@@ -420,6 +425,18 @@ const I18N = {
     dashboardNotificationLevelInfo: "Info",
     dashboardNotificationMeta: "Window {window} · Trigger {trigger} · {time}",
     integratedFlowSubtitle: "SAJ solar/grid + SAJ/Solplanet batteries, dual inverters in parallel",
+    poolPumpKicker: "Home Load Device",
+    poolPumpTitle: "Pool Pump",
+    poolPumpMeta: "Mounted under Home Load. Does not change the combined load split.",
+    poolPumpPowerLabel: "Current Power",
+    poolPumpStateLabel: "State",
+    poolPumpStateOn: "Running",
+    poolPumpStateOff: "Stopped",
+    poolPumpStateUnavailable: "Unavailable",
+    poolPumpActionTurnOn: "Turn On Pump",
+    poolPumpActionTurnOff: "Turn Off Pump",
+    poolPumpActionBusy: "Updating...",
+    poolPumpControlFailed: "Pool pump control failed: {error}",
     mobileFlowTitle: "Phone Flow",
     mobileFlowHint: "Compact icon flow with linked devices for phone screens.",
     mobileFlowGridStep: "Grid -> Switchboard",
@@ -483,8 +500,20 @@ const I18N = {
     teslaControlStatusFailedStop: "Stop request did not go through.",
     teslaControlStatusStarted: "Charging started.",
     teslaControlStatusStopped: "Charging stopped.",
-    teslaChargeForecastEstimate: "Est. Tesla headroom {value} kWh",
-    teslaChargeForecastUnavailable: "Est. Tesla headroom -",
+    overnightEnergyReferenceTitle: "Overnight Battery Reference",
+    overnightEnergyReferenceIntro: "Shows recent average base home load excluding Tesla charging and the pool pump, then estimates usable battery left by the next 08:00 and 11:00.",
+    overnightEnergyReferenceCurrentUsable: "Current usable battery",
+    overnightEnergyReferenceAvg3d: "Base use, last 3 windows",
+    overnightEnergyReferenceAvg7d: "Base use, last 7 windows",
+    overnightEnergyReferenceLeft3d: "Battery left, 3-window avg",
+    overnightEnergyReferenceLeft7d: "Battery left, 7-window avg",
+    overnightEnergyReferenceTargetLabel: "By {time}",
+    overnightEnergyReferenceReferenceOnly: "Reference only",
+    overnightEnergyReferenceUnavailable: "-",
+    overnightEnergyReferencePumpScenarioTitle: "Pump 23:00-05:00 (6h)",
+    overnightEnergyReferencePumpPower: "Pump power",
+    overnightEnergyReferencePumpEnergy: "Pump energy",
+    overnightEnergyReferenceAssumedPower: "Assumed power",
     teslaBatteryEnergyUnavailable: "- / - kWh",
     teslaChargeEtaUnavailable: "Est. full -",
     batteryTitle: "Battery",
@@ -824,9 +853,12 @@ const I18N = {
     notificationMatrixConditionTeslaConnected: "Tesla 已连接",
     notificationMatrixConditionTeslaReady: "Tesla 状态可控制",
     notificationMatrixConditionTeslaGridCap: "预测电网功率不超过 15.0kW 上限",
-    notificationMatrixConditionTeslaSocStart: "Solplanet SOC 达到启动阈值",
-    notificationMatrixConditionTeslaSocKeep: "Solplanet SOC 达到维持阈值",
-    notificationMatrixConditionTeslaOvernightReserve: "Solplanet SOC 高于夜间保底",
+    notificationMatrixConditionTeslaSocStart: "Solplanet SOC 达到 95% 启动阈值",
+    notificationMatrixConditionTeslaSocKeep: "Solplanet SOC 达到 90% 维持阈值",
+    notificationMatrixConditionTeslaOvernightReserve: "Solplanet SOC 高于 10% 夜间保底",
+    notificationMatrixConditionPoolPumpSchedule: "水泵运行时段",
+    notificationMatrixConditionPoolPumpRuntimeBudget: "可用运行时长",
+    notificationMatrixConditionValueCurrentNeed: "{current}（需 {need}）",
     notificationMatrixConditionSajProfileApplied: "SAJ 目标模式已生效",
     notificationMatrixConditionSajSyncCleared: "远程同步已完成",
     notificationMatrixProgressWatching: "监控中",
@@ -859,7 +891,7 @@ const I18N = {
     notificationMatrixWindowPostExportPeakTitle: "Export 后高价时段",
     notificationMatrixWindowPostExportPeakSummary: "20:00-23:00。这个窗口会尽量避免高价购电，并在风险出现时尽早提醒。",
     notificationMatrixWindowOvernightTitle: "夜间肩时段",
-    notificationMatrixWindowOvernightSummary: "23:00-次日11:00。这个窗口会继续监控 SAJ 电池提醒，并在 Solplanet SOC 高于夜间保底时启动 Tesla 充电。",
+    notificationMatrixWindowOvernightSummary: "23:00-次日11:00。这个窗口会继续监控 SAJ 电池提醒，在 Solplanet SOC 高于夜间保底时启动 Tesla 充电，并在电池预算允许时夜间运行水泵。",
     notificationMatrixWindowAlwaysTitle: "始终开启的满电监控",
     notificationMatrixWindowAlwaysSummary: "不属于 24 小时时段切分。任一电池新达到 100% SOC 时发送一次通知。",
     notificationMatrixRuleTypeNotification: "通知",
@@ -876,6 +908,8 @@ const I18N = {
     notificationRuleTeslaAfterFreePeakTrigger: "Solplanet SOC 到 95% 开始充，低于 90% 停止，区间内维持当前状态。",
     notificationRuleTeslaOvernightShoulderTitle: "夜间肩时段 Tesla 跟随 Solplanet 保底电量规则",
     notificationRuleTeslaOvernightShoulderTrigger: "23:00-次日11:00 期间，只要 Solplanet SOC 高于 10% 就允许 Tesla 充电；降到 10% 或以下就停止。",
+    notificationRulePoolPumpOvernightTitle: "夜间按电池预算运行水泵",
+    notificationRulePoolPumpOvernightTrigger: "23:00-05:00 期间，根据夜间电池预测算出水泵可运行时长，再只运行其中的 80%。",
     notificationRuleTeslaExportWindowTitle: "ZeroHero 时段 Tesla 按太阳能富余充电",
     notificationRuleTeslaExportWindowTrigger: "结合太阳能富余和 Solplanet SOC 阈值来决定 Tesla 的充电状态和充电电流，尽量避免不必要的电网取电。",
     notificationRuleTeslaPostExportPeakTitle: "高价时段强制关闭 Tesla 充电",
@@ -1104,6 +1138,18 @@ const I18N = {
     dashboardNotificationLevelInfo: "信息",
     dashboardNotificationMeta: "窗口 {window} · 条件 {trigger} · {time}",
     integratedFlowSubtitle: "SAJ 的 solar/grid + SAJ/Solplanet 电池，双逆变器并联",
+    poolPumpKicker: "家庭负载设备",
+    poolPumpTitle: "泳池水泵",
+    poolPumpMeta: "挂在 Home Load 下方显示，不改变综合负载拆分。",
+    poolPumpPowerLabel: "当前功率",
+    poolPumpStateLabel: "状态",
+    poolPumpStateOn: "运行中",
+    poolPumpStateOff: "已停止",
+    poolPumpStateUnavailable: "不可用",
+    poolPumpActionTurnOn: "打开水泵",
+    poolPumpActionTurnOff: "关闭水泵",
+    poolPumpActionBusy: "正在更新...",
+    poolPumpControlFailed: "泳池水泵控制失败：{error}",
     mobileFlowTitle: "手机流程视图",
     mobileFlowHint: "手机端的紧凑图标连线视图。",
     mobileFlowGridStep: "电网 -> 母线配电盘",
@@ -1167,8 +1213,20 @@ const I18N = {
     teslaControlStatusFailedStop: "停止充电请求没有成功发出。",
     teslaControlStatusStarted: "已开始充电。",
     teslaControlStatusStopped: "已停止充电。",
-    teslaChargeForecastEstimate: "近3天估算：Tesla 可充 {value} kWh",
-    teslaChargeForecastUnavailable: "近3天估算：Tesla 可充 -",
+    overnightEnergyReferenceTitle: "夜间电量参考",
+    overnightEnergyReferenceIntro: "展示已扣除 Tesla 充电和泳池水泵后的家庭基础平均用电，并按下一个 08:00 / 11:00 估算电池可用余量。",
+    overnightEnergyReferenceCurrentUsable: "当前可用电池",
+    overnightEnergyReferenceAvg3d: "最近 3 个窗口基础用电",
+    overnightEnergyReferenceAvg7d: "最近 7 个窗口基础用电",
+    overnightEnergyReferenceLeft3d: "按 3 个窗口均值剩余",
+    overnightEnergyReferenceLeft7d: "按 7 个窗口均值剩余",
+    overnightEnergyReferenceTargetLabel: "到 {time}",
+    overnightEnergyReferenceReferenceOnly: "仅供参考",
+    overnightEnergyReferenceUnavailable: "-",
+    overnightEnergyReferencePumpScenarioTitle: "水泵 23:00-05:00（6小时）",
+    overnightEnergyReferencePumpPower: "水泵功率",
+    overnightEnergyReferencePumpEnergy: "水泵耗电",
+    overnightEnergyReferenceAssumedPower: "估算功率",
     teslaBatteryEnergyUnavailable: "- / - kWh",
     teslaChargeEtaUnavailable: "预计充满 -",
     batteryTitle: "电池",
@@ -1768,6 +1826,7 @@ const stateCache = {
 let teslaControlBusy = false;
 let teslaCurrentControlBusy = false;
 let solplanetPinModalBusy = false;
+let poolPumpControlBusy = false;
 const TESLA_CONTROL_CONFIRM_POLL_MS = 1500;
 const TESLA_CONTROL_CONFIRM_TIMEOUT_MS = 15000;
 const TESLA_CONTROL_FEEDBACK_CLEAR_MS = 4000;
@@ -1798,6 +1857,13 @@ const NOTIFICATION_MATRIX_WINDOWS = [
         code: "tesla_overnight_shoulder_control",
         titleKey: "notificationRuleTeslaOvernightShoulderTitle",
         triggerKey: "notificationRuleTeslaOvernightShoulderTrigger",
+      },
+      {
+        kind: "operation",
+        level: "info",
+        code: "pool_pump_overnight_control",
+        titleKey: "notificationRulePoolPumpOvernightTitle",
+        triggerKey: "notificationRulePoolPumpOvernightTrigger",
       },
       {
         kind: "notification",
@@ -3065,6 +3131,7 @@ const COMBINED_LAYOUT = {
     solar: { x: 8, y: 594 },
     switchboard: { x: 558, y: 318 },
     load: { x: 312, y: 136 },
+    poolPump: { x: 320, y: -18 },
     tesla: { x: 830, y: 0 },
     battery1: { x: 24, y: 32 },
     inverter1: { x: 24, y: 360 },
@@ -3097,6 +3164,14 @@ const COMBINED_LAYOUT = {
     switchboardToHomeLoad: {
       points: [{ x: 670, y: 198 }, { x: 496, y: 198 }],
       labelPosition: { x: 583, y: 230 },
+      lineCap: "butt",
+      lineJoin: "miter",
+      tailUpperGapLength: 9,
+      tailRoundedCorner: true,
+    },
+    switchboardToPoolPump: {
+      points: [{ x: 670, y: 198 }, { x: 670, y: 54 }, { x: 488, y: 54 }],
+      labelPosition: { x: 592, y: 88 },
       lineCap: "butt",
       lineJoin: "miter",
       tailUpperGapLength: 9,
@@ -3274,13 +3349,28 @@ function buildCombinedDiagramSpec() {
         ],
       },
       {
+        id: "combined-poolPumpNode",
+        kind: "load",
+        icon: "load",
+        title: "Pool Pump",
+        titleKey: "poolPumpTitle",
+        width: 168,
+        height: 132,
+        position: layout.nodes.poolPump,
+        lines: [
+          { id: "combined-poolPumpPowerValue", className: "node-value", text: "-" },
+          { id: "combined-poolPumpState", className: "node-state muted", text: "-" },
+          { type: "button", id: "combined-poolPumpToggleBtn", className: "pool-pump-control-btn btn secondary", text: "-" },
+        ],
+      },
+      {
         id: "combined-teslaNode",
         kind: "tesla",
         icon: "tesla",
         title: "Tesla",
         titleKey: "teslaChargingLabel",
         width: 176,
-        height: 362,
+        height: 334,
         position: layout.nodes.tesla,
         lines: [
           {
@@ -3292,7 +3382,6 @@ function buildCombinedDiagramSpec() {
           { id: "combined-teslaChargingPowerValue", className: "node-sub-value", text: "-" },
           { id: "combined-teslaChargingCurrentValue", className: "node-mini-value muted", text: "-" },
           { id: "combined-teslaCurrentControlValue", className: "node-mini-value muted", text: "-" },
-          { id: "combined-teslaChargeForecastValue", className: "node-mini-value muted tesla-charge-forecast", text: "-" },
           { type: "button", id: "combined-teslaChargingToggleBtn", className: "tesla-control-btn btn secondary", text: "-" },
         ],
       },
@@ -3409,6 +3498,18 @@ function buildCombinedDiagramSpec() {
         lineJoin: layout.edges.switchboardToHomeLoad.lineJoin,
         tailUpperGapLength: layout.edges.switchboardToHomeLoad.tailUpperGapLength,
         tailRoundedCorner: layout.edges.switchboardToHomeLoad.tailRoundedCorner,
+      },
+      {
+        id: "combined-lineSwitchboardToPoolPump",
+        source: "combined-switchboardNode",
+        target: "combined-poolPumpNode",
+        labelId: "combined-flowLabelSwitchboardToPoolPump",
+        points: layout.edges.switchboardToPoolPump.points,
+        labelPosition: layout.edges.switchboardToPoolPump.labelPosition,
+        lineCap: layout.edges.switchboardToPoolPump.lineCap,
+        lineJoin: layout.edges.switchboardToPoolPump.lineJoin,
+        tailUpperGapLength: layout.edges.switchboardToPoolPump.tailUpperGapLength,
+        tailRoundedCorner: layout.edges.switchboardToPoolPump.tailRoundedCorner,
       },
       {
         id: "combined-lineSwitchboardToTotalLoad",
@@ -4231,14 +4332,6 @@ function isTeslaConnected(teslaInfo = null) {
   return null;
 }
 
-function formatTeslaChargeForecastSummary(teslaInfo = null) {
-  const forecastKwh = toFiniteNumber(teslaInfo?.chargeForecastKwh);
-  if (forecastKwh === null) return t("teslaChargeForecastUnavailable");
-  return t("teslaChargeForecastEstimate", {
-    value: formatTrimmedDecimal(Math.max(forecastKwh, 0), 1),
-  });
-}
-
 function sleep(ms) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -4356,7 +4449,6 @@ function teslaInfoFromCombinedFlow(combinedFlow) {
   const charging = tesla?.charging || {};
   const battery = tesla?.battery || {};
   const control = tesla?.control || {};
-  const chargeForecast = tesla?.charge_forecast || {};
   const operations = tesla?.operations || {};
   const currentOperation = operations?.set_charge_current || null;
   const result = {
@@ -4388,10 +4480,6 @@ function teslaInfoFromCombinedFlow(combinedFlow) {
     canStart: Boolean(control?.can_start),
     canStop: Boolean(control?.can_stop),
     controlFeedback: control?.feedback || null,
-    chargeForecastKwh: toFiniteNumber(chargeForecast?.estimated_tesla_charge_kwh),
-    chargeForecastAverageHomeLoadKwh: toFiniteNumber(chargeForecast?.average_home_load_kwh),
-    chargeForecastUsableBatteryKwh: toFiniteNumber(chargeForecast?.usable_battery_total_kwh),
-    chargeForecastDaysUsed: Number(chargeForecast?.days_used || 0),
     controlSwitchEntityId: null,
     controlStartButtonEntityId: null,
     controlStopButtonEntityId: null,
@@ -4411,6 +4499,91 @@ function teslaInfoFromCombinedFlow(combinedFlow) {
     teslaPendingCurrentTargetA = null;
   }
   return result;
+}
+
+function overnightEnergyReferenceFromCombinedFlow(combinedFlow) {
+  return combinedFlow?.overnight_energy_reference || null;
+}
+
+function formatEnergyReferenceValue(value) {
+  const numeric = toFiniteNumber(value);
+  if (numeric === null) return t("overnightEnergyReferenceUnavailable");
+  return `${formatTrimmedDecimal(numeric, 1)} kWh`;
+}
+
+function formatPowerReferenceValue(value) {
+  const numeric = toFiniteNumber(value);
+  if (numeric === null) return t("overnightEnergyReferenceUnavailable");
+  return `${formatTrimmedDecimal(numeric, 0)} W`;
+}
+
+function formatEnergyReferenceTarget(target) {
+  if (!target) return "-";
+  const dt = new Date(target);
+  if (Number.isNaN(dt.getTime())) return "-";
+  return dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function renderOvernightEnergyReference(combinedFlow) {
+  const reference = overnightEnergyReferenceFromCombinedFlow(combinedFlow);
+  const usableBatteryKwh = toFiniteNumber(reference?.usable_battery_total_kwh);
+  const updatedAtText = formatDateTimeWithAgo(reference?.updated_at_local || combinedFlow?.updated_at);
+  setText("overnightEnergyReferenceUpdatedAt", `${t("updatedAt")}: ${updatedAtText}`);
+  setText("overnightEnergyReferenceUsableBatteryValue", formatEnergyReferenceValue(usableBatteryKwh));
+
+  const projections = reference?.projections || {};
+  const projectionEntries = [
+    ["next8", projections?.next_8am || null],
+    ["next11", projections?.next_11am || null],
+  ];
+  for (const [prefix, projection] of projectionEntries) {
+    const targetLabel = projection?.target_at_local
+      ? t("overnightEnergyReferenceTargetLabel", { time: formatEnergyReferenceTarget(projection.target_at_local) })
+      : t("overnightEnergyReferenceUnavailable");
+    setText(`overnightEnergyReference${prefix}Title`, targetLabel);
+    setText(
+      `overnightEnergyReference${prefix}Badge`,
+      projection?.reference_only ? t("overnightEnergyReferenceReferenceOnly") : "",
+    );
+    setText(
+      `overnightEnergyReference${prefix}Avg3d`,
+      formatEnergyReferenceValue(projection?.averages?.days_3?.average_home_load_kwh),
+    );
+    setText(
+      `overnightEnergyReference${prefix}Avg7d`,
+      formatEnergyReferenceValue(projection?.averages?.days_7?.average_home_load_kwh),
+    );
+    setText(
+      `overnightEnergyReference${prefix}Left3d`,
+      formatEnergyReferenceValue(projection?.estimated_remaining_battery_kwh?.days_3),
+    );
+    setText(
+      `overnightEnergyReference${prefix}Left7d`,
+      formatEnergyReferenceValue(projection?.estimated_remaining_battery_kwh?.days_7),
+    );
+  }
+
+  const pumpScenario = reference?.pool_pump_scenarios?.night_11pm_to_5am || null;
+  setText(
+    "overnightEnergyReferencePumpScenarioBadge",
+    pumpScenario?.using_assumed_power ? t("overnightEnergyReferenceAssumedPower") : "",
+  );
+  setText(
+    "overnightEnergyReferencePumpPowerValue",
+    formatPowerReferenceValue(pumpScenario?.pool_pump_power_w),
+  );
+  setText(
+    "overnightEnergyReferencePumpEnergyValue",
+    formatEnergyReferenceValue(pumpScenario?.pool_pump_energy_kwh),
+  );
+  setText(
+    "overnightEnergyReferencePumpLeft3d",
+    formatEnergyReferenceValue(pumpScenario?.averages?.days_3?.estimated_remaining_battery_kwh),
+  );
+  setText(
+    "overnightEnergyReferencePumpLeft7d",
+    formatEnergyReferenceValue(pumpScenario?.averages?.days_7?.estimated_remaining_battery_kwh),
+  );
 }
 
 function renderTeslaControlButton(teslaInfo = null) {
@@ -4452,7 +4625,6 @@ function ensureTeslaCardUnifiedContent() {
     "combined-teslaChargingCurrentValue",
     "combined-teslaCurrentControlValue",
     "combined-teslaConnectionValue",
-    "combined-teslaChargeForecastValue",
     "combined-teslaChargingToggleBtn",
   ].forEach((id) => {
     const el = document.getElementById(id);
@@ -4766,7 +4938,7 @@ function renderMobileCombinedFlow({
   setHtml("energyFlowCombinedMobile", html);
 }
 
-function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
+function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null, poolPumpDevice = null) {
   const combined = buildCombinedFlowMetrics(combinedFlow);
   const {
     pvW,
@@ -4802,6 +4974,14 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
     homeLoadW = Math.max(0, totalLoadW - teslaW);
     if (Math.abs(homeLoadW) <= BALANCE_TOLERANCE_W) homeLoadW = 0;
   }
+  const poolPumpW = toFiniteNumber(poolPumpDevice?.metrics?.power_w);
+  let residualHomeLoadW = homeLoadW;
+  if (residualHomeLoadW !== null && poolPumpW !== null) {
+    residualHomeLoadW = Math.max(0, residualHomeLoadW - poolPumpW);
+    if (Math.abs(residualHomeLoadW) <= BALANCE_TOLERANCE_W) residualHomeLoadW = 0;
+  }
+  const poolPumpEnabled = poolPumpDevice?.control?.enabled === true;
+  const poolPumpAvailable = poolPumpDevice?.control?.available !== false && poolPumpDevice?.control?.switch_entity;
 
   const combinedLoadError = Boolean(combinedFlow?.__load_error);
   const combinedPending = !combinedLoadError && solarW === null && gridW === null;
@@ -4825,7 +5005,12 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
     "combined-inverter2RatioValue",
     formatValueWithDataKindHtml(formatInverterConversion(inverter2W, battery2W, solar2W), dataKinds.inverterRatio),
   );
-  setHtml("combined-loadPowerValue", formatValueWithDataKindHtml(formatPowerKwFromWatts(homeLoadW), dataKinds.homeLoad));
+  setHtml("combined-loadPowerValue", formatValueWithDataKindHtml(formatPowerKwFromWatts(residualHomeLoadW), dataKinds.homeLoad));
+  setHtml("combined-poolPumpPowerValue", formatValueWithDataKindHtml(formatPowerKwFromWatts(poolPumpW), "real"));
+  setText(
+    "combined-poolPumpState",
+    poolPumpEnabled ? t("poolPumpStateOn") : (poolPumpDevice?.control?.enabled === false ? t("poolPumpStateOff") : t("poolPumpStateUnavailable")),
+  );
   setHtml(
     "combined-teslaChargingPowerValue",
     formatValueWithDataKindHtml(formatTeslaBatteryEnergyValue(teslaCurrentEnergyKwh, teslaTotalCapacityKwh), "real"),
@@ -4838,20 +5023,6 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
       voltageV: teslaInfo?.voltageV,
     }),
   );
-  setText(
-    "combined-teslaChargeForecastValue",
-    teslaChargingW !== null && teslaChargingW >= POWER_FLOW_ACTIVE_THRESHOLD_W
-      ? formatTeslaChargeEtaSummary(teslaInfo)
-      : formatTeslaChargeForecastSummary(teslaInfo),
-  );
-  const teslaForecastEl = document.getElementById("combined-teslaChargeForecastValue");
-  if (teslaForecastEl) {
-    const forecastText = teslaChargingW !== null && teslaChargingW >= POWER_FLOW_ACTIVE_THRESHOLD_W
-      ? formatTeslaChargeEtaSummary(teslaInfo)
-      : formatTeslaChargeForecastSummary(teslaInfo);
-    teslaForecastEl.title = forecastText;
-    teslaForecastEl.setAttribute("aria-label", forecastText);
-  }
   renderBatterySocDisplay({
     system: null,
     soc: teslaSoc,
@@ -4886,25 +5057,12 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   setNodeSourceTip(
     "combined-loadPowerValue",
     currentLang === "zh"
-      ? `来源: 计算 ${sources.load}\n说明: 家庭负载(不含 Tesla) = 总负载 - 特斯拉充电`
-      : `Source: Calculated ${sources.load}\nNote: Home load (excluding Tesla) = total load - Tesla charging`,
+      ? `来源: 计算 ${sources.load}\n说明: 其他家庭负载 = 总负载 - 特斯拉充电 - 泳池水泵`
+      : `Source: Calculated ${sources.load}\nNote: Remaining home load = total load - Tesla charging - Pool Pump`,
   );
+  setNodeSourceTip("combined-poolPumpPowerValue", null);
   setNodeSourceTip("combined-teslaChargingPowerValue", null);
   setNodeSourceTip("combined-teslaChargingCurrentValue", null);
-  setNodeSourceTip(
-    "combined-teslaChargeForecastValue",
-    teslaChargingW !== null && teslaChargingW >= POWER_FLOW_ACTIVE_THRESHOLD_W
-      ? (
-        currentLang === "zh"
-          ? "优先使用 Home Assistant 的 Tesla 预计充满实体；如果没有，则按当前充电功率和剩余容量估算。"
-          : "Uses the Home Assistant Tesla completion estimate when available, otherwise estimates from current charging power and remaining capacity."
-      )
-      : (
-        currentLang === "zh"
-          ? "按最近 3 个已完成的 20:00 到次日 11:00 窗口平均家庭用电量估算，再扣减两块电池当前可用余量后得到。"
-          : "Estimated from the average home load across the last 3 completed 20:00 to next-day 11:00 windows, net of current usable battery energy."
-      ),
-  );
   setNodeSourceTip("combined-teslaSocValue", null);
 
   const solarActive = solarW !== null && solarW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
@@ -4914,13 +5072,15 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   setText("combined-gridState", gridActive ? (gridImport ? t("stateImporting") : t("stateExporting")) : t("stateIdle"));
   const switchboardActive = solarActive || gridActive || (totalLoadW !== null && totalLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W);
   setText("combined-switchboardState", switchboardActive ? t("switchboardStateActive") : t("switchboardStateIdle"));
-  const loadActive = homeLoadW !== null && homeLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
+  const loadActive = residualHomeLoadW !== null && residualHomeLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
+  const poolPumpActive = (poolPumpW !== null && poolPumpW >= POWER_FLOW_ACTIVE_THRESHOLD_W) || poolPumpEnabled;
   const teslaChargingActive = teslaChargingW !== null && teslaChargingW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const teslaConnected = isTeslaConnected(teslaInfo);
   const totalLoadActive = totalLoadW !== null && totalLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   setText("combined-loadState", loadActive ? t("stateConsuming") : t("stateIdle"));
   setFlowLine("combined-lineSwitchboardToTotalLoad", totalLoadActive, false);
   setFlowLine("combined-lineSwitchboardToHomeLoad", loadActive, false);
+  setFlowLine("combined-lineSwitchboardToPoolPump", poolPumpActive, false);
   setFlowLine("combined-lineSwitchboardToTeslaB", teslaChargingActive, false);
   setFlowEdgeMarker("combined-flowMarkerSwitchboardToTesla", teslaConnected === false);
 
@@ -5000,7 +5160,8 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   setFlowValueLabel("combined-flowLabelGridToSwitchboard", gridW, gridActive, dataKinds.grid);
   setFlowValueLabel("combined-flowLabelSolarToInverter1", solarToInverter1W, solarToInverter1Active, dataKinds.solarToInverter1);
   setFlowValueLabel("combined-flowLabelSwitchboardToTotalLoad", totalLoadW, totalLoadActive, dataKinds.totalLoad);
-  setFlowValueLabel("combined-flowLabelSwitchboardToHomeLoad", homeLoadW, loadActive, dataKinds.homeLoad);
+  setFlowValueLabel("combined-flowLabelSwitchboardToHomeLoad", residualHomeLoadW, loadActive, dataKinds.homeLoad);
+  setFlowValueLabel("combined-flowLabelSwitchboardToPoolPump", poolPumpW, poolPumpActive, "real");
   setFlowValueLabel("combined-flowLabelSwitchboardToTesla", teslaChargingW, teslaChargingActive, dataKinds.teslaCurrent);
   setFlowValueLabel("combined-flowLabelBattery1ToInverter1", battery1W, battery1Active, dataKinds.battery1);
   setFlowValueLabel("combined-flowLabelBattery2ToInverter2", battery2W, battery2Active, dataKinds.battery2);
@@ -5047,7 +5208,7 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
   renderMobileCombinedFlow({
     combined,
     teslaInfo,
-    homeLoadW,
+    homeLoadW: residualHomeLoadW,
     totalLoadW,
     teslaChargingW,
     teslaCurrentA,
@@ -5056,11 +5217,48 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null) {
     battery2Soc,
     formulaHtml: formula,
   });
+  const poolPumpBtn = document.getElementById("combined-poolPumpToggleBtn");
+  if (poolPumpBtn) {
+    poolPumpBtn.disabled = poolPumpControlBusy || !poolPumpAvailable;
+    poolPumpBtn.classList.toggle("active", poolPumpEnabled);
+    if (poolPumpControlBusy) poolPumpBtn.textContent = t("poolPumpActionBusy");
+    else if (!poolPumpAvailable) poolPumpBtn.textContent = t("poolPumpStateUnavailable");
+    else poolPumpBtn.textContent = poolPumpEnabled ? t("poolPumpActionTurnOff") : t("poolPumpActionTurnOn");
+  }
+}
+
+async function togglePoolPump() {
+  const summary = stateCache.lastSummary || { combinedFlow: { metrics: {} }, collectorStatus: null };
+  const device = summary.poolPump || null;
+  const enabled = device?.control?.enabled;
+  if (typeof enabled !== "boolean" || poolPumpControlBusy) return;
+  poolPumpControlBusy = true;
+  renderSummary(summary);
+  try {
+    const result = await fetchJson("/api/devices/pool-pump/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !enabled }),
+      timeoutMs: 12000,
+    });
+    summary.poolPump = result?.device || null;
+    stateCache.lastSummary = summary;
+    writeCachedDashboardSummary(summary);
+    renderSummary(summary);
+  } catch (err) {
+    console.error("Pool pump toggle failed", err);
+    const poolPumpStateEl = document.getElementById("combined-poolPumpState");
+    if (poolPumpStateEl) poolPumpStateEl.textContent = t("poolPumpControlFailed", { error: String(err) });
+  } finally {
+    poolPumpControlBusy = false;
+    renderSummary(stateCache.lastSummary || summary);
+  }
 }
 
 function renderSummary(payload) {
   const { combinedFlow, collectorStatus } = payload;
   const tesla = teslaInfoFromCombinedFlow(combinedFlow);
+  const poolPump = payload.poolPump || combinedFlow?.pool_pump || null;
   const combinedCount = Array.isArray(combinedFlow?.display?.order)
     ? combinedFlow.display.order.length
     : 0;
@@ -5069,7 +5267,8 @@ function renderSummary(payload) {
     count: Number(combinedCount) || 0,
   });
   renderDashboardNotifications(stateCache.lastDashboardNotifications);
-  renderCombinedEnergyFlow(combinedFlow, tesla);
+  renderCombinedEnergyFlow(combinedFlow, tesla, poolPump);
+  renderOvernightEnergyReference(combinedFlow);
 }
 
 function dashboardNotificationLevelText(level) {
@@ -5409,7 +5608,11 @@ function getNotificationMatrixProgress(item, windowItem, summary, options = {}) 
     || code === "tesla_overnight_shoulder_control"
   ) {
     const source = code === "tesla_overnight_shoulder_control" ? sajWatch : midday;
-    return getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWindowId, source, metrics);
+    return getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWindowId, source, metrics, live);
+  }
+  if (code === "pool_pump_overnight_control") {
+    const source = combinedSystems.last_pool_pump_overnight_check || {};
+    return getNotificationMatrixPoolPumpOperationProgress(windowItem, currentWindowId, source);
   }
   if (code === "solplanet_low_available_capacity") {
     const current = Number(live?.solplanet_battery_energy_kwh);
@@ -5521,6 +5724,23 @@ function getNotificationMatrixProgress(item, windowItem, summary, options = {}) 
   };
 }
 
+function getNotificationMatrixSolplanetSoc(metrics, live, source = null) {
+  const candidates = [
+    metrics?.battery2_soc_percent,
+    live?.solplanet_battery_soc_percent,
+    source?.battery2_soc_percent,
+    source?.overnight_shoulder_tesla?.solplanet_soc_percent,
+    source?.after_free_shoulder?.solplanet_soc_percent,
+    source?.after_free_peak?.solplanet_soc_percent,
+    source?.export_window?.solplanet_soc_percent,
+  ];
+  for (const value of candidates) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Number.NaN;
+}
+
 function getNotificationMatrixSajProfileProgress(code, windowItem, currentWindowId, midday) {
   const guard = midday?.saj_profile_guard || {};
   const expectedProfile = code === "saj_profile_free_energy" ? "time_of_use" : "self_consumption";
@@ -5566,14 +5786,14 @@ function getNotificationMatrixSajProfileProgress(code, windowItem, currentWindow
   };
 }
 
-function getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWindowId, source, metrics) {
+function getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWindowId, source, metrics, live) {
   const isCurrentWindow = currentWindowId === windowItem?.id;
   const action = source?.action || {};
   const decision = source?.decision || {};
   const before = source?.tesla_state_before || {};
   const actualCurrent = Number(metrics?.tesla_charge_current_amps);
   const configuredCurrent = Number(metrics?.tesla_configured_current_amps);
-  const solplanetSoc = Number(metrics?.battery2_soc_percent);
+  const solplanetSoc = getNotificationMatrixSolplanetSoc(metrics, live, source);
   const rawConnectionState = String(metrics?.tesla_connection_state || before?.connection_state || "").trim().toLowerCase();
   const connectionState = formatTeslaConnectionText(rawConnectionState);
   const rawStatusText = String(before?.status_text || "").trim().toLowerCase();
@@ -5622,7 +5842,7 @@ function getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWi
     triggerText = t("notificationMatrixTeslaTriggerSolplanetReserve", { soc: socText });
     conditions.push({
       label: t("notificationMatrixConditionTeslaOvernightReserve"),
-      value: socText,
+      value: t("notificationMatrixConditionValueCurrentNeed", { current: socText, need: "> 10%" }),
       matched: Number.isFinite(solplanetSoc) && solplanetSoc > 10,
     });
   } else if (code === "tesla_after_free_shoulder_control" || code === "tesla_after_free_peak_control") {
@@ -5630,12 +5850,12 @@ function getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWi
     triggerText = t("notificationMatrixTeslaTriggerSolplanetSoc", { soc: socText });
     conditions.push({
       label: t("notificationMatrixConditionTeslaSocStart"),
-      value: socText,
+      value: t("notificationMatrixConditionValueCurrentNeed", { current: socText, need: ">= 95%" }),
       matched: Number.isFinite(solplanetSoc) && solplanetSoc >= 95,
     });
     conditions.push({
       label: t("notificationMatrixConditionTeslaSocKeep"),
-      value: socText,
+      value: t("notificationMatrixConditionValueCurrentNeed", { current: socText, need: ">= 90%" }),
       matched: Number.isFinite(solplanetSoc) && solplanetSoc >= 90,
     });
   }
@@ -5653,6 +5873,55 @@ function getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWi
     deltaText,
     conditions,
     hideBar: true,
+  };
+}
+
+function getNotificationMatrixPoolPumpOperationProgress(windowItem, currentWindowId, source) {
+  const isCurrentWindow = currentWindowId === windowItem?.id;
+  const action = source?.action || {};
+  const runtimeBudget = source?.runtime_budget || {};
+  const poolPumpState = source?.pool_pump_state_before || {};
+  const pumpEnabled = poolPumpState?.control?.enabled === true;
+  const availableHours = Number(runtimeBudget?.available_runtime_hours);
+  const targetHours = Number(runtimeBudget?.target_runtime_hours);
+  const remainingHours = Number(runtimeBudget?.remaining_runtime_hours);
+  let statusText = t("notificationMatrixProgressScheduled");
+  if (isCurrentWindow) {
+    const actionType = String(action?.type || "").trim().toLowerCase();
+    if (actionType && actionType !== "noop") statusText = t("notificationMatrixProgressApplied");
+    else if (pumpEnabled) statusText = t("notificationMatrixProgressHolding");
+    else statusText = t("notificationMatrixProgressWatching");
+  }
+  const ratio = Number.isFinite(targetHours) && targetHours > 0 && Number.isFinite(remainingHours)
+    ? Math.max(0, Math.min(1, 1 - (remainingHours / targetHours)))
+    : 0;
+  return {
+    ratio,
+    statusText,
+    currentText: t("notificationMatrixProgressCurrent", {
+      value: Number.isFinite(remainingHours) ? `${formatTrimmedDecimal(remainingHours, 2)}h` : "-",
+    }),
+    triggerText: t("notificationMatrixProgressTarget", {
+      value: Number.isFinite(targetHours) ? `${formatTrimmedDecimal(targetHours, 2)}h` : "-",
+    }),
+    deltaText: String(source?.decision_reason || "").trim() || (pumpEnabled ? "running" : "idle"),
+    conditions: [
+      {
+        label: t("notificationMatrixConditionCurrentWindow"),
+        value: isCurrentWindow ? t("notificationMatrixCurrentWindowBadge") : windowItem?.schedule || "-",
+        matched: isCurrentWindow,
+      },
+      {
+        label: t("notificationMatrixConditionPoolPumpSchedule"),
+        value: String(source?.pump_schedule || "23:00-05:00"),
+        matched: Boolean(source?.pump_schedule_active),
+      },
+      {
+        label: t("notificationMatrixConditionPoolPumpRuntimeBudget"),
+        value: Number.isFinite(availableHours) ? `${formatTrimmedDecimal(availableHours, 2)}h` : "-",
+        matched: Number.isFinite(availableHours) && availableHours > 0,
+      },
+    ],
   };
 }
 
@@ -9894,6 +10163,7 @@ async function loadSummary() {
   const summary = stateCache.lastSummary || {
     combinedFlow: { metrics: {} },
     collectorStatus: null,
+    poolPump: null,
   };
   stateCache.lastSummary = summary;
   const cachedCombinedFlow = summary?.combinedFlow || { metrics: {} };
@@ -9906,7 +10176,9 @@ async function loadSummary() {
   renderSummary(summary);
   renderSajProfilePanel();
   const previousCombinedFlow = summary.combinedFlow;
+  const previousPoolPump = summary.poolPump || null;
   const combinedRequest = fetchJson("/api/energy-flow/combined", { timeoutMs: 30000 });
+  const poolPumpRequest = fetchJson("/api/devices/pool-pump", { timeoutMs: 10000 });
 
   const baseResults = await Promise.allSettled([
     fetchJson("/api/collector/status", { timeoutMs: 6000 }),
@@ -9966,6 +10238,19 @@ async function loadSummary() {
           refreshing: false,
         });
       }
+      renderSummary(summary);
+    });
+
+  void poolPumpRequest
+    .then((poolPump) => {
+      if (requestId !== summaryRequestId) return;
+      summary.poolPump = poolPump;
+      writeCachedDashboardSummary(summary);
+      renderSummary(summary);
+    })
+    .catch(() => {
+      if (requestId !== summaryRequestId) return;
+      summary.poolPump = previousPoolPump;
       renderSummary(summary);
     });
 }
@@ -11195,6 +11480,9 @@ document.addEventListener("click", (event) => {
 initFlowDiagrams();
 bindClickIfPresent("combined-teslaChargingToggleBtn", () => {
   void toggleTeslaCharging();
+});
+bindClickIfPresent("combined-poolPumpToggleBtn", () => {
+  void togglePoolPump();
 });
 applyTranslations();
 samplingRangeState.day = new Date().toISOString().slice(0, 10);

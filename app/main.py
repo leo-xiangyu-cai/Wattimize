@@ -130,6 +130,13 @@ TESLA_CONTROL_FEEDBACK_PENDING_TIMEOUT_SECONDS = 15.0
 TESLA_CONTROL_FEEDBACK_SUCCESS_TTL_SECONDS = 4.0
 TESLA_CONTROL_FEEDBACK_FAILURE_TTL_SECONDS = 30.0
 TESLA_OPERATION_PENDING_TIMEOUT_SECONDS = 180.0
+POOL_PUMP_SWITCH_ENTITY_ID = "switch.cuco_v3_3c00_switch"
+POOL_PUMP_POWER_ENTITY_ID = "sensor.cuco_v3_3c00_electric_power"
+POOL_PUMP_ASSUMED_POWER_W = 1100.0
+POOL_PUMP_OVERNIGHT_RUNTIME_FRACTION = 0.8
+POOL_PUMP_OVERNIGHT_TARGET_START_HOUR = 23
+POOL_PUMP_OVERNIGHT_TARGET_END_HOUR = 5
+POOL_PUMP_OVERNIGHT_STATE_KEY = "operation_state.pool_pump_overnight"
 BATTERY_CAPACITY_KWH = {
     "saj": 15.0,
     "solplanet": 40.0,
@@ -223,6 +230,7 @@ TIME_WINDOW_RULE_DEFINITIONS: tuple[dict[str, str], ...] = (
     {"code": "saj_profile_self_consumption", "window": "post_export_peak", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "overnight_shoulder", "kind": "operation"},
     {"code": "tesla_overnight_shoulder_control", "window": "overnight_shoulder", "kind": "operation"},
+    {"code": "pool_pump_overnight_control", "window": "overnight_shoulder", "kind": "operation"},
     {"code": "tesla_after_free_shoulder_control", "window": "after_free_shoulder", "kind": "operation"},
     {"code": "tesla_after_free_peak_control", "window": "after_free_peak", "kind": "operation"},
     {"code": "solplanet_low_available_capacity", "window": "after_free_shoulder", "kind": "notification"},
@@ -1377,6 +1385,10 @@ class TeslaChargeCurrentPayload(BaseModel):
     amps: int = Field(..., ge=0, le=80)
 
 
+class DeviceTogglePayload(BaseModel):
+    enabled: bool = Field(...)
+
+
 class NotificationDismissRequest(BaseModel):
     notification_key: str = Field(..., min_length=1, max_length=200)
 
@@ -1713,7 +1725,7 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
     tesla_control_state = tesla_raw.get("control_state")
     tesla_control_state_map = tesla_control_state if isinstance(tesla_control_state, dict) else {}
     tesla_control_feedback = _resolve_tesla_control_feedback(tesla_control_state_map)
-    tesla_charge_forecast = _build_tesla_charge_headroom_forecast(metrics)
+    overnight_energy_reference = _build_overnight_energy_reference(metrics)
     tesla_battery_soc_percent = _to_number(metrics.get("tesla_battery_soc_percent"))
     tesla_current_energy_kwh = (
         round((TESLA_BATTERY_CAPACITY_KWH * max(0.0, min(100.0, tesla_battery_soc_percent))) / 100.0, 4)
@@ -1730,6 +1742,7 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
         "system": "combined",
         "updated_at": flow.get("updated_at"),
         "display": display,
+        "pool_pump": flow.get("pool_pump") if isinstance(flow.get("pool_pump"), dict) else None,
         "tesla": {
             "charging": {
                 "power_w": _to_number(metrics.get("tesla_charge_power_w")),
@@ -1765,8 +1778,8 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
                 "can_stop": tesla_control_state_map.get("can_stop"),
                 "feedback": tesla_control_feedback,
             },
-            "charge_forecast": tesla_charge_forecast,
         },
+        "overnight_energy_reference": overnight_energy_reference,
         "notification_metrics": {
             "grid_w": _to_number(metrics.get("grid_w")),
             "saj_battery_soc_percent": _to_number(metrics.get("battery1_soc_percent")),
@@ -2049,38 +2062,60 @@ def _battery_usable_energy_kwh(system: str, soc_percent: object) -> float | None
     return round((capacity_kwh * usable_soc) / 100.0, 4)
 
 
-def _build_tesla_charge_headroom_forecast(metrics: dict[str, object]) -> dict[str, object] | None:
-    now_local, timezone_name = _tesla_grid_support_now_local()
+def _effective_usage_coverage_ratio(usage: dict[str, object]) -> float | None:
+    quality_map = usage.get("quality")
+    quality = quality_map if isinstance(quality_map, dict) else {}
+    configured_interval_seconds = _to_number(quality.get("configured_interval_seconds"))
+    observed_interval_seconds = _to_number(quality.get("observed_interval_seconds"))
+    effective_coverage_ratio = _to_number(usage.get("coverage_ratio"))
+    if (
+        effective_coverage_ratio is not None
+        and configured_interval_seconds is not None
+        and configured_interval_seconds > 0
+        and observed_interval_seconds is not None
+        and observed_interval_seconds > configured_interval_seconds
+    ):
+        effective_coverage_ratio = round(
+            effective_coverage_ratio * (observed_interval_seconds / configured_interval_seconds),
+            4,
+        )
+    return effective_coverage_ratio
+
+
+def _next_projection_target_local(now_local: datetime, target_hour: int) -> datetime:
+    local_tz = now_local.tzinfo
+    if local_tz is None:
+        raise ValueError("local timezone unavailable")
+    candidate = datetime.combine(
+        now_local.date(),
+        time(hour=target_hour),
+        tzinfo=local_tz,
+    )
+    if candidate <= now_local:
+        candidate += timedelta(days=1)
+    return candidate
+
+
+def _build_overnight_home_load_reference(
+    *,
+    now_local: datetime,
+    timezone_name: str,
+    target_hour: int,
+    lookback_days: int = 7,
+) -> dict[str, object] | None:
     local_tz = now_local.tzinfo
     if local_tz is None:
         return None
 
-    usable_battery_values = [
-        _battery_usable_energy_kwh("saj", metrics.get("battery1_soc_percent")),
-        _battery_usable_energy_kwh("solplanet", metrics.get("battery2_soc_percent")),
-    ]
-    usable_battery_total_kwh = round(sum(value for value in usable_battery_values if value is not None), 4)
-    has_current_battery_state = any(value is not None for value in usable_battery_values)
+    target_at_local = _next_projection_target_local(now_local, target_hour)
+    duration = target_at_local - now_local
+    if duration.total_seconds() <= 0:
+        return None
+
     history_windows: list[dict[str, object]] = []
-    anchor_date = now_local.date()
-    for _ in range(TESLA_POST_EXPORT_FORECAST_HISTORY_DAYS):
-        window_end_local = datetime.combine(
-            anchor_date,
-            time(hour=TESLA_POST_EXPORT_FORECAST_WINDOW_END_HOUR),
-            tzinfo=local_tz,
-        )
-        if window_end_local >= now_local:
-            anchor_date -= timedelta(days=1)
-            window_end_local = datetime.combine(
-                anchor_date,
-                time(hour=TESLA_POST_EXPORT_FORECAST_WINDOW_END_HOUR),
-                tzinfo=local_tz,
-            )
-        window_start_local = datetime.combine(
-            anchor_date - timedelta(days=1),
-            time(hour=TESLA_POST_EXPORT_FORECAST_WINDOW_START_HOUR),
-            tzinfo=local_tz,
-        )
+    for day_offset in range(1, lookback_days + 1):
+        window_end_local = target_at_local - timedelta(days=day_offset)
+        window_start_local = window_end_local - duration
         usage = compute_usage_between(
             storage_db_path,
             system="combined",
@@ -2092,66 +2127,229 @@ def _build_tesla_charge_headroom_forecast(metrics: dict[str, object]) -> dict[st
             grid_import_window_end_hour=FREE_ENERGY_WINDOW_END_HOUR,
             grid_export_window_start_hour=EXPORT_WINDOW_START_HOUR,
             grid_export_window_end_hour=EXPORT_WINDOW_END_HOUR,
+            exclude_tesla_load=True,
+            exclude_pool_pump_load=True,
         )
         energy_map = usage.get("energy_kwh")
         energy_usage = energy_map if isinstance(energy_map, dict) else {}
-        quality_map = usage.get("quality")
-        quality = quality_map if isinstance(quality_map, dict) else {}
-        configured_interval_seconds = _to_number(quality.get("configured_interval_seconds"))
-        observed_interval_seconds = _to_number(quality.get("observed_interval_seconds"))
-        effective_coverage_ratio = _to_number(usage.get("coverage_ratio"))
-        if (
-            effective_coverage_ratio is not None
-            and configured_interval_seconds is not None
-            and configured_interval_seconds > 0
-            and observed_interval_seconds is not None
-            and observed_interval_seconds > configured_interval_seconds
-        ):
-            effective_coverage_ratio = round(
-                effective_coverage_ratio * (observed_interval_seconds / configured_interval_seconds),
-                4,
-            )
         history_windows.append(
             {
                 "start_at_local": window_start_local.isoformat(),
                 "end_at_local": window_end_local.isoformat(),
                 "home_load_kwh": _to_number(energy_usage.get("home_load")),
                 "coverage_ratio": _to_number(usage.get("coverage_ratio")),
-                "effective_coverage_ratio": effective_coverage_ratio,
+                "effective_coverage_ratio": _effective_usage_coverage_ratio(usage),
                 "samples": int(_to_number(usage.get("samples")) or 0),
             }
         )
-        anchor_date -= timedelta(days=1)
 
-    valid_home_loads = [
-        float(item["home_load_kwh"])
-        for item in history_windows
-        if item.get("home_load_kwh") is not None
-        and int(item.get("samples") or 0) >= 2
-        and (
-            item.get("effective_coverage_ratio") is None
-            or float(item.get("effective_coverage_ratio") or 0.0) >= TESLA_POST_EXPORT_FORECAST_MIN_COVERAGE_RATIO
+    def _aggregate_average(limit_days: int) -> dict[str, object]:
+        limited_windows = history_windows[:limit_days]
+        valid_home_loads = [
+            float(item["home_load_kwh"])
+            for item in limited_windows
+            if item.get("home_load_kwh") is not None
+            and int(item.get("samples") or 0) >= 2
+            and (
+                item.get("effective_coverage_ratio") is None
+                or float(item.get("effective_coverage_ratio") or 0.0) >= TESLA_POST_EXPORT_FORECAST_MIN_COVERAGE_RATIO
+            )
+        ]
+        average_home_load_kwh = (
+            round(sum(valid_home_loads) / len(valid_home_loads), 4)
+            if valid_home_loads
+            else None
         )
-    ]
-    average_home_load_kwh = round(sum(valid_home_loads) / len(valid_home_loads), 4) if valid_home_loads else None
-    estimated_tesla_charge_kwh = (
-        round(max(usable_battery_total_kwh - average_home_load_kwh, 0.0), 4)
-        if average_home_load_kwh is not None and has_current_battery_state
-        else None
-    )
+        return {
+            "days_requested": limit_days,
+            "days_used": len(valid_home_loads),
+            "average_home_load_kwh": average_home_load_kwh,
+            "insufficient_history": len(valid_home_loads) < limit_days,
+        }
+
     return {
-        "window": {
-            "start_hour": TESLA_POST_EXPORT_FORECAST_WINDOW_START_HOUR,
-            "end_hour": TESLA_POST_EXPORT_FORECAST_WINDOW_END_HOUR,
+        "target_hour": target_hour,
+        "target_at_local": target_at_local.isoformat(),
+        "hours_from_now": round(duration.total_seconds() / 3600.0, 2),
+        "averages": {
+            "days_3": _aggregate_average(3),
+            "days_7": _aggregate_average(7),
         },
-        "history_days": TESLA_POST_EXPORT_FORECAST_HISTORY_DAYS,
-        "days_used": len(valid_home_loads),
-        "usable_battery_total_kwh": usable_battery_total_kwh,
-        "average_home_load_kwh": average_home_load_kwh,
-        "estimated_tesla_charge_kwh": estimated_tesla_charge_kwh,
-        "timezone": timezone_name,
-        "insufficient_history": len(valid_home_loads) < TESLA_POST_EXPORT_FORECAST_HISTORY_DAYS,
         "history_windows": history_windows,
+    }
+
+
+def _build_pool_pump_night_schedule_reference(
+    *,
+    now_local: datetime,
+    timezone_name: str,
+    usable_battery_total_kwh: float,
+    has_current_battery_state: bool,
+    pool_pump_power_w: float | None,
+    schedule_start_hour: int = 23,
+    schedule_end_hour: int = 5,
+    lookback_days: int = 7,
+) -> dict[str, object] | None:
+    local_tz = now_local.tzinfo
+    if local_tz is None:
+        return None
+
+    pump_power_w = pool_pump_power_w if pool_pump_power_w is not None and pool_pump_power_w > 0 else POOL_PUMP_ASSUMED_POWER_W
+    if schedule_end_hour > schedule_start_hour:
+        duration_hours = float(schedule_end_hour - schedule_start_hour)
+    else:
+        duration_hours = float((24 - schedule_start_hour) + schedule_end_hour)
+    pump_energy_kwh = round((pump_power_w * duration_hours) / 1000.0, 4)
+
+    history_windows: list[dict[str, object]] = []
+    anchor_date = now_local.date()
+    for day_offset in range(1, lookback_days + 1):
+        window_start_local = datetime.combine(
+            anchor_date - timedelta(days=day_offset),
+            time(hour=schedule_start_hour),
+            tzinfo=local_tz,
+        )
+        window_end_local = window_start_local + timedelta(hours=duration_hours)
+        usage = compute_usage_between(
+            storage_db_path,
+            system="combined",
+            start_at_utc=window_start_local.astimezone(UTC),
+            end_at_utc=window_end_local.astimezone(UTC),
+            sample_interval_seconds=_sample_interval_for_system("combined"),
+            local_timezone_name=timezone_name,
+            grid_import_window_start_hour=FREE_ENERGY_WINDOW_START_HOUR,
+            grid_import_window_end_hour=FREE_ENERGY_WINDOW_END_HOUR,
+            grid_export_window_start_hour=EXPORT_WINDOW_START_HOUR,
+            grid_export_window_end_hour=EXPORT_WINDOW_END_HOUR,
+            exclude_tesla_load=True,
+            exclude_pool_pump_load=True,
+        )
+        energy_map = usage.get("energy_kwh")
+        energy_usage = energy_map if isinstance(energy_map, dict) else {}
+        history_windows.append(
+            {
+                "start_at_local": window_start_local.isoformat(),
+                "end_at_local": window_end_local.isoformat(),
+                "base_home_load_kwh": _to_number(energy_usage.get("home_load")),
+                "coverage_ratio": _to_number(usage.get("coverage_ratio")),
+                "effective_coverage_ratio": _effective_usage_coverage_ratio(usage),
+                "samples": int(_to_number(usage.get("samples")) or 0),
+            }
+        )
+
+    def _aggregate_average(limit_days: int) -> dict[str, object]:
+        limited_windows = history_windows[:limit_days]
+        valid_loads = [
+            float(item["base_home_load_kwh"])
+            for item in limited_windows
+            if item.get("base_home_load_kwh") is not None
+            and int(item.get("samples") or 0) >= 2
+            and (
+                item.get("effective_coverage_ratio") is None
+                or float(item.get("effective_coverage_ratio") or 0.0) >= TESLA_POST_EXPORT_FORECAST_MIN_COVERAGE_RATIO
+            )
+        ]
+        average_home_load_kwh = round(sum(valid_loads) / len(valid_loads), 4) if valid_loads else None
+        remaining_battery_kwh = (
+            round(usable_battery_total_kwh - average_home_load_kwh - pump_energy_kwh, 4)
+            if average_home_load_kwh is not None and has_current_battery_state
+            else None
+        )
+        return {
+            "days_requested": limit_days,
+            "days_used": len(valid_loads),
+            "average_home_load_kwh": average_home_load_kwh,
+            "estimated_remaining_battery_kwh": remaining_battery_kwh,
+            "insufficient_history": len(valid_loads) < limit_days,
+        }
+
+    return {
+        "schedule": {
+            "start_hour": schedule_start_hour,
+            "end_hour": schedule_end_hour,
+            "duration_hours": duration_hours,
+        },
+        "pool_pump_power_w": pump_power_w,
+        "pool_pump_energy_kwh": pump_energy_kwh,
+        "using_assumed_power": pool_pump_power_w is None or pool_pump_power_w <= 0,
+        "averages": {
+            "days_3": _aggregate_average(3),
+            "days_7": _aggregate_average(7),
+        },
+        "history_windows": history_windows,
+    }
+
+
+def _build_overnight_energy_reference(metrics: dict[str, object]) -> dict[str, object] | None:
+    now_local, timezone_name = _tesla_grid_support_now_local()
+    local_tz = now_local.tzinfo
+    if local_tz is None:
+        return None
+
+    usable_battery_values = [
+        _battery_usable_energy_kwh("saj", metrics.get("battery1_soc_percent")),
+        _battery_usable_energy_kwh("solplanet", metrics.get("battery2_soc_percent")),
+    ]
+    usable_battery_total_kwh = round(sum(value for value in usable_battery_values if value is not None), 4)
+    has_current_battery_state = any(value is not None for value in usable_battery_values)
+    pool_pump_power_w = _to_number(metrics.get("pool_pump_power_w"))
+    projection_to_8 = _build_overnight_home_load_reference(
+        now_local=now_local,
+        timezone_name=timezone_name,
+        target_hour=8,
+    )
+    projection_to_11 = _build_overnight_home_load_reference(
+        now_local=now_local,
+        timezone_name=timezone_name,
+        target_hour=11,
+    )
+    pool_pump_schedule_projection = _build_pool_pump_night_schedule_reference(
+        now_local=now_local,
+        timezone_name=timezone_name,
+        usable_battery_total_kwh=usable_battery_total_kwh,
+        has_current_battery_state=has_current_battery_state,
+        pool_pump_power_w=pool_pump_power_w,
+    )
+
+    def _remaining_kwh(avg_payload: dict[str, object] | None) -> float | None:
+        average_home_load_kwh = _to_number((avg_payload or {}).get("average_home_load_kwh"))
+        if average_home_load_kwh is None or not has_current_battery_state:
+            return None
+        return round(usable_battery_total_kwh - average_home_load_kwh, 4)
+
+    for projection in (projection_to_8, projection_to_11):
+        if not isinstance(projection, dict):
+            continue
+        averages = projection.get("averages")
+        averages_map = averages if isinstance(averages, dict) else {}
+        days_3 = averages_map.get("days_3")
+        days_7 = averages_map.get("days_7")
+        projection["estimated_remaining_battery_kwh"] = {
+            "days_3": _remaining_kwh(days_3 if isinstance(days_3, dict) else None),
+            "days_7": _remaining_kwh(days_7 if isinstance(days_7, dict) else None),
+        }
+
+    return {
+        "usable_battery_total_kwh": usable_battery_total_kwh,
+        "usable_battery_by_system_kwh": {
+            "saj": usable_battery_values[0],
+            "solplanet": usable_battery_values[1],
+        },
+        "updated_at_local": now_local.isoformat(),
+        "timezone": timezone_name,
+        "projections": {
+            "next_8am": {
+                **(projection_to_8 or {}),
+                "reference_only": False,
+            },
+            "next_11am": {
+                **(projection_to_11 or {}),
+                "reference_only": True,
+            },
+        },
+        "pool_pump_scenarios": {
+            "night_11pm_to_5am": pool_pump_schedule_projection,
+        },
     }
 
 
@@ -3429,6 +3627,35 @@ async def _store_battery_full_active_state(*, saj_full_active: bool, solplanet_f
     )
 
 
+async def _load_pool_pump_overnight_state() -> dict[str, object]:
+    kv_map = await asyncio.to_thread(
+        get_realtime_kv_by_prefix,
+        storage_db_path,
+        prefix=POOL_PUMP_OVERNIGHT_STATE_KEY,
+    )
+    row = kv_map.get(POOL_PUMP_OVERNIGHT_STATE_KEY)
+    value = (row or {}).get("value")
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+async def _store_pool_pump_overnight_state(state: dict[str, object]) -> None:
+    await asyncio.to_thread(
+        upsert_realtime_kv,
+        storage_db_path,
+        [
+            (POOL_PUMP_OVERNIGHT_STATE_KEY, json.dumps(state, ensure_ascii=False), "worker"),
+        ],
+    )
+
+
 def _update_solar_surplus_export_energy_tracking(
     *,
     combined_status: dict[str, object],
@@ -4529,6 +4756,216 @@ async def _run_saj_battery_watch_check(
         result["log_error_text"] = error_text
 
 
+async def _run_pool_pump_overnight_control_check(
+    combined_flow: dict[str, object] | None,
+    *,
+    round_id: str | None = None,
+    requested_at_utc: str | None = None,
+) -> dict[str, object]:
+    requested_at_utc = str(requested_at_utc or "").strip() or datetime.now(UTC).isoformat()
+    now_local, timezone_name = _tesla_grid_support_now_local()
+    window_active = _is_within_overnight_shoulder_window(now_local)
+    schedule_active = _is_hour_in_window(
+        now_local.hour,
+        POOL_PUMP_OVERNIGHT_TARGET_START_HOUR,
+        POOL_PUMP_OVERNIGHT_TARGET_END_HOUR,
+    )
+    result: dict[str, object] = {
+        "executed_at_utc": datetime.now(UTC).isoformat(),
+        "evaluated_at_local": now_local.isoformat(),
+        "timezone": timezone_name,
+        "window_active": window_active,
+        "window_mode": "overnight_shoulder" if window_active else "off",
+        "window_schedule": _window_schedule_text("overnight_shoulder"),
+        "target": "pool_pump",
+        "pump_schedule": (
+            f"{POOL_PUMP_OVERNIGHT_TARGET_START_HOUR:02d}:00-"
+            f"{POOL_PUMP_OVERNIGHT_TARGET_END_HOUR:02d}:00(+1d)"
+        ),
+        "pump_schedule_active": schedule_active,
+    }
+    status = "ok"
+    ok = True
+    error_text: str | None = None
+    try:
+        enabled_map = await _load_time_window_rule_enabled_map()
+        result["rule_enabled_map"] = enabled_map
+        if not window_active:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "outside_window"}
+            status = "outside_window"
+            return result
+
+        rule_code = "pool_pump_overnight_control"
+        rule_enabled = _is_time_window_rule_enabled(enabled_map, rule_code)
+        result["pool_pump_rule_code"] = rule_code
+        result["pool_pump_rule_enabled"] = rule_enabled
+        if not rule_enabled:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "rule_disabled"}
+            result["decision_reason"] = "time_window_rule_disabled"
+            status = "noop"
+            return result
+
+        metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
+        metrics_map = metrics if isinstance(metrics, dict) else {}
+        reference = _build_overnight_energy_reference(metrics_map)
+        scenario = (
+            (reference or {}).get("pool_pump_scenarios", {}).get("night_11pm_to_5am")
+            if isinstance((reference or {}).get("pool_pump_scenarios"), dict)
+            else None
+        )
+        scenario_map = scenario if isinstance(scenario, dict) else {}
+        base_projection = (
+            (reference or {}).get("projections", {}).get("next_8am")
+            if isinstance((reference or {}).get("projections"), dict)
+            else None
+        )
+        base_projection_map = base_projection if isinstance(base_projection, dict) else {}
+        result["overnight_energy_reference"] = scenario_map
+
+        states_by_id = await _pool_pump_states_by_id()
+        pool_pump_state = _build_pool_pump_state(states_by_id)
+        result["pool_pump_state_before"] = pool_pump_state
+        control = pool_pump_state.get("control")
+        control_map = control if isinstance(control, dict) else {}
+        pump_enabled = bool(control_map.get("enabled"))
+        pump_available = bool(control_map.get("available"))
+        result["pool_pump_available"] = pump_available
+        if not pump_available:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "pool_pump_unavailable"}
+            result["decision_reason"] = "pool_pump_unavailable"
+            status = "noop"
+            return result
+
+        pump_power_w = _to_number(scenario_map.get("pool_pump_power_w"))
+        base_remaining_candidates = [
+            value
+            for value in (
+                _to_number((base_projection_map.get("estimated_remaining_battery_kwh") or {}).get("days_3"))
+                if isinstance(base_projection_map.get("estimated_remaining_battery_kwh"), dict)
+                else None,
+                _to_number((base_projection_map.get("estimated_remaining_battery_kwh") or {}).get("days_7"))
+                if isinstance(base_projection_map.get("estimated_remaining_battery_kwh"), dict)
+                else None,
+            )
+            if value is not None
+        ]
+        remaining_base_kwh = min(base_remaining_candidates) if base_remaining_candidates else None
+        available_runtime_hours = (
+            max(remaining_base_kwh / (pump_power_w / 1000.0), 0.0)
+            if remaining_base_kwh is not None and pump_power_w is not None and pump_power_w > 0
+            else None
+        )
+        target_runtime_seconds = (
+            round(float(available_runtime_hours) * 3600.0 * POOL_PUMP_OVERNIGHT_RUNTIME_FRACTION, 1)
+            if available_runtime_hours is not None
+            else None
+        )
+
+        persisted_state = await _load_pool_pump_overnight_state()
+        window_key = _overnight_shoulder_window_key(now_local)
+        if str(persisted_state.get("window_key") or "").strip() != window_key:
+            persisted_state = {
+                "window_key": window_key,
+                "elapsed_runtime_seconds": 0.0,
+                "last_enabled": False,
+                "last_evaluated_at_utc": requested_at_utc,
+            }
+
+        last_enabled = bool(persisted_state.get("last_enabled"))
+        elapsed_runtime_seconds = float(persisted_state.get("elapsed_runtime_seconds") or 0.0)
+        last_evaluated_at_text = str(persisted_state.get("last_evaluated_at_utc") or "").strip()
+        if last_enabled and last_evaluated_at_text:
+            try:
+                last_evaluated_at = datetime.fromisoformat(last_evaluated_at_text.replace("Z", "+00:00"))
+                if last_evaluated_at.tzinfo is None:
+                    last_evaluated_at = last_evaluated_at.replace(tzinfo=UTC)
+                elapsed_runtime_seconds += max(
+                    (datetime.now(UTC) - last_evaluated_at.astimezone(UTC)).total_seconds(),
+                    0.0,
+                )
+            except ValueError:
+                pass
+
+        remaining_runtime_seconds = (
+            max(float(target_runtime_seconds) - elapsed_runtime_seconds, 0.0)
+            if target_runtime_seconds is not None
+            else None
+        )
+        result["runtime_budget"] = {
+            "window_key": window_key,
+            "available_runtime_hours": round(available_runtime_hours, 3) if available_runtime_hours is not None else None,
+            "target_runtime_hours": round(float(target_runtime_seconds) / 3600.0, 3) if target_runtime_seconds is not None else None,
+            "elapsed_runtime_hours": round(elapsed_runtime_seconds / 3600.0, 3),
+            "remaining_runtime_hours": (
+                round(float(remaining_runtime_seconds) / 3600.0, 3)
+                if remaining_runtime_seconds is not None
+                else None
+            ),
+            "runtime_fraction": POOL_PUMP_OVERNIGHT_RUNTIME_FRACTION,
+        }
+
+        if not schedule_active:
+            if pump_enabled:
+                await _pool_pump_set_enabled(False)
+                result["action"] = {"type": "stop_pool_pump", "reason": "outside_pump_schedule"}
+                status = "applied"
+            else:
+                result["action"] = {"type": "noop", "reason": "outside_pump_schedule"}
+                status = "noop"
+            result["decision"] = {"mode": "off"}
+            result["decision_reason"] = "outside_pool_pump_schedule"
+        elif remaining_runtime_seconds is None or remaining_runtime_seconds <= 0:
+            if pump_enabled:
+                await _pool_pump_set_enabled(False)
+                result["action"] = {"type": "stop_pool_pump", "reason": "runtime_budget_exhausted"}
+                status = "applied"
+            else:
+                result["action"] = {"type": "noop", "reason": "runtime_budget_exhausted"}
+                status = "noop"
+            result["decision"] = {"mode": "off"}
+            result["decision_reason"] = "pool_pump_runtime_budget_exhausted"
+        else:
+            result["decision"] = {
+                "mode": "run",
+                "remaining_runtime_hours": round(float(remaining_runtime_seconds) / 3600.0, 3),
+            }
+            result["decision_reason"] = "pool_pump_runtime_budget_available"
+            if pump_enabled:
+                result["action"] = {"type": "noop", "reason": "already_running_within_budget"}
+                status = "noop"
+            else:
+                await _pool_pump_set_enabled(True)
+                result["action"] = {"type": "start_pool_pump", "reason": "runtime_budget_available"}
+                status = "applied"
+
+        await _store_pool_pump_overnight_state(
+            {
+                "window_key": window_key,
+                "elapsed_runtime_seconds": round(elapsed_runtime_seconds, 1),
+                "target_runtime_seconds": target_runtime_seconds,
+                "last_enabled": bool(result.get("decision", {}).get("mode") == "run" and remaining_runtime_seconds and remaining_runtime_seconds > 0),
+                "last_evaluated_at_utc": requested_at_utc,
+            }
+        )
+        return result
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        status = "failed"
+        error_text = f"{type(exc).__name__}: {exc}"
+        result["error"] = error_text
+        raise
+    finally:
+        result["service_window"] = OVERNIGHT_SHOULDER_SERVICE
+        result["service_window_schedule"] = _window_schedule_text("overnight_shoulder")
+        result["service_window_active"] = window_active
+        result["log_ok"] = ok
+        result["log_status"] = status
+        result["log_error_text"] = error_text
+
+
 async def _run_battery_full_notification_check(
     combined_flow: dict[str, object] | None,
     *,
@@ -5446,6 +5883,7 @@ def _build_combined_flow_payload(
     saj_flow: dict[str, object],
     solplanet_flow: dict[str, object],
     tesla_observation_result: dict[str, object] | None = None,
+    pool_pump_state: dict[str, object] | None = None,
 ) -> dict[str, object]:
     saj_metrics = saj_flow.get("metrics")
     saj_metrics_map = saj_metrics if isinstance(saj_metrics, dict) else {}
@@ -5487,6 +5925,10 @@ def _build_combined_flow_payload(
     tesla_connection_state = str(tesla_charging_map.get("connection_state") or "").strip() or None
     tesla_requested_enabled = tesla_charging_map.get("requested_enabled")
     tesla_cable_connected = tesla_charging_map.get("cable_connected")
+    pool_pump_control = pool_pump_state.get("control") if isinstance(pool_pump_state, dict) else None
+    pool_pump_metrics = pool_pump_state.get("metrics") if isinstance(pool_pump_state, dict) else None
+    pool_pump_power_w = _to_number(pool_pump_metrics.get("power_w")) if isinstance(pool_pump_metrics, dict) else None
+    pool_pump_enabled = pool_pump_control.get("enabled") if isinstance(pool_pump_control, dict) else None
     saj_pv_estimate_w: float | None = None
     if inverter1_w is not None and battery1_w is not None:
         saj_pv_estimate_w = max(inverter1_w - battery1_w, 0.0)
@@ -5554,6 +5996,8 @@ def _build_combined_flow_payload(
         "tesla_connection_state": tesla_connection_state,
         "tesla_charge_requested_enabled": tesla_requested_enabled,
         "tesla_cable_connected": tesla_cable_connected,
+        "pool_pump_power_w": pool_pump_power_w,
+        "pool_pump_enabled": pool_pump_enabled,
         "inverter_status": "combined",
         "inverter1_status": inverter1_status,
         "inverter2_status": inverter2_status,
@@ -5592,6 +6036,7 @@ def _build_combined_flow_payload(
             ),
             "combined_total_load_uses_saj_inverter_power + solplanet_inverter_power + saj_grid",
             "combined_tesla_observation_embedded",
+            "combined_pool_pump_observation_embedded",
         ],
     }
     return {
@@ -5651,6 +6096,13 @@ def _build_combined_flow_payload(
                 "Combined Tesla Battery SOC",
                 updated_at,
             ),
+            "pool_pump_power": _combined_pseudo_entity(
+                "combined.pool_pump_power",
+                pool_pump_power_w,
+                "W",
+                "Combined Pool Pump Power",
+                updated_at,
+            ),
             "inverter1": _combined_pseudo_entity(
                 "combined.inverter1_power",
                 inverter1_w,
@@ -5672,14 +6124,17 @@ def _build_combined_flow_payload(
                 "saj_updated_at": saj_flow.get("updated_at"),
                 "solplanet_updated_at": solplanet_flow.get("updated_at"),
                 "tesla_updated_at": tesla_observation_result.get("executed_at_utc") if isinstance(tesla_observation_result, dict) else None,
+                "pool_pump_updated_at": pool_pump_state.get("updated_at") if isinstance(pool_pump_state, dict) else None,
             },
         },
         "raw": {
             "saj": saj_flow,
             "solplanet": solplanet_flow,
             "tesla": tesla_observation_result,
+            "pool_pump": pool_pump_state,
         },
         "metrics": metrics,
+        "pool_pump": pool_pump_state if isinstance(pool_pump_state, dict) else None,
     }
 
 
@@ -5995,6 +6450,69 @@ def _compact_raw_ha_state(state: dict[str, object] | None) -> dict[str, object] 
         "state_class": attrs.get("state_class"),
         "last_changed": state.get("last_changed"),
         "last_updated": state.get("last_updated"),
+    }
+
+
+async def _pool_pump_states_by_id() -> dict[str, dict[str, object]]:
+    switch_state, power_state = await asyncio.gather(
+        ha_client.entity_state(POOL_PUMP_SWITCH_ENTITY_ID),
+        ha_client.entity_state(POOL_PUMP_POWER_ENTITY_ID),
+    )
+    return {
+        POOL_PUMP_SWITCH_ENTITY_ID: switch_state if isinstance(switch_state, dict) else {},
+        POOL_PUMP_POWER_ENTITY_ID: power_state if isinstance(power_state, dict) else {},
+    }
+
+
+async def _pool_pump_set_enabled(enabled: bool) -> dict[str, object]:
+    states_by_id = await _pool_pump_states_by_id()
+    current_state = _build_pool_pump_state(states_by_id)
+    control = current_state.get("control")
+    switch_entity = control.get("switch_entity") if isinstance(control, dict) else None
+    entity_id = str((switch_entity or {}).get("entity_id") or "")
+    if not entity_id:
+        raise HTTPException(status_code=400, detail="Pool pump switch entity unavailable")
+    service = "turn_on" if enabled else "turn_off"
+    await ha_client.call_service("switch", service, {"entity_id": entity_id})
+    refreshed_states_by_id = await _pool_pump_states_by_id()
+    return {
+        "ok": True,
+        "requested_enabled": enabled,
+        "device": _build_pool_pump_state(refreshed_states_by_id),
+    }
+
+
+def _build_pool_pump_state(states_by_id: dict[str, dict[str, object]]) -> dict[str, object]:
+    switch_state = states_by_id.get(POOL_PUMP_SWITCH_ENTITY_ID)
+    power_state = states_by_id.get(POOL_PUMP_POWER_ENTITY_ID)
+    switch_available = isinstance(switch_state, dict) and str(switch_state.get("state") or "").lower() not in ("", "unavailable", "unknown")
+    enabled = str(switch_state.get("state") or "").lower() == "on" if isinstance(switch_state, dict) else None
+    power_value = _to_number(power_state.get("state")) if isinstance(power_state, dict) else None
+    power_unit = (
+        power_state.get("attributes", {}).get("unit_of_measurement")
+        if isinstance(power_state, dict) and isinstance(power_state.get("attributes"), dict)
+        else None
+    )
+    power_w = _power_to_watts(power_value, str(power_unit) if power_unit is not None else None)
+    updated_at = None
+    if isinstance(power_state, dict):
+        updated_at = power_state.get("last_updated") or power_state.get("last_changed")
+    if not updated_at and isinstance(switch_state, dict):
+        updated_at = switch_state.get("last_updated") or switch_state.get("last_changed")
+    return {
+        "device_key": "pool_pump",
+        "label": "Pool Pump",
+        "location": "home_load",
+        "updated_at": updated_at,
+        "control": {
+            "enabled": enabled,
+            "available": switch_available,
+            "switch_entity": _compact_raw_ha_state(switch_state),
+        },
+        "metrics": {
+            "power_w": power_w,
+            "power_entity": _compact_raw_ha_state(power_state),
+        },
     }
 
 
@@ -7132,15 +7650,19 @@ async def _get_live_energy_flow(system: str) -> dict[str, object]:
         _ensure_ha_configured()
         saj_flow = await _get_live_energy_flow("saj")
         solplanet_flow = await _get_live_energy_flow("solplanet")
-        tesla_states = await _tesla_control_states()
+        tesla_states, pool_pump_states = await asyncio.gather(
+            _tesla_control_states(),
+            _pool_pump_states_by_id(),
+        )
         tesla_control_state = _build_tesla_control_state(tesla_states)
         tesla_observation = _build_tesla_observation_payload(tesla_states)
+        pool_pump_state = _build_pool_pump_state(pool_pump_states)
         tesla_result = {
             "executed_at_utc": datetime.now(UTC).isoformat(),
             "control_state": tesla_control_state,
             "observation": tesla_observation,
         }
-        return _build_combined_flow_payload(saj_flow, solplanet_flow, tesla_result)
+        return _build_combined_flow_payload(saj_flow, solplanet_flow, tesla_result, pool_pump_state)
     raise HTTPException(status_code=400, detail=f"Unsupported system: {system}")
 
 
@@ -7565,6 +8087,18 @@ def _worker_control_result_text(
                 f"solplanet_soc={_fmt_result_number(payload.get('battery2_soc_percent'), 0, '%')}, "
                 f"reserve={_fmt_result_number(TESLA_OVERNIGHT_SHOULDER_MIN_SOLPLANET_SOC_PERCENT, 0, '%')}"
             )
+        if payload.get("pool_pump_rule_code"):
+            runtime_budget = payload.get("runtime_budget")
+            runtime_budget_map = runtime_budget if isinstance(runtime_budget, dict) else {}
+            extra_parts.append(
+                "pool_pump "
+                f"action={action_map.get('type') or '-'}, "
+                f"reason={payload.get('decision_reason') or '-'}, "
+                f"available={_fmt_result_number(runtime_budget_map.get('available_runtime_hours'), 2, 'h')}, "
+                f"target={_fmt_result_number(runtime_budget_map.get('target_runtime_hours'), 2, 'h')}, "
+                f"elapsed={_fmt_result_number(runtime_budget_map.get('elapsed_runtime_hours'), 2, 'h')}, "
+                f"remaining={_fmt_result_number(runtime_budget_map.get('remaining_runtime_hours'), 2, 'h')}"
+            )
         return (
             f"Overnight shoulder {'skipped' if status == 'skipped' else status}: "
             f"schedule={service_window_schedule}, active={'yes' if payload.get('window_active') else 'no'}, "
@@ -7900,14 +8434,15 @@ async def _persist_worker_summary_logs(
     started_monotonic: float,
     midday_result: dict[str, object] | None,
     saj_watch_result: dict[str, object] | None,
+    pool_pump_result: dict[str, object] | None,
     battery_full_result: dict[str, object] | None,
 ) -> None:
-    source = _select_worker_summary_source(midday_result, saj_watch_result, battery_full_result)
-    all_notifications = _collect_worker_notifications(midday_result, saj_watch_result, battery_full_result)
-    all_actions = _collect_worker_actions(midday_result, saj_watch_result, battery_full_result)
+    source = _select_worker_summary_source(midday_result, saj_watch_result, pool_pump_result, battery_full_result)
+    all_notifications = _collect_worker_notifications(midday_result, saj_watch_result, pool_pump_result, battery_full_result)
+    all_actions = _collect_worker_actions(midday_result, saj_watch_result, pool_pump_result, battery_full_result)
     all_decision_reasons = [
         str(item.get("decision_reason") or "").strip()
-        for item in (midday_result, saj_watch_result, battery_full_result)
+        for item in (midday_result, saj_watch_result, pool_pump_result, battery_full_result)
         if isinstance(item, dict) and str(item.get("decision_reason") or "").strip()
     ]
     notification_status, notification_ok, notification_payload, notification_error_text = _build_notification_summary_payload(
@@ -7946,7 +8481,7 @@ async def _persist_worker_summary_logs(
         actions=all_actions,
         check_sources=[
             item
-            for item in (midday_result, saj_watch_result, battery_full_result)
+            for item in (midday_result, saj_watch_result, pool_pump_result, battery_full_result)
             if isinstance(item, dict)
         ],
     )
@@ -8084,6 +8619,7 @@ async def _collector_loop() -> None:
         saj_result: dict[str, object] = {}
         solplanet_result: dict[str, object] = {}
         tesla_observation_result: dict[str, object] | None = None
+        pool_pump_state: dict[str, object] | None = None
         try:
             tesla_observation_result = await _run_tesla_home_assistant_collection(
                 round_id=round_id,
@@ -8101,6 +8637,19 @@ async def _collector_loop() -> None:
                 "executed_at": datetime.now(UTC).isoformat(),
             }
         try:
+            pool_pump_state = _build_pool_pump_state(await _pool_pump_states_by_id())
+            collector_status.setdefault("combined", {})["last_pool_pump_state"] = pool_pump_state
+        except Exception as pool_pump_exc:  # noqa: BLE001
+            _append_worker_failure_log(
+                "combined",
+                stage="pool_pump",
+                error=pool_pump_exc,
+            )
+            collector_status.setdefault("combined", {})["last_pool_pump_state"] = {
+                "error": f"{type(pool_pump_exc).__name__}: {pool_pump_exc}",
+                "executed_at": datetime.now(UTC).isoformat(),
+            }
+        try:
             saj_result = round_results.get("saj") or {}
             solplanet_result = round_results.get("solplanet") or {}
             saj_stored = bool(saj_result.get("stored_sample"))
@@ -8108,7 +8657,12 @@ async def _collector_loop() -> None:
             saj_flow = saj_result.get("flow") if saj_stored else None
             solplanet_flow = solplanet_result.get("flow") if solplanet_stored else None
             if saj_flow and solplanet_flow:
-                combined_flow = _build_combined_flow_payload(saj_flow, solplanet_flow, tesla_observation_result)
+                combined_flow = _build_combined_flow_payload(
+                    saj_flow,
+                    solplanet_flow,
+                    tesla_observation_result,
+                    pool_pump_state,
+                )
                 combined_source = combined_flow.get("source")
                 combined_source_map = combined_source if isinstance(combined_source, dict) else {}
                 combined_source_map["source_details"] = {
@@ -8244,6 +8798,7 @@ async def _collector_loop() -> None:
         try:
             midday_window_result: dict[str, object] | None = None
             saj_battery_watch_result: dict[str, object] | None = None
+            pool_pump_overnight_result: dict[str, object] | None = None
             battery_full_notification_result: dict[str, object] | None = None
             midday_window_result = await _run_midday_window_check(
                 round_results.get("combined", {}).get("flow") if isinstance(round_results.get("combined"), dict) else None,
@@ -8285,6 +8840,24 @@ async def _collector_loop() -> None:
             }
 
         try:
+            pool_pump_overnight_result = await _run_pool_pump_overnight_control_check(
+                round_results.get("combined", {}).get("flow") if isinstance(round_results.get("combined"), dict) else None,
+                round_id=round_id,
+                requested_at_utc=round_started_at_utc,
+            )
+            collector_status.setdefault("combined", {})["last_pool_pump_overnight_check"] = pool_pump_overnight_result
+        except Exception as pool_pump_exc:  # noqa: BLE001
+            _append_worker_failure_log(
+                "combined",
+                stage=OVERNIGHT_SHOULDER_SERVICE,
+                error=pool_pump_exc,
+            )
+            collector_status.setdefault("combined", {})["last_pool_pump_overnight_check"] = {
+                "error": f"{type(pool_pump_exc).__name__}: {pool_pump_exc}",
+                "executed_at": datetime.now(UTC).isoformat(),
+            }
+
+        try:
             battery_full_notification_result = await _run_battery_full_notification_check(
                 round_results.get("combined", {}).get("flow") if isinstance(round_results.get("combined"), dict) else None,
                 round_id=round_id,
@@ -8312,6 +8885,7 @@ async def _collector_loop() -> None:
                 started_monotonic=summary_started_monotonic,
                 midday_result=midday_window_result,
                 saj_watch_result=saj_battery_watch_result,
+                pool_pump_result=pool_pump_overnight_result,
                 battery_full_result=battery_full_notification_result,
             )
         except Exception as summary_exc:  # noqa: BLE001
@@ -9542,6 +10116,39 @@ async def post_tesla_control_current(payload: TeslaChargeCurrentPayload) -> dict
             error_text=f"Failed to reach Home Assistant: {exc}",
             completed=True,
         )
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+@app.get("/api/devices/pool-pump")
+async def get_pool_pump_device_state() -> dict[str, object]:
+    _ensure_ha_configured()
+    try:
+        states_by_id = await _pool_pump_states_by_id()
+        return _build_pool_pump_state(states_by_id)
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+@app.post("/api/devices/pool-pump/toggle")
+async def post_pool_pump_toggle(payload: DeviceTogglePayload) -> dict[str, object]:
+    _ensure_ha_configured()
+    try:
+        return await _pool_pump_set_enabled(payload.enabled)
+    except httpx.HTTPStatusError as exc:
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
