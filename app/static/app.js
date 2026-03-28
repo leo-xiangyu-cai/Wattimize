@@ -3124,15 +3124,19 @@ const SOLPLANET_COMBINED_BATTERY_NODE_SIZE = {
   width: 230,
   height: Math.round(176 * SAJ_BATTERY_CARD_SCALE),
 };
+const COMBINED_LOAD_DEVICE_NODE_SIZE = {
+  width: 184,
+  height: 174,
+};
 const COMBINED_DIAGRAM_VIEWPORT = { width: 1340, height: 720 };
 const COMBINED_LAYOUT = {
   nodes: {
     grid: { x: 582, y: 594 },
     solar: { x: 8, y: 594 },
     switchboard: { x: 558, y: 318 },
-    load: { x: 312, y: 136 },
-    poolPump: { x: 320, y: -18 },
-    tesla: { x: 830, y: 0 },
+    load: { x: 354, y: 18 },
+    poolPump: { x: 578, y: 18 },
+    tesla: { x: 802, y: 18 },
     battery1: { x: 24, y: 32 },
     inverter1: { x: 24, y: 360 },
     inverter2: { x: 1113, y: 354 },
@@ -3148,30 +3152,30 @@ const COMBINED_LAYOUT = {
       labelPosition: { x: 130, y: 531 },
     },
     switchboardToTotalLoad: {
-      points: [{ x: 670, y: 318 }, { x: 670, y: 205 }],
-      labelPosition: { x: 670, y: 300 },
+      points: [{ x: 670, y: 318 }, { x: 670, y: 252 }],
+      labelPosition: { x: 718, y: 288 },
       lineCap: "butt",
       lineJoin: "miter",
     },
     switchboardToTesla: {
-      points: [{ x: 670, y: 198 }, { x: 830, y: 198 }],
-      labelPosition: { x: 750, y: 230 },
+      points: [{ x: 670, y: 252 }, { x: 894, y: 252 }, { x: 894, y: 192 }],
+      labelPosition: { x: 820, y: 268 },
       lineCap: "butt",
       lineJoin: "miter",
       tailUpperGapLength: 9,
       tailRoundedCorner: true,
     },
     switchboardToHomeLoad: {
-      points: [{ x: 670, y: 198 }, { x: 496, y: 198 }],
-      labelPosition: { x: 583, y: 230 },
+      points: [{ x: 670, y: 252 }, { x: 446, y: 252 }, { x: 446, y: 192 }],
+      labelPosition: { x: 520, y: 268 },
       lineCap: "butt",
       lineJoin: "miter",
       tailUpperGapLength: 9,
       tailRoundedCorner: true,
     },
     switchboardToPoolPump: {
-      points: [{ x: 670, y: 198 }, { x: 670, y: 54 }, { x: 488, y: 54 }],
-      labelPosition: { x: 592, y: 88 },
+      points: [{ x: 670, y: 252 }, { x: 670, y: 192 }],
+      labelPosition: { x: 704, y: 238 },
       lineCap: "butt",
       lineJoin: "miter",
       tailUpperGapLength: 9,
@@ -3340,8 +3344,8 @@ function buildCombinedDiagramSpec() {
         icon: "load",
         title: "Home Load",
         titleKey: "loadTitle",
-        width: 184,
-        height: 110,
+        width: COMBINED_LOAD_DEVICE_NODE_SIZE.width,
+        height: COMBINED_LOAD_DEVICE_NODE_SIZE.height,
         position: layout.nodes.load,
         lines: [
           { id: "combined-loadPowerValue", className: "node-value", text: "-" },
@@ -3354,8 +3358,8 @@ function buildCombinedDiagramSpec() {
         icon: "load",
         title: "Pool Pump",
         titleKey: "poolPumpTitle",
-        width: 168,
-        height: 132,
+        width: COMBINED_LOAD_DEVICE_NODE_SIZE.width,
+        height: COMBINED_LOAD_DEVICE_NODE_SIZE.height,
         position: layout.nodes.poolPump,
         lines: [
           { id: "combined-poolPumpPowerValue", className: "node-value", text: "-" },
@@ -3369,8 +3373,8 @@ function buildCombinedDiagramSpec() {
         icon: "tesla",
         title: "Tesla",
         titleKey: "teslaChargingLabel",
-        width: 176,
-        height: 334,
+        width: COMBINED_LOAD_DEVICE_NODE_SIZE.width,
+        height: COMBINED_LOAD_DEVICE_NODE_SIZE.height,
         position: layout.nodes.tesla,
         lines: [
           {
@@ -3514,7 +3518,7 @@ function buildCombinedDiagramSpec() {
       {
         id: "combined-lineSwitchboardToTotalLoad",
         source: "combined-switchboardNode",
-        target: "combined-teslaNode",
+        target: "combined-poolPumpNode",
         labelId: "combined-flowLabelSwitchboardToTotalLoad",
         glowWidth: 28,
         lineWidth: 18,
