@@ -61,7 +61,6 @@ from app.persistence import (
     get_latest_sample,
     get_series_samples,
     get_storage_status,
-    inspect_sqlite_database,
     insert_raw_request_result,
     insert_worker_api_log,
     import_database_bytes,
@@ -11343,15 +11342,6 @@ async def on_shutdown() -> None:
 async def on_startup() -> None:
     global static_asset_version
     static_asset_version = await asyncio.to_thread(_compute_static_asset_version)
-    if storage_db_path.exists():
-        inspection = await asyncio.to_thread(inspect_sqlite_database, storage_db_path)
-        if not bool(inspection.get("ok")):
-            await _attempt_storage_db_recovery(
-                trigger_error=RuntimeError(f"startup_integrity_check_failed: {inspection.get('integrity_check')}"),
-                trace_system="combined",
-                trace_round_id=None,
-                operation_name="startup_db_health_check",
-            )
     await asyncio.to_thread(init_db, storage_db_path)
     await asyncio.to_thread(upsert_operation_definitions, storage_db_path, definitions=list(MANUAL_OPERATION_DEFINITIONS))
     await asyncio.to_thread(migrate_worker_log_legacy_statuses, storage_db_path)

@@ -551,6 +551,7 @@ def inspect_sqlite_database(db_path: DatabaseTarget) -> dict[str, object]:
             "quick_check": [],
         }
 
+    db_size_bytes = sqlite_path.stat().st_size
     with tempfile.TemporaryDirectory(prefix="wattimize-db-check-") as temp_dir_raw:
         temp_dir = Path(temp_dir_raw)
         probe_path = temp_dir / sqlite_path.name
@@ -559,17 +560,31 @@ def inspect_sqlite_database(db_path: DatabaseTarget) -> dict[str, object]:
             if sidecar.exists():
                 shutil.copy2(sidecar, temp_dir / sidecar.name)
 
-        result = subprocess.run(
-            [
-                "sqlite3",
-                str(probe_path),
-                "PRAGMA journal_mode; PRAGMA integrity_check; PRAGMA quick_check;",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=SQLITE_INTEGRITY_CHECK_TIMEOUT_SECONDS,
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "sqlite3",
+                    str(probe_path),
+                    "PRAGMA journal_mode; PRAGMA integrity_check; PRAGMA quick_check;",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=SQLITE_INTEGRITY_CHECK_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return {
+                "db_path": str(sqlite_path),
+                "exists": True,
+                "ok": False,
+                "timed_out": True,
+                "db_size_bytes": db_size_bytes,
+                "timeout_seconds": SQLITE_INTEGRITY_CHECK_TIMEOUT_SECONDS,
+                "journal_mode": None,
+                "integrity_check": [],
+                "quick_check": [],
+                "stderr": str(exc),
+            }
     lines = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
     journal_mode = lines[0] if lines else None
     checks = lines[1:] if lines else []
@@ -578,6 +593,8 @@ def inspect_sqlite_database(db_path: DatabaseTarget) -> dict[str, object]:
         "db_path": str(sqlite_path),
         "exists": True,
         "ok": ok,
+        "timed_out": False,
+        "db_size_bytes": db_size_bytes,
         "journal_mode": journal_mode,
         "integrity_check": checks[:-1] if len(checks) > 1 else checks,
         "quick_check": [checks[-1]] if checks else [],

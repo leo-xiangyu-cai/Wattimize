@@ -155,7 +155,7 @@ First-run configuration:
 - Default Solplanet sampling frequency is every 60 seconds (`WATTIMIZE_SOLPLANET_SAMPLE_INTERVAL_SECONDS`).
 - Every sample stores current `pv_w/grid_w/battery_w/load_w/soc/inverter_status/balance` and raw flow payload.
 - SQLite writes and worker log persistence now retry on transient database failures before surfacing an error in collector status.
-- When SQLite corruption is detected, the backend now inspects the file, attempts an automatic recovery into the recovery directory, and reinitializes the runtime connection pool.
+- When SQLite corruption is detected during runtime recovery flows, the backend attempts an automatic recovery into the recovery directory and reinitializes the runtime connection pool.
 - Daily usage endpoint integrates power snapshots into kWh (UTC day).
 - `system=combined` is available on range usage and trend series endpoints for the frontend overall view.
 - The `History` tab combines range selection with an energy breakdown card, a power timeline chart, and compact date/week/month context for the selected window.
