@@ -37,7 +37,6 @@ class HomeAssistantClient:
         duration_ms: float | None,
         result_text: str | None,
         error_text: str | None,
-        response_json: Any = None,
     ) -> None:
         if not self._request_logger:
             return
@@ -55,7 +54,6 @@ class HomeAssistantClient:
                     "duration_ms": duration_ms,
                     "result_text": result_text,
                     "error_text": error_text,
-                    "response_json": response_json,
                 }
             )
         except Exception:
@@ -94,7 +92,6 @@ class HomeAssistantClient:
                 duration_ms=round((monotonic() - started) * 1000, 1),
                 result_text=response.text,
                 error_text=None,
-                response_json=payload_json,
             )
             return payload_json
         except httpx.HTTPStatusError as exc:
@@ -116,7 +113,6 @@ class HomeAssistantClient:
                 duration_ms=round((monotonic() - started) * 1000, 1),
                 result_text=response.text if response is not None else None,
                 error_text=str(exc),
-                response_json=payload_json,
             )
             raise
         except httpx.HTTPError as exc:

@@ -15,7 +15,7 @@ CONTAINER_PORT="${CONTAINER_PORT:-8000}"
 TZ_VALUE="${TZ_VALUE:-Asia/Shanghai}"
 DOCKER_BIN="${DOCKER_BIN:-/Volume1/@apps/DockerEngine/dockerd/bin/docker}"
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
-LOCAL_DB_PATH="${LOCAL_DB_PATH:-data/energy_samples.sqlite3}"
+LOCAL_DB_PATH="${LOCAL_DB_PATH:-data/wattimize.sqlite3}"
 LOCAL_COMPOSE_SERVICE="${LOCAL_COMPOSE_SERVICE:-wattimize-api}"
 
 SSH_TARGET="${NAS_USER}@${NAS_HOST}"

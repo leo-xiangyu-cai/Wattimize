@@ -39,7 +39,7 @@ CONST_WEATHER_LAT = -33.8688  # Default: Sydney, NSW, Australia
 CONST_WEATHER_LON = 151.2093
 CONFIG_TABLE_NAME = "app_config"
 CONFIG_SINGLETON_KEY = "global"
-DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "energy_samples.sqlite3"
+DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "wattimize.sqlite3"
 
 
 @dataclass(frozen=True)

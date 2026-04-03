@@ -3,7 +3,7 @@ services:
     build: .
     container_name: wattimize-api
     environment:
-      WATTIMIZE_DB_PATH: /app/data/energy_samples.sqlite3
+      WATTIMIZE_DB_PATH: /app/data/wattimize.sqlite3
     ports:
       - "18000:8000"
     volumes:

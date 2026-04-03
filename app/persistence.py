@@ -37,7 +37,7 @@ WORKER_LOG_LEGACY_STATUS_MAP: dict[str, str] = {
 }
 
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "energy_samples.sqlite3"
+DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "wattimize.sqlite3"
 DEFAULT_SAMPLE_INTERVAL_SECONDS = 5.0
 SQLITE_BUSY_TIMEOUT_SECONDS = 10.0
 SQLITE_INTEGRITY_CHECK_TIMEOUT_SECONDS = 120.0
@@ -72,23 +72,6 @@ OPERATION_RUN_STATUS_PENDING = "pending"
 OPERATION_RUN_STATUS_SUCCEEDED = "succeeded"
 OPERATION_RUN_STATUS_FAILED = "failed"
 OPERATION_RUN_STATUS_TIMEOUT = "timeout"
-
-
-@dataclass(frozen=True)
-class RawRequestResult:
-    round_id: str
-    system: str | None
-    source: str
-    endpoint: str
-    method: str
-    request_url: str
-    requested_at_utc: datetime
-    duration_ms: float | None
-    ok: bool
-    status_code: int | None
-    error_text: str | None
-    response_text: str | None
-    response_json: object | None
 
 
 @dataclass(frozen=True)
@@ -204,26 +187,6 @@ class TimeWindowRuleStateRow(Base):
     enabled = Column(Integer, nullable=False)
     updated_at_utc = Column(String, nullable=False)
     updated_at_epoch = Column(Float, nullable=False, index=True)
-
-
-class RawRequestResultRow(Base):
-    __tablename__ = "raw_request_results"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    round_id = Column(String, nullable=False, index=True)
-    system = Column(String)
-    source = Column(String, nullable=False, index=True)
-    endpoint = Column(String, nullable=False, index=True)
-    method = Column(String, nullable=False)
-    request_url = Column(String, nullable=False)
-    requested_at_utc = Column(String, nullable=False)
-    requested_at_epoch = Column(Float, nullable=False, index=True)
-    duration_ms = Column(Float)
-    ok = Column(Integer, nullable=False)
-    status_code = Column(Integer)
-    error_text = Column(String)
-    response_text = Column(String)
-    response_json = Column(String)
 
 
 class OperationDefinitionRow(Base):
@@ -525,6 +488,8 @@ def init_db(db_path: DatabaseTarget) -> None:
     Base.metadata.create_all(engine)
     if _is_sqlite(db_path):
         with engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS energy_samples"))
+            conn.execute(text("DROP TABLE IF EXISTS raw_request_results"))
             conn.execute(text("PRAGMA journal_mode=WAL;"))
 
 
@@ -892,6 +857,23 @@ def count_pending_worker_api_logs(
                 stmt = stmt.where(WorkerApiLogRow.service.in_(normalized_services))
             value = session.scalar(stmt)
             return int(value or 0)
+    except SQLAlchemyError:
+        return 0
+
+
+def delete_worker_api_logs_older_than(
+    db_path: DatabaseTarget,
+    *,
+    older_than_epoch: float,
+) -> int:
+    try:
+        with _session_scope(db_path) as session:
+            result = session.execute(
+                text("DELETE FROM worker_api_logs WHERE requested_at_epoch < :older_than_epoch"),
+                {"older_than_epoch": float(older_than_epoch)},
+            )
+            deleted = int(result.rowcount or 0)
+            return deleted
     except SQLAlchemyError:
         return 0
 
@@ -2136,154 +2118,6 @@ def list_realtime_kv_rows(db_path: DatabaseTarget, *, prefix: str | None = None)
             }
         )
     return items
-
-
-def insert_raw_request_result(
-    db_path: DatabaseTarget,
-    *,
-    round_id: str,
-    system: str | None,
-    source: str,
-    endpoint: str,
-    method: str,
-    request_url: str,
-    requested_at_utc: str,
-    duration_ms: float | None,
-    ok: bool,
-    status_code: int | None,
-    error_text: str | None,
-    response_text: str | None,
-    response_json: object | None,
-) -> None:
-    requested = _parse_iso_to_utc(requested_at_utc)
-    response_json_text = None if response_json is None else json.dumps(response_json, ensure_ascii=False)
-    with _session_scope(db_path) as session:
-        session.add(
-            RawRequestResultRow(
-                round_id=round_id,
-                system=str(system or "") or None,
-                source=source,
-                endpoint=endpoint,
-                method=method,
-                request_url=request_url,
-                requested_at_utc=requested.isoformat(),
-                requested_at_epoch=requested.timestamp(),
-                duration_ms=duration_ms,
-                ok=1 if ok else 0,
-                status_code=status_code,
-                error_text=error_text,
-                response_text=_truncate_result_text(response_text),
-                response_json=response_json_text,
-            )
-        )
-
-
-def get_latest_raw_request_result(
-    db_path: DatabaseTarget,
-    *,
-    source: str,
-    endpoint: str,
-) -> dict[str, object] | None:
-    if not _db_exists(db_path):
-        return None
-    try:
-        with _session_scope(db_path) as session:
-            row = session.scalar(
-                select(RawRequestResultRow)
-                .where(
-                    RawRequestResultRow.source == source,
-                    RawRequestResultRow.endpoint == endpoint,
-                )
-                .order_by(desc(RawRequestResultRow.requested_at_epoch))
-                .limit(1)
-            )
-    except SQLAlchemyError:
-        return None
-    if row is None:
-        return None
-
-    payload = _json_loads(row.response_json, default=None)
-    return {
-        "round_id": row.round_id,
-        "system": row.system,
-        "endpoint": endpoint,
-        "path": row.request_url,
-        "requested_at_utc": row.requested_at_utc,
-        "fetch_ms": row.duration_ms,
-        "ok": bool(row.ok),
-        "status_code": row.status_code,
-        "error": row.error_text,
-        "payload": payload,
-        "response_text": row.response_text,
-        "last_success_at_utc": None,
-    }
-
-
-def list_raw_request_results(
-    db_path: DatabaseTarget,
-    *,
-    page: int,
-    page_size: int,
-    round_id: str | None = None,
-    system: str | None = None,
-    source: str | None = None,
-) -> dict[str, object]:
-    safe_page, safe_page_size = _paginate(page, page_size)
-    if not _db_exists(db_path):
-        return _empty_page(safe_page, safe_page_size)
-
-    try:
-        with _session_scope(db_path) as session:
-            stmt = select(RawRequestResultRow)
-            count_stmt = select(func.count()).select_from(RawRequestResultRow)
-            filters = []
-            if round_id:
-                filters.append(RawRequestResultRow.round_id == round_id)
-            if system:
-                filters.append(RawRequestResultRow.system == system)
-            if source:
-                filters.append(RawRequestResultRow.source == source)
-            if filters:
-                stmt = stmt.where(*filters)
-                count_stmt = count_stmt.where(*filters)
-            total = int(session.scalar(count_stmt) or 0)
-            rows = session.scalars(
-                stmt.order_by(desc(RawRequestResultRow.requested_at_epoch))
-                .offset((safe_page - 1) * safe_page_size)
-                .limit(safe_page_size)
-            ).all()
-    except SQLAlchemyError:
-        return _empty_page(safe_page, safe_page_size)
-
-    items: list[dict[str, object]] = []
-    for row in rows:
-        items.append(
-            {
-                "id": int(row.id),
-                "round_id": str(row.round_id),
-                "system": str(row.system or ""),
-                "source": str(row.source),
-                "endpoint": str(row.endpoint),
-                "method": str(row.method),
-                "request_url": str(row.request_url),
-                "requested_at_utc": row.requested_at_utc,
-                "duration_ms": row.duration_ms,
-                "ok": bool(row.ok),
-                "status_code": row.status_code,
-                "error_text": str(row.error_text or ""),
-                "response_json": _json_loads(row.response_json, default=None),
-            }
-        )
-    end = safe_page * safe_page_size
-    return {
-        "count": len(items),
-        "total": total,
-        "page": safe_page,
-        "page_size": safe_page_size,
-        "has_next": end < total,
-        "has_prev": safe_page > 1,
-        "items": items,
-    }
 
 
 def get_series_samples(

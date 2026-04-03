@@ -26,12 +26,12 @@ Use the web config page:
 
 Config storage:
 - Stored in SQLite table `app_config`
-- Local default DB: `data/energy_samples.sqlite3`
+- Local default DB: `data/wattimize.sqlite3`
 - Docker default DB path is controlled by `WATTIMIZE_DB_PATH`
 - Existing legacy `config.json` is auto-migrated on first load
 
 Persistence config (optional):
-- `WATTIMIZE_DB_PATH` (default: `data/energy_samples.sqlite3`)
+- `WATTIMIZE_DB_PATH` (default: `data/wattimize.sqlite3`)
 - `WATTIMIZE_SAMPLE_INTERVAL_SECONDS` (default: `5`, choices: `5/10/30/60/300`)
 - `WATTIMIZE_SOLPLANET_SAMPLE_INTERVAL_SECONDS` (default: `60`, choices: `5/10/30/60/300`)
 
@@ -146,7 +146,7 @@ First-run configuration:
 - Other values are backend constants (entity ids, port/scheme/ssl/cache/timeout), except the two sampling interval fields.
 - Saved config is written into SQLite table `app_config`.
 - The database path can be overridden with `WATTIMIZE_DB_PATH`.
-- The checked-in `docker-compose.yml` points `WATTIMIZE_DB_PATH` at `/app/data/energy_samples.sqlite3`.
+- The checked-in `docker-compose.yml` points `WATTIMIZE_DB_PATH` at `/app/data/wattimize.sqlite3`.
 
 ## 6) Built-in SQLite Sampling
 

@@ -8,7 +8,6 @@ import os
 import re
 import sqlite3
 import traceback
-from urllib.parse import urlparse
 from collections import Counter
 from contextvars import ContextVar
 from datetime import UTC, date, datetime, time, timedelta
@@ -49,19 +48,18 @@ from app.persistence import (
     backfill_notification_entries_from_worker_logs,
     compute_daily_usage,
     compute_usage_between,
+    delete_worker_api_logs_older_than,
     dismiss_notification_entry,
     delete_realtime_kv_by_prefix,
     dispose_db_connections,
     expire_pending_worker_api_logs,
     export_database_bytes,
     finalize_pending_worker_api_logs_for_round,
-    get_latest_raw_request_result,
     get_latest_operation_runs,
     get_realtime_kv_by_prefix,
     get_latest_sample,
     get_series_samples,
     get_storage_status,
-    insert_raw_request_result,
     insert_worker_api_log,
     import_database_bytes,
     init_db,
@@ -71,7 +69,6 @@ from app.persistence import (
     list_database_table_rows,
     list_database_tables,
     list_time_window_rule_state_rows,
-    list_raw_request_results,
     list_realtime_kv_rows,
     list_samples,
     list_worker_api_logs,
@@ -129,6 +126,8 @@ TESLA_CONTROL_FEEDBACK_PENDING_TIMEOUT_SECONDS = 15.0
 TESLA_CONTROL_FEEDBACK_SUCCESS_TTL_SECONDS = 4.0
 TESLA_CONTROL_FEEDBACK_FAILURE_TTL_SECONDS = 30.0
 TESLA_OPERATION_PENDING_TIMEOUT_SECONDS = 180.0
+WORKER_API_LOG_TTL_DAYS = 3
+WORKER_API_LOG_CLEANUP_INTERVAL_SECONDS = 6 * 60 * 60
 POOL_PUMP_SWITCH_ENTITY_ID = "switch.cuco_v3_3c00_switch"
 POOL_PUMP_POWER_ENTITY_ID = "sensor.cuco_v3_3c00_electric_power"
 POOL_PUMP_ASSUMED_POWER_W = 1100.0
@@ -416,6 +415,8 @@ db_recovery_state: dict[str, object] = {
 }
 collector_task: asyncio.Task[None] | None = None
 collector_stop_event = asyncio.Event()
+worker_log_cleanup_task: asyncio.Task[None] | None = None
+worker_log_cleanup_stop_event = asyncio.Event()
 storage_db_path = Path(os.getenv("WATTIMIZE_DB_PATH", "").strip() or DEFAULT_DB_PATH)
 worker_failure_log_path = Path(
     os.getenv("WATTIMIZE_WORKER_FAILURE_LOG_PATH", "").strip() or storage_db_path.with_name("worker_failures.log")
@@ -941,31 +942,12 @@ def _handle_outbound_request_log(event: dict[str, object]) -> None:
     duration_ms = round(float(duration_raw), 1) if isinstance(duration_raw, (int, float)) else None
     result_text = str(event.get("result_text") or "")
     error_text = str(event.get("error_text") or "")
-    response_json = event.get("response_json")
     endpoint = _endpoint_name_from_event(service=service, method=method, url=api_link)
-    parsed_url = urlparse(api_link)
     worker_requested_at = round_started_at or actual_requested_at
 
     try:
         if phase == "start":
             return
-        if round_id:
-            insert_raw_request_result(
-                storage_db_path,
-                round_id=round_id,
-                system=system,
-                source=service,
-                endpoint=endpoint,
-                method=method,
-                request_url=api_link,
-                requested_at_utc=actual_requested_at,
-                duration_ms=duration_ms,
-                ok=ok,
-                status_code=status_code,
-                error_text=error_text or None,
-                response_text=result_text or None,
-                response_json=response_json,
-            )
         if request_token:
             update_worker_api_log(
                 storage_db_path,
@@ -5645,74 +5627,6 @@ def _is_solplanet_meter_data_valid(meter_data: dict[str, object]) -> bool:
     return flg == 1 and bool(tim)
 
 
-async def _save_solplanet_endpoint_snapshot(
-    *,
-    endpoint: str,
-    path: str,
-    ok: bool,
-    error: str | None,
-    payload: dict[str, object] | None,
-    fetch_ms: float | None,
-    requested_at_utc: str | None = None,
-) -> None:
-    round_id = str(request_round_ctx.get() or "").strip() or "manual"
-    request_url = (
-        f"{settings.solplanet_dongle_scheme}://"
-        f"{settings.solplanet_dongle_host}:{settings.solplanet_dongle_port}/{path.lstrip('/')}"
-    )
-    try:
-        await asyncio.to_thread(
-            insert_raw_request_result,
-            storage_db_path,
-            round_id=round_id,
-            system="solplanet",
-            source="solplanet_cgi",
-            endpoint=endpoint,
-            requested_at_utc=requested_at_utc or datetime.now(UTC).isoformat(),
-            method="GET",
-            request_url=request_url,
-            duration_ms=fetch_ms,
-            ok=ok,
-            status_code=None,
-            error_text=error,
-            response_text=json.dumps(payload, ensure_ascii=False) if payload is not None else None,
-            response_json=payload,
-        )
-        if request_actor_ctx.get() == "worker":
-            request_token = _worker_log_request_token(round_id, "solplanet_cgi", "GET", request_url)
-            await asyncio.to_thread(
-                update_worker_api_log if request_token else insert_worker_api_log,
-                storage_db_path,
-                **(
-                    {
-                        "request_token": request_token,
-                        "ok": ok,
-                        "status": "ok" if ok else "failed",
-                        "status_code": None,
-                        "duration_ms": fetch_ms,
-                        "result_text": json.dumps(payload, ensure_ascii=False) if payload is not None else None,
-                        "error_text": error,
-                    }
-                    if request_token
-                    else {
-                        "worker": str(request_actor_ctx.get() or "worker"),
-                        "system": str(request_system_ctx.get() or "solplanet"),
-                        "service": "solplanet_cgi",
-                        "method": "GET",
-                        "api_link": request_url,
-                        "requested_at_utc": requested_at_utc or datetime.now(UTC).isoformat(),
-                        "ok": ok,
-                        "status_code": None,
-                        "duration_ms": fetch_ms,
-                        "result_text": json.dumps(payload, ensure_ascii=False) if payload is not None else None,
-                        "error_text": error,
-                    }
-                ),
-            )
-    except Exception as exc:
-        logger.warning("Failed to persist raw Solplanet result for %s (%s): %s", endpoint, path, exc)
-
-
 def _extract_solplanet_context(inverter_info: dict[str, object]) -> dict[str, object]:
     inv_list = inverter_info.get("inv")
     inverter_item = inv_list[0] if isinstance(inv_list, list) and inv_list and isinstance(inv_list[0], dict) else {}
@@ -5796,16 +5710,6 @@ async def _run_solplanet_endpoint_request(
         fetch_ms = round((monotonic() - fetch_started) * 1000, 1)
         if round_number is not None:
             _mark_endpoint_failure("solplanet", endpoint, round_number, error_text)
-        if not isinstance(exc, httpx.HTTPError):
-            await _save_solplanet_endpoint_snapshot(
-                endpoint=endpoint,
-                path=path,
-                ok=False,
-                error=error_text,
-                payload=None,
-                fetch_ms=fetch_ms,
-                requested_at_utc=requested_at_utc,
-            )
         return endpoint, {}, error_text, path, fetch_ms
 
 
@@ -6108,14 +6012,6 @@ async def _build_solplanet_energy_flow_payload_from_cgi(
             endpoint_map[endpoint] = ({}, error_text, path, 0.0)
             if round_number is not None:
                 _mark_endpoint_failure("solplanet", endpoint, round_number, error_text)
-            await _save_solplanet_endpoint_snapshot(
-                endpoint=endpoint,
-                path=path,
-                ok=False,
-                error=error_text,
-                payload=None,
-                fetch_ms=0.0,
-            )
 
     return _build_solplanet_energy_flow_from_endpoint_map(
         endpoint_map,
@@ -6581,99 +6477,43 @@ def _build_solplanet_single_endpoint_response(
     }
 
 
-def _parse_iso_utc(value: object) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
-
-
-async def _solplanet_endpoint_response_from_snapshot(
+async def _solplanet_endpoint_response_live(
     *,
     name: str,
     path: str,
-    started_at: float,
+    fetch_payload: Callable[[], object],
 ) -> dict[str, object]:
-    snapshot = await asyncio.to_thread(
-        get_latest_raw_request_result,
-        storage_db_path,
-        source="solplanet_cgi",
-        endpoint=name,
-    )
-    if not snapshot:
+    started_at = monotonic()
+    requested_at = datetime.now(UTC).isoformat()
+    try:
+        result = await asyncio.wait_for(fetch_payload(), timeout=settings.solplanet_request_timeout_seconds)
+        payload = result if isinstance(result, dict) else {}
+        response = _build_solplanet_single_endpoint_response(
+            name=name,
+            path=path,
+            payload=payload,
+            error=None,
+            started_at=started_at,
+        )
+        response["status"] = "success"
+        response["last_requested_at"] = requested_at
+        response["last_success_at"] = requested_at
+        response["updated_at"] = requested_at
+        return response
+    except Exception as exc:  # noqa: BLE001
+        error = f"{type(exc).__name__}: {exc}"
         response = _build_solplanet_single_endpoint_response(
             name=name,
             path=path,
             payload=None,
-            error="No snapshot stored yet",
+            error=error,
             started_at=started_at,
         )
-        response["status"] = "missing"
-        response["last_requested_at"] = None
-        response["last_success_at"] = None
-        response["source"] = {"type": "raw_request_results"}
-        return response
-
-    snap_ok = bool(snapshot.get("ok"))
-    snap_error = str(snapshot.get("error") or "Last request failed") if not snap_ok else None
-    snap_payload = snapshot.get("payload") if isinstance(snapshot.get("payload"), dict) else None
-    snap_path = str(snapshot.get("path") or path)
-    response = _build_solplanet_single_endpoint_response(
-        name=name,
-        path=snap_path,
-        payload=snap_payload,
-        error=snap_error,
-        started_at=started_at,
-    )
-    requested_at = snapshot.get("requested_at_utc")
-    if isinstance(requested_at, str) and requested_at:
-        response["updated_at"] = requested_at
+        response["status"] = "failed"
         response["last_requested_at"] = requested_at
-    else:
-        response["last_requested_at"] = None
-    response["last_success_at"] = None
-    response["status"] = "success" if snap_ok else "failed"
-    response["ok"] = snap_ok
-    response["error"] = snap_error
-    if snapshot.get("fetch_ms") is not None:
-        response["fetch_ms"] = snapshot.get("fetch_ms")
-    last_success_dt = None
-    last_requested_dt = _parse_iso_utc(snapshot.get("requested_at_utc"))
-    collector_solplanet = dict(collector_status.get("solplanet") or {})
-    collector_last_success_dt = _parse_iso_utc(collector_solplanet.get("last_success_at"))
-    collector_last_error_dt = _parse_iso_utc(collector_solplanet.get("last_error_at"))
-    stale_after_seconds = max(45.0, settings.solplanet_request_timeout_seconds * 3.0)
-    stale = False
-    stale_reason: str | None = None
-    if last_requested_dt is not None:
-        age_seconds = max((datetime.now(UTC) - last_requested_dt).total_seconds(), 0.0)
-        response["age_seconds"] = round(age_seconds, 1)
-        if age_seconds > stale_after_seconds:
-            stale = True
-            stale_reason = "snapshot_too_old"
-    if (
-        collector_last_error_dt is not None
-        and (collector_last_success_dt is None or collector_last_error_dt > collector_last_success_dt)
-        and (last_success_dt is None or collector_last_error_dt >= last_success_dt)
-    ):
-        stale = True
-        stale_reason = stale_reason or "collector_currently_failing"
-    if stale:
-        response["stale"] = True
-        response["stale_reason"] = stale_reason
-        response["status"] = "stale"
-    response["source"] = {
-        "type": "raw_request_results",
-        "host": settings.solplanet_dongle_host,
-        "port": settings.solplanet_dongle_port,
-        "scheme": settings.solplanet_dongle_scheme,
-    }
-    return response
+        response["last_success_at"] = None
+        response["updated_at"] = requested_at
+        return response
 
 
 def _build_saj_single_endpoint_response(
@@ -7311,28 +7151,6 @@ async def _solplanet_get_schedule_live() -> dict[str, object]:
     for day in SOLPLANET_DAY_KEYS:
         normalized[day] = _solplanet_day_slots(payload.get(day))
     return normalized
-
-
-async def _solplanet_get_schedule_with_fallback() -> dict[str, object]:
-    try:
-        return await _solplanet_get_schedule_live()
-    except Exception:  # noqa: BLE001
-        snapshot = await asyncio.to_thread(
-            get_latest_raw_request_result,
-            storage_db_path,
-            source="solplanet_cgi",
-            endpoint="getdefine",
-        )
-        payload = snapshot.get("payload") if isinstance(snapshot, dict) else None
-        if not isinstance(payload, dict):
-            raise
-        normalized: dict[str, object] = {
-            "Pin": int(_to_number(payload.get("Pin")) or 0),
-            "Pout": int(_to_number(payload.get("Pout")) or 0),
-        }
-        for day in SOLPLANET_DAY_KEYS:
-            normalized[day] = _solplanet_day_slots(payload.get(day))
-        return normalized
 
 
 async def _solplanet_set_schedule_payload(payload: dict[str, object]) -> dict[str, object]:
@@ -9269,6 +9087,57 @@ async def _stop_collector() -> None:
         status["in_progress"] = False
 
 
+async def _prune_worker_api_logs_once() -> int:
+    cutoff_epoch = datetime.now(UTC).timestamp() - (WORKER_API_LOG_TTL_DAYS * 24 * 60 * 60)
+    deleted = await asyncio.to_thread(
+        delete_worker_api_logs_older_than,
+        storage_db_path,
+        older_than_epoch=cutoff_epoch,
+    )
+    if deleted:
+        logger.info(
+            "Pruned %s worker_api_logs rows older than %s days",
+            deleted,
+            WORKER_API_LOG_TTL_DAYS,
+        )
+    return deleted
+
+
+async def _worker_log_cleanup_loop() -> None:
+    while not worker_log_cleanup_stop_event.is_set():
+        try:
+            await _prune_worker_api_logs_once()
+        except Exception:  # noqa: BLE001
+            logger.exception("worker_api_logs TTL cleanup failed")
+        try:
+            await asyncio.wait_for(
+                worker_log_cleanup_stop_event.wait(),
+                timeout=WORKER_API_LOG_CLEANUP_INTERVAL_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            continue
+
+
+async def _start_worker_log_cleanup() -> None:
+    global worker_log_cleanup_task  # noqa: PLW0603
+    if worker_log_cleanup_task and not worker_log_cleanup_task.done():
+        return
+    worker_log_cleanup_stop_event.clear()
+    worker_log_cleanup_task = asyncio.create_task(_worker_log_cleanup_loop())
+
+
+async def _stop_worker_log_cleanup() -> None:
+    global worker_log_cleanup_task  # noqa: PLW0603
+    worker_log_cleanup_stop_event.set()
+    if worker_log_cleanup_task:
+        worker_log_cleanup_task.cancel()
+        try:
+            await worker_log_cleanup_task
+        except asyncio.CancelledError:
+            pass
+        worker_log_cleanup_task = None
+
+
 async def _restart_collector() -> dict[str, object]:
     async with runtime_lock:
         was_running = bool(collector_task and not collector_task.done())
@@ -9813,30 +9682,6 @@ async def worker_failure_log(
     before: int = Query(default=0, ge=0),
 ) -> dict[str, object]:
     payload = await asyncio.to_thread(_read_worker_failure_log, limit=limit, before=before)
-    payload["updated_at"] = datetime.now(UTC).isoformat()
-    return payload
-
-
-@app.get("/api/raw-requests")
-async def raw_requests(
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=100, ge=1, le=500),
-    round_id: str | None = Query(default=None),
-    system: str | None = Query(default=None, description="saj or solplanet"),
-    source: str | None = Query(default=None, description="home_assistant or solplanet_cgi"),
-) -> dict[str, object]:
-    normalized_system: str | None = None
-    if system:
-        normalized_system = _normalize_system_name(system) if system.lower().strip() != "combined" else "combined"
-    payload = await asyncio.to_thread(
-        list_raw_request_results,
-        storage_db_path,
-        page=page,
-        page_size=page_size,
-        round_id=str(round_id or "").strip() or None,
-        system=normalized_system,
-        source=str(source or "").strip() or None,
-    )
     payload["updated_at"] = datetime.now(UTC).isoformat()
     return payload
 
@@ -10843,7 +10688,7 @@ async def post_saj_control_refresh_touch() -> dict[str, object]:
 @app.get("/api/solplanet/control/state")
 async def get_solplanet_control_state() -> dict[str, object]:
     try:
-        schedule = await _solplanet_get_schedule_with_fallback()
+        schedule = await _solplanet_get_schedule_live()
         return {"system": "solplanet", "control_state": _build_solplanet_control_state(schedule)}
     except httpx.HTTPStatusError as exc:
         detail = {
@@ -10873,7 +10718,7 @@ async def put_solplanet_control_limits(payload: SolplanetLimitsPayload) -> dict[
     if not update_payload:
         raise HTTPException(status_code=400, detail="No fields to update")
     try:
-        previous_schedule = await _solplanet_get_schedule_with_fallback()
+        previous_schedule = await _solplanet_get_schedule_live()
         operation_run_id = await _start_operation_history_run(
             "solplanet.manual.set_limits",
             request_payload=payload.model_dump(mode="json"),
@@ -10884,7 +10729,7 @@ async def put_solplanet_control_limits(payload: SolplanetLimitsPayload) -> dict[
         readback_error: str | None = None
         try:
             schedule = await asyncio.wait_for(
-                _solplanet_get_schedule_with_fallback(),
+                _solplanet_get_schedule_live(),
                 timeout=min(5.0, float(settings.solplanet_request_timeout_seconds)),
             )
             state_payload = _build_solplanet_control_state(schedule)
@@ -10944,7 +10789,7 @@ async def put_solplanet_day_schedule(day: str, payload: SolplanetDaySchedulePayl
     slots = _validate_solplanet_day_slots(payload.slots)
     operation_run_id: int | None = None
     try:
-        previous_schedule = await _solplanet_get_schedule_with_fallback()
+        previous_schedule = await _solplanet_get_schedule_live()
         operation_run_id = await _start_operation_history_run(
             "solplanet.manual.set_day_schedule",
             request_payload={"day": day_key, **payload.model_dump(mode="json")},
@@ -10952,7 +10797,7 @@ async def put_solplanet_day_schedule(day: str, payload: SolplanetDaySchedulePayl
         )
         request_payload = {day_key: slots}
         cgi_write = await _solplanet_set_schedule_payload(request_payload)
-        schedule = await _solplanet_get_schedule_with_fallback()
+        schedule = await _solplanet_get_schedule_live()
         result = {
             "ok": True,
             "changed": [{"key": day_key, "value": slots}],
@@ -11034,7 +10879,7 @@ async def put_solplanet_day_schedule_slot(day: str, slot: int, payload: Solplane
             day_slots[index] = 0
         request_payload = {day_key: day_slots}
         cgi_write = await _solplanet_set_schedule_payload(request_payload)
-        latest = await _solplanet_get_schedule_with_fallback()
+        latest = await _solplanet_get_schedule_live()
         result = {
             "ok": True,
             "changed": [{"key": day_key, "slot": safe_slot, "value": day_slots[index]}],
@@ -11088,14 +10933,14 @@ async def put_solplanet_raw_setting(payload: SolplanetRawSettingPayload) -> dict
         raise HTTPException(status_code=400, detail="payload cannot be empty")
     operation_run_id: int | None = None
     try:
-        previous_schedule = await _solplanet_get_schedule_with_fallback()
+        previous_schedule = await _solplanet_get_schedule_live()
         operation_run_id = await _start_operation_history_run(
             "solplanet.manual.set_raw_setting",
             request_payload=payload.model_dump(mode="json"),
             previous_state={"state": _build_solplanet_control_state(previous_schedule)},
         )
         cgi_write = await _solplanet_set_schedule_payload(payload.payload)
-        schedule = await _solplanet_get_schedule_with_fallback()
+        schedule = await _solplanet_get_schedule_live()
         result = {
             "ok": True,
             "changed": [{"key": "raw_payload", "value": payload.payload}],
@@ -11186,99 +11031,111 @@ async def get_solplanet_cgi_dump() -> dict[str, object]:
 @app.get("/api/soulplanet/cgi/getdev-device-2")
 @app.get("/api/solplanet/cgi/getdev-device-2")
 async def get_solplanet_getdev_device_2() -> dict[str, object]:
-    started_at = monotonic()
-    return await _solplanet_endpoint_response_from_snapshot(
+    return await _solplanet_endpoint_response_live(
         name="getdev_device_2",
         path="getdev.cgi?device=2",
-        started_at=started_at,
+        fetch_payload=solplanet_client.get_inverter_info,
     )
 
 
 @app.get("/api/soulplanet/cgi/getdev-device-0")
 @app.get("/api/solplanet/cgi/getdev-device-0")
 async def get_solplanet_getdev_device_0() -> dict[str, object]:
-    started_at = monotonic()
-    return await _solplanet_endpoint_response_from_snapshot(
+    return await _solplanet_endpoint_response_live(
         name="getdev_device_0",
         path="getdev.cgi?device=0",
-        started_at=started_at,
+        fetch_payload=solplanet_client.get_dongle_info,
     )
 
 
 @app.get("/api/soulplanet/cgi/getdev-device-3")
 @app.get("/api/solplanet/cgi/getdev-device-3")
 async def get_solplanet_getdev_device_3() -> dict[str, object]:
-    started_at = monotonic()
-    return await _solplanet_endpoint_response_from_snapshot(
+    return await _solplanet_endpoint_response_live(
         name="getdev_device_3",
         path="getdev.cgi?device=3",
-        started_at=started_at,
+        fetch_payload=solplanet_client.get_meter_info,
     )
 
 
 @app.get("/api/soulplanet/cgi/getdev-device-4")
 @app.get("/api/solplanet/cgi/getdev-device-4")
 async def get_solplanet_getdev_device_4() -> dict[str, object]:
-    started_at = monotonic()
-    return await _solplanet_endpoint_response_from_snapshot(
+    async def _fetch_payload() -> dict[str, object]:
+        context = await _get_solplanet_context_cached()
+        inverter_sn = str(context.get("inverter_sn") or "").strip()
+        if not inverter_sn:
+            raise ValueError("Missing Solplanet inverter serial number")
+        return await solplanet_client.get_battery_info(inverter_sn)
+
+    return await _solplanet_endpoint_response_live(
         name="getdev_device_4",
         path="getdev.cgi?device=4",
-        started_at=started_at,
+        fetch_payload=_fetch_payload,
     )
 
 
 @app.get("/api/soulplanet/cgi/getdevdata-device-2")
 @app.get("/api/solplanet/cgi/getdevdata-device-2")
 async def get_solplanet_getdevdata_device_2() -> dict[str, object]:
-    started_at = monotonic()
-    return await _solplanet_endpoint_response_from_snapshot(
+    async def _fetch_payload() -> dict[str, object]:
+        context = await _get_solplanet_context_cached()
+        inverter_sn = str(context.get("inverter_sn") or "").strip()
+        if not inverter_sn:
+            raise ValueError("Missing Solplanet inverter serial number")
+        return await solplanet_client.get_inverter_data(inverter_sn)
+
+    return await _solplanet_endpoint_response_live(
         name="getdevdata_device_2",
         path="getdevdata.cgi?device=2",
-        started_at=started_at,
+        fetch_payload=_fetch_payload,
     )
 
 
 @app.get("/api/soulplanet/cgi/getdevdata-device-3")
 @app.get("/api/solplanet/cgi/getdevdata-device-3")
 async def get_solplanet_getdevdata_device_3() -> dict[str, object]:
-    started_at = monotonic()
-    return await _solplanet_endpoint_response_from_snapshot(
+    return await _solplanet_endpoint_response_live(
         name="getdevdata_device_3",
         path="getdevdata.cgi?device=3",
-        started_at=started_at,
+        fetch_payload=solplanet_client.get_meter_data,
     )
 
 
 @app.get("/api/soulplanet/cgi/getdevdata-device-4")
 @app.get("/api/solplanet/cgi/getdevdata-device-4")
 async def get_solplanet_getdevdata_device_4() -> dict[str, object]:
-    started_at = monotonic()
-    return await _solplanet_endpoint_response_from_snapshot(
+    async def _fetch_payload() -> dict[str, object]:
+        context = await _get_solplanet_context_cached()
+        battery_sn = str(context.get("battery_sn") or "").strip()
+        if not battery_sn:
+            raise ValueError("Missing Solplanet battery serial number")
+        return await solplanet_client.get_battery_data(battery_sn)
+
+    return await _solplanet_endpoint_response_live(
         name="getdevdata_device_4",
         path="getdevdata.cgi?device=4",
-        started_at=started_at,
+        fetch_payload=_fetch_payload,
     )
 
 
 @app.get("/api/soulplanet/cgi/getdevdata-device-5")
 @app.get("/api/solplanet/cgi/getdevdata-device-5")
 async def get_solplanet_getdevdata_device_5() -> dict[str, object]:
-    started_at = monotonic()
-    return await _solplanet_endpoint_response_from_snapshot(
+    return await _solplanet_endpoint_response_live(
         name="getdevdata_device_5",
         path="getdevdata.cgi?device=5",
-        started_at=started_at,
+        fetch_payload=lambda: solplanet_client.get_device_data(5),
     )
 
 
 @app.get("/api/soulplanet/cgi/getdefine")
 @app.get("/api/solplanet/cgi/getdefine")
 async def get_solplanet_getdefine() -> dict[str, object]:
-    started_at = monotonic()
-    return await _solplanet_endpoint_response_from_snapshot(
+    return await _solplanet_endpoint_response_live(
         name="getdefine",
         path="getdefine.cgi",
-        started_at=started_at,
+        fetch_payload=solplanet_client.get_schedule,
     )
 
 
@@ -11334,6 +11191,7 @@ async def get_solplanet_cgi_explore() -> dict[str, object]:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    await _stop_worker_log_cleanup()
     await _stop_collector()
     await solplanet_client.aclose()
 
@@ -11352,6 +11210,8 @@ async def on_startup() -> None:
         service=NOTIFICATION_SUMMARY_SERVICE,
         active_statuses=(WORKER_LOG_STATUS_SEND, "notification", "notified", "alarmed"),
     )
+    await _prune_worker_api_logs_once()
+    await _start_worker_log_cleanup()
     await _start_collector()
 
 
