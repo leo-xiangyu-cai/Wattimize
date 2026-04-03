@@ -1481,13 +1481,13 @@ td {
 
 .mobile-flow-board {
   display: none;
-  margin-top: 14px;
+  margin-top: 8px;
 }
 
 .mobile-energy-card {
   border: 1px solid #d7e0d9;
   border-radius: 22px;
-  padding: 14px 12px 12px;
+  padding: 10px;
   background:
     radial-gradient(circle at top left, rgba(241, 248, 244, 0.98), rgba(241, 248, 244, 0) 38%),
     linear-gradient(180deg, rgba(247, 251, 248, 0.98), rgba(239, 246, 241, 0.98));
@@ -1495,12 +1495,12 @@ td {
 }
 
 .mobile-energy-card-head {
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .mobile-energy-card-title {
   margin: 0;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1516,15 +1516,15 @@ td {
 .mobile-energy-scene {
   position: relative;
   width: 100%;
-  min-height: 680px;
-  border-radius: 18px;
-  background: rgba(226, 234, 230, 0.52);
+  min-height: 540px;
+  border-radius: 16px;
+  background: #f6faf7;
   overflow: hidden;
 }
 
 .mobile-energy-node {
   position: absolute;
-  width: 84px;
+  width: 88px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1537,32 +1537,35 @@ td {
   transform: translateY(-1px);
 }
 
+.mobile-energy-node.is-clickable {
+  cursor: pointer;
+}
+
 .mobile-energy-node.is-dimmed {
   opacity: 0.48;
 }
 
 .mobile-energy-icon {
-  width: 50px;
-  height: 50px;
+  width: 58px;
+  height: 58px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  border: 1px solid rgba(203, 211, 206, 0.96);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 6px 16px rgba(34, 46, 40, 0.06);
-  color: #55605a;
+  border: 0;
+  background: #d5f6de;
+  box-shadow: none;
+  color: #438d63;
 }
 
 .mobile-energy-node.is-active .mobile-energy-icon {
-  border-color: rgba(105, 172, 134, 0.95);
-  background: #ffffff;
-  color: #2c6f4f;
+  background: #c9f2d5;
+  color: #3f8a61;
 }
 
 .mobile-energy-icon svg {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
 }
 
 .mobile-energy-icon svg * {
@@ -1574,25 +1577,30 @@ td {
 }
 
 .mobile-energy-title {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   font-size: 10px;
   font-weight: 700;
-  color: #37423d;
+  color: #1f2923;
 }
 
 .mobile-energy-value,
 .mobile-energy-subvalue {
   margin: 2px 0 0;
-  min-height: 16px;
+  min-height: 14px;
   font-size: 10px;
   font-weight: 700;
-  line-height: 1.25;
-  color: #7b38d0;
+  line-height: 1.2;
+  color: #3f8f62;
 }
 
 .mobile-energy-subvalue {
-  color: #6c7a73;
-  font-weight: 600;
+  color: #6e746f;
+  font-weight: 500;
+}
+
+.mobile-energy-copy {
+  display: grid;
+  gap: 0;
 }
 
 .mobile-energy-node .data-kind-value {
@@ -1600,20 +1608,66 @@ td {
   gap: 0.22em;
 }
 
-.mobile-energy-node.node-solar { left: 10%; top: 7%; }
-.mobile-energy-node.node-grid { right: 10%; top: 7%; }
-.mobile-energy-node.node-home { left: calc(50% - 42px); top: 31%; width: 84px; }
-.mobile-energy-node.node-inverter1 { left: 10%; top: 40%; }
-.mobile-energy-node.node-inverter2 { right: 10%; top: 40%; }
-.mobile-energy-node.node-battery1 { left: 8%; top: 69%; }
-.mobile-energy-node.node-load { left: calc(50% - 42px); top: 69%; width: 84px; }
-.mobile-energy-node.node-battery2 { right: 8%; top: 69%; }
-.mobile-energy-node.node-tesla { right: 10%; top: 86%; width: 84px; }
+.mobile-energy-node.node-solar { left: 4%; top: 5%; }
+.mobile-energy-node.node-grid { left: calc(50% - 44px); top: 5%; width: 88px; }
+.mobile-energy-node.node-inverter1 { left: 4%; top: 28%; }
+.mobile-energy-node.node-home { left: calc(50% - 48px); top: 24.5%; width: 96px; }
+.mobile-energy-node.node-inverter2 { right: 4%; top: 28%; }
+.mobile-energy-node.node-battery1 { left: 1%; top: 55%; width: 130px; flex-direction: row-reverse; align-items: center; gap: 8px; text-align: left; }
+.mobile-energy-node.node-battery2 { right: 1%; top: 55%; width: 130px; flex-direction: row; align-items: center; gap: 8px; text-align: right; }
+.mobile-energy-node.node-load { left: 6%; top: 79%; width: 88px; }
+.mobile-energy-node.node-pool { left: calc(50% - 44px); top: 79%; width: 88px; }
+.mobile-energy-node.node-tesla { right: 6%; top: 79%; width: 88px; }
+
+.mobile-energy-node.node-battery1 .mobile-energy-copy,
+.mobile-energy-node.node-battery2 .mobile-energy-copy {
+  width: 72px;
+}
+
+.mobile-energy-node.node-battery1 .mobile-energy-copy {
+  text-align: left;
+}
+
+.mobile-energy-node.node-battery2 .mobile-energy-copy {
+  text-align: right;
+}
+
+.mobile-energy-node.node-home .mobile-energy-icon {
+  width: 88px;
+  height: 88px;
+  border-radius: 999px;
+  padding-top: 0;
+  background: linear-gradient(180deg, #fffdf9, #f8fbf7);
+  border: 1px solid rgba(86, 144, 106, 0.1);
+  color: #4b956a;
+  box-shadow:
+    0 10px 26px rgba(41, 79, 57, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.mobile-energy-node.node-home .mobile-energy-icon svg {
+  width: 36px;
+  height: 36px;
+}
+
+.mobile-energy-node.node-home .mobile-energy-title {
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.mobile-energy-node.node-home .mobile-energy-value {
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.mobile-energy-node.node-load .mobile-energy-value {
+  color: #d77f61;
+}
 
 .mobile-energy-line {
   position: absolute;
   z-index: 1;
-  background: rgba(126, 137, 132, 0.28);
+  background: #4a9a6c;
   border-radius: 999px;
 }
 
@@ -1632,45 +1686,45 @@ td {
 }
 
 .mobile-energy-line::after {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 999px;
-  background: rgba(88, 95, 92, 0.3);
+  background: #4a9a6c;
 }
 
 .mobile-energy-line.is-active {
-  background: linear-gradient(180deg, rgba(61, 172, 120, 0.85), rgba(61, 172, 120, 0.55));
-  box-shadow: 0 0 0 1px rgba(61, 172, 120, 0.12);
+  background: #4a9a6c;
+  box-shadow: none;
 }
 
 .mobile-energy-line.is-active::before {
   opacity: 1;
-  background: rgba(61, 172, 120, 0.95);
-  box-shadow: 0 0 0 4px rgba(61, 172, 120, 0.12);
+  background: #4a9a6c;
+  box-shadow: none;
 }
 
 .mobile-energy-line.is-active::after {
-  background: rgba(61, 172, 120, 0.92);
+  background: #4a9a6c;
 }
 
 .mobile-energy-line.is-reverse.is-active {
-  background: linear-gradient(180deg, rgba(74, 136, 255, 0.85), rgba(74, 136, 255, 0.55));
+  background: #4a9a6c;
 }
 
 .mobile-energy-line.is-reverse.is-active::before {
-  background: rgba(74, 136, 255, 0.95);
-  box-shadow: 0 0 0 4px rgba(74, 136, 255, 0.12);
+  background: #4a9a6c;
+  box-shadow: none;
 }
 
 .mobile-energy-line.is-reverse.is-active::after {
-  background: rgba(74, 136, 255, 0.92);
+  background: #4a9a6c;
 }
 
 .mobile-energy-line.line-solar-inverter1 {
-  left: 25%;
-  top: 21%;
+  left: 17%;
+  top: 16%;
   width: 2px;
-  height: 25%;
+  height: 15%;
 }
 
 .mobile-energy-line.line-solar-inverter1::before {
@@ -1684,10 +1738,10 @@ td {
 }
 
 .mobile-energy-line.line-grid-home {
-  right: 25%;
-  top: 21%;
+  left: calc(50% - 1px);
+  top: 16%;
   width: 2px;
-  height: 21%;
+  height: 14%;
 }
 
 .mobile-energy-line.line-grid-home::before {
@@ -1700,77 +1754,94 @@ td {
   bottom: 18%;
 }
 
-.mobile-energy-line.line-battery1-inverter1 {
-  left: 25%;
-  top: 57%;
+.mobile-energy-line.line-battery1-branch-v {
+  left: 17%;
+  top: 49%;
   width: 2px;
-  height: 16%;
+  height: 10%;
 }
 
-.mobile-energy-line.line-battery1-inverter1::before {
+.mobile-energy-line.line-battery1-branch-v::before {
   left: -4px;
   top: 0;
 }
 
-.mobile-energy-line.line-battery1-inverter1::after {
+.mobile-energy-line.line-battery1-branch-v::after {
   left: -3px;
-  top: 28%;
+  top: 0;
 }
 
-.mobile-energy-line.line-battery2-inverter2 {
-  right: 25%;
-  top: 57%;
+.mobile-energy-line.line-battery1-branch-h {
+  left: 17%;
+  top: 58.5%;
+  width: 20%;
+  height: 2px;
+}
+
+.mobile-energy-line.line-battery1-branch-h::before {
+  left: 0;
+  top: -4px;
+}
+
+.mobile-energy-line.line-battery1-branch-h::after {
+  left: 48%;
+  top: -4px;
+}
+
+.mobile-energy-line.line-battery2-branch-v {
+  right: 17%;
+  top: 49%;
   width: 2px;
-  height: 16%;
+  height: 10%;
 }
 
-.mobile-energy-line.line-battery2-inverter2::before {
+.mobile-energy-line.line-battery2-branch-v::before {
   left: -4px;
   top: 0;
 }
 
-.mobile-energy-line.line-battery2-inverter2::after {
+.mobile-energy-line.line-battery2-branch-v::after {
   left: -3px;
-  top: 28%;
+  top: 0;
 }
 
-.mobile-energy-line.line-home-load {
+.mobile-energy-line.line-battery2-branch-h {
+  left: 63%;
+  top: 58.5%;
+  width: 20%;
+  height: 2px;
+}
+
+.mobile-energy-line.line-battery2-branch-h::before {
+  left: calc(100% - 10px);
+  top: -4px;
+}
+
+.mobile-energy-line.line-battery2-branch-h::after {
+  left: 42%;
+  top: -4px;
+}
+
+.mobile-energy-line.line-home-trunk {
   left: calc(50% - 1px);
-  top: 51%;
+  top: 47%;
   width: 2px;
-  height: 19%;
+  height: 28%;
 }
 
-.mobile-energy-line.line-home-load::before {
+.mobile-energy-line.line-home-trunk::before {
   left: -4px;
   top: 0;
 }
 
-.mobile-energy-line.line-home-load::after {
+.mobile-energy-line.line-home-trunk::after {
   left: -3px;
-  top: 22%;
-}
-
-.mobile-energy-line.line-home-tesla {
-  right: 19%;
-  top: 83%;
-  width: 2px;
-  height: 7%;
-}
-
-.mobile-energy-line.line-home-tesla::before {
-  left: -4px;
-  top: 0;
-}
-
-.mobile-energy-line.line-home-tesla::after {
-  left: -3px;
-  top: 38%;
+  top: 74%;
 }
 
 .mobile-energy-line.line-inverter1-home {
-  left: 30%;
-  top: 46.5%;
+  left: 17%;
+  top: 32.6%;
   width: 21%;
   height: 2px;
 }
@@ -1781,14 +1852,14 @@ td {
 }
 
 .mobile-energy-line.line-inverter1-home::after {
-  left: 46%;
+  left: calc(100% - 10px);
   top: -3px;
 }
 
 .mobile-energy-line.line-inverter2-home {
-  left: 50%;
-  top: 46.5%;
-  width: 21%;
+  left: 61%;
+  top: 32.6%;
+  width: 22%;
   height: 2px;
 }
 
@@ -1798,8 +1869,76 @@ td {
 }
 
 .mobile-energy-line.line-inverter2-home::after {
-  left: 46%;
+  left: calc(100% - 10px);
   top: -3px;
+}
+
+.mobile-energy-line.line-bus-horizontal {
+  left: 17%;
+  top: 75%;
+  width: 66%;
+  height: 2px;
+}
+
+.mobile-energy-line.line-bus-horizontal::before {
+  left: 0;
+  top: -4px;
+}
+
+.mobile-energy-line.line-bus-horizontal::after {
+  left: calc(50% - 5px);
+  top: -3px;
+}
+
+.mobile-energy-line.line-bus-load {
+  left: 17%;
+  top: 75%;
+  width: 2px;
+  height: 4%;
+}
+
+.mobile-energy-line.line-bus-load::before {
+  left: -4px;
+  top: 0;
+}
+
+.mobile-energy-line.line-bus-load::after {
+  left: -4px;
+  bottom: 0;
+}
+
+.mobile-energy-line.line-bus-pool {
+  left: calc(50% - 1px);
+  top: 75%;
+  width: 2px;
+  height: 4%;
+}
+
+.mobile-energy-line.line-bus-pool::before {
+  left: -4px;
+  top: 0;
+}
+
+.mobile-energy-line.line-bus-pool::after {
+  left: -4px;
+  bottom: 0;
+}
+
+.mobile-energy-line.line-bus-tesla {
+  right: 17%;
+  top: 75%;
+  width: 2px;
+  height: 4%;
+}
+
+.mobile-energy-line.line-bus-tesla::before {
+  left: -4px;
+  top: 0;
+}
+
+.mobile-energy-line.line-bus-tesla::after {
+  left: -4px;
+  bottom: 0;
 }
 
 @keyframes mobileFlowMoveY {
@@ -1824,29 +1963,39 @@ td {
 
 .mobile-energy-line.line-solar-inverter1.is-active::before,
 .mobile-energy-line.line-grid-home.is-active::before,
-.mobile-energy-line.line-battery1-inverter1.is-active::before,
-.mobile-energy-line.line-battery2-inverter2.is-active::before,
-.mobile-energy-line.line-home-load.is-active::before,
-.mobile-energy-line.line-home-tesla.is-active::before {
+.mobile-energy-line.line-battery1-branch-v.is-active::before,
+.mobile-energy-line.line-battery2-branch-v.is-active::before,
+.mobile-energy-line.line-home-trunk.is-active::before,
+.mobile-energy-line.line-bus-load.is-active::before,
+.mobile-energy-line.line-bus-pool.is-active::before,
+.mobile-energy-line.line-bus-tesla.is-active::before {
   animation: mobileFlowMoveY 1.4s linear infinite;
 }
 
 .mobile-energy-line.line-solar-inverter1.is-active.is-reverse::before,
 .mobile-energy-line.line-grid-home.is-active.is-reverse::before,
-.mobile-energy-line.line-battery1-inverter1.is-active.is-reverse::before,
-.mobile-energy-line.line-battery2-inverter2.is-active.is-reverse::before,
-.mobile-energy-line.line-home-load.is-active.is-reverse::before,
-.mobile-energy-line.line-home-tesla.is-active.is-reverse::before {
+.mobile-energy-line.line-battery1-branch-v.is-active.is-reverse::before,
+.mobile-energy-line.line-battery2-branch-v.is-active.is-reverse::before,
+.mobile-energy-line.line-home-trunk.is-active.is-reverse::before,
+.mobile-energy-line.line-bus-load.is-active.is-reverse::before,
+.mobile-energy-line.line-bus-pool.is-active.is-reverse::before,
+.mobile-energy-line.line-bus-tesla.is-active.is-reverse::before {
   animation: mobileFlowMoveYReverse 1.4s linear infinite;
 }
 
 .mobile-energy-line.line-inverter1-home.is-active::before,
-.mobile-energy-line.line-inverter2-home.is-active::before {
+.mobile-energy-line.line-inverter2-home.is-active::before,
+.mobile-energy-line.line-battery1-branch-h.is-active::before,
+.mobile-energy-line.line-battery2-branch-h.is-active::before,
+.mobile-energy-line.line-bus-horizontal.is-active::before {
   animation: mobileFlowMoveX 1.4s linear infinite;
 }
 
 .mobile-energy-line.line-inverter1-home.is-active.is-reverse::before,
-.mobile-energy-line.line-inverter2-home.is-active.is-reverse::before {
+.mobile-energy-line.line-inverter2-home.is-active.is-reverse::before,
+.mobile-energy-line.line-battery1-branch-h.is-active.is-reverse::before,
+.mobile-energy-line.line-battery2-branch-h.is-active.is-reverse::before,
+.mobile-energy-line.line-bus-horizontal.is-active.is-reverse::before {
   animation: mobileFlowMoveXReverse 1.4s linear infinite;
 }
 
@@ -3095,20 +3244,18 @@ td {
 
 @media (max-width: 700px) {
   .page {
-    padding: 12px;
+    padding: 10px;
+    gap: 12px;
   }
 
   .topbar {
-    gap: 10px;
-    flex-direction: column;
-    align-items: flex-start;
+    gap: 4px;
+    flex-direction: row;
+    align-items: baseline;
   }
 
   .topbar-actions {
-    width: 100%;
-    justify-content: stretch;
-    flex-wrap: wrap;
-    gap: 8px;
+    display: none;
   }
 
   .lang-switch,
@@ -3135,7 +3282,11 @@ td {
   }
 
   .topbar h1 {
-    font-size: 30px;
+    font-size: 28px;
+  }
+
+  .topbar p {
+    display: none;
   }
 
   .card {
@@ -3149,15 +3300,15 @@ td {
   .tabs {
     width: 100%;
     flex-wrap: nowrap;
-    padding: 8px;
-    border-radius: 18px;
-    padding-bottom: 8px;
+    padding: 6px;
+    border-radius: 16px;
+    padding-bottom: 6px;
   }
 
   .tab-btn {
     flex: 0 0 auto;
-    padding: 10px 14px;
-    font-size: 15px;
+    padding: 9px 12px;
+    font-size: 14px;
   }
 
   .flow-board {
@@ -3169,7 +3320,7 @@ td {
   }
 
   .flow-system-card {
-    padding: 8px;
+    padding: 6px;
   }
 
   .flow-node {
@@ -3219,6 +3370,19 @@ td {
     display: block;
   }
 
+  #weatherWidget,
+  #dashboardNotificationsSection,
+  #overnightEnergyReferenceSection {
+    display: none !important;
+  }
+
+  #dashboardView .section-header,
+  .flow-system-subtitle,
+  .flow-meta,
+  .mobile-energy-detail {
+    display: none !important;
+  }
+
   .saj-profile-popover {
     display: none !important;
   }
@@ -3229,6 +3393,22 @@ td {
 
   .balance-formula {
     display: none;
+  }
+
+  .view {
+    gap: 10px;
+  }
+
+  .mobile-energy-card {
+    border-radius: 16px;
+  }
+
+  .mobile-energy-card-head {
+    padding-bottom: 4px;
+  }
+
+  .mobile-energy-scene {
+    min-height: 560px;
   }
 }
 

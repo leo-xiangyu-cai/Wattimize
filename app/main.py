@@ -133,13 +133,15 @@ TESLA_OPERATION_PENDING_TIMEOUT_SECONDS = 180.0
 POOL_PUMP_SWITCH_ENTITY_ID = "switch.cuco_v3_3c00_switch"
 POOL_PUMP_POWER_ENTITY_ID = "sensor.cuco_v3_3c00_electric_power"
 POOL_PUMP_ASSUMED_POWER_W = 1100.0
+POOL_PUMP_FREE_ENERGY_GRID_MAX_W = 15_000.0
+POOL_PUMP_FREE_ENERGY_STATE_KEY = "operation_state.pool_pump_free_energy"
 POOL_PUMP_OVERNIGHT_RUNTIME_FRACTION = 0.8
 POOL_PUMP_OVERNIGHT_TARGET_START_HOUR = 23
 POOL_PUMP_OVERNIGHT_TARGET_END_HOUR = 5
 POOL_PUMP_OVERNIGHT_STATE_KEY = "operation_state.pool_pump_overnight"
 BATTERY_CAPACITY_KWH = {
     "saj": 15.0,
-    "solplanet": 40.0,
+    "solplanet": 50.0,
 }
 TESLA_BATTERY_CAPACITY_KWH = 75.0
 BATTERY_MIN_DISCHARGE_SOC_PERCENT = {
@@ -224,6 +226,7 @@ WORKER_LOG_LEGACY_STATUSES: tuple[str, ...] = (
 TIME_WINDOW_RULE_DEFINITIONS: tuple[dict[str, str], ...] = (
     {"code": "saj_profile_free_energy", "window": "free_energy", "kind": "operation"},
     {"code": "tesla_free_energy_control", "window": "free_energy", "kind": "operation"},
+    {"code": "pool_pump_free_energy_control", "window": "free_energy", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "after_free_shoulder", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "after_free_peak", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "export_window", "kind": "operation"},
@@ -3497,11 +3500,21 @@ def _operation_check_summary(source: dict[str, object]) -> dict[str, object]:
         "current_grid_import_w",
         "current_grid_export_w",
         "base_grid_without_tesla_w",
+        "predicted_grid_with_tesla_w",
+        "predicted_grid_with_pump_w",
+        "pool_pump_power_w",
         "available_current_options_amps",
         "candidates",
         "tesla_rule_code",
         "tesla_rule_enabled",
         "tesla_state_before",
+        "tesla_decision",
+        "tesla_priority_ready_for_pool_pump",
+        "tesla_priority_reason",
+        "tesla_start_pending",
+        "pool_pump_rule_code",
+        "pool_pump_rule_enabled",
+        "pool_pump_state_before",
         "saj_profile_guard",
         "after_free_shoulder",
         "after_free_peak",
@@ -3646,12 +3659,41 @@ async def _load_pool_pump_overnight_state() -> dict[str, object]:
     return {}
 
 
+async def _load_pool_pump_free_energy_state() -> dict[str, object]:
+    kv_map = await asyncio.to_thread(
+        get_realtime_kv_by_prefix,
+        storage_db_path,
+        prefix=POOL_PUMP_FREE_ENERGY_STATE_KEY,
+    )
+    row = kv_map.get(POOL_PUMP_FREE_ENERGY_STATE_KEY)
+    value = (row or {}).get("value")
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 async def _store_pool_pump_overnight_state(state: dict[str, object]) -> None:
     await asyncio.to_thread(
         upsert_realtime_kv,
         storage_db_path,
         [
             (POOL_PUMP_OVERNIGHT_STATE_KEY, json.dumps(state, ensure_ascii=False), "worker"),
+        ],
+    )
+
+
+async def _store_pool_pump_free_energy_state(state: dict[str, object]) -> None:
+    await asyncio.to_thread(
+        upsert_realtime_kv,
+        storage_db_path,
+        [
+            (POOL_PUMP_FREE_ENERGY_STATE_KEY, json.dumps(state, ensure_ascii=False), "worker"),
         ],
     )
 
@@ -3794,6 +3836,10 @@ def _calculate_tesla_grid_support_target(
     }
 
 
+def _pool_pump_free_energy_window_key(now_local: datetime) -> str:
+    return now_local.strftime("%Y-%m-%d")
+
+
 def _choose_tesla_solar_surplus_target_from_options(
     base_grid_without_tesla_w: float,
     charge_current_options_a: tuple[int, ...],
@@ -3823,6 +3869,224 @@ def _choose_tesla_solar_surplus_target_from_options(
     if not valid_candidates:
         return candidates[0]
     return max(valid_candidates, key=lambda candidate: float(candidate["predicted_grid_w"]))
+
+
+async def _run_pool_pump_free_energy_control_check(
+    combined_flow: dict[str, object] | None,
+    midday_result: dict[str, object] | None,
+    *,
+    round_id: str | None = None,
+    requested_at_utc: str | None = None,
+) -> dict[str, object]:
+    requested_at_utc = str(requested_at_utc or "").strip() or datetime.now(UTC).isoformat()
+    now_local, timezone_name = _tesla_grid_support_now_local()
+    window_active = _is_within_free_energy_window(now_local)
+    result: dict[str, object] = {
+        "executed_at_utc": datetime.now(UTC).isoformat(),
+        "evaluated_at_local": now_local.isoformat(),
+        "timezone": timezone_name,
+        "window_active": window_active,
+        "window_mode": "free_energy" if window_active else "off",
+        "window_schedule": _window_schedule_text("free_energy" if window_active else "off"),
+        "target": "pool_pump",
+        "service_window": WINDOW_CHECK_FREE_ENERGY_SERVICE,
+        "service_window_schedule": _window_schedule_text("free_energy"),
+        "target_grid_max_w": POOL_PUMP_FREE_ENERGY_GRID_MAX_W,
+    }
+    status = "ok"
+    ok = True
+    error_text: str | None = None
+    try:
+        enabled_map = await _load_time_window_rule_enabled_map()
+        result["rule_enabled_map"] = enabled_map
+        rule_code = "pool_pump_free_energy_control"
+        rule_enabled = _is_time_window_rule_enabled(enabled_map, rule_code)
+        result["pool_pump_rule_code"] = rule_code
+        result["pool_pump_rule_enabled"] = rule_enabled
+
+        states_by_id = await _pool_pump_states_by_id()
+        pool_pump_state = _build_pool_pump_state(states_by_id)
+        result["pool_pump_state_before"] = pool_pump_state
+        control = pool_pump_state.get("control")
+        control_map = control if isinstance(control, dict) else {}
+        pump_enabled = bool(control_map.get("enabled"))
+        pump_available = bool(control_map.get("available"))
+        result["pool_pump_available"] = pump_available
+
+        persisted_state = await _load_pool_pump_free_energy_state()
+        window_key = _pool_pump_free_energy_window_key(now_local)
+        persisted_window_key = str(persisted_state.get("window_key") or "").strip()
+        auto_started = bool(persisted_state.get("auto_started"))
+        if persisted_window_key != window_key:
+            auto_started = False
+            persisted_state = {"window_key": window_key, "auto_started": False}
+        result["window_key"] = window_key
+        result["auto_started"] = auto_started
+
+        if not pump_available:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "pool_pump_unavailable"}
+            result["decision_reason"] = "pool_pump_unavailable"
+            status = "noop"
+            return result
+
+        if not window_active:
+            if auto_started and pump_enabled:
+                await _pool_pump_set_enabled(False)
+                persisted_state["auto_started"] = False
+                await _store_pool_pump_free_energy_state(persisted_state)
+                result["action"] = {"type": "stop_pool_pump", "reason": "outside_free_energy_window"}
+                result["decision"] = {"mode": "off"}
+                result["decision_reason"] = "outside_free_energy_window_cleanup"
+                status = "applied"
+                return result
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "outside_window"}
+            result["decision_reason"] = "outside_free_energy_window"
+            status = "outside_window"
+            return result
+
+        if not rule_enabled:
+            if auto_started and pump_enabled:
+                await _pool_pump_set_enabled(False)
+                persisted_state["auto_started"] = False
+                await _store_pool_pump_free_energy_state(persisted_state)
+                result["action"] = {"type": "stop_pool_pump", "reason": "rule_disabled"}
+                result["decision"] = {"mode": "off"}
+                result["decision_reason"] = "time_window_rule_disabled_cleanup"
+                status = "applied"
+                return result
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "rule_disabled"}
+            result["decision_reason"] = "time_window_rule_disabled"
+            status = "noop"
+            return result
+
+        metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
+        metrics_map = metrics if isinstance(metrics, dict) else {}
+        midday_map = midday_result if isinstance(midday_result, dict) else {}
+        tesla_before = midday_map.get("tesla_state_before")
+        tesla_before_map = tesla_before if isinstance(tesla_before, dict) else {}
+        tesla_decision = midday_map.get("decision")
+        tesla_decision_map = tesla_decision if isinstance(tesla_decision, dict) else {}
+        tesla_action = midday_map.get("action")
+        tesla_action_map = tesla_action if isinstance(tesla_action, dict) else {}
+
+        grid_w = _to_number(metrics_map.get("grid_w"))
+        if grid_w is None:
+            result["skipped"] = "combined_grid_unavailable"
+            status = "skipped"
+            return result
+        current_grid_import_w = max(float(grid_w), 0.0)
+        result["current_grid_import_w"] = round(current_grid_import_w, 1)
+
+        current_tesla_power_w = max(float(_to_number(tesla_before_map.get("power_w")) or 0.0), 0.0)
+        base_grid_without_tesla_w = max(current_grid_import_w - current_tesla_power_w, 0.0)
+        result["base_grid_without_tesla_w"] = round(base_grid_without_tesla_w, 1)
+
+        desired_tesla_mode = str(tesla_decision_map.get("mode") or "").strip().lower()
+        desired_tesla_amps = _to_number(tesla_decision_map.get("charge_current_amps"))
+        tesla_priority_power_w = max(
+            float(_to_number(tesla_decision_map.get("tesla_power_w")) or 0.0),
+            float(desired_tesla_amps or 0.0) * TESLA_ASSUMED_CHARGING_VOLTAGE_V,
+        )
+        tesla_currently_active = bool(tesla_before_map.get("enabled")) or bool(tesla_before_map.get("requested_enabled"))
+        tesla_should_charge = desired_tesla_mode in ("charge", "hold_current_state")
+        tesla_start_pending = tesla_should_charge and not tesla_currently_active
+        tesla_action_type = str(tesla_action_map.get("type") or "").strip().lower()
+
+        pump_power_w_candidates = [
+            _to_number((pool_pump_state.get("metrics") or {}).get("power_w"))
+            if isinstance(pool_pump_state.get("metrics"), dict)
+            else None,
+            _to_number(metrics_map.get("pool_pump_power_w")),
+        ]
+        pump_power_w = next(
+            (float(value) for value in pump_power_w_candidates if value is not None and float(value) > 0),
+            POOL_PUMP_ASSUMED_POWER_W,
+        )
+        predicted_grid_with_tesla_w = base_grid_without_tesla_w + tesla_priority_power_w
+        predicted_grid_with_pump_w = predicted_grid_with_tesla_w + pump_power_w
+        tesla_priority_ready = (not tesla_should_charge) or tesla_currently_active
+        within_grid_cap = predicted_grid_with_pump_w <= POOL_PUMP_FREE_ENERGY_GRID_MAX_W
+
+        result["tesla_rule_code"] = midday_map.get("tesla_rule_code")
+        result["tesla_rule_enabled"] = midday_map.get("tesla_rule_enabled")
+        result["tesla_state_before"] = tesla_before_map
+        result["tesla_decision"] = tesla_decision_map
+        result["tesla_action_before_pool_pump"] = tesla_action_map
+        result["tesla_should_charge"] = tesla_should_charge
+        result["tesla_currently_active"] = tesla_currently_active
+        result["tesla_start_pending"] = tesla_start_pending
+        result["tesla_priority_ready_for_pool_pump"] = tesla_priority_ready
+        result["tesla_priority_reason"] = (
+            "tesla_not_required"
+            if not tesla_should_charge
+            else "tesla_already_active"
+            if tesla_currently_active
+            else "tesla_start_pending"
+        )
+        result["pool_pump_power_w"] = round(pump_power_w, 1)
+        result["predicted_grid_with_tesla_w"] = round(predicted_grid_with_tesla_w, 1)
+        result["predicted_grid_with_pump_w"] = round(predicted_grid_with_pump_w, 1)
+        result["tesla_action_type_before_pool_pump"] = tesla_action_type
+
+        if tesla_priority_ready and within_grid_cap:
+            result["decision"] = {
+                "mode": "run",
+                "predicted_grid_w": round(predicted_grid_with_pump_w, 1),
+                "pool_pump_power_w": round(pump_power_w, 1),
+            }
+            result["decision_reason"] = (
+                "free_energy_pool_pump_within_grid_cap_after_tesla_priority"
+            )
+            if pump_enabled:
+                result["action"] = {"type": "noop", "reason": "already_running"}
+                status = "noop"
+            else:
+                await _pool_pump_set_enabled(True)
+                persisted_state["auto_started"] = True
+                await _store_pool_pump_free_energy_state(persisted_state)
+                result["action"] = {"type": "start_pool_pump", "reason": "within_grid_cap_after_tesla_priority"}
+                status = "applied"
+            return result
+
+        result["decision"] = {
+            "mode": "off",
+            "predicted_grid_w": round(predicted_grid_with_pump_w, 1),
+            "pool_pump_power_w": round(pump_power_w, 1),
+        }
+        result["decision_reason"] = (
+            "tesla_priority_blocks_pool_pump"
+            if not tesla_priority_ready
+            else "pool_pump_would_exceed_free_energy_grid_cap"
+        )
+        if pump_enabled:
+            await _pool_pump_set_enabled(False)
+            persisted_state["auto_started"] = False
+            await _store_pool_pump_free_energy_state(persisted_state)
+            result["action"] = {
+                "type": "stop_pool_pump",
+                "reason": "tesla_priority" if not tesla_priority_ready else "grid_cap_exceeded",
+            }
+            status = "applied"
+        else:
+            result["action"] = {
+                "type": "noop",
+                "reason": "tesla_priority_pending" if not tesla_priority_ready else "grid_cap_exceeded",
+            }
+            status = "noop"
+        return result
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        status = "failed"
+        error_text = f"{type(exc).__name__}: {exc}"
+        result["error"] = error_text
+        raise
+    finally:
+        result["log_ok"] = ok
+        result["log_status"] = status
+        result["log_error_text"] = error_text
 
 
 def _tesla_observation_charge_state(observation: dict[str, object]) -> dict[str, object]:
@@ -8433,16 +8697,35 @@ async def _persist_worker_summary_logs(
     requested_at_utc: str,
     started_monotonic: float,
     midday_result: dict[str, object] | None,
+    pool_pump_free_energy_result: dict[str, object] | None,
     saj_watch_result: dict[str, object] | None,
     pool_pump_result: dict[str, object] | None,
     battery_full_result: dict[str, object] | None,
 ) -> None:
-    source = _select_worker_summary_source(midday_result, saj_watch_result, pool_pump_result, battery_full_result)
-    all_notifications = _collect_worker_notifications(midday_result, saj_watch_result, pool_pump_result, battery_full_result)
-    all_actions = _collect_worker_actions(midday_result, saj_watch_result, pool_pump_result, battery_full_result)
+    source = _select_worker_summary_source(
+        midday_result,
+        pool_pump_free_energy_result,
+        saj_watch_result,
+        pool_pump_result,
+        battery_full_result,
+    )
+    all_notifications = _collect_worker_notifications(
+        midday_result,
+        pool_pump_free_energy_result,
+        saj_watch_result,
+        pool_pump_result,
+        battery_full_result,
+    )
+    all_actions = _collect_worker_actions(
+        midday_result,
+        pool_pump_free_energy_result,
+        saj_watch_result,
+        pool_pump_result,
+        battery_full_result,
+    )
     all_decision_reasons = [
         str(item.get("decision_reason") or "").strip()
-        for item in (midday_result, saj_watch_result, pool_pump_result, battery_full_result)
+        for item in (midday_result, pool_pump_free_energy_result, saj_watch_result, pool_pump_result, battery_full_result)
         if isinstance(item, dict) and str(item.get("decision_reason") or "").strip()
     ]
     notification_status, notification_ok, notification_payload, notification_error_text = _build_notification_summary_payload(
@@ -8481,7 +8764,7 @@ async def _persist_worker_summary_logs(
         actions=all_actions,
         check_sources=[
             item
-            for item in (midday_result, saj_watch_result, pool_pump_result, battery_full_result)
+            for item in (midday_result, pool_pump_free_energy_result, saj_watch_result, pool_pump_result, battery_full_result)
             if isinstance(item, dict)
         ],
     )
@@ -8797,6 +9080,7 @@ async def _collector_loop() -> None:
             )
         try:
             midday_window_result: dict[str, object] | None = None
+            pool_pump_free_energy_result: dict[str, object] | None = None
             saj_battery_watch_result: dict[str, object] | None = None
             pool_pump_overnight_result: dict[str, object] | None = None
             battery_full_notification_result: dict[str, object] | None = None
@@ -8817,6 +9101,25 @@ async def _collector_loop() -> None:
             )
             collector_status.setdefault("combined", {})["last_midday_window_check"] = {
                 "error": f"{type(window_exc).__name__}: {window_exc}",
+                "executed_at": datetime.now(UTC).isoformat(),
+            }
+
+        try:
+            pool_pump_free_energy_result = await _run_pool_pump_free_energy_control_check(
+                round_results.get("combined", {}).get("flow") if isinstance(round_results.get("combined"), dict) else None,
+                midday_window_result,
+                round_id=round_id,
+                requested_at_utc=round_started_at_utc,
+            )
+            collector_status.setdefault("combined", {})["last_pool_pump_free_energy_check"] = pool_pump_free_energy_result
+        except Exception as pool_pump_free_energy_exc:  # noqa: BLE001
+            _append_worker_failure_log(
+                "combined",
+                stage=WINDOW_CHECK_FREE_ENERGY_SERVICE,
+                error=pool_pump_free_energy_exc,
+            )
+            collector_status.setdefault("combined", {})["last_pool_pump_free_energy_check"] = {
+                "error": f"{type(pool_pump_free_energy_exc).__name__}: {pool_pump_free_energy_exc}",
                 "executed_at": datetime.now(UTC).isoformat(),
             }
 
@@ -8884,6 +9187,7 @@ async def _collector_loop() -> None:
                 requested_at_utc=round_started_at_utc,
                 started_monotonic=summary_started_monotonic,
                 midday_result=midday_window_result,
+                pool_pump_free_energy_result=pool_pump_free_energy_result,
                 saj_watch_result=saj_battery_watch_result,
                 pool_pump_result=pool_pump_overnight_result,
                 battery_full_result=battery_full_notification_result,
