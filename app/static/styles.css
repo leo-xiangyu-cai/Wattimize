@@ -901,7 +901,7 @@ select {
 
 .sampling-totals-chart-wrap {
   margin: 8px 0 12px;
-  padding: 8px 2px 2px;
+  padding: 8px 6px 6px;
   border-radius: 10px;
   background: linear-gradient(180deg, rgba(250, 252, 250, 0.78), rgba(246, 250, 247, 0.38));
   flex: 1 1 auto;
@@ -910,28 +910,125 @@ select {
 .sampling-totals-chart {
   position: relative;
   width: 100%;
-  min-height: 180px;
-  height: 260px;
+  min-height: 60px;
 }
 
-.sampling-totals-chart-overlay {
+/* Energy breakdown bar rows */
+.eb-row {
+  position: relative;
+  height: 48px;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 6px;
+  cursor: default;
+  transition: opacity 0.2s;
+}
+
+.eb-row:last-child {
+  margin-bottom: 0;
+}
+
+.eb-row.eb-dimmed {
+  opacity: 0.3;
+}
+
+.eb-track {
   position: absolute;
-  inset: 6px 8px;
-  z-index: 5;
+  inset: 0;
+  background: rgba(82, 104, 92, 0.1);
+  border-radius: 10px;
 }
 
-.sampling-totals-chart-lane {
+.eb-fill {
   position: absolute;
   left: 0;
-  right: 0;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
+  top: 0;
+  bottom: 0;
+  border-radius: 10px;
+  min-width: 6px;
+}
+
+.eb-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 10px;
+  opacity: 0.55;
+}
+
+.eb-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  z-index: 2;
   pointer-events: none;
 }
 
+/* White text layer — clipped to the colored fill area */
+.eb-content-light .eb-label,
+.eb-content-light .eb-value {
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+/* Dark text layer — clipped to the gray track area */
+.eb-content-dark .eb-label,
+.eb-content-dark .eb-value {
+  color: #1e3d2e;
+  text-shadow: none;
+}
+
+.eb-label {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
+
+.eb-value {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.eb-no-data {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80px;
+  color: #6b7f72;
+  font-size: 13px;
+}
+
+.eb-loading {
+  min-height: 80px;
+  position: relative;
+}
+
+.eb-loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(246, 250, 247, 0.7);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Legacy overlay/lane classes — kept to avoid breaking references */
+.sampling-totals-chart-overlay,
+.sampling-totals-chart-lane,
 .sampling-totals-bars {
-  display: block;
+  display: none;
 }
 
 @media (max-width: 720px) {
@@ -983,7 +1080,7 @@ select {
   }
 
   .sampling-totals-chart {
-    min-height: 160px;
+    min-height: 40px;
   }
 }
 

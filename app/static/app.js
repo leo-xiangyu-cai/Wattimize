@@ -8671,37 +8671,34 @@ function ensureSamplingTotalsChart() {
   if (samplingTotalsChart) return samplingTotalsChart;
   const canvas = document.getElementById("samplingTotalsChartCanvas");
   if (!canvas) return null;
-  if (typeof window.echarts === "undefined") return null;
-  samplingTotalsChart = window.echarts.init(canvas, null, { renderer: "canvas" });
+  samplingTotalsChart = {
+    __isCustomBars: true,
+    resize() {},
+    showLoading() {
+      const el = document.getElementById("samplingTotalsChartCanvas");
+      if (el) el.classList.add("eb-loading");
+    },
+    hideLoading() {
+      const el = document.getElementById("samplingTotalsChartCanvas");
+      if (el) el.classList.remove("eb-loading");
+    },
+  };
   return samplingTotalsChart;
 }
 
 function setSamplingTotalsChartLoading(loading) {
-  const chart = ensureSamplingTotalsChart();
-  if (!chart) return;
+  ensureSamplingTotalsChart();
+  const el = document.getElementById("samplingTotalsChartCanvas");
+  if (!el) return;
   if (loading) {
-    chart.showLoading("default", {
-      text: "",
-      color: "#4f8a6b",
-      maskColor: "rgba(246, 250, 247, 0.62)",
-      lineWidth: 2,
-    });
-    return;
+    el.classList.add("eb-loading");
+  } else {
+    el.classList.remove("eb-loading");
   }
-  chart.hideLoading();
 }
 
 function renderSamplingTotalsChartOverlay(chart, rows, hasData) {
-  const host = document.getElementById("samplingTotalsChartCanvas");
-  if (!host) return;
-  let overlay = host.querySelector(".sampling-totals-chart-overlay");
-  if (!overlay) {
-    overlay = document.createElement("div");
-    overlay.className = "sampling-totals-chart-overlay";
-    host.appendChild(overlay);
-  }
-  overlay.innerHTML = "";
-  overlay.classList.add("hidden");
+  // No-op: overlay is now rendered inline in the HTML bars
 }
 
 function buildSamplingTotalsChartRows(cards) {
@@ -8767,137 +8764,65 @@ function buildSamplingTotalsChartRows(cards) {
 }
 
 function renderSamplingTotalsChart(cards) {
-  const chart = ensureSamplingTotalsChart();
-  if (!chart) return;
-  chart.hideLoading();
-  chart.__cards = cards;
+  ensureSamplingTotalsChart();
+  const container = document.getElementById("samplingTotalsChartCanvas");
+  if (!container) return;
+  container.classList.remove("eb-loading");
+
   const rows = buildSamplingTotalsChartRows(cards);
-  chart.__rows = rows;
   const hasData = rows.some((row) => Number(row.value || 0) !== 0);
-  const labels = rows.map((row) => row.label);
-  const maxAbs = Math.max(0, ...rows.map((row) => Math.abs(Number(row.value || 0))));
-  const axisMax = maxAbs > 0 ? maxAbs * 1.2 : 1;
-  const isRowHighlighted = (row, index) => {
-    if (samplingChartFocusSeries) return samplingChartFocusSeries === row?.seriesKey;
-    return true;
-  };
-  const isRowDimmed = (row, index) => {
-    if (samplingChartFocusSeries) return samplingChartFocusSeries !== row?.seriesKey;
-    return false;
-  };
-  const canvas = document.getElementById("samplingTotalsChartCanvas");
-  const rowHeight = 46;
-  const newHeight = Math.max(180, rows.length * rowHeight);
-  if (canvas) canvas.style.height = newHeight + "px";
-  chart.resize();
-  chart.setOption(
-    {
-      animation: false,
-      grid: { left: 220, right: 130, top: 10, bottom: 10, containLabel: false },
-      xAxis: {
-        type: "value",
-        min: 0,
-        max: axisMax,
-        splitNumber: 2,
-        axisLine: { show: false },
-        axisTick: { show: false },
-        splitLine: { show: false },
-        axisLabel: { show: false },
-      },
-      yAxis: {
-        type: "category",
-        inverse: true,
-        data: labels,
-        axisTick: { show: false },
-        axisLine: { show: false },
-        axisLabel: { color: "#395346", fontSize: 13, fontWeight: 700 },
-      },
-      tooltip: {
-        trigger: "item",
-        formatter: (params) => {
-          const idx = Number(params?.dataIndex || 0);
-          const row = rows[idx];
-          if (!row) return "";
-          if (row.overlayLabel) {
-            return `${escapeHtml(row.label)}<br/>${escapeHtml(row.overlayLabel)}: ${formatEnergyKwhText(row.overlayValue)}<br/>${escapeHtml(t("samplingTotalsWindowOther"))}: ${formatEnergyKwhText(Math.max(row.value - row.overlayValue, 0))}<br/>${escapeHtml(t("samplingTotalsWindowTotal"))}: ${formatEnergyKwhText(row.value)}`;
-          }
-          return `${escapeHtml(row.label)}<br/>${formatEnergyKwhText(row.value)}`;
-        },
-      },
-      visualMap: [],
-      graphic: hasData
-        ? []
-        : [
-            {
-              type: "text",
-              left: "center",
-              top: "middle",
-              style: { text: t("samplingTotalsNoData"), fill: "#6b7f72", fontSize: 13 },
-            },
-          ],
-      series: [
-        {
-          type: "bar",
-          barWidth: 18,
-          data: rows.map((row, index) => ({
-            value: row.value,
-            itemStyle: {
-              color: getSamplingTotalBaseColor(row.seriesKey, "#6b7f72"),
-              opacity: isRowDimmed(row, index) ? 0.18 : isRowHighlighted(row, index) ? 0.96 : 0.88,
-            },
-          })),
-          itemStyle: {
-            borderRadius: [999, 999, 999, 999],
-          },
-          emphasis: { disabled: true },
-          label: {
-            show: true,
-            position: "right",
-            distance: 8,
-            color: ({ dataIndex }) => {
-              const row = rows[dataIndex];
-              return isRowDimmed(row, dataIndex) ? "#a6b2ab" : isRowHighlighted(row, dataIndex) ? "#16261f" : "#415449";
-            },
-            fontSize: 12,
-            formatter: ({ dataIndex, value }) => {
-              const row = rows[dataIndex];
-              if (row?.valueLabel) return row.valueLabel;
-              return Number(value) ? `${formatTrimmedDecimal(Math.abs(Number(value)), 2)} kWh` : "";
-            },
-          },
-          markLine: {
-            silent: true,
-            symbol: "none",
-            label: { show: false },
-            lineStyle: { color: "rgba(82, 104, 92, 0.18)", width: 2 },
-            data: [{ xAxis: 0 }],
-          },
-          cursor: "pointer",
-        },
-        {
-          type: "bar",
-          barWidth: 18,
-          barGap: "-100%",
-          silent: true,
-          tooltip: { show: false },
-          z: 4,
-          data: rows.map((row, index) => ({
-            value: Math.min(Math.max(Number(row.overlayValue || 0), 0), Math.max(Number(row.value || 0), 0)),
-            itemStyle: {
-              color: getSamplingWindowSegmentColor(row.seriesKey, getSamplingSeriesColor(row.seriesKey, "#6b7f72")),
-              opacity: isRowDimmed(row, index) ? 0.3 : isRowHighlighted(row, index) ? 1 : 0.96,
-            },
-          })),
-          itemStyle: {
-            borderRadius: [999, 999, 999, 999],
-          },
-          emphasis: { disabled: true },
-        },
-      ],
-    },
-    true,
-  );
-  renderSamplingTotalsChartOverlay(chart, rows, hasData);
+
+  if (!hasData) {
+    container.innerHTML = `<div class="eb-no-data">${escapeHtml(t("samplingTotalsNoData"))}</div>`;
+    return;
+  }
+
+  const maxAbs = Math.max(1, ...rows.map((row) => Math.abs(Number(row.value || 0))));
+
+  const html = rows
+    .map((row) => {
+      const val = Math.max(Number(row.value || 0), 0);
+      const pct = Math.min(100, (val / maxAbs) * 100);
+      const overlayVal = Math.min(Math.max(Number(row.overlayValue || 0), 0), val);
+      const overlayPct = overlayVal > 0 && val > 0 ? Math.min(100, (overlayVal / val) * 100) : 0;
+      const dimmed = samplingChartFocusSeries && samplingChartFocusSeries !== row.seriesKey;
+      const color = getSamplingTotalBaseColor(row.seriesKey, "#6b7f72");
+      const overlayColor = getSamplingWindowSegmentColor(row.seriesKey, getSamplingSeriesColor(row.seriesKey, "#6b7f72"));
+      const valueText =
+        row.valueLabel || (val ? `${formatTrimmedDecimal(val, 2)} kWh` : "—");
+
+      let titleText = `${row.label}: ${formatEnergyKwhText(val)}`;
+      if (row.overlayLabel && overlayVal > 0) {
+        titleText += `\n${row.overlayLabel}: ${formatEnergyKwhText(overlayVal)}`;
+        titleText += `\n${t("samplingTotalsWindowOther")}: ${formatEnergyKwhText(Math.max(val - overlayVal, 0))}`;
+        titleText += `\n${t("samplingTotalsWindowTotal")}: ${formatEnergyKwhText(val)}`;
+      }
+
+      const overlayHtml =
+        overlayPct > 0
+          ? `<div class="eb-overlay" style="width:${overlayPct.toFixed(2)}%;background:${overlayColor};"></div>`
+          : "";
+
+      const rightPct = (100 - pct).toFixed(2);
+      const labelHtml = escapeHtml(row.label);
+      const valueHtml = escapeHtml(valueText);
+      return `<div class="eb-row${dimmed ? " eb-dimmed" : ""}" data-series-key="${escapeHtml(row.seriesKey || "")}" title="${escapeHtml(titleText)}">
+  <div class="eb-track">
+    <div class="eb-fill" style="width:${pct.toFixed(2)}%;background:${color};">${overlayHtml}</div>
+  </div>
+  <div class="eb-content eb-content-light" style="clip-path:inset(0 ${rightPct}% 0 0)">
+    <span class="eb-label">${labelHtml}</span>
+    <span class="eb-value">${valueHtml}</span>
+  </div>
+  <div class="eb-content eb-content-dark" style="clip-path:inset(0 0 0 ${pct.toFixed(2)}%)">
+    <span class="eb-label">${labelHtml}</span>
+    <span class="eb-value">${valueHtml}</span>
+  </div>
+</div>`;
+    })
+    .join("");
+
+  container.innerHTML = html;
 }
 
 function renderSamplingTotals(usageBySystem, selectedSystem, rangeLabel, options = {}) {
