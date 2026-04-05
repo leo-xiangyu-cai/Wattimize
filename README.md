@@ -174,7 +174,8 @@ First-run configuration:
 - The combined dashboard now includes an overnight battery reference panel that projects remaining usable battery at the next `08:00` and `11:00`, based on recent combined base home-load history with Tesla charging and pool-pump load excluded.
 - The combined dashboard now exposes pool-pump live state and manual toggle controls through `GET /api/devices/pool-pump` and `POST /api/devices/pool-pump/toggle`.
 - The overnight shoulder automation matrix now includes `pool_pump_overnight_control`, which can keep the pool pump inside the configured `23:00-05:00` battery budget and reports its runtime budget in worker status.
+- That runtime budget now divides usable remaining battery by the current overnight runtime load, defined as current home load excluding Tesla charging plus the pool-pump power, so the dashboard formula matches the actual control calculation.
 - The free-energy window (`11:00-14:00`) now also includes `pool_pump_free_energy_control`, which only starts the pool pump after Tesla priority is already satisfied and only when the predicted combined grid draw with the pump stays within the configured `15.0kW` cap.
 - Dashboard auto-refresh defaults to 30 seconds, keeps the last summary cached locally, and shows background refresh state while new data is loading.
 - The combined dashboard lets you click the Solplanet inverter node to read and update the live Solplanet `Pin` charging limit.
-- On phone-sized layouts, the dashboard now hides the weather/notification/reference panels and switches the combined flow card to a simplified mobile-first energy map that keeps load, remaining battery, live flow, pool pump, and Tesla state in view.
+- On phone-sized layouts, the dashboard now hides the weather/notification/reference panels and switches the combined flow card to a simplified mobile-first energy map with a central hub view that keeps load, remaining battery, live flow, pool pump, and Tesla state in view.

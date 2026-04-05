@@ -5085,6 +5085,18 @@ async def _run_pool_pump_overnight_control_check(
             return result
 
         pump_power_w = _to_number(scenario_map.get("pool_pump_power_w"))
+        total_load_w = _to_number(metrics_map.get("load_w"))
+        tesla_charge_power_w = _to_number(metrics_map.get("tesla_charge_power_w"))
+        current_home_load_w = total_load_w
+        if current_home_load_w is not None:
+            current_home_load_w = max(current_home_load_w - (tesla_charge_power_w or 0.0) - (pump_power_w or 0.0), 0.0)
+            if abs(current_home_load_w) <= BALANCE_TOLERANCE_W:
+                current_home_load_w = 0.0
+        runtime_load_w = (
+            current_home_load_w + pump_power_w
+            if current_home_load_w is not None and pump_power_w is not None
+            else None
+        )
         base_remaining_candidates = [
             value
             for value in (
@@ -5099,8 +5111,8 @@ async def _run_pool_pump_overnight_control_check(
         ]
         remaining_base_kwh = min(base_remaining_candidates) if base_remaining_candidates else None
         available_runtime_hours = (
-            max(remaining_base_kwh / (pump_power_w / 1000.0), 0.0)
-            if remaining_base_kwh is not None and pump_power_w is not None and pump_power_w > 0
+            max(remaining_base_kwh / (runtime_load_w / 1000.0), 0.0)
+            if remaining_base_kwh is not None and runtime_load_w is not None and runtime_load_w > 0
             else None
         )
         target_runtime_seconds = (
@@ -5141,6 +5153,10 @@ async def _run_pool_pump_overnight_control_check(
         )
         result["runtime_budget"] = {
             "window_key": window_key,
+            "remaining_base_kwh": round(remaining_base_kwh, 3) if remaining_base_kwh is not None else None,
+            "current_home_load_w": round(current_home_load_w, 1) if current_home_load_w is not None else None,
+            "pump_power_w": round(pump_power_w, 1) if pump_power_w is not None else None,
+            "runtime_load_w": round(runtime_load_w, 1) if runtime_load_w is not None else None,
             "available_runtime_hours": round(available_runtime_hours, 3) if available_runtime_hours is not None else None,
             "target_runtime_hours": round(float(target_runtime_seconds) / 3600.0, 3) if target_runtime_seconds is not None else None,
             "elapsed_runtime_hours": round(elapsed_runtime_seconds / 3600.0, 3),

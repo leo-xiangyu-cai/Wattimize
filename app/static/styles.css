@@ -1,13 +1,14 @@
 :root {
-  --bg: #f0f5ec;
-  --card: #fbfdf9;
-  --text: #17221d;
-  --muted: #5b6b61;
-  --line: #ccd7ce;
+  color-scheme: light;
+  --bg: #f4f8f5;
+  --card: rgba(255, 255, 255, 0.9);
+  --text: #183126;
+  --muted: #5f7569;
+  --line: rgba(103, 133, 118, 0.2);
   --accent: #1f7a52;
-  --accent-dark: #165a3c;
-  --glow: #7de3ba;
-  --danger: #c43f4e;
+  --accent-dark: #16563a;
+  --glow: rgba(42, 153, 105, 0.18);
+  --danger: #d84f63;
 }
 
 * {
@@ -27,48 +28,64 @@ body {
   line-height: 1.5;
   color: var(--text);
   background:
-    radial-gradient(circle at 0% 0%, #dff8ea 0, transparent 45%),
-    radial-gradient(circle at 100% 100%, #dde8ff 0, transparent 42%),
+    radial-gradient(circle at 12% 8%, rgba(114, 181, 146, 0.18) 0, transparent 32%),
+    radial-gradient(circle at 88% 88%, rgba(111, 169, 214, 0.12) 0, transparent 28%),
+    linear-gradient(180deg, #fbfdfb 0%, #f4f8f5 54%, #eef4ef 100%),
     var(--bg);
 }
 
 .page {
   max-width: 1420px;
   margin: 0 auto;
-  padding: 18px;
+  padding: 18px 18px 108px;
   display: grid;
   gap: 16px;
 }
 
 .topbar {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
+  padding: 12px 14px;
+  border: 1px solid rgba(103, 133, 118, 0.18);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(244, 248, 245, 0.9));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    0 16px 34px rgba(31, 73, 51, 0.08);
 }
 
 .topbar-actions {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .tabs {
-  position: relative;
+  position: fixed;
+  left: 50%;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 50;
   display: flex;
   gap: 10px;
   align-items: center;
   flex-wrap: nowrap;
   padding: 10px;
-  border: 1px solid rgba(118, 149, 129, 0.26);
+  width: min(1180px, calc(100vw - 24px));
+  border: 1px solid rgba(103, 133, 118, 0.18);
   border-radius: 22px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(233, 241, 235, 0.96)),
-    rgba(251, 253, 249, 0.92);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(243, 248, 244, 0.94)),
+    rgba(246, 250, 247, 0.94);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.8),
-    0 14px 34px rgba(22, 64, 41, 0.08);
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 20px 46px rgba(31, 73, 51, 0.1);
   overflow-x: auto;
   scrollbar-width: none;
+  backdrop-filter: blur(18px);
 }
 
 .tabs::before {
@@ -76,7 +93,7 @@ body {
   position: absolute;
   inset: 1px;
   border-radius: 20px;
-  background: linear-gradient(135deg, rgba(125, 227, 186, 0.12), rgba(125, 163, 227, 0.08));
+  background: linear-gradient(135deg, rgba(42, 153, 105, 0.06), rgba(111, 169, 214, 0.05));
   pointer-events: none;
 }
 
@@ -87,9 +104,9 @@ body {
 .tab-btn {
   position: relative;
   z-index: 1;
-  border: 1px solid rgba(119, 147, 130, 0.22);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(237, 244, 238, 0.92));
-  color: #496052;
+  border: 1px solid rgba(103, 133, 118, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(239, 245, 240, 0.92));
+  color: #527060;
   border-radius: 999px;
   padding: 11px 18px;
   font-size: 16px;
@@ -104,8 +121,8 @@ body {
     border-color 180ms ease,
     box-shadow 180ms ease;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.75),
-    0 4px 10px rgba(27, 45, 35, 0.05);
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 8px 16px rgba(31, 73, 51, 0.06);
 }
 
 .tab-btn:hover {
@@ -113,24 +130,24 @@ body {
   color: var(--text);
   border-color: rgba(31, 122, 82, 0.28);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.86),
-    0 10px 18px rgba(20, 54, 35, 0.08);
+    inset 0 1px 0 rgba(255, 255, 255, 0.94),
+    0 12px 22px rgba(31, 73, 51, 0.08);
 }
 
 .tab-btn:focus-visible {
   outline: none;
   box-shadow:
-    0 0 0 3px rgba(125, 227, 186, 0.34),
-    0 10px 20px rgba(20, 54, 35, 0.1);
+    0 0 0 3px rgba(42, 153, 105, 0.18),
+    0 10px 20px rgba(31, 73, 51, 0.08);
 }
 
 .tab-btn.active {
-  background: linear-gradient(135deg, #259764, var(--accent-dark));
+  background: linear-gradient(135deg, #2aa06c, #1f7a52);
   color: #fff;
-  border-color: rgba(18, 75, 50, 0.85);
+  border-color: rgba(31, 122, 82, 0.8);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    0 14px 24px rgba(22, 90, 60, 0.26);
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 14px 24px rgba(31, 122, 82, 0.22);
 }
 
 .tab-btn.active::after {
@@ -141,7 +158,7 @@ body {
   bottom: 6px;
   height: 3px;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0.85), rgba(173, 244, 214, 0.95));
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.2));
 }
 
 .tab-btn.active:hover {
@@ -174,7 +191,7 @@ body {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 7px 10px;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.94);
   color: var(--text);
 }
 
@@ -217,7 +234,7 @@ p {
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 16px;
-  box-shadow: 0 12px 30px rgba(14, 36, 24, 0.08);
+  box-shadow: 0 16px 34px rgba(31, 73, 51, 0.08);
 }
 
 .value {
@@ -351,7 +368,7 @@ select {
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 16px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 18px 48px rgba(31, 73, 51, 0.12);
 }
 
 .worker-log-detail-modal-card {
@@ -1381,7 +1398,7 @@ td {
   border-radius: 14px;
   overflow: hidden;
   background:
-    radial-gradient(circle at top, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0) 40%),
+    radial-gradient(circle at top, rgba(125, 163, 227, 0.16), rgba(125, 163, 227, 0) 40%),
     linear-gradient(180deg, rgba(247, 251, 248, 0.92), rgba(240, 247, 242, 0.96));
 }
 
@@ -1396,7 +1413,7 @@ td {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 10px;
-  background: #f7fbf8;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(242, 248, 244, 0.96));
 }
 
 .flow-system-subtitle {
@@ -1429,10 +1446,10 @@ td {
   width: 460px;
   max-width: calc(100vw - 32px);
   padding: 16px 18px;
-  border: 1px solid #afc3b7;
+  border: 1px solid rgba(103, 133, 118, 0.2);
   border-radius: 18px;
-  background: #f9fcfa;
-  box-shadow: 0 20px 40px rgba(63, 90, 73, 0.18);
+  background: #ffffff;
+  box-shadow: 0 20px 40px rgba(31, 73, 51, 0.16);
 }
 
 .saj-profile-popover.hidden {
@@ -1484,14 +1501,90 @@ td {
   margin-top: 8px;
 }
 
+.mobile-flow-board.is-x6-ready .mobile-energy-card {
+  overflow: hidden;
+}
+
+.mobile-energy-scene-x6 {
+  height: 800px;
+  min-height: 800px;
+}
+
+.mobile-energy-graph,
+.mobile-energy-graph .x6-graph,
+.mobile-energy-graph .x6-graph-svg,
+.mobile-energy-graph .x6-graph-background {
+  width: 100%;
+  height: 100%;
+}
+
+.mobile-energy-graph .x6-node {
+  overflow: visible;
+}
+
+.mobile-energy-graph .x6-node foreignObject {
+  overflow: visible;
+}
+
+.mobile-energy-graph .x6-edge .connection-wrap,
+.mobile-energy-graph .x6-edge .vertices,
+.mobile-energy-graph .x6-edge .arrowheads,
+.mobile-energy-graph .x6-edge .tools {
+  display: none;
+}
+
+.mobile-flow-board .mobile-energy-x6-node {
+  position: relative;
+  left: auto !important;
+  right: auto !important;
+  top: auto !important;
+  width: 100% !important;
+  height: 100%;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.mobile-flow-board .mobile-energy-x6-node.node-hub {
+  height: 100%;
+}
+
+.mobile-flow-board .mobile-energy-x6-node .mobile-energy-copy {
+  height: 100%;
+}
+
+.mobile-energy-edge {
+  fill: none;
+  stroke: rgba(24, 204, 255, 0.32);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke 160ms ease, filter 160ms ease, opacity 160ms ease;
+}
+
+.mobile-energy-edge.is-active {
+  stroke: #10d6ff;
+  filter: drop-shadow(0 0 6px rgba(16, 214, 255, 0.38));
+  stroke-dasharray: 10 8;
+  animation: mobileX6Dash 1.4s linear infinite;
+}
+
+.mobile-energy-edge.is-active.is-reverse {
+  animation-direction: reverse;
+}
+
+@keyframes mobileX6Dash {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -36; }
+}
+
 .mobile-energy-card {
-  border: 1px solid #d7e0d9;
-  border-radius: 22px;
+  border: 1px solid rgba(33, 48, 78, 0.9);
+  border-radius: 28px;
   padding: 10px;
   background:
-    radial-gradient(circle at top left, rgba(241, 248, 244, 0.98), rgba(241, 248, 244, 0) 38%),
-    linear-gradient(180deg, rgba(247, 251, 248, 0.98), rgba(239, 246, 241, 0.98));
-  box-shadow: 0 14px 28px rgba(16, 37, 25, 0.08);
+    radial-gradient(circle at top center, rgba(20, 54, 101, 0.22), rgba(20, 54, 101, 0) 48%),
+    linear-gradient(180deg, rgba(7, 13, 26, 0.98), rgba(8, 14, 27, 0.96));
+  box-shadow: 0 24px 48px rgba(3, 8, 18, 0.32);
 }
 
 .mobile-energy-card-head {
@@ -1510,31 +1603,48 @@ td {
 .mobile-energy-card-text {
   margin-top: 5px;
   font-size: 12px;
-  color: #6a7b72;
+  color: #7b86a4;
 }
 
 .mobile-energy-scene {
   position: relative;
   width: 100%;
-  min-height: 540px;
-  border-radius: 16px;
-  background: #f6faf7;
+  min-height: 930px;
+  border-radius: 22px;
+  overflow: hidden;
+  --mobile-pad: 10px;
+  --mobile-gap: 12px;
+  --mobile-half: calc((100% - (var(--mobile-pad) * 2) - var(--mobile-gap)) / 2);
+  --mobile-third: calc((100% - (var(--mobile-pad) * 2) - (var(--mobile-gap) * 2)) / 3);
+  background:
+    radial-gradient(circle at top center, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 24%),
+    linear-gradient(180deg, #060c17 0%, #07111f 48%, #07131d 100%);
   overflow: hidden;
 }
 
 .mobile-energy-node {
   position: absolute;
-  width: 88px;
+  width: var(--mobile-half);
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
+  justify-content: flex-start;
+  gap: 10px;
   z-index: 2;
-  transition: opacity 160ms ease, transform 160ms ease;
+  padding: 16px 14px 14px;
+  border: 1px solid rgba(58, 88, 126, 0.74);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(15, 24, 40, 0.96), rgba(14, 22, 35, 0.92));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 14px 36px rgba(2, 8, 20, 0.28);
+  transition: opacity 160ms ease, transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 
 .mobile-energy-node.is-active {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
 }
 
 .mobile-energy-node.is-clickable {
@@ -1546,26 +1656,25 @@ td {
 }
 
 .mobile-energy-icon {
-  width: 58px;
-  height: 58px;
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
   border: 0;
-  background: #d5f6de;
-  box-shadow: none;
-  color: #438d63;
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  color: var(--accent, #12d7ff);
 }
 
 .mobile-energy-node.is-active .mobile-energy-icon {
-  background: #c9f2d5;
-  color: #3f8a61;
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .mobile-energy-icon svg {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
 }
 
 .mobile-energy-icon svg * {
@@ -1577,30 +1686,40 @@ td {
 }
 
 .mobile-energy-title {
-  margin: 6px 0 0;
-  font-size: 10px;
+  margin: 0;
+  font-size: 12px;
   font-weight: 700;
-  color: #1f2923;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent, #12d7ff);
 }
 
 .mobile-energy-value,
-.mobile-energy-subvalue {
-  margin: 2px 0 0;
+.mobile-energy-subvalue,
+.mobile-energy-meta {
+  margin: 0;
   min-height: 14px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.2;
-  color: #3f8f62;
+  color: #f5f8ff;
 }
 
 .mobile-energy-subvalue {
-  color: #6e746f;
+  color: rgba(217, 227, 248, 0.72);
   font-weight: 500;
+}
+
+.mobile-energy-meta {
+  font-size: 11px;
+  color: var(--accent, #12d7ff);
+  font-weight: 600;
 }
 
 .mobile-energy-copy {
   display: grid;
-  gap: 0;
+  gap: 6px;
+  width: 100%;
 }
 
 .mobile-energy-node .data-kind-value {
@@ -1608,66 +1727,98 @@ td {
   gap: 0.22em;
 }
 
-.mobile-energy-node.node-solar { left: 4%; top: 5%; }
-.mobile-energy-node.node-grid { left: calc(50% - 44px); top: 5%; width: 88px; }
-.mobile-energy-node.node-inverter1 { left: 4%; top: 28%; }
-.mobile-energy-node.node-home { left: calc(50% - 48px); top: 24.5%; width: 96px; }
-.mobile-energy-node.node-inverter2 { right: 4%; top: 28%; }
-.mobile-energy-node.node-battery1 { left: 1%; top: 55%; width: 130px; flex-direction: row-reverse; align-items: center; gap: 8px; text-align: left; }
-.mobile-energy-node.node-battery2 { right: 1%; top: 55%; width: 130px; flex-direction: row; align-items: center; gap: 8px; text-align: right; }
-.mobile-energy-node.node-load { left: 6%; top: 79%; width: 88px; }
-.mobile-energy-node.node-pool { left: calc(50% - 44px); top: 79%; width: 88px; }
-.mobile-energy-node.node-tesla { right: 6%; top: 79%; width: 88px; }
-
-.mobile-energy-node.node-battery1 .mobile-energy-copy,
-.mobile-energy-node.node-battery2 .mobile-energy-copy {
-  width: 72px;
+.mobile-energy-node.node-solar { left: var(--mobile-pad); top: 16px; }
+.mobile-energy-node.node-grid { right: var(--mobile-pad); top: 16px; }
+.mobile-energy-node.node-saj { left: var(--mobile-pad); top: 196px; width: var(--mobile-half); }
+.mobile-energy-node.node-solplanet { right: var(--mobile-pad); top: 196px; width: var(--mobile-half); }
+.mobile-energy-node.node-load,
+.mobile-energy-node.node-pool,
+.mobile-energy-node.node-tesla {
+  width: var(--mobile-third);
+  min-height: 132px;
+  padding-inline: 8px;
+}
+.mobile-energy-node.node-load { left: var(--mobile-pad); top: 768px; }
+.mobile-energy-node.node-pool { left: calc(var(--mobile-pad) + var(--mobile-third) + var(--mobile-gap)); top: 768px; }
+.mobile-energy-node.node-tesla { left: calc(var(--mobile-pad) + (var(--mobile-third) * 2) + (var(--mobile-gap) * 2)); top: 768px; }
+.mobile-energy-node.node-load .mobile-energy-title,
+.mobile-energy-node.node-pool .mobile-energy-title,
+.mobile-energy-node.node-tesla .mobile-energy-title {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+.mobile-energy-node.node-load .mobile-energy-value,
+.mobile-energy-node.node-pool .mobile-energy-value,
+.mobile-energy-node.node-tesla .mobile-energy-value {
+  font-size: 18px;
 }
 
-.mobile-energy-node.node-battery1 .mobile-energy-copy {
-  text-align: left;
-}
-
-.mobile-energy-node.node-battery2 .mobile-energy-copy {
-  text-align: right;
-}
-
-.mobile-energy-node.node-home .mobile-energy-icon {
-  width: 88px;
-  height: 88px;
+.mobile-energy-node.node-hub {
+  left: calc(50% - 66px);
+  top: 402px;
+  width: 132px;
+  height: 132px;
   border-radius: 999px;
-  padding-top: 0;
-  background: linear-gradient(180deg, #fffdf9, #f8fbf7);
-  border: 1px solid rgba(86, 144, 106, 0.1);
-  color: #4b956a;
-  box-shadow:
-    0 10px 26px rgba(41, 79, 57, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  padding: 20px 14px;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(17, 210, 255, 0.14), rgba(17, 210, 255, 0) 58%),
+    linear-gradient(180deg, rgba(6, 17, 31, 0.98), rgba(5, 18, 32, 0.96));
 }
 
-.mobile-energy-node.node-home .mobile-energy-icon svg {
-  width: 36px;
-  height: 36px;
+.mobile-energy-node.node-hub .mobile-energy-copy {
+  gap: 4px;
 }
 
-.mobile-energy-node.node-home .mobile-energy-title {
+.mobile-energy-node.node-hub .mobile-energy-title {
   font-size: 12px;
-  margin-top: 8px;
 }
 
-.mobile-energy-node.node-home .mobile-energy-value {
-  font-size: 11px;
+.mobile-energy-node.node-hub .mobile-energy-value {
+  font-size: 20px;
+}
+
+.mobile-energy-node .mobile-energy-value {
+  font-size: 28px;
   font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
-.mobile-energy-node.node-load .mobile-energy-value {
-  color: #d77f61;
+.mobile-energy-node .mobile-energy-subvalue .data-kind-value,
+.mobile-energy-node .mobile-energy-value .data-kind-value,
+.mobile-energy-node .mobile-energy-meta .data-kind-value {
+  justify-content: center;
 }
+
+.mobile-energy-node[class*="accent-"] {
+  --accent-glow: rgba(18, 215, 255, 0.2);
+  border-color: color-mix(in srgb, var(--accent) 48%, rgba(68, 92, 140, 0.72));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 16px 36px rgba(2, 8, 20, 0.26),
+    0 0 0 1px rgba(255, 255, 255, 0.02),
+    0 0 28px var(--accent-glow);
+}
+
+.mobile-energy-node.is-active[class*="accent-"] {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 20px 42px rgba(2, 8, 20, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 0 34px var(--accent-glow);
+}
+
+.mobile-energy-node.accent-solar { --accent: #ffb020; --accent-glow: rgba(255, 176, 32, 0.26); }
+.mobile-energy-node.accent-grid { --accent: #ff4d5d; --accent-glow: rgba(255, 77, 93, 0.22); }
+.mobile-energy-node.accent-cyan { --accent: #10d6ff; --accent-glow: rgba(16, 214, 255, 0.22); }
+.mobile-energy-node.accent-battery { --accent: #00ec9e; --accent-glow: rgba(0, 236, 158, 0.2); }
+.mobile-energy-node.accent-load { --accent: #72a9ff; --accent-glow: rgba(114, 169, 255, 0.18); }
+.mobile-energy-node.accent-tesla { --accent: #7fe05f; --accent-glow: rgba(127, 224, 95, 0.18); }
 
 .mobile-energy-line {
   position: absolute;
   z-index: 1;
-  background: #4a9a6c;
+  background: rgba(24, 204, 255, 0.32);
   border-radius: 999px;
 }
 
@@ -1678,265 +1829,251 @@ td {
 }
 
 .mobile-energy-line::before {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
   background: transparent;
   opacity: 0;
 }
 
 .mobile-energy-line::after {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
-  background: #4a9a6c;
+  background: rgba(24, 204, 255, 0.56);
 }
 
 .mobile-energy-line.is-active {
-  background: #4a9a6c;
-  box-shadow: none;
+  background: rgba(24, 204, 255, 0.9);
+  box-shadow: 0 0 16px rgba(24, 204, 255, 0.22);
 }
 
 .mobile-energy-line.is-active::before {
   opacity: 1;
-  background: #4a9a6c;
-  box-shadow: none;
+  background: #10d6ff;
 }
 
 .mobile-energy-line.is-active::after {
-  background: #4a9a6c;
+  background: #10d6ff;
 }
 
-.mobile-energy-line.is-reverse.is-active {
-  background: #4a9a6c;
-}
-
-.mobile-energy-line.is-reverse.is-active::before {
-  background: #4a9a6c;
-  box-shadow: none;
-}
-
-.mobile-energy-line.is-reverse.is-active::after {
-  background: #4a9a6c;
-}
-
-.mobile-energy-line.line-solar-inverter1 {
-  left: 17%;
-  top: 16%;
+.mobile-energy-line.line-solar-down {
+  left: calc(var(--mobile-pad) + (var(--mobile-half) / 2));
+  top: 170px;
   width: 2px;
-  height: 15%;
+  height: 28px;
 }
 
-.mobile-energy-line.line-solar-inverter1::before {
+.mobile-energy-line.line-solar-down::before {
   left: -4px;
   top: 0;
 }
 
-.mobile-energy-line.line-solar-inverter1::after {
+.mobile-energy-line.line-solar-down::after {
   left: -3px;
-  bottom: 18%;
+  bottom: 0;
 }
 
-.mobile-energy-line.line-grid-home {
+.mobile-energy-line.line-grid-down {
+  left: calc(100% - var(--mobile-pad) - (var(--mobile-half) / 2));
+  top: 170px;
+  width: 2px;
+  height: 28px;
+}
+
+.mobile-energy-line.line-grid-down::before {
+  left: -4px;
+  top: 0;
+}
+
+.mobile-energy-line.line-grid-down::after {
+  left: -3px;
+  bottom: 0;
+}
+
+.mobile-energy-line.line-saj-down {
+  left: calc(var(--mobile-pad) + (var(--mobile-half) / 2));
+  top: 170px;
+  width: 2px;
+  height: 26px;
+}
+
+.mobile-energy-line.line-saj-down::before {
+  left: -4px;
+  top: 0;
+}
+
+.mobile-energy-line.line-saj-down::after {
+  left: -3px;
+  bottom: 0;
+}
+
+.mobile-energy-line.line-solplanet-down {
+  left: calc(100% - var(--mobile-pad) - (var(--mobile-half) / 2));
+  top: 170px;
+  width: 2px;
+  height: 26px;
+}
+
+.mobile-energy-line.line-solplanet-down::before {
+  left: -4px;
+  top: 0;
+}
+
+.mobile-energy-line.line-solplanet-down::after {
+  left: -3px;
+  bottom: 0;
+}
+
+.mobile-energy-line.line-saj-link-v {
+  left: calc(var(--mobile-pad) + (var(--mobile-half) / 2));
+  top: 350px;
+  width: 2px;
+  height: 54px;
+}
+
+.mobile-energy-line.line-saj-link-v::before {
+  left: -4px;
+  top: 0;
+}
+
+.mobile-energy-line.line-saj-link-v::after {
+  left: -3px;
+  bottom: 0;
+}
+
+.mobile-energy-line.line-saj-link-h {
+  left: calc(var(--mobile-pad) + (var(--mobile-half) / 2));
+  top: 404px;
+  width: calc(50% - 66px - var(--mobile-pad) - (var(--mobile-half) / 2));
+  height: 2px;
+}
+
+.mobile-energy-line.line-saj-link-h::before {
+  left: 0;
+  top: -4px;
+}
+
+.mobile-energy-line.line-saj-link-h::after {
+  right: 0;
+  top: -3px;
+}
+
+.mobile-energy-line.line-solplanet-link-v {
+  left: calc(100% - var(--mobile-pad) - (var(--mobile-half) / 2));
+  top: 350px;
+  width: 2px;
+  height: 54px;
+}
+
+.mobile-energy-line.line-solplanet-link-v::before {
+  left: -4px;
+  top: 0;
+}
+
+.mobile-energy-line.line-solplanet-link-v::after {
+  left: -3px;
+  bottom: 0;
+}
+
+.mobile-energy-line.line-solplanet-link-h {
+  left: calc(50% + 66px);
+  top: 404px;
+  width: calc(100% - var(--mobile-pad) - (var(--mobile-half) / 2) - (50% + 66px));
+  height: 2px;
+}
+
+.mobile-energy-line.line-solplanet-link-h::before {
+  left: 0;
+  top: -4px;
+}
+
+.mobile-energy-line.line-solplanet-link-h::after {
+  right: 0;
+  top: -3px;
+}
+
+.mobile-energy-line.line-hub-down {
   left: calc(50% - 1px);
-  top: 16%;
+  top: 468px;
   width: 2px;
-  height: 14%;
+  height: 158px;
 }
 
-.mobile-energy-line.line-grid-home::before {
+.mobile-energy-line.line-hub-down::before {
   left: -4px;
   top: 0;
 }
 
-.mobile-energy-line.line-grid-home::after {
+.mobile-energy-line.line-hub-down::after {
   left: -3px;
-  bottom: 18%;
+  bottom: 0;
 }
 
-.mobile-energy-line.line-battery1-branch-v {
-  left: 17%;
-  top: 49%;
-  width: 2px;
-  height: 10%;
-}
-
-.mobile-energy-line.line-battery1-branch-v::before {
-  left: -4px;
-  top: 0;
-}
-
-.mobile-energy-line.line-battery1-branch-v::after {
-  left: -3px;
-  top: 0;
-}
-
-.mobile-energy-line.line-battery1-branch-h {
-  left: 17%;
-  top: 58.5%;
-  width: 20%;
+.mobile-energy-line.line-bottom-bus {
+  left: calc(var(--mobile-pad) + (var(--mobile-third) / 2));
+  top: 626px;
+  width: calc(100% - (var(--mobile-pad) * 2) - var(--mobile-third));
   height: 2px;
 }
 
-.mobile-energy-line.line-battery1-branch-h::before {
+.mobile-energy-line.line-bottom-bus::before {
   left: 0;
   top: -4px;
 }
 
-.mobile-energy-line.line-battery1-branch-h::after {
-  left: 48%;
-  top: -4px;
-}
-
-.mobile-energy-line.line-battery2-branch-v {
-  right: 17%;
-  top: 49%;
-  width: 2px;
-  height: 10%;
-}
-
-.mobile-energy-line.line-battery2-branch-v::before {
-  left: -4px;
-  top: 0;
-}
-
-.mobile-energy-line.line-battery2-branch-v::after {
-  left: -3px;
-  top: 0;
-}
-
-.mobile-energy-line.line-battery2-branch-h {
-  left: 63%;
-  top: 58.5%;
-  width: 20%;
-  height: 2px;
-}
-
-.mobile-energy-line.line-battery2-branch-h::before {
-  left: calc(100% - 10px);
-  top: -4px;
-}
-
-.mobile-energy-line.line-battery2-branch-h::after {
-  left: 42%;
-  top: -4px;
-}
-
-.mobile-energy-line.line-home-trunk {
-  left: calc(50% - 1px);
-  top: 47%;
-  width: 2px;
-  height: 28%;
-}
-
-.mobile-energy-line.line-home-trunk::before {
-  left: -4px;
-  top: 0;
-}
-
-.mobile-energy-line.line-home-trunk::after {
-  left: -3px;
-  top: 74%;
-}
-
-.mobile-energy-line.line-inverter1-home {
-  left: 17%;
-  top: 32.6%;
-  width: 21%;
-  height: 2px;
-}
-
-.mobile-energy-line.line-inverter1-home::before {
-  left: 0;
-  top: -4px;
-}
-
-.mobile-energy-line.line-inverter1-home::after {
-  left: calc(100% - 10px);
+.mobile-energy-line.line-bottom-bus::after {
+  left: calc(50% - 4px);
   top: -3px;
 }
 
-.mobile-energy-line.line-inverter2-home {
-  left: 61%;
-  top: 32.6%;
-  width: 22%;
-  height: 2px;
-}
-
-.mobile-energy-line.line-inverter2-home::before {
-  left: 0;
-  top: -4px;
-}
-
-.mobile-energy-line.line-inverter2-home::after {
-  left: calc(100% - 10px);
-  top: -3px;
-}
-
-.mobile-energy-line.line-bus-horizontal {
-  left: 17%;
-  top: 75%;
-  width: 66%;
-  height: 2px;
-}
-
-.mobile-energy-line.line-bus-horizontal::before {
-  left: 0;
-  top: -4px;
-}
-
-.mobile-energy-line.line-bus-horizontal::after {
-  left: calc(50% - 5px);
-  top: -3px;
-}
-
-.mobile-energy-line.line-bus-load {
-  left: 17%;
-  top: 75%;
+.mobile-energy-line.line-load-down {
+  left: calc(var(--mobile-pad) + (var(--mobile-third) / 2));
+  top: 626px;
   width: 2px;
-  height: 4%;
+  height: 142px;
 }
 
-.mobile-energy-line.line-bus-load::before {
+.mobile-energy-line.line-load-down::before {
   left: -4px;
   top: 0;
 }
 
-.mobile-energy-line.line-bus-load::after {
+.mobile-energy-line.line-load-down::after {
   left: -4px;
   bottom: 0;
 }
 
-.mobile-energy-line.line-bus-pool {
-  left: calc(50% - 1px);
-  top: 75%;
+.mobile-energy-line.line-pool-down {
+  left: calc(var(--mobile-pad) + var(--mobile-third) + var(--mobile-gap) + (var(--mobile-third) / 2));
+  top: 626px;
   width: 2px;
-  height: 4%;
+  height: 142px;
 }
 
-.mobile-energy-line.line-bus-pool::before {
+.mobile-energy-line.line-pool-down::before {
   left: -4px;
   top: 0;
 }
 
-.mobile-energy-line.line-bus-pool::after {
+.mobile-energy-line.line-pool-down::after {
   left: -4px;
   bottom: 0;
 }
 
-.mobile-energy-line.line-bus-tesla {
-  right: 17%;
-  top: 75%;
+.mobile-energy-line.line-tesla-down {
+  left: calc(var(--mobile-pad) + (var(--mobile-third) * 2) + (var(--mobile-gap) * 2) + (var(--mobile-third) / 2));
+  top: 626px;
   width: 2px;
-  height: 4%;
+  height: 142px;
 }
 
-.mobile-energy-line.line-bus-tesla::before {
+.mobile-energy-line.line-tesla-down::before {
   left: -4px;
   top: 0;
 }
 
-.mobile-energy-line.line-bus-tesla::after {
+.mobile-energy-line.line-tesla-down::after {
   left: -4px;
   bottom: 0;
 }
@@ -1961,41 +2098,41 @@ td {
   to { left: 0; }
 }
 
-.mobile-energy-line.line-solar-inverter1.is-active::before,
-.mobile-energy-line.line-grid-home.is-active::before,
-.mobile-energy-line.line-battery1-branch-v.is-active::before,
-.mobile-energy-line.line-battery2-branch-v.is-active::before,
-.mobile-energy-line.line-home-trunk.is-active::before,
-.mobile-energy-line.line-bus-load.is-active::before,
-.mobile-energy-line.line-bus-pool.is-active::before,
-.mobile-energy-line.line-bus-tesla.is-active::before {
+.mobile-energy-line.line-solar-down.is-active::before,
+.mobile-energy-line.line-grid-down.is-active::before,
+.mobile-energy-line.line-saj-down.is-active::before,
+.mobile-energy-line.line-solplanet-down.is-active::before,
+.mobile-energy-line.line-saj-link-v.is-active::before,
+.mobile-energy-line.line-solplanet-link-v.is-active::before,
+.mobile-energy-line.line-hub-down.is-active::before,
+.mobile-energy-line.line-load-down.is-active::before,
+.mobile-energy-line.line-pool-down.is-active::before,
+.mobile-energy-line.line-tesla-down.is-active::before {
   animation: mobileFlowMoveY 1.4s linear infinite;
 }
 
-.mobile-energy-line.line-solar-inverter1.is-active.is-reverse::before,
-.mobile-energy-line.line-grid-home.is-active.is-reverse::before,
-.mobile-energy-line.line-battery1-branch-v.is-active.is-reverse::before,
-.mobile-energy-line.line-battery2-branch-v.is-active.is-reverse::before,
-.mobile-energy-line.line-home-trunk.is-active.is-reverse::before,
-.mobile-energy-line.line-bus-load.is-active.is-reverse::before,
-.mobile-energy-line.line-bus-pool.is-active.is-reverse::before,
-.mobile-energy-line.line-bus-tesla.is-active.is-reverse::before {
+.mobile-energy-line.line-solar-down.is-active.is-reverse::before,
+.mobile-energy-line.line-grid-down.is-active.is-reverse::before,
+.mobile-energy-line.line-saj-down.is-active.is-reverse::before,
+.mobile-energy-line.line-solplanet-down.is-active.is-reverse::before,
+.mobile-energy-line.line-saj-link-v.is-active.is-reverse::before,
+.mobile-energy-line.line-solplanet-link-v.is-active.is-reverse::before,
+.mobile-energy-line.line-hub-down.is-active.is-reverse::before,
+.mobile-energy-line.line-load-down.is-active.is-reverse::before,
+.mobile-energy-line.line-pool-down.is-active.is-reverse::before,
+.mobile-energy-line.line-tesla-down.is-active.is-reverse::before {
   animation: mobileFlowMoveYReverse 1.4s linear infinite;
 }
 
-.mobile-energy-line.line-inverter1-home.is-active::before,
-.mobile-energy-line.line-inverter2-home.is-active::before,
-.mobile-energy-line.line-battery1-branch-h.is-active::before,
-.mobile-energy-line.line-battery2-branch-h.is-active::before,
-.mobile-energy-line.line-bus-horizontal.is-active::before {
+.mobile-energy-line.line-saj-link-h.is-active::before,
+.mobile-energy-line.line-solplanet-link-h.is-active::before,
+.mobile-energy-line.line-bottom-bus.is-active::before {
   animation: mobileFlowMoveX 1.4s linear infinite;
 }
 
-.mobile-energy-line.line-inverter1-home.is-active.is-reverse::before,
-.mobile-energy-line.line-inverter2-home.is-active.is-reverse::before,
-.mobile-energy-line.line-battery1-branch-h.is-active.is-reverse::before,
-.mobile-energy-line.line-battery2-branch-h.is-active.is-reverse::before,
-.mobile-energy-line.line-bus-horizontal.is-active.is-reverse::before {
+.mobile-energy-line.line-saj-link-h.is-active.is-reverse::before,
+.mobile-energy-line.line-solplanet-link-h.is-active.is-reverse::before,
+.mobile-energy-line.line-bottom-bus.is-active.is-reverse::before {
   animation: mobileFlowMoveXReverse 1.4s linear infinite;
 }
 
@@ -3243,25 +3380,35 @@ td {
 }
 
 @media (max-width: 700px) {
+  body {
+    overflow: hidden;
+  }
+
   .page {
-    padding: 10px;
-    gap: 12px;
+    height: 100svh;
+    padding: 10px 10px calc(82px + env(safe-area-inset-bottom));
+    gap: 10px;
+    grid-template-rows: auto 1fr;
   }
 
   .topbar {
-    gap: 4px;
+    gap: 8px;
     flex-direction: row;
-    align-items: baseline;
+    align-items: stretch;
+    padding: 10px;
   }
 
   .topbar-actions {
-    display: none;
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
   }
 
   .lang-switch,
   .refresh-switch {
-    width: 100%;
-    justify-content: space-between;
+    width: auto;
+    justify-content: stretch;
   }
 
   .lang-switch select,
@@ -3269,28 +3416,21 @@ td {
   #configBtn,
   #refreshBtn {
     width: 100%;
+    min-width: 0;
   }
 
   #configBtn,
   #refreshBtn {
-    min-height: 46px;
+    min-height: 42px;
   }
 
   .topbar-actions > .btn,
   .topbar-actions > label {
-    flex: 1 1 100%;
-  }
-
-  .topbar h1 {
-    font-size: 28px;
-  }
-
-  .topbar p {
-    display: none;
+    flex: none;
   }
 
   .card {
-    padding: 12px;
+    padding: 10px;
   }
 
   h2 {
@@ -3298,17 +3438,17 @@ td {
   }
 
   .tabs {
-    width: 100%;
+    width: calc(100vw - 16px);
     flex-wrap: nowrap;
     padding: 6px;
-    border-radius: 16px;
-    padding-bottom: 6px;
+    border-radius: 18px;
+    bottom: max(8px, env(safe-area-inset-bottom));
   }
 
   .tab-btn {
     flex: 0 0 auto;
-    padding: 9px 12px;
-    font-size: 14px;
+    padding: 10px 12px;
+    font-size: 13px;
   }
 
   .flow-board {
@@ -3368,6 +3508,8 @@ td {
 
   .mobile-flow-board {
     display: block;
+    height: auto;
+    overflow: hidden;
   }
 
   #weatherWidget,
@@ -3397,10 +3539,13 @@ td {
 
   .view {
     gap: 10px;
+    min-height: 0;
+    overflow: auto;
   }
 
   .mobile-energy-card {
     border-radius: 16px;
+    width: 100%;
   }
 
   .mobile-energy-card-head {
@@ -3408,7 +3553,238 @@ td {
   }
 
   .mobile-energy-scene {
-    min-height: 560px;
+    min-height: 760px;
+    --mobile-pad: 8px;
+    --mobile-gap: 10px;
+  }
+
+  #dashboardView {
+    overflow: hidden;
+  }
+
+  #dashboardView > .card {
+    height: 100%;
+    padding: 6px;
+  }
+
+  #dashboardView .flow-compare-grid,
+  #dashboardView .flow-system-card {
+    height: 100%;
+  }
+
+  .topbar-actions .lang-switch span,
+  .topbar-actions .refresh-switch span {
+    display: none;
+  }
+
+  .mobile-energy-node {
+    padding: 10px 10px 8px;
+    border-radius: 18px;
+    gap: 8px;
+  }
+
+  .mobile-energy-node .mobile-energy-title {
+    font-size: 10px;
+  }
+
+  .mobile-energy-node .mobile-energy-value {
+    font-size: 18px;
+  }
+
+  .mobile-energy-node .mobile-energy-subvalue,
+  .mobile-energy-node .mobile-energy-meta {
+    font-size: 10px;
+  }
+
+  .mobile-energy-node.node-solar,
+  .mobile-energy-node.node-grid {
+    width: var(--mobile-half);
+  }
+
+  .mobile-energy-node.node-saj,
+  .mobile-energy-node.node-solplanet {
+    width: calc(var(--mobile-half) - 12px);
+  }
+
+  .mobile-energy-node.node-solar,
+  .mobile-energy-node.node-grid {
+    padding: 6px 7px 5px;
+    min-height: 90px;
+    width: calc(var(--mobile-half) - 12px);
+  }
+
+  .mobile-energy-node.node-solar .mobile-energy-icon,
+  .mobile-energy-node.node-grid .mobile-energy-icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .mobile-energy-node.node-solar .mobile-energy-icon svg,
+  .mobile-energy-node.node-grid .mobile-energy-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .mobile-energy-node.node-solar .mobile-energy-title,
+  .mobile-energy-node.node-grid .mobile-energy-title {
+    font-size: 8px;
+  }
+
+  .mobile-energy-node.node-solar .mobile-energy-value,
+  .mobile-energy-node.node-grid .mobile-energy-value {
+    font-size: 12px;
+  }
+
+  .mobile-energy-node.node-solar .mobile-energy-subvalue,
+  .mobile-energy-node.node-grid .mobile-energy-subvalue,
+  .mobile-energy-node.node-solar .mobile-energy-meta,
+  .mobile-energy-node.node-grid .mobile-energy-meta {
+    font-size: 8px;
+  }
+
+  .mobile-energy-node.node-solar { top: 12px; }
+  .mobile-energy-node.node-grid { top: 12px; }
+  .mobile-energy-node.node-saj { top: 214px; }
+  .mobile-energy-node.node-solplanet { top: 214px; }
+
+  .mobile-energy-node.node-hub {
+    left: calc(50% - 54px);
+    top: 300px;
+    width: 104px;
+    height: 104px;
+    padding: 12px 9px;
+  }
+
+  .mobile-energy-node.node-hub .mobile-energy-title {
+    font-size: 11px;
+  }
+
+  .mobile-energy-node.node-hub .mobile-energy-value {
+    font-size: 16px;
+  }
+
+  .mobile-energy-node.node-load,
+  .mobile-energy-node.node-pool,
+  .mobile-energy-node.node-tesla {
+    min-height: 78px;
+    top: 478px;
+    padding-top: 8px;
+    padding-bottom: 7px;
+  }
+
+  .mobile-energy-node.node-load .mobile-energy-title,
+  .mobile-energy-node.node-pool .mobile-energy-title,
+  .mobile-energy-node.node-tesla .mobile-energy-title {
+    font-size: 9px;
+  }
+
+  .mobile-energy-node.node-load .mobile-energy-value,
+  .mobile-energy-node.node-pool .mobile-energy-value,
+  .mobile-energy-node.node-tesla .mobile-energy-value {
+    font-size: 13px;
+  }
+
+  .mobile-energy-node.node-saj,
+  .mobile-energy-node.node-solplanet {
+    min-height: 84px;
+    padding-top: 7px;
+    padding-bottom: 6px;
+    width: 112px;
+  }
+
+  .mobile-energy-node.node-saj .mobile-energy-value,
+  .mobile-energy-node.node-solplanet .mobile-energy-value {
+    font-size: 14px;
+  }
+
+  .mobile-energy-node.node-saj .mobile-energy-subvalue,
+  .mobile-energy-node.node-solplanet .mobile-energy-subvalue,
+  .mobile-energy-node.node-saj .mobile-energy-meta,
+  .mobile-energy-node.node-solplanet .mobile-energy-meta {
+    font-size: 8px;
+  }
+
+  .mobile-energy-line.line-solar-down,
+  .mobile-energy-line.line-grid-down {
+    top: 102px;
+    height: 112px;
+  }
+
+  .mobile-energy-line.line-saj-down,
+  .mobile-energy-line.line-solplanet-down {
+    top: 102px;
+    height: 112px;
+  }
+
+  .mobile-energy-line.line-saj-link-v,
+  .mobile-energy-line.line-solplanet-link-v {
+    top: 298px;
+    height: 54px;
+  }
+
+  .mobile-energy-node.node-solar {
+    left: calc(var(--mobile-pad) + 6px);
+  }
+
+  .mobile-energy-node.node-grid {
+    right: calc(var(--mobile-pad) + 6px);
+  }
+
+  .mobile-energy-node.node-saj {
+    left: calc(50% - 188px);
+  }
+
+  .mobile-energy-node.node-solplanet {
+    left: calc(50% + 72px);
+  }
+
+  .mobile-energy-line.line-solar-down,
+  .mobile-energy-line.line-saj-down {
+    left: calc(50% - 132px);
+  }
+
+  .mobile-energy-line.line-grid-down,
+  .mobile-energy-line.line-solplanet-down {
+    left: calc(50% + 128px);
+  }
+
+  .mobile-energy-line.line-saj-link-v {
+    left: calc(50% - 132px);
+  }
+
+  .mobile-energy-line.line-solplanet-link-v {
+    left: calc(50% + 128px);
+  }
+
+  .mobile-energy-line.line-saj-link-h {
+    left: calc(50% - 132px);
+    width: 78px;
+  }
+
+  .mobile-energy-line.line-solplanet-link-h {
+    left: calc(50% + 50px);
+    width: 78px;
+  }
+
+  .mobile-energy-line.line-saj-link-h,
+  .mobile-energy-line.line-solplanet-link-h {
+    top: 352px;
+  }
+
+  .mobile-energy-line.line-hub-down {
+    top: 404px;
+    height: 48px;
+  }
+
+  .mobile-energy-line.line-bottom-bus {
+    top: 452px;
+  }
+
+  .mobile-energy-line.line-load-down,
+  .mobile-energy-line.line-pool-down,
+  .mobile-energy-line.line-tesla-down {
+    top: 452px;
+    height: 26px;
   }
 }
 
@@ -4531,6 +4907,7 @@ td {
   font-size: 12px;
   color: #5f6d81;
   text-align: right;
+  white-space: pre-line;
 }
 
 .notification-rule-progress {

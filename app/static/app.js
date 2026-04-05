@@ -456,6 +456,8 @@ const I18N = {
     mobileFlowSolplanetInverterShort: "Solplanet Inverter",
     mobileFlowSajBatteryShort: "SAJ Battery",
     mobileFlowSolplanetBatteryShort: "Solplanet Battery",
+    mobileFlowInvertersCombinedShort: "Inverters",
+    mobileFlowBatteriesCombinedShort: "Battery Bank",
     mobileDashboardFocusTitle: "Dashboard Focus",
     mobileDashboardFocusHint: "Keep the phone view centered on load power, usable battery, and live flow.",
     mobileDashboardLoadPower: "Working power",
@@ -480,6 +482,7 @@ const I18N = {
     mobileDashboardFlowBatterySaj: "SAJ battery",
     mobileDashboardFlowBatterySolplanet: "Solplanet battery",
     mobileDashboardFlowExtra: "Extra details",
+    mobileDashboardHubTitle: "Hub",
     solarTitle: "Solar",
     gridTitle: "Grid",
     inverterTitle: "Inverter",
@@ -529,12 +532,12 @@ const I18N = {
     teslaControlStatusStarted: "Charging started.",
     teslaControlStatusStopped: "Charging stopped.",
     overnightEnergyReferenceTitle: "Overnight Battery Reference",
-    overnightEnergyReferenceIntro: "Shows recent average base home load excluding Tesla charging and the pool pump, then estimates usable battery left by the next 08:00 and 11:00.",
+    overnightEnergyReferenceIntro: "Shows recent average base home load excluding Tesla charging and the pool pump, then estimates usable remaining battery by the next 08:00 and 11:00.",
     overnightEnergyReferenceCurrentUsable: "Current usable battery",
     overnightEnergyReferenceAvg3d: "Base use, last 3 windows",
     overnightEnergyReferenceAvg7d: "Base use, last 7 windows",
-    overnightEnergyReferenceLeft3d: "Battery left, 3-window avg",
-    overnightEnergyReferenceLeft7d: "Battery left, 7-window avg",
+    overnightEnergyReferenceLeft3d: "Usable remaining battery, 3-window avg",
+    overnightEnergyReferenceLeft7d: "Usable remaining battery, 7-window avg",
     overnightEnergyReferenceTargetLabel: "By {time}",
     overnightEnergyReferenceReferenceOnly: "Reference only",
     overnightEnergyReferenceUnavailable: "-",
@@ -1197,6 +1200,8 @@ const I18N = {
     mobileFlowSolplanetInverterShort: "Solplanet 逆变器",
     mobileFlowSajBatteryShort: "SAJ 电池",
     mobileFlowSolplanetBatteryShort: "Solplanet 电池",
+    mobileFlowInvertersCombinedShort: "双逆变器",
+    mobileFlowBatteriesCombinedShort: "电池组",
     mobileDashboardFocusTitle: "手机重点面板",
     mobileDashboardFocusHint: "手机端先聚焦工作功率、电量余量和实时流向。",
     mobileDashboardLoadPower: "工作功率",
@@ -1221,6 +1226,7 @@ const I18N = {
     mobileDashboardFlowBatterySaj: "SAJ 电池",
     mobileDashboardFlowBatterySolplanet: "Solplanet 电池",
     mobileDashboardFlowExtra: "补充信息",
+    mobileDashboardHubTitle: "Hub",
     solarTitle: "太阳能",
     gridTitle: "电网",
     inverterTitle: "逆变器",
@@ -1270,12 +1276,12 @@ const I18N = {
     teslaControlStatusStarted: "已开始充电。",
     teslaControlStatusStopped: "已停止充电。",
     overnightEnergyReferenceTitle: "夜间电量参考",
-    overnightEnergyReferenceIntro: "展示已扣除 Tesla 充电和泳池水泵后的家庭基础平均用电，并按下一个 08:00 / 11:00 估算电池可用余量。",
+    overnightEnergyReferenceIntro: "展示已扣除 Tesla 充电和泳池水泵后的家庭基础平均用电，并按下一个 08:00 / 11:00 估算可用剩余电量。",
     overnightEnergyReferenceCurrentUsable: "当前可用电池",
     overnightEnergyReferenceAvg3d: "最近 3 个窗口基础用电",
     overnightEnergyReferenceAvg7d: "最近 7 个窗口基础用电",
-    overnightEnergyReferenceLeft3d: "按 3 个窗口均值剩余",
-    overnightEnergyReferenceLeft7d: "按 7 个窗口均值剩余",
+    overnightEnergyReferenceLeft3d: "按 3 个窗口均值的可用剩余电量",
+    overnightEnergyReferenceLeft7d: "按 7 个窗口均值的可用剩余电量",
     overnightEnergyReferenceTargetLabel: "到 {time}",
     overnightEnergyReferenceReferenceOnly: "仅供参考",
     overnightEnergyReferenceUnavailable: "-",
@@ -2989,6 +2995,47 @@ function formatTrimmedDecimal(value, digits = 1) {
   return fixed.replace(/\.0$/, "");
 }
 
+function formatRuntimeBudgetFormula(runtimeBudget) {
+  const remainingBaseKwh = Number(runtimeBudget?.remaining_base_kwh);
+  const currentHomeLoadW = Number(runtimeBudget?.current_home_load_w);
+  const pumpPowerW = Number(runtimeBudget?.pump_power_w);
+  const runtimeLoadW = Number(runtimeBudget?.runtime_load_w);
+  const availableHours = Number(runtimeBudget?.available_runtime_hours);
+  const targetHours = Number(runtimeBudget?.target_runtime_hours);
+  const elapsedHours = Number(runtimeBudget?.elapsed_runtime_hours);
+  const remainingHours = Number(runtimeBudget?.remaining_runtime_hours);
+  const runtimeFraction = Number(runtimeBudget?.runtime_fraction);
+  const pumpPowerKw = Number.isFinite(pumpPowerW) ? pumpPowerW / 1000 : NaN;
+  const currentHomeLoadKw = Number.isFinite(currentHomeLoadW) ? currentHomeLoadW / 1000 : NaN;
+  const runtimeLoadKw = Number.isFinite(runtimeLoadW) ? runtimeLoadW / 1000 : NaN;
+  const lines = [];
+
+  if (
+    Number.isFinite(availableHours)
+    && Number.isFinite(remainingBaseKwh)
+    && Number.isFinite(runtimeLoadKw)
+    && runtimeLoadKw > 0
+    && Number.isFinite(pumpPowerKw)
+    && Number.isFinite(currentHomeLoadKw)
+  ) {
+    lines.push(
+      `available = usable_remaining_battery / (pump_power + home_load) = ${formatTrimmedDecimal(remainingBaseKwh, 2)}kWh / (${formatTrimmedDecimal(pumpPowerKw, 2)}kW + ${formatTrimmedDecimal(currentHomeLoadKw, 2)}kW) = ${formatTrimmedDecimal(remainingBaseKwh, 2)}kWh / ${formatTrimmedDecimal(runtimeLoadKw, 2)}kW = ${formatTrimmedDecimal(availableHours, 2)}h`
+    );
+  }
+  if (Number.isFinite(targetHours) && Number.isFinite(availableHours) && Number.isFinite(runtimeFraction)) {
+    lines.push(
+      `target = available x ${formatTrimmedDecimal(runtimeFraction * 100, 0)}% = ${formatTrimmedDecimal(availableHours, 2)}h x ${formatTrimmedDecimal(runtimeFraction, 2)} = ${formatTrimmedDecimal(targetHours, 2)}h`
+    );
+  }
+  if (Number.isFinite(remainingHours) && Number.isFinite(targetHours) && Number.isFinite(elapsedHours)) {
+    lines.push(
+      `remaining = target - elapsed = ${formatTrimmedDecimal(targetHours, 2)}h - ${formatTrimmedDecimal(elapsedHours, 2)}h = ${formatTrimmedDecimal(remainingHours, 2)}h`
+    );
+  }
+
+  return lines.join("\n");
+}
+
 function formatBatteryEnergyKwh(system, batterySoc) {
   const capacityKwh = BATTERY_CAPACITY_KWH[system];
   if (!Number.isFinite(capacityKwh)) return "-";
@@ -3655,6 +3702,364 @@ function refreshFlowDiagrams() {
   flowDiagrams.byBoard.forEach((diagram) => {
     diagram.fit();
   });
+}
+
+const MOBILE_COMBINED_DIAGRAM = {
+  shapeName: "mobile-energy-html",
+  sceneHeight: 800,
+  mobileBreakpoint: 768,
+  state: {
+    host: null,
+    scene: null,
+    surface: null,
+    graph: null,
+    nodes: new Map(),
+    edges: new Map(),
+    anchors: new Map(),
+    shapeRegistered: false,
+    lastModel: null,
+  },
+};
+
+function shouldUseMobileCombinedX6() {
+  const ua = String(window.navigator?.userAgent || "");
+  const isIOS = /iPhone|iPad|iPod/i.test(ua)
+    || (/Macintosh/i.test(ua) && Number(window.navigator?.maxTouchPoints || 0) > 1);
+  if (isIOS) return false;
+  return Boolean(window.X6?.Graph && window.X6?.Shape?.HTML);
+}
+
+function registerMobileCombinedDiagramShape() {
+  const state = MOBILE_COMBINED_DIAGRAM.state;
+  const X6 = window.X6;
+  if (state.shapeRegistered || !X6?.Shape?.HTML) return Boolean(state.shapeRegistered);
+  X6.Shape.HTML.register({
+    shape: MOBILE_COMBINED_DIAGRAM.shapeName,
+    inherit: "html",
+    effect: ["data"],
+    html(cell) {
+      return renderMobileCombinedNodeMarkup(cell.getData() || {});
+    },
+  });
+  state.shapeRegistered = true;
+  return true;
+}
+
+function renderMobileCombinedNodeMarkup(data) {
+  const cls = escapeHtml(String(data.cls || ""));
+  const kind = String(data.kind || "hub");
+  const title = escapeHtml(String(data.title || ""));
+  const accent = escapeHtml(String(data.accent || "cyan"));
+  const stateClass = `${data.active ? " is-active" : ""}${data.dimmed ? " is-dimmed" : ""}${data.action ? " is-clickable" : ""}`;
+  const attrs = [
+    "data-mobile-node='true'",
+    data.action ? `data-mobile-action="${escapeHtml(data.action)}"` : "",
+    data.hint ? `title="${escapeHtml(data.hint)}"` : "",
+  ].filter(Boolean).join(" ");
+  const valueHtml = data.valueHtml || "-";
+  const subValueHtml = data.subValueHtml || "&nbsp;";
+  const metaHtml = data.metaHtml || "&nbsp;";
+  if (kind === "hub") {
+    return (
+      `<article class="mobile-energy-node mobile-energy-x6-node ${cls} accent-${accent}${stateClass}" ${attrs}>` +
+      `<div class="mobile-energy-icon mobile-energy-icon-hub">${mobileFlowIconMarkup("hub")}</div>` +
+      `<div class="mobile-energy-copy">` +
+      `<p class="mobile-energy-title">${title}</p>` +
+      `<p class="mobile-energy-value">${valueHtml}</p>` +
+      `<p class="mobile-energy-subvalue">${subValueHtml}</p>` +
+      "</div>" +
+      "</article>"
+    );
+  }
+  return (
+    `<article class="mobile-energy-node mobile-energy-x6-node ${cls} accent-${accent}${stateClass}" ${attrs}>` +
+    `<div class="mobile-energy-icon mobile-energy-icon-${escapeHtml(kind)}">${mobileFlowIconMarkup(kind)}</div>` +
+    `<div class="mobile-energy-copy">` +
+    `<p class="mobile-energy-title">${title}</p>` +
+    `<p class="mobile-energy-value">${valueHtml}</p>` +
+    `<p class="mobile-energy-subvalue">${subValueHtml}</p>` +
+    `<p class="mobile-energy-meta">${metaHtml}</p>` +
+    "</div>" +
+    "</article>"
+  );
+}
+
+function getMobileCombinedSceneWidth() {
+  const state = MOBILE_COMBINED_DIAGRAM.state;
+  const width = Math.round(state.scene?.clientWidth || state.surface?.clientWidth || state.host?.clientWidth || 0);
+  return Math.max(320, width);
+}
+
+function computeMobileCombinedDiagramLayout(sceneWidth) {
+  const pad = sceneWidth <= 380 ? 8 : 10;
+  const gap = sceneWidth <= 380 ? 10 : 12;
+  const inset = 6;
+  const half = (sceneWidth - (pad * 2) - gap) / 2;
+  const topWidth = Math.round(half - 12);
+  const midWidth = Math.max(108, Math.round(topWidth - 26));
+  const third = (sceneWidth - (pad * 2) - (gap * 2)) / 3;
+  const bottomWidth = Math.round(third);
+  const topHeight = 120;
+  const midHeight = 128;
+  const bottomHeight = 112;
+  const hubSize = 128;
+  const leftX = Math.round(pad + inset);
+  const rightX = Math.round(sceneWidth - pad - inset - topWidth);
+  const loadX = Math.round(pad);
+  const poolX = Math.round(pad + third + gap);
+  const teslaX = Math.round(pad + (third * 2) + (gap * 2));
+  const solarTop = 12;
+  const inverterTop = 214;
+  const hubTop = 430;
+  const bottomTop = 668;
+  const hubX = Math.round((sceneWidth / 2) - (hubSize / 2));
+  const sajX = Math.round(hubX - 22 - midWidth);
+  const solplanetX = Math.round(hubX + hubSize + 22);
+  const solarCenterX = Math.round(leftX + (topWidth / 2));
+  const gridCenterX = Math.round(rightX + (topWidth / 2));
+  const sajCenterX = Math.round(sajX + (midWidth / 2));
+  const solplanetCenterX = Math.round(solplanetX + (midWidth / 2));
+  const hubCenterX = Math.round(hubX + (hubSize / 2));
+  const hubCenterY = Math.round(hubTop + (hubSize / 2));
+  const loadCenterX = Math.round(loadX + (bottomWidth / 2));
+  const poolCenterX = Math.round(poolX + (bottomWidth / 2));
+  const teslaCenterX = Math.round(teslaX + (bottomWidth / 2));
+  const busY = 640;
+  return {
+    width: sceneWidth,
+    height: MOBILE_COMBINED_DIAGRAM.sceneHeight,
+    nodes: {
+      solar: { x: leftX, y: solarTop, width: topWidth, height: topHeight },
+      grid: { x: rightX, y: solarTop, width: topWidth, height: topHeight },
+      saj: { x: sajX, y: inverterTop, width: midWidth, height: midHeight },
+      solplanet: { x: solplanetX, y: inverterTop, width: midWidth, height: midHeight },
+      hub: { x: hubX, y: hubTop, width: hubSize, height: hubSize },
+      load: { x: loadX, y: bottomTop, width: bottomWidth, height: bottomHeight },
+      pool: { x: poolX, y: bottomTop, width: bottomWidth, height: bottomHeight },
+      tesla: { x: teslaX, y: bottomTop, width: bottomWidth, height: bottomHeight },
+    },
+    anchors: {
+      sajJoint: { x: sajCenterX, y: hubTop },
+      solplanetJoint: { x: solplanetCenterX, y: hubTop },
+      hubLeft: { x: hubX, y: hubCenterY },
+      hubRight: { x: hubX + hubSize, y: hubCenterY },
+      hubBottom: { x: hubCenterX, y: hubTop + hubSize },
+      busCenter: { x: hubCenterX, y: busY },
+      busLeft: { x: loadCenterX, y: busY },
+      busRight: { x: teslaCenterX, y: busY },
+    },
+    edgeVertices: {
+      solarDown: [],
+      gridDown: [],
+      sajDown: [],
+      solplanetDown: [],
+      sajLinkH: [],
+      solplanetLinkH: [],
+      hubDown: [],
+      busLeft: [],
+      busRight: [],
+      loadDown: [],
+      poolDown: [],
+      teslaDown: [],
+    },
+  };
+}
+
+function ensureMobileCombinedFlowDiagram() {
+  const state = MOBILE_COMBINED_DIAGRAM.state;
+  state.host = document.getElementById("energyFlowCombinedMobile");
+  if (!state.host || !shouldUseMobileCombinedX6() || !registerMobileCombinedDiagramShape() || !window.X6?.Graph) {
+    if (state.host) state.host.classList.remove("is-x6-ready");
+    return null;
+  }
+  if (!state.graph) {
+    state.host.innerHTML =
+      `<div class="mobile-energy-card mobile-energy-card-x6">` +
+      `<div class="mobile-energy-scene mobile-energy-scene-x6">` +
+      `<div class="mobile-energy-graph"></div>` +
+      "</div>" +
+      "</div>";
+    state.scene = state.host.querySelector(".mobile-energy-scene-x6");
+    state.surface = state.host.querySelector(".mobile-energy-graph");
+    if (!state.surface) return null;
+    state.graph = new window.X6.Graph({
+      container: state.surface,
+      width: getMobileCombinedSceneWidth(),
+      height: MOBILE_COMBINED_DIAGRAM.sceneHeight,
+      interacting: false,
+      panning: false,
+      mousewheel: false,
+      moving: false,
+      selecting: false,
+      connecting: { snap: false },
+      background: { color: "transparent" },
+    });
+    state.host.classList.add("is-x6-ready");
+    buildMobileCombinedFlowGraph(state.graph);
+  }
+  return state.graph;
+}
+
+function buildMobileCombinedFlowGraph(graph) {
+  const state = MOBILE_COMBINED_DIAGRAM.state;
+  const layout = computeMobileCombinedDiagramLayout(getMobileCombinedSceneWidth());
+  const hiddenNodeAttrs = {
+    body: {
+      fill: "transparent",
+      stroke: "none",
+      pointerEvents: "none",
+    },
+    label: {
+      display: "none",
+    },
+  };
+  const anchorEntries = Object.entries(layout.anchors);
+  anchorEntries.forEach(([key, point]) => {
+    const node = graph.addNode({
+      id: `mobile-anchor-${key}`,
+      shape: "rect",
+      x: point.x,
+      y: point.y,
+      width: 1,
+      height: 1,
+      attrs: hiddenNodeAttrs,
+      zIndex: 0,
+    });
+    state.anchors.set(key, node);
+  });
+  const visibleNodes = [
+    ["solar", "node-solar", "solar"],
+    ["grid", "node-grid", "grid"],
+    ["saj", "node-saj", "chip"],
+    ["solplanet", "node-solplanet", "chip"],
+    ["hub", "node-hub", "hub"],
+    ["load", "node-load", "home"],
+    ["pool", "node-pool", "pool"],
+    ["tesla", "node-tesla", "ev"],
+  ];
+  visibleNodes.forEach(([key, cls, kind]) => {
+    const box = layout.nodes[key];
+    const node = graph.addNode({
+      id: `mobile-node-${key}`,
+      shape: MOBILE_COMBINED_DIAGRAM.shapeName,
+      x: box.x,
+      y: box.y,
+      width: box.width,
+      height: box.height,
+      data: {
+        cls,
+        kind,
+        title: "-",
+        valueHtml: "-",
+        subValueHtml: "&nbsp;",
+        metaHtml: "&nbsp;",
+        accent: key === "solar" ? "solar" : key === "grid" ? "grid" : key === "hub" ? "cyan" : key === "load" ? "load" : key === "tesla" ? "tesla" : (key === "solplanet" ? "battery" : "cyan"),
+        active: false,
+        dimmed: false,
+      },
+      zIndex: 2,
+    });
+    state.nodes.set(key, node);
+  });
+  const edgeDefs = [
+    ["solarDown", "mobile-node-solar", "mobile-node-saj"],
+    ["gridDown", "mobile-node-grid", "mobile-node-solplanet"],
+    ["sajDown", "mobile-node-saj", "mobile-anchor-sajJoint"],
+    ["solplanetDown", "mobile-node-solplanet", "mobile-anchor-solplanetJoint"],
+    ["sajLinkH", "mobile-anchor-sajJoint", "mobile-anchor-hubLeft"],
+    ["solplanetLinkH", "mobile-anchor-solplanetJoint", "mobile-anchor-hubRight"],
+    ["hubDown", "mobile-anchor-hubBottom", "mobile-anchor-busCenter"],
+    ["busLeft", "mobile-anchor-busCenter", "mobile-anchor-busLeft"],
+    ["busRight", "mobile-anchor-busCenter", "mobile-anchor-busRight"],
+    ["loadDown", "mobile-anchor-busLeft", "mobile-node-load"],
+    ["poolDown", "mobile-anchor-busCenter", "mobile-node-pool"],
+    ["teslaDown", "mobile-anchor-busRight", "mobile-node-tesla"],
+  ];
+  edgeDefs.forEach(([key, source, target]) => {
+    const edge = graph.addEdge({
+      id: `mobile-edge-${key}`,
+      source: { cell: source },
+      target: { cell: target },
+      vertices: layout.edgeVertices[key] || [],
+      zIndex: 1,
+      attrs: {
+        line: {
+          class: "mobile-energy-edge",
+          stroke: "rgba(24, 204, 255, 0.32)",
+          strokeWidth: 2,
+          strokeLinecap: "round",
+          strokeLinejoin: "round",
+          targetMarker: null,
+          sourceMarker: null,
+        },
+      },
+    });
+    state.edges.set(key, edge);
+  });
+}
+
+function updateMobileCombinedFlowGraphLayout() {
+  const state = MOBILE_COMBINED_DIAGRAM.state;
+  if (!state.graph) return;
+  const layout = computeMobileCombinedDiagramLayout(getMobileCombinedSceneWidth());
+  state.graph.resize(layout.width, layout.height);
+  Object.entries(layout.nodes).forEach(([key, box]) => {
+    const node = state.nodes.get(key);
+    if (!node) return;
+    node.position(box.x, box.y);
+    node.resize(box.width, box.height);
+  });
+  Object.entries(layout.anchors).forEach(([key, point]) => {
+    const node = state.anchors.get(key);
+    if (!node) return;
+    node.position(point.x, point.y);
+  });
+  Object.entries(layout.edgeVertices).forEach(([key, vertices]) => {
+    const edge = state.edges.get(key);
+    if (!edge) return;
+    edge.setVertices(vertices);
+  });
+}
+
+function setMobileCombinedNodeState(key, nextData) {
+  const node = MOBILE_COMBINED_DIAGRAM.state.nodes.get(key);
+  if (!node) return;
+  node.setData({ ...(node.getData() || {}), ...nextData });
+}
+
+function setMobileCombinedEdgeState(key, active = false, reverse = false) {
+  const edge = MOBILE_COMBINED_DIAGRAM.state.edges.get(key);
+  if (!edge) return;
+  const className = `mobile-energy-edge${active ? " is-active" : ""}${reverse ? " is-reverse" : ""}`;
+  edge.attr("line/class", className);
+}
+
+function refreshMobileCombinedFlowDiagram() {
+  const state = MOBILE_COMBINED_DIAGRAM.state;
+  if (!state.graph) return;
+  updateMobileCombinedFlowGraphLayout();
+  if (state.lastModel) {
+    Object.entries(state.lastModel.nodes || {}).forEach(([key, value]) => {
+      setMobileCombinedNodeState(key, value);
+    });
+    Object.entries(state.lastModel.edges || {}).forEach(([key, value]) => {
+      setMobileCombinedEdgeState(key, value.active, value.reverse);
+    });
+  }
+}
+
+function applyMobileCombinedFlowDiagram(model) {
+  const graph = ensureMobileCombinedFlowDiagram();
+  if (!graph) return false;
+  MOBILE_COMBINED_DIAGRAM.state.lastModel = model;
+  updateMobileCombinedFlowGraphLayout();
+  Object.entries(model.nodes || {}).forEach(([key, value]) => {
+    setMobileCombinedNodeState(key, value);
+  });
+  Object.entries(model.edges || {}).forEach(([key, value]) => {
+    setMobileCombinedEdgeState(key, value.active, value.reverse);
+  });
+  return true;
 }
 
 function setFlowLine(id, active, reverse = false, theme = "default") {
@@ -4844,10 +5249,18 @@ function mobileFlowIconMarkup(kind) {
   if (kind === "grid") {
     return (
       "<svg viewBox='0 0 24 24' focusable='false'>" +
-      "<path d='M9 4v7'></path>" +
-      "<path d='M15 4v7'></path>" +
-      "<path d='M7 11h10'></path>" +
-      "<path d='M8 11v4a4 4 0 0 0 8 0v-4'></path>" +
+      "<path d='M13 2L6 13h5l-1 9 8-11h-5l0-9z'></path>" +
+      "</svg>"
+    );
+  }
+  if (kind === "hub") {
+    return (
+      "<svg viewBox='0 0 24 24' focusable='false'>" +
+      "<path d='M12 14v5'></path>" +
+      "<path d='M7 19h10'></path>" +
+      "<circle cx='12' cy='10' r='2'></circle>" +
+      "<path d='M8 12a4 4 0 0 1 8 0'></path>" +
+      "<path d='M5 11a7 7 0 0 1 14 0'></path>" +
       "</svg>"
     );
   }
@@ -4859,10 +5272,19 @@ function mobileFlowIconMarkup(kind) {
       "</svg>"
     );
   }
-  if (kind === "inverter") {
+  if (kind === "inverter" || kind === "chip") {
     return (
       "<svg viewBox='0 0 24 24' focusable='false'>" +
-      "<path d='M13 3L6 13h5l-1 8 8-11h-5l0-7z'></path>" +
+      "<rect x='7' y='7' width='10' height='10' rx='2' ry='2'></rect>" +
+      "<path d='M10 10h4v4h-4z'></path>" +
+      "<path d='M9 3v3'></path>" +
+      "<path d='M15 3v3'></path>" +
+      "<path d='M9 18v3'></path>" +
+      "<path d='M15 18v3'></path>" +
+      "<path d='M3 9h3'></path>" +
+      "<path d='M3 15h3'></path>" +
+      "<path d='M18 9h3'></path>" +
+      "<path d='M18 15h3'></path>" +
       "</svg>"
     );
   }
@@ -4871,6 +5293,15 @@ function mobileFlowIconMarkup(kind) {
       "<svg viewBox='0 0 24 24' focusable='false'>" +
       "<path d='M4 9c1.5 2 3.5 2 5 0c1.5-2 3.5-2 5 0c1.5 2 3.5 2 5 0'></path>" +
       "<path d='M4 14c1.5 2 3.5 2 5 0c1.5-2 3.5-2 5 0c1.5 2 3.5 2 5 0'></path>" +
+      "</svg>"
+    );
+  }
+  if (kind === "home") {
+    return (
+      "<svg viewBox='0 0 24 24' focusable='false'>" +
+      "<path d='M4 11.5L12 5l8 6.5'></path>" +
+      "<path d='M6.5 10.5V19h11v-8.5'></path>" +
+      "<path d='M10 19v-4h4v4'></path>" +
       "</svg>"
     );
   }
@@ -4901,21 +5332,47 @@ function mobileFlowIconMarkup(kind) {
   );
 }
 
-function renderMobileEnergyNode({ cls, kind, title, valueHtml, subValueHtml, active = false, dimmed = false, action = "", hint = "" }) {
+function renderMobileEnergyNode({
+  cls,
+  kind,
+  title,
+  valueHtml,
+  subValueHtml,
+  metaHtml = "",
+  accent = "cyan",
+  active = false,
+  dimmed = false,
+  action = "",
+  hint = "",
+}) {
   const stateClass = `${active ? " is-active" : ""}${dimmed ? " is-dimmed" : ""}${action ? " is-clickable" : ""}`;
   const attrs = [
     action ? `data-mobile-action="${escapeHtml(action)}"` : "",
     hint ? `title="${escapeHtml(hint)}"` : "",
   ].filter(Boolean).join(" ");
   return (
-    `<article class="mobile-energy-node ${escapeHtml(cls)}${stateClass}" ${attrs}>` +
+    `<article class="mobile-energy-node ${escapeHtml(cls)} accent-${escapeHtml(accent)}${stateClass}" ${attrs}>` +
     `<div class="mobile-energy-icon mobile-energy-icon-${escapeHtml(kind)}">${mobileFlowIconMarkup(kind)}</div>` +
     `<div class="mobile-energy-copy">` +
     `<p class="mobile-energy-title">${escapeHtml(title)}</p>` +
     `<p class="mobile-energy-value">${valueHtml || "-"}</p>` +
     `<p class="mobile-energy-subvalue">${subValueHtml || "&nbsp;"}</p>` +
+    `<p class="mobile-energy-meta">${metaHtml || "&nbsp;"}</p>` +
     `</div>` +
     "</article>"
+  );
+}
+
+function renderMobileEnergyHub({ valueHtml, subValueHtml, active = false }) {
+  return (
+    `<article class="mobile-energy-node node-hub accent-cyan${active ? " is-active" : ""}">` +
+    `<div class="mobile-energy-icon mobile-energy-icon-hub">${mobileFlowIconMarkup("hub")}</div>` +
+    `<div class="mobile-energy-copy">` +
+    `<p class="mobile-energy-title">${escapeHtml(t("mobileDashboardHubTitle"))}</p>` +
+    `<p class="mobile-energy-value">${valueHtml || "-"}</p>` +
+    `<p class="mobile-energy-subvalue">${subValueHtml || "&nbsp;"}</p>` +
+    `</div>` +
+    `</article>`
   );
 }
 
@@ -4932,6 +5389,8 @@ function renderMobileCombinedFlow({
   totalLoadW,
   teslaChargingW,
   teslaSoc,
+  teslaCurrentEnergyKwh,
+  teslaTotalCapacityKwh,
   battery1Soc,
   battery2Soc,
 }) {
@@ -4954,6 +5413,7 @@ function renderMobileCombinedFlow({
   const totalLoadActive = totalLoadW !== null && totalLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const teslaChargingActive = teslaChargingW !== null && teslaChargingW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const poolPumpEnabled = poolPumpDevice?.control?.enabled === true;
+  const poolPumpAvailable = poolPumpDevice?.control?.available !== false && poolPumpDevice?.control?.switch_entity;
   const poolPumpActive = (poolPumpW !== null && poolPumpW >= POWER_FLOW_ACTIVE_THRESHOLD_W) || poolPumpEnabled;
   const battery1Active = battery1W !== null && Math.abs(battery1W) >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const battery2Active = battery2W !== null && Math.abs(battery2W) >= POWER_FLOW_ACTIVE_THRESHOLD_W;
@@ -4968,109 +5428,151 @@ function renderMobileCombinedFlow({
   const poolPumpStateText = poolPumpEnabled
     ? t("poolPumpStateOn")
     : (poolPumpDevice?.control?.enabled === false ? t("poolPumpStateOff") : t("poolPumpStateUnavailable"));
+  const sajActive = inverter1Active || battery1Active || solar1Active;
+  const solplanetActive = inverter2Active || battery2Active || solar2Active;
+  const anyHubActive = totalLoadActive || gridActive || sajActive || solplanetActive;
+  const teslaEnergyText = teslaCurrentEnergyKwh !== null && teslaTotalCapacityKwh !== null
+    ? `${formatTrimmedDecimal(teslaCurrentEnergyKwh, 1)} / ${formatTrimmedDecimal(teslaTotalCapacityKwh, 1)} kWh`
+    : teslaConnection;
+  const teslaValueHtml = formatValueWithDataKindHtml(
+    teslaSoc === null ? formatPowerKwFromWatts(teslaChargingW) : `${Math.max(0, Math.min(100, teslaSoc)).toFixed(0)}%`,
+    teslaSoc === null ? "real" : dataKinds.teslaSoc,
+  );
+  const model = {
+    nodes: {
+      solar: {
+        cls: "node-solar",
+        kind: "solar",
+        title: t("solarTitle"),
+        valueHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(solarW), dataKinds.solar),
+        subValueHtml: escapeHtml(solar1Active ? t("stateProducing") : t("stateIdle")),
+        metaHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(solarToInverter1W), dataKinds.solarToInverter1),
+        accent: "solar",
+        active: solar1Active,
+        dimmed: false,
+      },
+      grid: {
+        cls: "node-grid",
+        kind: "grid",
+        title: t("gridTitle"),
+        valueHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(gridW === null ? null : Math.abs(gridW)), dataKinds.grid),
+        subValueHtml: escapeHtml(gridActive ? (gridImport ? t("stateImporting") : t("stateExporting")) : t("stateIdle")),
+        metaHtml: escapeHtml(gridImport ? "AC IN" : "AC OUT"),
+        accent: "grid",
+        active: gridActive,
+        dimmed: false,
+      },
+      saj: {
+        cls: "node-saj",
+        kind: "chip",
+        title: "SAJ",
+        valueHtml: formatValueWithDataKindHtml(formatInverterConversion(inverter1W, battery1W, solarToInverter1W), dataKinds.inverterRatio),
+        subValueHtml: escapeHtml(`${sajModeText} · Battery ${Math.max(0, Math.min(100, battery1Soc || 0)).toFixed(0)}%`),
+        metaHtml: escapeHtml(`${formatBatteryEnergyKwh("saj", battery1Soc)} · ${formatBatteryUsableKwh("saj", battery1Soc)}`),
+        accent: "cyan",
+        active: sajActive,
+        dimmed: false,
+        action: "saj-profile",
+        hint: t("sajProfilePanelKicker"),
+      },
+      solplanet: {
+        cls: "node-solplanet",
+        kind: "chip",
+        title: "SOLPLANET",
+        valueHtml: formatValueWithDataKindHtml(formatInverterConversion(inverter2W, battery2W, solar2W), dataKinds.inverterRatio),
+        subValueHtml: escapeHtml(`${solplanetModeText} · Battery ${Math.max(0, Math.min(100, battery2Soc || 0)).toFixed(0)}%`),
+        metaHtml: escapeHtml(`${formatBatteryEnergyKwh("solplanet", battery2Soc)} · ${formatBatteryUsableKwh("solplanet", battery2Soc)}`),
+        accent: "battery",
+        active: solplanetActive,
+        dimmed: false,
+        action: "solplanet-pin",
+        hint: t("solplanetDashboardPinOpenHint"),
+      },
+      hub: {
+        cls: "node-hub",
+        kind: "hub",
+        title: t("mobileDashboardHubTitle"),
+        valueHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(totalLoadW), dataKinds.totalLoad),
+        subValueHtml: escapeHtml(totalLoadActive ? t("switchboardStateActive") : t("switchboardStateIdle")),
+        accent: "cyan",
+        active: anyHubActive,
+        dimmed: false,
+      },
+      load: {
+        cls: "node-load",
+        kind: "home",
+        title: t("loadTitle"),
+        valueHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(homeLoadW), dataKinds.homeLoad),
+        subValueHtml: escapeHtml(homeLoadActive ? t("stateConsuming") : t("stateIdle")),
+        metaHtml: escapeHtml(homeLoadActive ? "HOME" : "-"),
+        accent: "load",
+        active: homeLoadActive,
+        dimmed: false,
+      },
+      pool: {
+        cls: "node-pool",
+        kind: "pool",
+        title: t("poolPumpTitle"),
+        valueHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(poolPumpW), "real"),
+        subValueHtml: escapeHtml(poolPumpStateText),
+        metaHtml: escapeHtml(poolPumpAvailable ? "POOL" : t("poolPumpStateUnavailable")),
+        accent: "cyan",
+        active: poolPumpActive,
+        dimmed: !poolPumpActive && poolPumpW === null,
+      },
+      tesla: {
+        cls: "node-tesla",
+        kind: "ev",
+        title: t("teslaChargingLabel"),
+        valueHtml: teslaValueHtml,
+        subValueHtml: escapeHtml(teslaEnergyText),
+        metaHtml: escapeHtml(teslaChargingActive ? t("teslaControlStop") : t("teslaControlStart")),
+        accent: "tesla",
+        active: teslaChargingActive,
+        dimmed: !teslaChargingActive && teslaChargingW === null,
+      },
+    },
+    edges: {
+      solarDown: { active: solar1Active, reverse: false },
+      gridDown: { active: gridActive, reverse: !gridImport },
+      sajDown: { active: sajActive, reverse: false },
+      solplanetDown: { active: solplanetActive, reverse: false },
+      sajLinkH: { active: sajActive, reverse: false },
+      solplanetLinkH: { active: solplanetActive, reverse: false },
+      hubDown: { active: homeLoadActive || poolPumpActive || teslaChargingActive, reverse: false },
+      busLeft: { active: homeLoadActive || poolPumpActive || teslaChargingActive, reverse: false },
+      busRight: { active: homeLoadActive || poolPumpActive || teslaChargingActive, reverse: false },
+      loadDown: { active: homeLoadActive, reverse: false },
+      poolDown: { active: poolPumpActive, reverse: false },
+      teslaDown: { active: teslaChargingActive, reverse: false },
+    },
+  };
+  if (applyMobileCombinedFlowDiagram(model)) return;
 
   const html =
     `<div class="mobile-energy-card">` +
     `<div class="mobile-energy-scene">` +
-    renderMobileEnergyLine("line-solar-inverter1", solar1Active, false) +
-    renderMobileEnergyLine("line-grid-home", gridActive, !gridImport) +
-    renderMobileEnergyLine("line-battery1-branch-v", battery1Active, !battery1W || battery1W < 0) +
-    renderMobileEnergyLine("line-battery1-branch-h", battery1Active, !battery1W || battery1W < 0) +
-    renderMobileEnergyLine("line-inverter1-home", inverter1Active, !inverter1W || inverter1W < 0) +
-    renderMobileEnergyLine("line-inverter2-home", inverter2Active, !inverter2W || inverter2W < 0) +
-    renderMobileEnergyLine("line-battery2-branch-v", battery2Active, Boolean(battery2W && battery2W > 0)) +
-    renderMobileEnergyLine("line-battery2-branch-h", battery2Active, Boolean(battery2W && battery2W > 0)) +
-    renderMobileEnergyLine("line-home-trunk", homeLoadActive || poolPumpActive || teslaChargingActive, false) +
-    renderMobileEnergyLine("line-bus-horizontal", homeLoadActive || poolPumpActive || teslaChargingActive, false) +
-    renderMobileEnergyLine("line-bus-load", homeLoadActive, false) +
-    renderMobileEnergyLine("line-bus-pool", poolPumpActive, false) +
-    renderMobileEnergyLine("line-bus-tesla", teslaChargingActive, false) +
-    renderMobileEnergyNode({
-      cls: "node-solar",
-      kind: "solar",
-      title: "PV",
-      valueHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(solarW), dataKinds.solar),
-      subValueHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(solarToInverter1W), dataKinds.solarToInverter1),
-      active: solar1Active,
-    }) +
-    renderMobileEnergyNode({
-      cls: "node-grid",
-      kind: "grid",
-      title: t("gridTitle"),
-      valueHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(gridW === null ? null : Math.abs(gridW)), dataKinds.grid),
-      subValueHtml: escapeHtml(gridActive ? (gridImport ? t("stateImporting") : t("stateExporting")) : t("stateIdle")),
-      active: gridActive,
-    }) +
-    renderMobileEnergyNode({
-      cls: "node-home",
-      kind: "home",
-      title: t("mobileFlowHomeTitle"),
-      valueHtml: escapeHtml(totalLoadActive ? t("switchboardStateActive") : t("switchboardStateIdle")),
-      subValueHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(totalLoadW), dataKinds.totalLoad),
-      active: totalLoadActive || gridActive || inverter1Active || inverter2Active,
-    }) +
-    renderMobileEnergyNode({
-      cls: "node-inverter1",
-      kind: "inverter",
-      title: t("mobileFlowSajInverterShort"),
-      valueHtml: formatValueWithDataKindHtml(formatSignedKwFromWatts(inverter1W), dataKinds.inverter1),
-      subValueHtml: escapeHtml(sajModeText),
-      active: inverter1Active,
-      action: "saj-profile",
-      hint: t("sajProfilePanelKicker"),
-    }) +
-    renderMobileEnergyNode({
-      cls: "node-battery1",
-      kind: "battery",
-      title: t("mobileFlowSajBatteryShort"),
-      valueHtml: formatValueWithDataKindHtml(formatSignedKwFromWatts(battery1W), dataKinds.battery1),
-      subValueHtml: formatValueWithDataKindHtml(battery1Soc === null ? "-" : `${Math.max(0, Math.min(100, battery1Soc)).toFixed(0)}%`, "real"),
-      active: battery1Active,
-    }) +
-    renderMobileEnergyNode({
-      cls: "node-inverter2",
-      kind: "inverter",
-      title: t("mobileFlowSolplanetInverterShort"),
-      valueHtml: formatValueWithDataKindHtml(formatSignedKwFromWatts(inverter2W), dataKinds.inverter2),
-      subValueHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(solar2W), dataKinds.solar),
-      active: inverter2Active || solar2Active,
-      action: "solplanet-pin",
-      hint: t("solplanetDashboardPinOpenHint"),
-    }) +
-    renderMobileEnergyNode({
-      cls: "node-battery2",
-      kind: "battery",
-      title: t("mobileFlowSolplanetBatteryShort"),
-      valueHtml: formatValueWithDataKindHtml(formatSignedKwFromWatts(battery2W), dataKinds.battery2),
-      subValueHtml: formatValueWithDataKindHtml(battery2Soc === null ? "-" : `${Math.max(0, Math.min(100, battery2Soc)).toFixed(0)}%`, "real"),
-      active: battery2Active,
-    }) +
-    renderMobileEnergyNode({
-      cls: "node-load",
-      kind: "load",
-      title: t("loadTitle"),
-      valueHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(homeLoadW), dataKinds.homeLoad),
-      subValueHtml: escapeHtml(homeLoadActive ? t("stateConsuming") : t("stateIdle")),
-      active: homeLoadActive,
-    }) +
-    renderMobileEnergyNode({
-      cls: "node-pool",
-      kind: "pool",
-      title: t("poolPumpTitle"),
-      valueHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(poolPumpW), "real"),
-      subValueHtml: escapeHtml(poolPumpStateText),
-      active: poolPumpActive,
-      dimmed: !poolPumpActive && poolPumpW === null,
-    }) +
-    renderMobileEnergyNode({
-      cls: "node-tesla",
-      kind: "tesla",
-      title: t("teslaChargingLabel"),
-      valueHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(teslaChargingW), "real"),
-      subValueHtml: formatValueWithDataKindHtml(teslaSoc === null ? teslaConnection : `${Math.max(0, Math.min(100, teslaSoc)).toFixed(0)}%`, teslaSoc === null ? null : dataKinds.teslaSoc),
-      active: teslaChargingActive,
-      dimmed: !teslaChargingActive && teslaChargingW === null,
-    }) +
+    renderMobileEnergyLine("line-solar-down", solar1Active, false) +
+    renderMobileEnergyLine("line-grid-down", gridActive, !gridImport) +
+    renderMobileEnergyLine("line-saj-down", sajActive, false) +
+    renderMobileEnergyLine("line-solplanet-down", solplanetActive, false) +
+    renderMobileEnergyLine("line-saj-link-v", sajActive, false) +
+    renderMobileEnergyLine("line-saj-link-h", sajActive, false) +
+    renderMobileEnergyLine("line-solplanet-link-v", solplanetActive, false) +
+    renderMobileEnergyLine("line-solplanet-link-h", solplanetActive, false) +
+    renderMobileEnergyLine("line-hub-down", homeLoadActive || poolPumpActive || teslaChargingActive, false) +
+    renderMobileEnergyLine("line-bottom-bus", homeLoadActive || poolPumpActive || teslaChargingActive, false) +
+    renderMobileEnergyLine("line-load-down", homeLoadActive, false) +
+    renderMobileEnergyLine("line-pool-down", poolPumpActive, false) +
+    renderMobileEnergyLine("line-tesla-down", teslaChargingActive, false) +
+    renderMobileEnergyNode(model.nodes.solar) +
+    renderMobileEnergyNode(model.nodes.grid) +
+    renderMobileEnergyNode(model.nodes.saj) +
+    renderMobileEnergyNode(model.nodes.solplanet) +
+    renderMobileEnergyHub(model.nodes.hub) +
+    renderMobileEnergyNode(model.nodes.load) +
+    renderMobileEnergyNode(model.nodes.pool) +
+    renderMobileEnergyNode(model.nodes.tesla) +
     `</div>`;
 
   setHtml("energyFlowCombinedMobile", html);
@@ -5351,6 +5853,8 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null, poolPumpDevice
     totalLoadW,
     teslaChargingW,
     teslaSoc,
+    teslaCurrentEnergyKwh,
+    teslaTotalCapacityKwh,
     battery1Soc,
     battery2Soc,
   });
@@ -6071,6 +6575,7 @@ function getNotificationMatrixPoolPumpOperationProgress(code, windowItem, curren
   const availableHours = Number(runtimeBudget?.available_runtime_hours);
   const targetHours = Number(runtimeBudget?.target_runtime_hours);
   const remainingHours = Number(runtimeBudget?.remaining_runtime_hours);
+  const runtimeBudgetFormula = formatRuntimeBudgetFormula(runtimeBudget);
   const ratio = Number.isFinite(targetHours) && targetHours > 0 && Number.isFinite(remainingHours)
     ? Math.max(0, Math.min(1, 1 - (remainingHours / targetHours)))
     : 0;
@@ -6097,7 +6602,7 @@ function getNotificationMatrixPoolPumpOperationProgress(code, windowItem, curren
       },
       {
         label: t("notificationMatrixConditionPoolPumpRuntimeBudget"),
-        value: Number.isFinite(availableHours) ? `${formatTrimmedDecimal(availableHours, 2)}h` : "-",
+        value: runtimeBudgetFormula || (Number.isFinite(availableHours) ? `${formatTrimmedDecimal(availableHours, 2)}h` : "-"),
         matched: Number.isFinite(availableHours) && availableHours > 0,
       },
     ],
@@ -11645,6 +12150,7 @@ window.addEventListener("resize", () => {
   if (samplingChart) samplingChart.resize();
   if (samplingTotalsChart) samplingTotalsChart.resize();
   refreshFlowDiagrams();
+  refreshMobileCombinedFlowDiagram();
 });
 
 document.addEventListener("click", (event) => {
