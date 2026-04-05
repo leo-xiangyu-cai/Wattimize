@@ -143,6 +143,12 @@ const I18N = {
     notificationMatrixConditionTeslaSocStart: "Solplanet SOC >= 95% start threshold",
     notificationMatrixConditionTeslaSocKeep: "Solplanet SOC >= 90% keep threshold",
     notificationMatrixConditionTeslaOvernightReserve: "Solplanet SOC > 10% overnight reserve",
+    notificationMatrixConditionTeslaOvernightBudget: "Available for Tesla",
+    notificationMatrixConditionTeslaOvernightBatteryTotal: "Usable battery (both)",
+    notificationMatrixConditionTeslaOvernightHomeLoad: "Home load to 8am",
+    notificationMatrixConditionTeslaOvernightPumpLoad: "Pool pump to 5am",
+    notificationMatrixConditionTeslaOvernightChargeState: "Charging state",
+    notificationMatrixConditionTeslaOvernightLastAction: "Last adjustment",
     notificationMatrixConditionPoolPumpGridCap: "Pool pump keeps predicted grid within 15.0kW cap",
     notificationMatrixConditionPoolPumpTeslaPriority: "Tesla priority already satisfied",
     notificationMatrixConditionPoolPumpSchedule: "Pump schedule",
@@ -180,7 +186,7 @@ const I18N = {
     notificationMatrixWindowPostExportPeakTitle: "Post-Export Peak",
     notificationMatrixWindowPostExportPeakSummary: "20:00-23:00. Worker tries to avoid expensive import and raises early warnings when that risk appears.",
     notificationMatrixWindowOvernightTitle: "Overnight Shoulder",
-    notificationMatrixWindowOvernightSummary: "23:00-11:00 next day. Worker watches SAJ battery reminders, starts Tesla charging when Solplanet stays above its overnight reserve, and can run the pool pump overnight within the battery budget.",
+    notificationMatrixWindowOvernightSummary: "23:00-11:00 next day. Worker watches SAJ battery reminders, starts Tesla charging when projected battery after home load (to 8am) and pool pump (to 5am) stays above 1.0 kWh, and can run the pool pump overnight within the battery budget.",
     notificationMatrixWindowAlwaysTitle: "Always-On Battery Watch",
     notificationMatrixWindowAlwaysSummary: "Not part of the 24-hour window split. Worker sends a one-time notification when either battery newly reaches 100% SOC.",
     notificationMatrixRuleTypeNotification: "Notification",
@@ -197,8 +203,8 @@ const I18N = {
     notificationRuleTeslaAfterFreeShoulderTrigger: "Start when Solplanet SOC reaches 95%, stop when it falls below 90%, otherwise hold the current state.",
     notificationRuleTeslaAfterFreePeakTitle: "Tesla charging keeps following Solplanet SOC before export pricing",
     notificationRuleTeslaAfterFreePeakTrigger: "Start when Solplanet SOC reaches 95%, stop when it falls below 90%, otherwise hold the current state.",
-    notificationRuleTeslaOvernightShoulderTitle: "Tesla charging follows Solplanet reserve overnight",
-    notificationRuleTeslaOvernightShoulderTrigger: "During 23:00-11:00, start Tesla charging when Solplanet SOC stays above 10%; stop when it drops to 10% or below.",
+    notificationRuleTeslaOvernightShoulderTitle: "Tesla charging follows overnight energy budget",
+    notificationRuleTeslaOvernightShoulderTrigger: "During 23:00-11:00, start Tesla charging when projected battery minus home load to 8am minus pool pump to 5am is above 1.0 kWh; stop when that budget is exhausted.",
     notificationRulePoolPumpOvernightTitle: "Pool pump uses overnight battery budget",
     notificationRulePoolPumpOvernightTrigger: "During 23:00-05:00, estimate how long the pump can run from the overnight battery forecast, then use only 80% of that available runtime.",
     notificationRuleTeslaExportWindowTitle: "Tesla charging uses solar surplus during ZeroHero Window",
@@ -208,6 +214,7 @@ const I18N = {
     notificationMatrixTeslaTriggerGridCap: "Target <= 15.0kW grid",
     notificationMatrixTeslaTriggerSolplanetSoc: "Solplanet {soc} (start >= 95%, keep >= 90%)",
     notificationMatrixTeslaTriggerSolplanetReserve: "Solplanet {soc} (keep > 10%)",
+    notificationMatrixTeslaTriggerOvernightBudget: "{battery} − {home} (home {homeKw}×{homeH}) − {pump} (pump {pumpKw}×{pumpH}) = {available}",
     notificationMatrixTeslaTriggerExport: "Export {value} / surplus solar",
     notificationMatrixTeslaTriggerStop: "Target charging off",
     notificationMatrixTeslaCurrent: "Tesla {actual} / set {configured}",
@@ -887,6 +894,12 @@ const I18N = {
     notificationMatrixConditionTeslaSocStart: "Solplanet SOC 达到 95% 启动阈值",
     notificationMatrixConditionTeslaSocKeep: "Solplanet SOC 达到 90% 维持阈值",
     notificationMatrixConditionTeslaOvernightReserve: "Solplanet SOC 高于 10% 夜间保底",
+    notificationMatrixConditionTeslaOvernightBudget: "特斯拉可用电量",
+    notificationMatrixConditionTeslaOvernightBatteryTotal: "两块电池总可用",
+    notificationMatrixConditionTeslaOvernightHomeLoad: "家庭负载到早上8点",
+    notificationMatrixConditionTeslaOvernightPumpLoad: "水泵到早上5点",
+    notificationMatrixConditionTeslaOvernightChargeState: "充电状态",
+    notificationMatrixConditionTeslaOvernightLastAction: "上次调节",
     notificationMatrixConditionPoolPumpGridCap: "开启水泵后预测电网功率仍不超过 15.0kW",
     notificationMatrixConditionPoolPumpTeslaPriority: "Tesla 优先级条件已满足",
     notificationMatrixConditionPoolPumpSchedule: "水泵运行时段",
@@ -924,7 +937,7 @@ const I18N = {
     notificationMatrixWindowPostExportPeakTitle: "Export 后高价时段",
     notificationMatrixWindowPostExportPeakSummary: "20:00-23:00。这个窗口会尽量避免高价购电，并在风险出现时尽早提醒。",
     notificationMatrixWindowOvernightTitle: "夜间肩时段",
-    notificationMatrixWindowOvernightSummary: "23:00-次日11:00。这个窗口会继续监控 SAJ 电池提醒，在 Solplanet SOC 高于夜间保底时启动 Tesla 充电，并在电池预算允许时夜间运行水泵。",
+    notificationMatrixWindowOvernightSummary: "23:00-次日11:00。这个窗口会继续监控 SAJ 电池提醒，在电池剩余电量扣除家庭负载（到早上8点）和水泵（到早上5点）后仍高于 1.0 kWh 时启动 Tesla 充电，并在电池预算允许时夜间运行水泵。",
     notificationMatrixWindowAlwaysTitle: "始终开启的满电监控",
     notificationMatrixWindowAlwaysSummary: "不属于 24 小时时段切分。任一电池新达到 100% SOC 时发送一次通知。",
     notificationMatrixRuleTypeNotification: "通知",
@@ -941,8 +954,8 @@ const I18N = {
     notificationRuleTeslaAfterFreeShoulderTrigger: "Solplanet SOC 到 95% 开始充，低于 90% 停止，区间内维持当前状态。",
     notificationRuleTeslaAfterFreePeakTitle: "峰前时段 Tesla 继续跟随 Solplanet SOC 规则",
     notificationRuleTeslaAfterFreePeakTrigger: "Solplanet SOC 到 95% 开始充，低于 90% 停止，区间内维持当前状态。",
-    notificationRuleTeslaOvernightShoulderTitle: "夜间肩时段 Tesla 跟随 Solplanet 保底电量规则",
-    notificationRuleTeslaOvernightShoulderTrigger: "23:00-次日11:00 期间，只要 Solplanet SOC 高于 10% 就允许 Tesla 充电；降到 10% 或以下就停止。",
+    notificationRuleTeslaOvernightShoulderTitle: "夜间肩时段 Tesla 跟随电池预算规则",
+    notificationRuleTeslaOvernightShoulderTrigger: "23:00-次日11:00 期间，当两块电池总可用电量扣除到早上8点的家庭负载和到早上5点的水泵用电后仍超过 1.0 kWh 时允许 Tesla 充电；预算耗尽时停止。",
     notificationRulePoolPumpOvernightTitle: "夜间按电池预算运行水泵",
     notificationRulePoolPumpOvernightTrigger: "23:00-05:00 期间，根据夜间电池预测算出水泵可运行时长，再只运行其中的 80%。",
     notificationRuleTeslaExportWindowTitle: "ZeroHero 时段 Tesla 按太阳能富余充电",
@@ -952,6 +965,7 @@ const I18N = {
     notificationMatrixTeslaTriggerGridCap: "目标保持电网 <= 15.0kW",
     notificationMatrixTeslaTriggerSolplanetSoc: "Solplanet {soc}（达到 95% 开始，>= 90% 维持）",
     notificationMatrixTeslaTriggerSolplanetReserve: "Solplanet {soc}（保持 > 10%）",
+    notificationMatrixTeslaTriggerOvernightBudget: "{battery} − {home}（家 {homeKw}×{homeH}）− {pump}（泵 {pumpKw}×{pumpH}）= {available}",
     notificationMatrixTeslaTriggerExport: "当前外送 {value} / 太阳能富余",
     notificationMatrixTeslaTriggerStop: "目标为停止充电",
     notificationMatrixTeslaCurrent: "Tesla 实际 {actual} / 设定 {configured}",
@@ -3242,7 +3256,7 @@ const SOLPLANET_COMBINED_BATTERY_NODE_SIZE = {
 };
 const COMBINED_LOAD_DEVICE_NODE_SIZE = {
   width: 184,
-  height: 174,
+  height: 210,
 };
 const COMBINED_DIAGRAM_VIEWPORT = { width: 1340, height: 720 };
 const COMBINED_LAYOUT = {
@@ -6488,13 +6502,63 @@ function getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWi
       matched: Number.isFinite(predictedGrid) && predictedGrid <= 15000,
     });
   } else if (code === "tesla_overnight_shoulder_control") {
-    const socText = Number.isFinite(solplanetSoc) ? `${formatTrimmedDecimal(solplanetSoc, 1)}%` : "-";
-    triggerText = t("notificationMatrixTeslaTriggerSolplanetReserve", { soc: socText });
+    const budget = source?.overnight_shoulder_tesla?.energy_budget;
+    const availableKwh = Number(budget?.available_for_tesla_kwh);
+    const batteryKwh = Number(budget?.usable_battery_total_kwh);
+    const homeLoadKwh = Number(budget?.projected_home_load_to_8am_kwh);
+    const homeHours = Number(budget?.home_load_hours_to_8am);
+    const pumpKwh = Number(budget?.pool_pump_remaining_kwh);
+    const pumpHours = Number(budget?.pool_pump_remaining_hours);
+    const pumpPowerW = Number(budget?.pool_pump_power_w);
+    const minKwh = Number(budget?.min_available_kwh ?? 1.0);
+    const fmtKwh = (v) => Number.isFinite(v) ? `${formatTrimmedDecimal(v, 1)}kWh` : "-";
+    const fmtH = (v) => Number.isFinite(v) ? `${formatTrimmedDecimal(v, 1)}h` : "-";
+    const fmtW = (v) => Number.isFinite(v) ? `${formatTrimmedDecimal(v / 1000, 1)}kW` : "-";
+    const chargingEnabled = source?.tesla_state_before?.enabled === true;
+    const chargeStateText = chargingEnabled ? t("notificationMatrixConditionMatched") : t("notificationMatrixConditionNotMatched");
     conditions.push({
-      label: t("notificationMatrixConditionTeslaOvernightReserve"),
-      value: t("notificationMatrixConditionValueCurrentNeed", { current: socText, need: "> 10%" }),
-      matched: Number.isFinite(solplanetSoc) && solplanetSoc > 10,
+      label: t("notificationMatrixConditionTeslaOvernightChargeState"),
+      value: chargeStateText,
+      matched: chargingEnabled,
     });
+    const lastActionAt = source?.tesla_overnight_last_action_at_utc;
+    const lastActionType = String(source?.tesla_overnight_last_action_type || "").trim();
+    conditions.push({
+      label: t("notificationMatrixConditionTeslaOvernightLastAction"),
+      value: lastActionAt ? `${lastActionType} · ${formatRelativeAgo(lastActionAt)}` : "-",
+      matched: !!lastActionAt,
+    });
+    if (budget != null) {
+      const homeAvgKw = (Number.isFinite(homeLoadKwh) && Number.isFinite(homeHours) && homeHours > 0)
+        ? homeLoadKwh / homeHours
+        : NaN;
+      triggerText = t("notificationMatrixTeslaTriggerOvernightBudget", {
+        battery: fmtKwh(batteryKwh),
+        home: fmtKwh(homeLoadKwh),
+        homeKw: fmtW(homeAvgKw * 1000),
+        homeH: fmtH(homeHours),
+        pump: fmtKwh(pumpKwh),
+        pumpKw: fmtW(pumpPowerW),
+        pumpH: fmtH(pumpHours),
+        available: fmtKwh(availableKwh),
+      });
+      conditions.push({
+        label: t("notificationMatrixConditionTeslaOvernightBudget"),
+        value: t("notificationMatrixConditionValueCurrentNeed", {
+          current: fmtKwh(availableKwh),
+          need: `> ${fmtKwh(minKwh)}`,
+        }),
+        matched: Number.isFinite(availableKwh) && availableKwh > minKwh,
+      });
+    } else {
+      const socText = Number.isFinite(solplanetSoc) ? `${formatTrimmedDecimal(solplanetSoc, 1)}%` : "-";
+      triggerText = t("notificationMatrixTeslaTriggerSolplanetReserve", { soc: socText });
+      conditions.push({
+        label: t("notificationMatrixConditionTeslaOvernightReserve"),
+        value: t("notificationMatrixConditionValueCurrentNeed", { current: socText, need: "> 10%" }),
+        matched: Number.isFinite(solplanetSoc) && solplanetSoc > 10,
+      });
+    }
   } else if (code === "tesla_after_free_shoulder_control" || code === "tesla_after_free_peak_control") {
     const socText = Number.isFinite(solplanetSoc) ? `${formatTrimmedDecimal(solplanetSoc, 1)}%` : "-";
     triggerText = t("notificationMatrixTeslaTriggerSolplanetSoc", { soc: socText });
@@ -8721,10 +8785,15 @@ function renderSamplingTotalsChart(cards) {
     if (samplingChartFocusSeries) return samplingChartFocusSeries !== row?.seriesKey;
     return false;
   };
+  const canvas = document.getElementById("samplingTotalsChartCanvas");
+  const rowHeight = 46;
+  const newHeight = Math.max(180, rows.length * rowHeight);
+  if (canvas) canvas.style.height = newHeight + "px";
+  chart.resize();
   chart.setOption(
     {
       animation: false,
-      grid: { left: 220, right: 108, top: 6, bottom: 6, containLabel: false },
+      grid: { left: 220, right: 130, top: 10, bottom: 10, containLabel: false },
       xAxis: {
         type: "value",
         min: 0,
@@ -8741,7 +8810,7 @@ function renderSamplingTotalsChart(cards) {
         data: labels,
         axisTick: { show: false },
         axisLine: { show: false },
-        axisLabel: { color: "#395346", fontSize: 12, fontWeight: 700 },
+        axisLabel: { color: "#395346", fontSize: 13, fontWeight: 700 },
       },
       tooltip: {
         trigger: "item",
@@ -8769,7 +8838,7 @@ function renderSamplingTotalsChart(cards) {
       series: [
         {
           type: "bar",
-          barWidth: 12,
+          barWidth: 18,
           data: rows.map((row, index) => ({
             value: row.value,
             itemStyle: {
@@ -8789,7 +8858,7 @@ function renderSamplingTotalsChart(cards) {
               const row = rows[dataIndex];
               return isRowDimmed(row, dataIndex) ? "#a6b2ab" : isRowHighlighted(row, dataIndex) ? "#16261f" : "#415449";
             },
-            fontSize: 11,
+            fontSize: 12,
             formatter: ({ dataIndex, value }) => {
               const row = rows[dataIndex];
               if (row?.valueLabel) return row.valueLabel;
@@ -8807,7 +8876,7 @@ function renderSamplingTotalsChart(cards) {
         },
         {
           type: "bar",
-          barWidth: 12,
+          barWidth: 18,
           barGap: "-100%",
           silent: true,
           tooltip: { show: false },

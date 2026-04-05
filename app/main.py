@@ -147,6 +147,7 @@ BATTERY_MIN_DISCHARGE_SOC_PERCENT = {
     "solplanet": 10.0,
 }
 TESLA_OVERNIGHT_SHOULDER_MIN_SOLPLANET_SOC_PERCENT = BATTERY_MIN_DISCHARGE_SOC_PERCENT["solplanet"]
+TESLA_OVERNIGHT_SHOULDER_MIN_AVAILABLE_KWH = 1.0
 TESLA_POST_EXPORT_FORECAST_WINDOW_START_HOUR = 20
 TESLA_POST_EXPORT_FORECAST_WINDOW_END_HOUR = 11
 TESLA_POST_EXPORT_FORECAST_HISTORY_DAYS = 3
@@ -4896,6 +4897,39 @@ async def _run_saj_battery_watch_check(
             },
         }
 
+        # Build energy budget: total usable battery - home load to 8am - pool pump to 5am
+        energy_ref = _build_overnight_energy_reference(metrics_map)
+        available_for_tesla_kwh: float | None = None
+        if energy_ref is not None:
+            usable_battery_total_kwh = _to_number(energy_ref.get("usable_battery_total_kwh"))
+            proj_8am = (energy_ref.get("projections") or {}).get("next_8am") or {}
+            averages_8am = proj_8am.get("averages") or {}
+            days_3_avg = averages_8am.get("days_3") or {}
+            days_7_avg = averages_8am.get("days_7") or {}
+            home_load_kwh = _to_number(days_3_avg.get("average_home_load_kwh")) or _to_number(days_7_avg.get("average_home_load_kwh"))
+            pump_scenario = (energy_ref.get("pool_pump_scenarios") or {}).get("night_11pm_to_5am") or {}
+            pump_power_w = _to_number(pump_scenario.get("pool_pump_power_w")) or POOL_PUMP_ASSUMED_POWER_W
+            pump_end_local = datetime.combine(now_local.date(), time(hour=POOL_PUMP_OVERNIGHT_TARGET_END_HOUR), tzinfo=now_local.tzinfo)
+            if pump_end_local <= now_local:
+                pump_end_local += timedelta(days=1)
+            pump_duration_hours = (pump_end_local - now_local).total_seconds() / 3600.0
+            pump_max_hours = float((24 - POOL_PUMP_OVERNIGHT_TARGET_START_HOUR) + POOL_PUMP_OVERNIGHT_TARGET_END_HOUR)
+            pump_remaining_hours = max(0.0, min(pump_duration_hours, pump_max_hours))
+            pool_pump_remaining_kwh = round((pump_power_w * pump_remaining_hours) / 1000.0, 4)
+            if usable_battery_total_kwh is not None and home_load_kwh is not None:
+                available_for_tesla_kwh = round(usable_battery_total_kwh - home_load_kwh - pool_pump_remaining_kwh, 4)
+            home_load_hours_to_8am = _to_number(proj_8am.get("hours_from_now"))
+            result["overnight_shoulder_tesla"]["energy_budget"] = {
+                "usable_battery_total_kwh": usable_battery_total_kwh,
+                "projected_home_load_to_8am_kwh": home_load_kwh,
+                "home_load_hours_to_8am": round(home_load_hours_to_8am, 2) if home_load_hours_to_8am is not None else None,
+                "pool_pump_power_w": pump_power_w,
+                "pool_pump_remaining_hours": round(pump_remaining_hours, 2),
+                "pool_pump_remaining_kwh": pool_pump_remaining_kwh,
+                "available_for_tesla_kwh": available_for_tesla_kwh,
+                "min_available_kwh": TESLA_OVERNIGHT_SHOULDER_MIN_AVAILABLE_KWH,
+            }
+
         observation = (
             tesla_observation_result.get("observation")
             if isinstance(tesla_observation_result, dict)
@@ -4952,13 +4986,23 @@ async def _run_saj_battery_watch_check(
             status = "noop"
             return result
 
-        if solplanet_soc_percent > TESLA_OVERNIGHT_SHOULDER_MIN_SOLPLANET_SOC_PERCENT:
+        # Prefer energy budget check; fall back to simple SOC check if data unavailable
+        if available_for_tesla_kwh is not None:
+            should_charge = available_for_tesla_kwh > TESLA_OVERNIGHT_SHOULDER_MIN_AVAILABLE_KWH
+            charge_reason = "overnight_shoulder_energy_budget_positive"
+            stop_reason = "overnight_shoulder_energy_budget_exhausted"
+        else:
+            should_charge = solplanet_soc_percent is not None and solplanet_soc_percent > TESLA_OVERNIGHT_SHOULDER_MIN_SOLPLANET_SOC_PERCENT
+            charge_reason = "overnight_shoulder_solplanet_has_available_energy"
+            stop_reason = "overnight_shoulder_solplanet_below_minimum_soc"
+
+        if should_charge:
             result["decision"] = {
                 "mode": "charge",
                 "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
                 "predicted_grid_w": None,
             }
-            result["decision_reason"] = "overnight_shoulder_solplanet_has_available_energy"
+            result["decision_reason"] = charge_reason
             if charging_enabled:
                 result["action"] = {"type": "noop", "reason": "already_charging"}
                 status = "noop"
@@ -4968,7 +5012,7 @@ async def _run_saj_battery_watch_check(
                 result["action"] = {"type": "restart_charging", "reason": "charging_requested_but_not_active"}
             else:
                 await _tesla_set_charging(True)
-                result["action"] = {"type": "start_charging", "reason": "solplanet_soc_above_minimum"}
+                result["action"] = {"type": "start_charging", "reason": "energy_budget_above_minimum"}
             status = "applied"
             return result
 
@@ -4977,10 +5021,10 @@ async def _run_saj_battery_watch_check(
             "charge_current_amps": 0,
             "predicted_grid_w": None,
         }
-        result["decision_reason"] = "overnight_shoulder_solplanet_below_minimum_soc"
+        result["decision_reason"] = stop_reason
         if active_or_requested:
             await _tesla_set_charging(False)
-            result["action"] = {"type": "stop_charging", "reason": "solplanet_soc_at_or_below_minimum"}
+            result["action"] = {"type": "stop_charging", "reason": "energy_budget_below_minimum"}
             status = "applied"
         else:
             result["action"] = {"type": "noop", "reason": "already_stopped"}
@@ -4999,6 +5043,15 @@ async def _run_saj_battery_watch_check(
         result["log_ok"] = ok
         result["log_status"] = status
         result["log_error_text"] = error_text
+        _combined_status = collector_status.get("combined") or {}
+        if status == "applied":
+            action_type = str((result.get("action") or {}).get("type") or "").strip()
+            if action_type in ("start_charging", "stop_charging", "restart_charging"):
+                _combined_status["tesla_overnight_last_action_at_utc"] = datetime.now(UTC).isoformat()
+                _combined_status["tesla_overnight_last_action_type"] = action_type
+                collector_status.setdefault("combined", {}).update(_combined_status)
+        result["tesla_overnight_last_action_at_utc"] = _combined_status.get("tesla_overnight_last_action_at_utc")
+        result["tesla_overnight_last_action_type"] = _combined_status.get("tesla_overnight_last_action_type")
 
 
 async def _run_pool_pump_overnight_control_check(
