@@ -615,6 +615,7 @@ const I18N = {
     samplingTotalsMetaNoData: "{system} · {range} · not enough samples for totals yet",
     samplingTotalsScopeOverall: "Overall",
     samplingTotalsScopeSystem: "{system}",
+    samplingTotalsScopeHomeLoad: "Home Load",
     samplingTotalsScopeSajBattery: "SAJ Battery",
     samplingTotalsScopeSolplanetBattery: "Solplanet Battery",
     samplingTotalsGridTitle: "Grid",
@@ -625,6 +626,9 @@ const I18N = {
     samplingOverallMetricPv: "PV Generation",
     samplingOverallMetricGridImport: "Grid Import",
     samplingOverallMetricGridExport: "Grid Export",
+    samplingOverallMetricHomeLoadTesla: "Tesla",
+    samplingOverallMetricHomeLoadPoolPump: "Pool Pump",
+    samplingOverallMetricHomeLoadOther: "Other Home Load",
     samplingOverallMetricBatteryCharge: "Battery Charge",
     samplingOverallMetricBatteryDischarge: "Battery Discharge",
     samplingOverallSeriesSajBatteryCharge: "SAJ Battery Charge",
@@ -1366,6 +1370,7 @@ const I18N = {
     samplingTotalsMetaNoData: "{system} · {range} · 当前样本不足，无法统计累计值",
     samplingTotalsScopeOverall: "综合",
     samplingTotalsScopeSystem: "{system}",
+    samplingTotalsScopeHomeLoad: "家庭用电",
     samplingTotalsScopeSajBattery: "SAJ 电池",
     samplingTotalsScopeSolplanetBattery: "Solplanet 电池",
     samplingTotalsGridTitle: "电网",
@@ -1376,6 +1381,9 @@ const I18N = {
     samplingOverallMetricPv: "光伏发电",
     samplingOverallMetricGridImport: "电网购电",
     samplingOverallMetricGridExport: "电网上网",
+    samplingOverallMetricHomeLoadTesla: "特斯拉",
+    samplingOverallMetricHomeLoadPoolPump: "水泵",
+    samplingOverallMetricHomeLoadOther: "其他家庭用电",
     samplingOverallMetricBatteryCharge: "电池充电",
     samplingOverallMetricBatteryDischarge: "电池放电",
     samplingOverallSeriesSajBatteryCharge: "SAJ 电池充电",
@@ -8223,6 +8231,37 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         samples: combinedHasData ? Number(combinedUsage?.samples || 0) : 0,
       },
       {
+        title: t("samplingTotalsScopeHomeLoad"),
+        value: combinedHasData ? Number(combinedBreakdown?.home_load?.tesla || combinedEnergy.tesla_load || 0) : 0,
+        kind: "load",
+        seriesKey: "tesla_charge_power_w",
+        scope: t("samplingTotalsScopeOverall"),
+        layout: "single",
+        showGroupHeader: true,
+        samples: combinedHasData ? Number(combinedUsage?.samples || 0) : 0,
+        rowLabel: t("samplingOverallMetricHomeLoadTesla"),
+      },
+      {
+        title: t("samplingTotalsScopeHomeLoad"),
+        value: combinedHasData ? Number(combinedBreakdown?.home_load?.pool_pump || combinedEnergy.pool_pump_load || 0) : 0,
+        kind: "load",
+        seriesKey: "pool_pump_power_w",
+        scope: t("samplingTotalsScopeOverall"),
+        layout: "single",
+        samples: combinedHasData ? Number(combinedUsage?.samples || 0) : 0,
+        rowLabel: t("samplingOverallMetricHomeLoadPoolPump"),
+      },
+      {
+        title: t("samplingTotalsScopeHomeLoad"),
+        value: combinedHasData ? Number(combinedBreakdown?.home_load?.other || combinedEnergy.other_home_load || 0) : 0,
+        kind: "load",
+        seriesKey: "load_w",
+        scope: t("samplingTotalsScopeOverall"),
+        layout: "single",
+        samples: combinedHasData ? Number(combinedUsage?.samples || 0) : 0,
+        rowLabel: t("samplingOverallMetricHomeLoadOther"),
+      },
+      {
         title: t("samplingTotalsScopeSajBattery"),
         leftLabel: t("samplingOverallMetricBatteryCharge"),
         leftValue: sajHasData ? Number(sajEnergy.battery_charge || 0) : 0,
@@ -8705,6 +8744,9 @@ function renderSamplingTotalsChartOverlay(chart, rows, hasData) {
 function buildSamplingTotalsChartRows(cards) {
   const rows = [];
   for (const card of Array.isArray(cards) ? cards : []) {
+    if (card.showGroupHeader) {
+      rows.push({ type: "group-header", label: card.title });
+    }
     if (card.layout === "stacked") {
       const leftVal = Math.max(Number(card.leftValue || 0), 0);
       const rightVal = Math.max(Number(card.rightValue || 0), 0);
@@ -8740,9 +8782,6 @@ function buildSamplingTotalsChartRows(cards) {
             : null,
       });
     } else if (card.layout === "dual") {
-      if (card.showGroupHeader) {
-        rows.push({ type: "group-header", label: card.title });
-      }
       const suffix = card.showGroupHeader
         ? ""
         : card.title === t("samplingTotalsGridTitle")
@@ -8796,7 +8835,7 @@ function buildSamplingTotalsChartRows(cards) {
       });
     } else {
       rows.push({
-        label: card.title,
+        label: card.rowLabel || card.title,
         value: Math.max(Number(card.value || 0), 0),
         valueLabel:
           Number(card.value || 0) > 0
@@ -8813,12 +8852,33 @@ function buildSamplingTotalsChartRows(cards) {
 function buildEbValueHtml(row) {
   if (row.valueParts && row.valueParts.length === 2) {
     const [a, b] = row.valueParts;
-    const numA = `${Number(a.value).toFixed(2)} kWh`;
-    const numB = `${Number(b.value).toFixed(2)} kWh`;
-    return `<span class="eb-value-split"><span class="eb-val-icon">${a.icon}</span><span class="eb-val-num">${numA}</span><span class="eb-val-icon">${b.icon}</span><span class="eb-val-num">${numB}</span></span>`;
+    const compactText = `${formatTrimmedDecimal(Number(a.value || 0), 2)} / ${formatTrimmedDecimal(Number(b.value || 0), 2)} kWh`;
+    return `<span class="eb-value">${escapeHtml(compactText)}</span>`;
   }
   const text = row.valueLabel || (row.totalValue != null ? `${formatTrimmedDecimal(row.totalValue, 2)} kWh` : (Number(row.value) ? `${formatTrimmedDecimal(Number(row.value), 2)} kWh` : "—"));
   return `<span class="eb-value">${escapeHtml(text)}</span>`;
+}
+
+function energyBreakdownEmojiForRow(row) {
+  const label = String(row?.label || "").toLowerCase();
+  const title = String(row?.title || "").toLowerCase();
+  const seriesKey = String(row?.seriesKey || "").toLowerCase();
+  const kind = String(row?.kind || "").toLowerCase();
+
+  if (label.includes("pv") || title.includes("pv") || seriesKey === "pv_w" || seriesKey === "pv_total_w") return "☀️";
+  if (label.includes("tesla") || seriesKey === "tesla_charge_power_w") return "🚗";
+  if (label.includes("pool pump") || label.includes("水泵") || seriesKey === "pool_pump_power_w") return "💧";
+  if (label.includes("home load") || label.includes("家庭用电") || label.includes("other home")) return "🏠";
+  if (label.includes("grid") || title.includes("grid") || kind === "import" || kind === "export" || seriesKey === "grid_w") return "⚡";
+  if (label.includes("battery") || title.includes("battery") || kind === "charge" || kind === "discharge" || seriesKey.includes("battery")) return "🔋";
+  return "•";
+}
+
+function formatEnergyBreakdownLabel(row) {
+  const text = String(row?.label || "").trim();
+  const emoji = energyBreakdownEmojiForRow(row);
+  if (!text) return emoji;
+  return `${emoji} ${text}`;
 }
 
 function renderSamplingTotalsChart(cards) {
@@ -8862,7 +8922,7 @@ function renderSamplingTotalsChart(cards) {
   const html = rows
     .map((row, i) => {
       if (row.type === "group-header") {
-        return `<div class="eb-group-header">${escapeHtml(row.label)}</div>`;
+        return `<div class="eb-group-header">${escapeHtml(formatEnergyBreakdownLabel(row))}</div>`;
       }
       const inGroup = rowInGroupFinal[i];
       if (row.type === "stacked") {
@@ -8872,7 +8932,7 @@ function renderSamplingTotalsChart(cards) {
         const dimmed =
           samplingChartFocusSeries &&
           !row.segments.some((s) => s.seriesKey === samplingChartFocusSeries);
-        const labelHtml = escapeHtml(row.label);
+        const labelHtml = escapeHtml(formatEnergyBreakdownLabel(row));
         const valueHtml = buildEbValueHtml(row);
 
         const titleLines = row.segments
@@ -8925,7 +8985,7 @@ function renderSamplingTotalsChart(cards) {
           : "";
 
       const rightPct = (100 - pct).toFixed(2);
-      const labelHtml = escapeHtml(row.label);
+      const labelHtml = escapeHtml(formatEnergyBreakdownLabel(row));
       const valueHtml = buildEbValueHtml(row);
       return `<div class="eb-row${dimmed ? " eb-dimmed" : ""}${inGroup ? " eb-row-grouped" : ""}" data-series-key="${escapeHtml(row.seriesKey || "")}" title="${escapeHtml(titleText)}">
   <div class="eb-track">

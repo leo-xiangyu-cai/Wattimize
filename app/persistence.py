@@ -1823,6 +1823,9 @@ def _integrate_usage_rows(
             "coverage_ratio": round((len(rows) / expected), 4) if expected > 0 else None,
             "energy_kwh": {
                 "home_load": 0.0,
+                "other_home_load": 0.0,
+                "tesla_load": 0.0,
+                "pool_pump_load": 0.0,
                 "solar_generation": 0.0,
                 "grid_import": 0.0,
                 "grid_export": 0.0,
@@ -1830,6 +1833,12 @@ def _integrate_usage_rows(
                 "battery_discharge": 0.0,
             },
             "breakdown_kwh": {
+                "home_load": {
+                    "total": 0.0,
+                    "tesla": 0.0,
+                    "pool_pump": 0.0,
+                    "other": 0.0,
+                },
                 "grid_import": {
                     "window": 0.0,
                     "other": 0.0,
@@ -1866,6 +1875,7 @@ def _integrate_usage_rows(
 
     tesla_load_wh = 0.0
     pool_pump_load_wh = 0.0
+    other_home_load_wh = 0.0
 
     for current_row, next_row in zip(rows, rows[1:]):
         ts, pv_w, grid_w, battery_w, load_w, tesla_charge_power_w, pool_pump_power_w = current_row
@@ -1876,11 +1886,13 @@ def _integrate_usage_rows(
         if dt > max_dt:
             dt = max_dt
         if load_w is not None and load_w > 0:
-            adjusted_load_w = float(load_w)
+            raw_load_w = float(load_w)
+            adjusted_load_w = raw_load_w
             tesla_w = max(float(tesla_charge_power_w or 0.0), 0.0)
             pool_pump_w = max(float(pool_pump_power_w or 0.0), 0.0)
             tesla_load_wh += tesla_w * dt / 3600.0
             pool_pump_load_wh += pool_pump_w * dt / 3600.0
+            other_home_load_wh += max(raw_load_w - tesla_w - pool_pump_w, 0.0) * dt / 3600.0
             if exclude_tesla_load:
                 adjusted_load_w -= tesla_w
             if exclude_pool_pump_load:
@@ -1917,6 +1929,7 @@ def _integrate_usage_rows(
         "coverage_ratio": round((len(rows) / expected), 4) if expected > 0 else None,
         "energy_kwh": {
             "home_load": round(home_load_wh / 1000.0, 4),
+            "other_home_load": round(other_home_load_wh / 1000.0, 4),
             "tesla_load": round(tesla_load_wh / 1000.0, 4),
             "pool_pump_load": round(pool_pump_load_wh / 1000.0, 4),
             "solar_generation": round(solar_wh / 1000.0, 4),
@@ -1926,6 +1939,12 @@ def _integrate_usage_rows(
             "battery_discharge": round(battery_discharge_wh / 1000.0, 4),
         },
         "breakdown_kwh": {
+            "home_load": {
+                "total": round(home_load_wh / 1000.0, 4),
+                "tesla": round(tesla_load_wh / 1000.0, 4),
+                "pool_pump": round(pool_pump_load_wh / 1000.0, 4),
+                "other": round(other_home_load_wh / 1000.0, 4),
+            },
             "grid_import": {
                 "window": round(grid_import_window_wh / 1000.0, 4),
                 "other": round(grid_import_other_wh / 1000.0, 4),
