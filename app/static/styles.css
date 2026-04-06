@@ -917,7 +917,7 @@ select {
 .eb-row {
   position: relative;
   height: 48px;
-  border-radius: 10px;
+  border-radius: 0;
   overflow: hidden;
   margin-bottom: 6px;
   cursor: default;
@@ -928,6 +928,41 @@ select {
   margin-bottom: 0;
 }
 
+.eb-row-grouped {
+  margin-left: 10px;
+  height: 34px;
+  margin-bottom: 1px;
+  border-radius: 0;
+}
+
+.eb-row-grouped .eb-track,
+.eb-row-grouped .eb-fill,
+.eb-row-grouped .eb-overlay,
+.eb-row-grouped .eb-segment {
+  border-radius: 0;
+}
+
+.eb-row-grouped + .eb-row-grouped {
+  margin-bottom: 6px;
+}
+
+.eb-group-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7f72;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 10px 2px 3px;
+  border-top: 1px solid rgba(82, 104, 92, 0.15);
+  margin-top: 2px;
+}
+
+.eb-group-header:first-child {
+  border-top: none;
+  padding-top: 2px;
+  margin-top: 0;
+}
+
 .eb-row.eb-dimmed {
   opacity: 0.3;
 }
@@ -936,7 +971,7 @@ select {
   position: absolute;
   inset: 0;
   background: rgba(82, 104, 92, 0.1);
-  border-radius: 10px;
+  border-radius: 0;
 }
 
 .eb-fill {
@@ -944,7 +979,7 @@ select {
   left: 0;
   top: 0;
   bottom: 0;
-  border-radius: 10px;
+  border-radius: 0;
   min-width: 6px;
 }
 
@@ -959,24 +994,12 @@ select {
   flex-shrink: 0;
 }
 
-.eb-segment:first-child {
-  border-radius: 10px 0 0 10px;
-}
-
-.eb-segment:last-child {
-  border-radius: 0 10px 10px 0;
-}
-
-.eb-segment:only-child {
-  border-radius: 10px;
-}
-
 .eb-overlay {
   position: absolute;
   left: 0;
   top: 0;
   bottom: 0;
-  border-radius: 10px;
+  border-radius: 0;
   opacity: 0.55;
 }
 

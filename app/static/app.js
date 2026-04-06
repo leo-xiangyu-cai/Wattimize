@@ -1687,19 +1687,19 @@ const SAJ_RAW_APIS = [
   { key: "saj_core_entities", titleKey: "rawApiSajCoreEntities", url: "/api/saj/raw/core-entities" },
 ];
 const SAMPLING_SERIES = [
-  { key: "pv_w", labelKey: "samplingSeriesPv", color: "#f59e0b" },
+  { key: "pv_w", labelKey: "samplingSeriesPv", color: "#d97706" },
   { key: "grid_w", labelKey: "samplingSeriesGrid", color: "#2563eb" },
-  { key: "battery_w", labelKey: "samplingSeriesBattery", color: "#10b981" },
-  { key: "load_w", labelKey: "samplingSeriesLoad", color: "#ef4444" },
+  { key: "battery_w", labelKey: "samplingSeriesBattery", color: "#16a34a" },
+  { key: "load_w", labelKey: "samplingSeriesLoad", color: "#dc2626" },
 ];
 const SAMPLING_OVERALL_SERIES = [
-  { key: "pv_total_w", labelKey: "samplingOverallMetricPv", color: "#f59e0b" },
+  { key: "pv_total_w", labelKey: "samplingOverallMetricPv", color: "#d97706" },
   { key: "grid_import_w", labelKey: "samplingOverallMetricGridImport", color: "#2563eb" },
-  { key: "grid_export_w", labelKey: "samplingOverallMetricGridExport", color: "#7c3aed" },
-  { key: "saj_battery_charge_w", labelKey: "samplingOverallSeriesSajBatteryCharge", color: "#0f766e" },
-  { key: "saj_battery_discharge_w", labelKey: "samplingOverallSeriesSajBatteryDischarge", color: "#10b981" },
-  { key: "solplanet_battery_charge_w", labelKey: "samplingOverallSeriesSolplanetBatteryCharge", color: "#9a3412" },
-  { key: "solplanet_battery_discharge_w", labelKey: "samplingOverallSeriesSolplanetBatteryDischarge", color: "#ef4444" },
+  { key: "grid_export_w", labelKey: "samplingOverallMetricGridExport", color: "#0891b2" },
+  { key: "saj_battery_charge_w", labelKey: "samplingOverallSeriesSajBatteryCharge", color: "#15803d" },
+  { key: "saj_battery_discharge_w", labelKey: "samplingOverallSeriesSajBatteryDischarge", color: "#16a34a" },
+  { key: "solplanet_battery_charge_w", labelKey: "samplingOverallSeriesSolplanetBatteryCharge", color: "#6d28d9" },
+  { key: "solplanet_battery_discharge_w", labelKey: "samplingOverallSeriesSolplanetBatteryDischarge", color: "#c026d3" },
 ];
 
 const SAMPLING_SERIES_META_BY_KEY = Object.fromEntries(
@@ -8090,14 +8090,13 @@ function getSamplingSeriesColor(seriesKey, fallback = "#6b7f72") {
 }
 
 function getSamplingTotalBaseColor(seriesKey, fallback = "#6b7f72") {
-  if (seriesKey === "grid_import_w") return "#1d4ed8";
-  if (seriesKey === "grid_export_w") return "#6d28d9";
   return getSamplingSeriesColor(seriesKey, fallback);
 }
 
 function getSamplingWindowSegmentColor(seriesKey, fallback = "#2fb36f") {
   if (!seriesKey) return fallback;
-  if (seriesKey === "grid_import_w" || seriesKey === "grid_export_w") return "#84cc16";
+  if (seriesKey === "grid_import_w") return "#60a5fa";
+  if (seriesKey === "grid_export_w") return "#22d3ee";
   return fallback;
 }
 
@@ -8234,7 +8233,8 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         rightKind: "discharge",
         rightSeriesKey: "saj_battery_discharge_w",
         scope: t("samplingTotalsScopeOverall"),
-        layout: "stacked",
+        layout: "dual",
+        showGroupHeader: true,
         samples: sajHasData ? Number(sajUsage?.samples || 0) : 0,
       },
       {
@@ -8248,7 +8248,8 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         rightKind: "discharge",
         rightSeriesKey: "solplanet_battery_discharge_w",
         scope: t("samplingTotalsScopeOverall"),
-        layout: "stacked",
+        layout: "dual",
+        showGroupHeader: true,
         samples: solplanetHasData ? Number(solplanetUsage?.samples || 0) : 0,
       },
     ];
@@ -8739,8 +8740,12 @@ function buildSamplingTotalsChartRows(cards) {
             : null,
       });
     } else if (card.layout === "dual") {
-      const suffix =
-        card.title === t("samplingTotalsGridTitle")
+      if (card.showGroupHeader) {
+        rows.push({ type: "group-header", label: card.title });
+      }
+      const suffix = card.showGroupHeader
+        ? ""
+        : card.title === t("samplingTotalsGridTitle")
           ? ""
           : card.title === t("samplingTotalsScopeSajBattery")
             ? " (SAJ)"
@@ -8824,7 +8829,7 @@ function renderSamplingTotalsChart(cards) {
 
   const rows = buildSamplingTotalsChartRows(cards);
   const hasData = rows.some((row) =>
-    row.type === "stacked" ? row.totalValue > 0 : Number(row.value || 0) !== 0,
+    row.type === "group-header" ? false : row.type === "stacked" ? row.totalValue > 0 : Number(row.value || 0) !== 0,
   );
 
   if (!hasData) {
@@ -8839,8 +8844,27 @@ function renderSamplingTotalsChart(cards) {
     ),
   );
 
+  // Track whether each row is inside a group (follows a group-header)
+  const rowInGroup = rows.map((_, i) => {
+    for (let j = i - 1; j >= 0; j--) {
+      if (rows[j].type === "group-header") return true;
+      break;
+    }
+    return false;
+  });
+  // Propagate: any row after a group-header (until the next group-header or non-grouped row) is in the group
+  let inGroupState = false;
+  const rowInGroupFinal = rows.map((row) => {
+    if (row.type === "group-header") { inGroupState = true; return false; }
+    return inGroupState;
+  });
+
   const html = rows
-    .map((row) => {
+    .map((row, i) => {
+      if (row.type === "group-header") {
+        return `<div class="eb-group-header">${escapeHtml(row.label)}</div>`;
+      }
+      const inGroup = rowInGroupFinal[i];
       if (row.type === "stacked") {
         const total = row.totalValue;
         const pct = Math.min(100, (total / maxAbs) * 100);
@@ -8864,7 +8888,7 @@ function renderSamplingTotalsChart(cards) {
           })
           .join("");
 
-        return `<div class="eb-row${dimmed ? " eb-dimmed" : ""}" title="${escapeHtml(titleText)}">
+        return `<div class="eb-row${dimmed ? " eb-dimmed" : ""}${inGroup ? " eb-row-grouped" : ""}" title="${escapeHtml(titleText)}">
   <div class="eb-track">
     <div class="eb-fill eb-fill-stacked" style="width:${pct.toFixed(2)}%;">${segmentsHtml}</div>
   </div>
@@ -8903,7 +8927,7 @@ function renderSamplingTotalsChart(cards) {
       const rightPct = (100 - pct).toFixed(2);
       const labelHtml = escapeHtml(row.label);
       const valueHtml = buildEbValueHtml(row);
-      return `<div class="eb-row${dimmed ? " eb-dimmed" : ""}" data-series-key="${escapeHtml(row.seriesKey || "")}" title="${escapeHtml(titleText)}">
+      return `<div class="eb-row${dimmed ? " eb-dimmed" : ""}${inGroup ? " eb-row-grouped" : ""}" data-series-key="${escapeHtml(row.seriesKey || "")}" title="${escapeHtml(titleText)}">
   <div class="eb-track">
     <div class="eb-fill" style="width:${pct.toFixed(2)}%;background:${color};">${overlayHtml}</div>
   </div>
