@@ -948,6 +948,29 @@ select {
   min-width: 6px;
 }
 
+.eb-fill-stacked {
+  display: flex;
+  flex-direction: row;
+  background: transparent;
+}
+
+.eb-segment {
+  height: 100%;
+  flex-shrink: 0;
+}
+
+.eb-segment:first-child {
+  border-radius: 10px 0 0 10px;
+}
+
+.eb-segment:last-child {
+  border-radius: 0 10px 10px 0;
+}
+
+.eb-segment:only-child {
+  border-radius: 10px;
+}
+
 .eb-overlay {
   position: absolute;
   left: 0;
@@ -970,14 +993,18 @@ select {
 
 /* White text layer — clipped to the colored fill area */
 .eb-content-light .eb-label,
-.eb-content-light .eb-value {
+.eb-content-light .eb-value,
+.eb-content-light .eb-val-num,
+.eb-content-light .eb-val-unit {
   color: rgba(255, 255, 255, 0.95);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
 /* Dark text layer — clipped to the gray track area */
 .eb-content-dark .eb-label,
-.eb-content-dark .eb-value {
+.eb-content-dark .eb-value,
+.eb-content-dark .eb-val-num,
+.eb-content-dark .eb-val-unit {
   color: #1e3d2e;
   text-shadow: none;
 }
@@ -992,11 +1019,36 @@ select {
 }
 
 .eb-value {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
   white-space: nowrap;
   flex-shrink: 0;
   margin-left: 8px;
+}
+
+.eb-value-split {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.eb-val-icon {
+  width: 22px;
+  text-align: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.eb-val-num {
+  width: 84px;
+  text-align: left;
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .eb-no-data {

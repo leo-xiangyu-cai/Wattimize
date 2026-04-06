@@ -8124,7 +8124,7 @@ function normalizeGridWindowBreakdown(rawBreakdown, totalValue) {
 function formatSamplingWindowSplit(windowValue, totalValue) {
   const total = Math.max(Number(totalValue || 0), 0);
   if (total <= 0) return "-";
-  return `${formatEnergyKwhText(Math.max(Number(windowValue || 0), 0))} / ${formatEnergyKwhText(total)}`;
+  return `⏱ ${formatEnergyKwhText(Math.max(Number(windowValue || 0), 0))}  📊 ${formatEnergyKwhText(total)}`;
 }
 
 function formatSamplingPointsCompact(samples) {
@@ -8234,7 +8234,7 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         rightKind: "discharge",
         rightSeriesKey: "saj_battery_discharge_w",
         scope: t("samplingTotalsScopeOverall"),
-        layout: "dual",
+        layout: "stacked",
         samples: sajHasData ? Number(sajUsage?.samples || 0) : 0,
       },
       {
@@ -8248,7 +8248,7 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         rightKind: "discharge",
         rightSeriesKey: "solplanet_battery_discharge_w",
         scope: t("samplingTotalsScopeOverall"),
-        layout: "dual",
+        layout: "stacked",
         samples: solplanetHasData ? Number(solplanetUsage?.samples || 0) : 0,
       },
     ];
@@ -8704,7 +8704,41 @@ function renderSamplingTotalsChartOverlay(chart, rows, hasData) {
 function buildSamplingTotalsChartRows(cards) {
   const rows = [];
   for (const card of Array.isArray(cards) ? cards : []) {
-    if (card.layout === "dual") {
+    if (card.layout === "stacked") {
+      const leftVal = Math.max(Number(card.leftValue || 0), 0);
+      const rightVal = Math.max(Number(card.rightValue || 0), 0);
+      const totalVal = leftVal + rightVal;
+      rows.push({
+        type: "stacked",
+        label: card.title,
+        totalValue: totalVal,
+        segments: [
+          {
+            label: card.leftLabel || "",
+            value: leftVal,
+            color: getSamplingTotalBaseColor(card.leftSeriesKey, "#6b7f72"),
+            seriesKey: card.leftSeriesKey || null,
+          },
+          {
+            label: card.rightLabel || "",
+            value: rightVal,
+            color: getSamplingTotalBaseColor(card.rightSeriesKey, "#6b7f72"),
+            seriesKey: card.rightSeriesKey || null,
+          },
+        ],
+        valueLabel:
+          totalVal > 0
+            ? `⚡ ${formatTrimmedDecimal(leftVal, 2)}  🔋 ${formatTrimmedDecimal(rightVal, 2)} kWh`
+            : null,
+        valueParts:
+          totalVal > 0
+            ? [
+                { icon: "⚡", value: leftVal },
+                { icon: "🔋", value: rightVal },
+              ]
+            : null,
+      });
+    } else if (card.layout === "dual") {
       const suffix =
         card.title === t("samplingTotalsGridTitle")
           ? ""
@@ -8720,12 +8754,16 @@ function buildSamplingTotalsChartRows(cards) {
         overlayLabel: card.leftWindowLabel || "",
         valueLabel:
           Number(card.leftValue || 0) > 0
-            ? formatSamplingValueWithPoints(
-                card.leftWindowLabel
-                  ? formatSamplingWindowSplit(card.leftWindowValue, card.leftValue)
-                  : formatEnergyKwhText(card.leftValue),
-                card.samples,
-              )
+            ? (card.leftWindowLabel
+                ? formatSamplingWindowSplit(card.leftWindowValue, card.leftValue)
+                : formatEnergyKwhText(card.leftValue))
+            : null,
+        valueParts:
+          Number(card.leftValue || 0) > 0 && card.leftWindowLabel
+            ? [
+                { icon: "⏱", value: Number(card.leftWindowValue || 0) },
+                { icon: "📊", value: Number(card.leftValue || 0) },
+              ]
             : null,
         kind: card.leftKind,
         seriesKey: card.leftSeriesKey || null,
@@ -8737,12 +8775,16 @@ function buildSamplingTotalsChartRows(cards) {
         overlayLabel: card.rightWindowLabel || "",
         valueLabel:
           Number(card.rightValue || 0) > 0
-            ? formatSamplingValueWithPoints(
-                card.rightWindowLabel
-                  ? formatSamplingWindowSplit(card.rightWindowValue, card.rightValue)
-                  : formatEnergyKwhText(card.rightValue),
-                card.samples,
-              )
+            ? (card.rightWindowLabel
+                ? formatSamplingWindowSplit(card.rightWindowValue, card.rightValue)
+                : formatEnergyKwhText(card.rightValue))
+            : null,
+        valueParts:
+          Number(card.rightValue || 0) > 0 && card.rightWindowLabel
+            ? [
+                { icon: "⏱", value: Number(card.rightWindowValue || 0) },
+                { icon: "📊", value: Number(card.rightValue || 0) },
+              ]
             : null,
         kind: card.rightKind,
         seriesKey: card.rightSeriesKey || null,
@@ -8753,7 +8795,7 @@ function buildSamplingTotalsChartRows(cards) {
         value: Math.max(Number(card.value || 0), 0),
         valueLabel:
           Number(card.value || 0) > 0
-            ? formatSamplingValueWithPoints(formatEnergyKwhText(card.value), card.samples)
+            ? formatEnergyKwhText(card.value)
             : null,
         kind: card.kind,
         seriesKey: card.seriesKey || null,
@@ -8763,6 +8805,17 @@ function buildSamplingTotalsChartRows(cards) {
   return rows;
 }
 
+function buildEbValueHtml(row) {
+  if (row.valueParts && row.valueParts.length === 2) {
+    const [a, b] = row.valueParts;
+    const numA = `${Number(a.value).toFixed(2)} kWh`;
+    const numB = `${Number(b.value).toFixed(2)} kWh`;
+    return `<span class="eb-value-split"><span class="eb-val-icon">${a.icon}</span><span class="eb-val-num">${numA}</span><span class="eb-val-icon">${b.icon}</span><span class="eb-val-num">${numB}</span></span>`;
+  }
+  const text = row.valueLabel || (row.totalValue != null ? `${formatTrimmedDecimal(row.totalValue, 2)} kWh` : (Number(row.value) ? `${formatTrimmedDecimal(Number(row.value), 2)} kWh` : "—"));
+  return `<span class="eb-value">${escapeHtml(text)}</span>`;
+}
+
 function renderSamplingTotalsChart(cards) {
   ensureSamplingTotalsChart();
   const container = document.getElementById("samplingTotalsChartCanvas");
@@ -8770,17 +8823,62 @@ function renderSamplingTotalsChart(cards) {
   container.classList.remove("eb-loading");
 
   const rows = buildSamplingTotalsChartRows(cards);
-  const hasData = rows.some((row) => Number(row.value || 0) !== 0);
+  const hasData = rows.some((row) =>
+    row.type === "stacked" ? row.totalValue > 0 : Number(row.value || 0) !== 0,
+  );
 
   if (!hasData) {
     container.innerHTML = `<div class="eb-no-data">${escapeHtml(t("samplingTotalsNoData"))}</div>`;
     return;
   }
 
-  const maxAbs = Math.max(1, ...rows.map((row) => Math.abs(Number(row.value || 0))));
+  const maxAbs = Math.max(
+    1,
+    ...rows.map((row) =>
+      row.type === "stacked" ? row.totalValue : Math.abs(Number(row.value || 0)),
+    ),
+  );
 
   const html = rows
     .map((row) => {
+      if (row.type === "stacked") {
+        const total = row.totalValue;
+        const pct = Math.min(100, (total / maxAbs) * 100);
+        const rightPct = (100 - pct).toFixed(2);
+        const dimmed =
+          samplingChartFocusSeries &&
+          !row.segments.some((s) => s.seriesKey === samplingChartFocusSeries);
+        const labelHtml = escapeHtml(row.label);
+        const valueHtml = buildEbValueHtml(row);
+
+        const titleLines = row.segments
+          .map((s) => `${s.label}: ${formatEnergyKwhText(s.value)}`)
+          .join("\n");
+        const titleText = `${row.label}\n${titleLines}`;
+
+        const segmentsHtml = row.segments
+          .filter((s) => s.value > 0)
+          .map((s) => {
+            const segPct = total > 0 ? ((s.value / total) * 100).toFixed(2) : "0";
+            return `<div class="eb-segment" style="width:${segPct}%;background:${s.color};"></div>`;
+          })
+          .join("");
+
+        return `<div class="eb-row${dimmed ? " eb-dimmed" : ""}" title="${escapeHtml(titleText)}">
+  <div class="eb-track">
+    <div class="eb-fill eb-fill-stacked" style="width:${pct.toFixed(2)}%;">${segmentsHtml}</div>
+  </div>
+  <div class="eb-content eb-content-light" style="clip-path:inset(0 ${rightPct}% 0 0)">
+    <span class="eb-label">${labelHtml}</span>
+    ${valueHtml}
+  </div>
+  <div class="eb-content eb-content-dark" style="clip-path:inset(0 0 0 ${pct.toFixed(2)}%)">
+    <span class="eb-label">${labelHtml}</span>
+    ${valueHtml}
+  </div>
+</div>`;
+      }
+
       const val = Math.max(Number(row.value || 0), 0);
       const pct = Math.min(100, (val / maxAbs) * 100);
       const overlayVal = Math.min(Math.max(Number(row.overlayValue || 0), 0), val);
@@ -8788,8 +8886,7 @@ function renderSamplingTotalsChart(cards) {
       const dimmed = samplingChartFocusSeries && samplingChartFocusSeries !== row.seriesKey;
       const color = getSamplingTotalBaseColor(row.seriesKey, "#6b7f72");
       const overlayColor = getSamplingWindowSegmentColor(row.seriesKey, getSamplingSeriesColor(row.seriesKey, "#6b7f72"));
-      const valueText =
-        row.valueLabel || (val ? `${formatTrimmedDecimal(val, 2)} kWh` : "—");
+      const valueText = row.valueLabel || (val ? `${formatTrimmedDecimal(val, 2)} kWh` : "—");
 
       let titleText = `${row.label}: ${formatEnergyKwhText(val)}`;
       if (row.overlayLabel && overlayVal > 0) {
@@ -8805,18 +8902,18 @@ function renderSamplingTotalsChart(cards) {
 
       const rightPct = (100 - pct).toFixed(2);
       const labelHtml = escapeHtml(row.label);
-      const valueHtml = escapeHtml(valueText);
+      const valueHtml = buildEbValueHtml(row);
       return `<div class="eb-row${dimmed ? " eb-dimmed" : ""}" data-series-key="${escapeHtml(row.seriesKey || "")}" title="${escapeHtml(titleText)}">
   <div class="eb-track">
     <div class="eb-fill" style="width:${pct.toFixed(2)}%;background:${color};">${overlayHtml}</div>
   </div>
   <div class="eb-content eb-content-light" style="clip-path:inset(0 ${rightPct}% 0 0)">
     <span class="eb-label">${labelHtml}</span>
-    <span class="eb-value">${valueHtml}</span>
+    ${valueHtml}
   </div>
   <div class="eb-content eb-content-dark" style="clip-path:inset(0 0 0 ${pct.toFixed(2)}%)">
     <span class="eb-label">${labelHtml}</span>
-    <span class="eb-value">${valueHtml}</span>
+    ${valueHtml}
   </div>
 </div>`;
     })
