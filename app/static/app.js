@@ -127,6 +127,29 @@ const I18N = {
     notificationMatrixTab: "Time Window",
     notificationMatrixTitle: "Time Window",
     notificationMatrixIntro: "Each panel groups rules by Operation and Notification so you can quickly distinguish automated actions from alerts. Checkboxes are currently fixed on because the system behavior is already enabled.",
+    notificationMatrixPriorityTitle: "Priority Scores",
+    notificationMatrixPrioritySummary: "The worker now scores Tesla and the pool pump from 0 to 100. When they conflict, the higher score wins.",
+    notificationMatrixPriorityWinner: "Current winner: {winner}",
+    notificationMatrixPriorityBusinessDay: "Business day: {value}",
+    notificationMatrixPriorityFormula: "Formula",
+    notificationMatrixPriorityTeslaLabel: "Tesla",
+    notificationMatrixPriorityPumpLabel: "Pool Pump",
+    notificationMatrixPrioritySoc: "SOC",
+    notificationMatrixPriorityWeightedRuntime: "Weighted runtime",
+    notificationMatrixPriorityRawRuntime: "Raw runtime",
+    notificationMatrixPriorityDeficit: "Deficit",
+    notificationMatrixPriorityCurrentWindow: "Today window",
+    notificationMatrixPriorityPreviousWindow: "Yesterday window",
+    notificationMatrixPriorityWeights: "Time weights",
+    notificationMatrixPriorityOverrideLabel: "Highest priority override",
+    notificationMatrixPriorityOverrideAuto: "Auto",
+    notificationMatrixPriorityOverrideTesla: "Tesla",
+    notificationMatrixPriorityOverridePump: "Pool Pump",
+    notificationMatrixPriorityOverriddenScore: "{score} ({original})",
+    notificationMatrixLoadingTitle: "Loading Time Window",
+    notificationMatrixLoadingBody: "Refreshing rules, priority scores, and live window state...",
+    notificationMatrixPriorityExpand: "Expand priority",
+    notificationMatrixPriorityCollapse: "Collapse priority",
     notificationMatrixNoNotifications: "No rule is configured for this window at the moment.",
     notificationMatrixAlwaysNote: "This watch is always active and is shown separately from the 24-hour time-window schedule.",
     notificationMatrixCurrentWindowBadge: "Current Window",
@@ -882,6 +905,29 @@ const I18N = {
     notificationMatrixTab: "Time Window",
     notificationMatrixTitle: "Time Window",
     notificationMatrixIntro: "每个面板会按 Operation 和 Notification 分组展示规则，这样你可以更快区分自动执行的动作和提醒通知。当前复选框固定为开启，因为系统行为已经默认启用。",
+    notificationMatrixPriorityTitle: "优先级分数",
+    notificationMatrixPrioritySummary: "现在 worker 会把 Tesla 和水泵都打成 0 到 100 分。两者冲突时，谁分高谁优先。",
+    notificationMatrixPriorityWinner: "当前优先者：{winner}",
+    notificationMatrixPriorityBusinessDay: "业务日：{value}",
+    notificationMatrixPriorityFormula: "公式",
+    notificationMatrixPriorityTeslaLabel: "Tesla",
+    notificationMatrixPriorityPumpLabel: "水泵",
+    notificationMatrixPrioritySoc: "SOC",
+    notificationMatrixPriorityWeightedRuntime: "加权运行时长",
+    notificationMatrixPriorityRawRuntime: "原始运行时长",
+    notificationMatrixPriorityDeficit: "缺口",
+    notificationMatrixPriorityCurrentWindow: "今天窗口",
+    notificationMatrixPriorityPreviousWindow: "昨天窗口",
+    notificationMatrixPriorityWeights: "时段权重",
+    notificationMatrixPriorityOverrideLabel: "最高优先级覆盖",
+    notificationMatrixPriorityOverrideAuto: "自动",
+    notificationMatrixPriorityOverrideTesla: "Tesla",
+    notificationMatrixPriorityOverridePump: "水泵",
+    notificationMatrixPriorityOverriddenScore: "{score}（原始 {original}）",
+    notificationMatrixLoadingTitle: "正在加载 Time Window",
+    notificationMatrixLoadingBody: "正在刷新规则、优先级分数和当前窗口状态...",
+    notificationMatrixPriorityExpand: "展开优先级",
+    notificationMatrixPriorityCollapse: "收起优先级",
     notificationMatrixNoNotifications: "这个时间窗口当前没有配置规则。",
     notificationMatrixAlwaysNote: "这个监控始终开启，单独展示，不属于 24 小时时间窗口切分的一部分。",
     notificationMatrixCurrentWindowBadge: "当前窗口",
@@ -1911,6 +1957,7 @@ let teslaControlBusy = false;
 let teslaCurrentControlBusy = false;
 let solplanetPinModalBusy = false;
 let poolPumpControlBusy = false;
+let timeWindowPriorityOverrideBusy = false;
 const TESLA_CONTROL_CONFIRM_POLL_MS = 1500;
 const TESLA_CONTROL_CONFIRM_TIMEOUT_MS = 15000;
 const TESLA_CONTROL_FEEDBACK_CLEAR_MS = 4000;
@@ -2189,6 +2236,7 @@ const samplingBrushState = {
 };
 let notificationMatrixCollapseState = {};
 let notificationMatrixCollapseInitialized = false;
+let notificationMatrixPriorityCollapsed = true;
 const tabLoadState = {
   dashboard: { inFlight: false },
   notificationMatrix: { inFlight: false },
@@ -3262,7 +3310,11 @@ const SOLPLANET_COMBINED_BATTERY_NODE_SIZE = {
   width: 230,
   height: Math.round(176 * SAJ_BATTERY_CARD_SCALE),
 };
-const COMBINED_LOAD_DEVICE_NODE_SIZE = {
+const COMBINED_COMPACT_LOAD_NODE_SIZE = {
+  width: 184,
+  height: 150,
+};
+const COMBINED_TESLA_NODE_SIZE = {
   width: 184,
   height: 210,
 };
@@ -3272,8 +3324,8 @@ const COMBINED_LAYOUT = {
     grid: { x: 582, y: 594 },
     solar: { x: 8, y: 594 },
     switchboard: { x: 558, y: 318 },
-    load: { x: 354, y: 18 },
-    poolPump: { x: 578, y: 18 },
+    load: { x: 354, y: 48 },
+    poolPump: { x: 578, y: 48 },
     tesla: { x: 802, y: 18 },
     battery1: { x: 24, y: 32 },
     inverter1: { x: 24, y: 360 },
@@ -3482,12 +3534,11 @@ function buildCombinedDiagramSpec() {
         icon: "load",
         title: "Home Load",
         titleKey: "loadTitle",
-        width: COMBINED_LOAD_DEVICE_NODE_SIZE.width,
-        height: COMBINED_LOAD_DEVICE_NODE_SIZE.height,
+        width: COMBINED_COMPACT_LOAD_NODE_SIZE.width,
+        height: COMBINED_COMPACT_LOAD_NODE_SIZE.height,
         position: layout.nodes.load,
         lines: [
           { id: "combined-loadPowerValue", className: "node-value", text: "-" },
-          { id: "combined-loadState", className: "node-state muted", text: "idle" },
         ],
       },
       {
@@ -3496,8 +3547,8 @@ function buildCombinedDiagramSpec() {
         icon: "load",
         title: "Pool Pump",
         titleKey: "poolPumpTitle",
-        width: COMBINED_LOAD_DEVICE_NODE_SIZE.width,
-        height: COMBINED_LOAD_DEVICE_NODE_SIZE.height,
+        width: COMBINED_COMPACT_LOAD_NODE_SIZE.width,
+        height: COMBINED_COMPACT_LOAD_NODE_SIZE.height,
         position: layout.nodes.poolPump,
         lines: [
           { id: "combined-poolPumpPowerValue", className: "node-value", text: "-" },
@@ -3511,8 +3562,8 @@ function buildCombinedDiagramSpec() {
         icon: "tesla",
         title: "Tesla",
         titleKey: "teslaChargingLabel",
-        width: COMBINED_LOAD_DEVICE_NODE_SIZE.width,
-        height: COMBINED_LOAD_DEVICE_NODE_SIZE.height,
+        width: COMBINED_TESLA_NODE_SIZE.width,
+        height: COMBINED_TESLA_NODE_SIZE.height,
         position: layout.nodes.tesla,
         lines: [
           {
@@ -4122,6 +4173,36 @@ function setSocTextContrastBySocValueId(socValueId, socPercent) {
   textLayer.style.setProperty("--soc-text-shadow", "rgba(255, 255, 255, 0.5)");
 }
 
+function setTeslaSocTone(socPercent) {
+  const teslaNode = document.querySelector(".efd-node.efd-node-id-combined-teslaNode");
+  const teslaFill = document.getElementById("combined-teslaSocFill");
+  const teslaTextLayer = document.getElementById("combined-teslaSocValue")?.parentElement;
+  if (!teslaNode || !teslaFill || !teslaTextLayer) return;
+
+  if (socPercent === null || socPercent === undefined || Number.isNaN(Number(socPercent))) {
+    delete teslaNode.dataset.socTone;
+    teslaFill.style.background = "";
+    teslaTextLayer.style.setProperty("--soc-text-color", "#352c25");
+    teslaTextLayer.style.setProperty("--soc-text-shadow", "rgba(255, 255, 255, 0.5)");
+    return;
+  }
+
+  const clampedSoc = Math.max(0, Math.min(100, Number(socPercent)));
+  const tone = clampedSoc > 80 ? "high" : "healthy";
+  teslaNode.dataset.socTone = tone;
+
+  if (tone === "high") {
+    teslaFill.style.background = "linear-gradient(180deg, rgba(248, 194, 85, 0.96) 0%, rgba(232, 140, 59, 0.98) 58%, rgba(208, 82, 50, 0.98) 100%)";
+    teslaTextLayer.style.setProperty("--soc-text-color", "#4d2416");
+    teslaTextLayer.style.setProperty("--soc-text-shadow", "rgba(255, 245, 238, 0.66)");
+    return;
+  }
+
+  teslaFill.style.background = "linear-gradient(180deg, rgba(157, 204, 111, 0.95) 0%, rgba(104, 170, 97, 0.97) 62%, rgba(67, 126, 81, 0.98) 100%)";
+  teslaTextLayer.style.setProperty("--soc-text-color", "#243126");
+  teslaTextLayer.style.setProperty("--soc-text-shadow", "rgba(244, 255, 246, 0.62)");
+}
+
 function getBatterySocColor(socPercent) {
   const pct = Math.max(0, Math.min(100, Number(socPercent) || 0));
   for (let i = 1; i < BATTERY_SOC_COLOR_STOPS.length; i += 1) {
@@ -4719,21 +4800,15 @@ function formatTeslaCurrentValue(actualValue, configuredValue, unit, options = {
 
 function formatTeslaCurrentValueHtml(actualValue, configuredValue, unit, kind, options = {}) {
   const display = buildTeslaCurrentDisplay(actualValue, configuredValue, unit, { ...options, showConfigured: false });
-  const secondaryLabel = display.showConfigured
-    ? t("teslaChargingCurrentConfiguredLabel")
-    : "";
-  const secondaryLineText = display.showConfigured
-    ? `${secondaryLabel} ${display.secondaryText}`
-    : (display.secondaryText || "");
   const voltageValue = toFiniteNumber(options?.voltageV);
-  const voltageLineText = voltageValue === null
-    ? ""
-    : `${t("teslaChargingVoltageLabel")} ${formatTrimmedDecimal(voltageValue, 0)} V`;
+  const actualLabel = t("teslaChargingCurrentActualLabel");
+  let singleLineText = `${actualLabel} ${display.actualText}`;
+  if (voltageValue !== null) {
+    singleLineText += ` / ${formatTrimmedDecimal(voltageValue, 0)} V`;
+  }
   return (
     `<span class="data-kind-value tesla-current-stack">` +
-    `<span class="data-kind-main tesla-current-line">${escapeHtml(t("teslaChargingCurrentActualLabel"))} ${escapeHtml(display.actualText)}</span>` +
-    `<span class="data-kind-main tesla-current-line">${escapeHtml(secondaryLineText)}</span>` +
-    `<span class="data-kind-main tesla-current-line">${escapeHtml(voltageLineText)}</span>` +
+    `<span class="data-kind-main tesla-current-line">${escapeHtml(singleLineText)}</span>` +
     `</span>`
   );
 }
@@ -5693,6 +5768,7 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null, poolPumpDevice
     socFillId: "combined-teslaSocFill",
     socDataKind: dataKinds.teslaSoc,
   });
+  setTeslaSocTone(teslaSoc);
   setText("combined-teslaRateValue", formatTeslaSocRateEstimate(teslaTotalCapacityKwh, teslaChargingW));
   ensureTeslaCardUnifiedContent();
   if (teslaCurrentDraftA === null) {
@@ -5739,8 +5815,9 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null, poolPumpDevice
   const teslaChargingActive = teslaChargingW !== null && teslaChargingW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const teslaConnected = isTeslaConnected(teslaInfo);
   const totalLoadActive = totalLoadW !== null && totalLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
+  const downstreamLoadActive = totalLoadActive || loadActive || poolPumpActive || teslaChargingActive;
   setText("combined-loadState", loadActive ? t("stateConsuming") : t("stateIdle"));
-  setFlowLine("combined-lineSwitchboardToTotalLoad", totalLoadActive, false);
+  setFlowLine("combined-lineSwitchboardToTotalLoad", downstreamLoadActive, false);
   setFlowLine("combined-lineSwitchboardToHomeLoad", loadActive, false);
   setFlowLine("combined-lineSwitchboardToPoolPump", poolPumpActive, false);
   setFlowLine("combined-lineSwitchboardToTeslaB", teslaChargingActive, false);
@@ -6091,10 +6168,166 @@ function renderDashboardNotifications(payload) {
   }
 }
 
+function renderNotificationMatrixPriorityCard() {
+  const priority = stateCache.lastTimeWindowRules?.priority || null;
+  if (!priority) return "";
+  const tesla = priority?.tesla || {};
+  const pump = priority?.pool_pump || {};
+  const override = priority?.override || {};
+  const windows = Array.isArray(pump?.windows) ? pump.windows : [];
+  const currentWindow = windows.find((item) => item?.id === "current") || {};
+  const previousWindow = windows.find((item) => item?.id === "previous") || {};
+  const formatHours = (value) => (Number.isFinite(Number(value)) ? `${formatTrimmedDecimal(Number(value), 2)}h` : "-");
+  const formatScore = (value) => (Number.isFinite(Number(value)) ? formatTrimmedDecimal(Number(value), 1) : "-");
+  const formatScoreWithOverride = (effectiveValue, originalValue, isOverridden) => {
+    if (!isOverridden) return formatScore(effectiveValue);
+    return t("notificationMatrixPriorityOverriddenScore", {
+      score: formatScore(effectiveValue),
+      original: formatScore(originalValue),
+    });
+  };
+  const weightText = (Array.isArray(pump?.weights) ? pump.weights : [])
+    .map((item) => `${item?.range || "-"} × ${formatTrimmedDecimal(Number(item?.weight), 1)}`)
+    .join(" · ");
+  const winnerLabel = String(priority?.winner || "tie").trim() === "pool_pump"
+    ? t("notificationMatrixPriorityPumpLabel")
+    : t("notificationMatrixPriorityTeslaLabel");
+  const isCollapsed = notificationMatrixPriorityCollapsed;
+  return `
+    <article class="notification-priority-card${isCollapsed ? " is-collapsed" : ""}">
+      <div class="notification-priority-header">
+        <div>
+          <h3 class="notification-priority-title">${escapeHtml(t("notificationMatrixPriorityTitle"))}</h3>
+          ${isCollapsed ? "" : `<p class="notification-priority-summary">${escapeHtml(t("notificationMatrixPrioritySummary"))}</p>`}
+          ${isCollapsed ? "" : `<p class="notification-priority-meta">${escapeHtml(t("notificationMatrixPriorityBusinessDay", { value: String(priority?.business_day?.definition || "-") }))}</p>`}
+        </div>
+        <div class="notification-priority-header-actions">
+          <div class="notification-priority-winner">${escapeHtml(t("notificationMatrixPriorityWinner", { winner: winnerLabel }))}</div>
+          <button
+            type="button"
+            class="notification-priority-toggle"
+            aria-expanded="${isCollapsed ? "false" : "true"}"
+            aria-label="${escapeHtml(t(isCollapsed ? "notificationMatrixPriorityExpand" : "notificationMatrixPriorityCollapse"))}"
+          >
+            <span class="notification-priority-toggle-chevron${isCollapsed ? " is-collapsed" : ""}" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+      <div class="notification-priority-score-strip">
+        <div class="notification-priority-score-pill">
+          <span>${escapeHtml(t("notificationMatrixPriorityTeslaLabel"))}</span>
+          <strong>${escapeHtml(formatScoreWithOverride(tesla?.score, tesla?.original_score, String(override?.target || "") === "tesla"))}</strong>
+        </div>
+        <div class="notification-priority-score-pill">
+          <span>${escapeHtml(t("notificationMatrixPriorityPumpLabel"))}</span>
+          <strong>${escapeHtml(formatScoreWithOverride(pump?.score, pump?.original_score, String(override?.target || "") === "pool_pump"))}</strong>
+        </div>
+      </div>
+      ${isCollapsed ? "" : `
+      <div class="notification-priority-override">
+        <span class="notification-priority-override-label">${escapeHtml(t("notificationMatrixPriorityOverrideLabel"))}</span>
+        <label class="notification-priority-radio">
+          <input type="radio" name="time-window-priority-override" value="auto" ${String(override?.target || "auto") === "auto" ? "checked" : ""} ${timeWindowPriorityOverrideBusy ? "disabled" : ""} />
+          <span>${escapeHtml(t("notificationMatrixPriorityOverrideAuto"))}</span>
+        </label>
+        <label class="notification-priority-radio">
+          <input type="radio" name="time-window-priority-override" value="tesla" ${String(override?.target || "") === "tesla" ? "checked" : ""} ${timeWindowPriorityOverrideBusy ? "disabled" : ""} />
+          <span>${escapeHtml(t("notificationMatrixPriorityOverrideTesla"))}</span>
+        </label>
+        <label class="notification-priority-radio">
+          <input type="radio" name="time-window-priority-override" value="pool_pump" ${String(override?.target || "") === "pool_pump" ? "checked" : ""} ${timeWindowPriorityOverrideBusy ? "disabled" : ""} />
+          <span>${escapeHtml(t("notificationMatrixPriorityOverridePump"))}</span>
+        </label>
+      </div>
+      <div class="notification-priority-grid">
+        <section class="notification-priority-device">
+          <div class="notification-priority-device-topline">
+            <span class="notification-priority-device-name">${escapeHtml(t("notificationMatrixPriorityTeslaLabel"))}</span>
+            <strong class="notification-priority-score">${escapeHtml(formatScoreWithOverride(tesla?.score, tesla?.original_score, String(override?.target || "") === "tesla"))}</strong>
+          </div>
+          <div class="notification-priority-device-meta">${escapeHtml(t("notificationMatrixPrioritySoc"))}: ${escapeHtml(Number.isFinite(Number(tesla?.soc_percent)) ? `${formatTrimmedDecimal(Number(tesla?.soc_percent), 1)}%` : "-")}</div>
+          <div class="notification-priority-formula-label">${escapeHtml(t("notificationMatrixPriorityFormula"))}</div>
+          <code class="notification-priority-formula">${escapeHtml(String(tesla?.formula || "-"))}</code>
+        </section>
+        <section class="notification-priority-device">
+          <div class="notification-priority-device-topline">
+            <span class="notification-priority-device-name">${escapeHtml(t("notificationMatrixPriorityPumpLabel"))}</span>
+            <strong class="notification-priority-score">${escapeHtml(formatScoreWithOverride(pump?.score, pump?.original_score, String(override?.target || "") === "pool_pump"))}</strong>
+          </div>
+          <div class="notification-priority-device-meta">${escapeHtml(t("notificationMatrixPriorityWeights"))}: ${escapeHtml(weightText || "-")}</div>
+          <div class="notification-priority-formula-label">${escapeHtml(t("notificationMatrixPriorityFormula"))}</div>
+          <code class="notification-priority-formula">${escapeHtml(String(pump?.formula || "-"))}</code>
+          <code class="notification-priority-formula">${escapeHtml(String(pump?.runtime_formula || "-"))}</code>
+          <div class="notification-priority-window-list">
+            <div class="notification-priority-window-item">
+              <strong>${escapeHtml(t("notificationMatrixPriorityCurrentWindow"))}</strong>
+              <span>${escapeHtml(t("notificationMatrixPriorityRawRuntime"))}: ${escapeHtml(formatHours(currentWindow?.raw_runtime_hours))}</span>
+              <span>${escapeHtml(t("notificationMatrixPriorityWeightedRuntime"))}: ${escapeHtml(formatHours(currentWindow?.weighted_runtime_hours))}</span>
+              <span>${escapeHtml(t("notificationMatrixPriorityDeficit"))}: ${escapeHtml(formatHours(currentWindow?.deficit_weighted_hours))}</span>
+            </div>
+            <div class="notification-priority-window-item">
+              <strong>${escapeHtml(t("notificationMatrixPriorityPreviousWindow"))}</strong>
+              <span>${escapeHtml(t("notificationMatrixPriorityRawRuntime"))}: ${escapeHtml(formatHours(previousWindow?.raw_runtime_hours))}</span>
+              <span>${escapeHtml(t("notificationMatrixPriorityWeightedRuntime"))}: ${escapeHtml(formatHours(previousWindow?.weighted_runtime_hours))}</span>
+              <span>${escapeHtml(t("notificationMatrixPriorityDeficit"))}: ${escapeHtml(formatHours(previousWindow?.deficit_weighted_hours))}</span>
+            </div>
+          </div>
+        </section>
+      </div>
+      `}
+    </article>
+  `;
+}
+
 function renderNotificationMatrix() {
   const root = document.getElementById("notificationMatrixPanels");
+  const overlay = document.getElementById("notificationMatrixLoadingOverlay");
   if (!root) return;
-  root.innerHTML = "";
+  const isLoading = Boolean(tabLoadState.notificationMatrix?.inFlight);
+  if (overlay) {
+    overlay.classList.add("hidden");
+    overlay.setAttribute("aria-hidden", "true");
+  }
+  if (isLoading) {
+    root.innerHTML = `
+      <article class="notification-matrix-loading-shell is-standalone" aria-live="polite" aria-busy="true">
+        <div class="notification-matrix-loading-visual" aria-hidden="true">
+          <div class="notification-matrix-loading-glow"></div>
+          <div class="notification-matrix-loading-orbit orbit-a">
+            <span class="notification-matrix-loading-dot"></span>
+          </div>
+          <div class="notification-matrix-loading-orbit orbit-b">
+            <span class="notification-matrix-loading-dot"></span>
+          </div>
+          <div class="notification-matrix-loading-core">
+            <span class="notification-matrix-loading-core-ring ring-a"></span>
+            <span class="notification-matrix-loading-core-ring ring-b"></span>
+            <span class="notification-matrix-loading-core-disc"></span>
+          </div>
+          <span class="notification-matrix-loading-chip chip-tesla">Tesla</span>
+          <span class="notification-matrix-loading-chip chip-pump">Pump</span>
+          <span class="notification-matrix-loading-chip chip-rules">Rules</span>
+        </div>
+        <strong>${escapeHtml(t("notificationMatrixLoadingTitle"))}</strong>
+        <p>${escapeHtml(t("notificationMatrixLoadingBody"))}</p>
+      </article>
+    `;
+    return;
+  }
+  root.innerHTML = renderNotificationMatrixPriorityCard();
+  const priorityToggle = root.querySelector(".notification-priority-toggle");
+  if (priorityToggle) {
+    priorityToggle.addEventListener("click", () => {
+      notificationMatrixPriorityCollapsed = !notificationMatrixPriorityCollapsed;
+      renderNotificationMatrix();
+    });
+  }
+  for (const radio of root.querySelectorAll('input[name="time-window-priority-override"]')) {
+    radio.addEventListener("change", (event) => {
+      const target = event.currentTarget;
+      void updateTimeWindowPriorityOverride(target?.value || "auto");
+    });
+  }
   const currentWindowId = getCurrentNotificationMatrixWindowId(stateCache.lastNotificationSummary);
   if (!notificationMatrixCollapseInitialized) {
     notificationMatrixCollapseState = {};
@@ -6831,6 +7064,29 @@ async function updateTimeWindowRuleState(ruleCode, enabled) {
     window.alert(String(err));
   } finally {
     timeWindowRuleBusy.delete(normalized);
+    renderNotificationMatrix();
+  }
+}
+
+async function updateTimeWindowPriorityOverride(target) {
+  const normalized = String(target || "auto").trim().toLowerCase() || "auto";
+  if (timeWindowPriorityOverrideBusy) return;
+  timeWindowPriorityOverrideBusy = true;
+  renderNotificationMatrix();
+  try {
+    await fetchJson("/api/time-window-priority-override", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target: normalized }),
+      timeoutMs: 10000,
+    });
+    const refreshed = await fetchJson("/api/time-window-rules", { timeoutMs: 10000 });
+    stateCache.lastTimeWindowRules = refreshed;
+    renderNotificationMatrix();
+  } catch (err) {
+    window.alert(String(err));
+  } finally {
+    timeWindowPriorityOverrideBusy = false;
     renderNotificationMatrix();
   }
 }
@@ -11711,6 +11967,9 @@ async function loadTabWithGuard(tab, fromAutoRefresh = false) {
     return true;
   } finally {
     if (slot) slot.inFlight = false;
+    if (tabKey === "notificationMatrix") {
+      renderNotificationMatrix();
+    }
   }
 }
 

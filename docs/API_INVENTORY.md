@@ -1,6 +1,6 @@
 # API Inventory
 
-Last updated: 2026-03-23
+Last updated: 2026-04-06
 
 This file tracks all backend APIs and their current usage status.
 
@@ -21,6 +21,7 @@ Status values:
 - `GET /api/dashboard/notifications`
 - `GET /api/time-window-rules`
 - `PUT /api/time-window-rules/{rule_code}`
+- `PUT /api/time-window-priority-override`
 - `GET /api/devices/pool-pump`
 - `POST /api/devices/pool-pump/toggle`
 - `POST /api/tesla/control/charging`

@@ -58,6 +58,7 @@ from app.persistence import (
     get_latest_operation_runs,
     get_realtime_kv_by_prefix,
     get_latest_sample,
+    get_metric_rows,
     get_series_samples,
     get_storage_status,
     insert_worker_api_log,
@@ -137,6 +138,7 @@ POOL_PUMP_OVERNIGHT_RUNTIME_FRACTION = 0.8
 POOL_PUMP_OVERNIGHT_TARGET_START_HOUR = 23
 POOL_PUMP_OVERNIGHT_TARGET_END_HOUR = 5
 POOL_PUMP_OVERNIGHT_STATE_KEY = "operation_state.pool_pump_overnight"
+TIME_WINDOW_PRIORITY_OVERRIDE_STATE_KEY = "time_window.priority_override"
 BATTERY_CAPACITY_KWH = {
     "saj": 15.0,
     "solplanet": 50.0,
@@ -154,6 +156,20 @@ TESLA_POST_EXPORT_FORECAST_HISTORY_DAYS = 3
 TESLA_POST_EXPORT_FORECAST_MIN_COVERAGE_RATIO = 0.5
 FREE_ENERGY_WINDOW_START_HOUR = 11
 FREE_ENERGY_WINDOW_END_HOUR = 14
+PRIORITY_BUSINESS_DAY_START_HOUR = 11
+TESLA_PRIORITY_TARGET_SOC_PERCENT = 80.0
+TESLA_PRIORITY_MIN_SOC_PERCENT = 10.0
+POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MIN_HOURS = 6.0
+POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MAX_HOURS = 9.0
+POOL_PUMP_PRIORITY_CURRENT_WINDOW_WEIGHT = 0.7
+POOL_PUMP_PRIORITY_PREVIOUS_WINDOW_WEIGHT = 0.3
+POOL_PUMP_PRIORITY_TIME_WEIGHTS: tuple[tuple[int, int, float], ...] = (
+    (11, 17, 0.6),
+    (17, 21, 1.0),
+    (21, 24, 1.4),
+    (0, 5, 1.4),
+    (5, 11, 0.8),
+)
 FREE_ENERGY_WINDOW_SELF_CONSUMPTION_START_MINUTE = 50
 AFTER_FREE_SHOULDER_WINDOW_START_HOUR = 14
 AFTER_FREE_SHOULDER_WINDOW_END_HOUR = 16
@@ -1382,6 +1398,10 @@ class TimeWindowRuleStatePayload(BaseModel):
     enabled: bool = Field(...)
 
 
+class TimeWindowPriorityOverridePayload(BaseModel):
+    target: str | None = Field(default=None)
+
+
 def _split_entity_id(entity_id: str) -> tuple[str, str]:
     if "." not in entity_id:
         return "", entity_id
@@ -1468,6 +1488,231 @@ def _to_bool(value: object) -> bool | None:
     if text in ("false", "0", "no", "off"):
         return False
     return None
+
+
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, value))
+
+
+def _priority_business_window_start(now_local: datetime) -> datetime:
+    if now_local.hour < PRIORITY_BUSINESS_DAY_START_HOUR:
+        business_date = now_local.date() - timedelta(days=1)
+    else:
+        business_date = now_local.date()
+    return datetime.combine(
+        business_date,
+        time(hour=PRIORITY_BUSINESS_DAY_START_HOUR),
+        tzinfo=now_local.tzinfo,
+    )
+
+
+def _priority_window_definitions(now_local: datetime) -> list[dict[str, object]]:
+    current_start_local = _priority_business_window_start(now_local)
+    current_end_local = current_start_local + timedelta(days=1)
+    previous_start_local = current_start_local - timedelta(days=1)
+    previous_end_local = current_start_local
+    return [
+        {
+            "id": "current",
+            "label": "today",
+            "weight": POOL_PUMP_PRIORITY_CURRENT_WINDOW_WEIGHT,
+            "start_local": current_start_local,
+            "end_local": current_end_local,
+        },
+        {
+            "id": "previous",
+            "label": "yesterday",
+            "weight": POOL_PUMP_PRIORITY_PREVIOUS_WINDOW_WEIGHT,
+            "start_local": previous_start_local,
+            "end_local": previous_end_local,
+        },
+    ]
+
+
+def _pool_pump_priority_weight_for_local_dt(dt_local: datetime) -> float:
+    hour = dt_local.hour
+    for start_hour, end_hour, weight in POOL_PUMP_PRIORITY_TIME_WEIGHTS:
+        if start_hour < end_hour and start_hour <= hour < end_hour:
+            return weight
+        if start_hour > end_hour and (hour >= start_hour or hour < end_hour):
+            return weight
+    return 1.0
+
+
+def _next_pool_pump_priority_boundary_local(dt_local: datetime) -> datetime:
+    local_tz = dt_local.tzinfo
+    if local_tz is None:
+        return dt_local + timedelta(hours=1)
+    candidates: list[datetime] = []
+    for offset_days in (0, 1):
+        candidate_date = dt_local.date() + timedelta(days=offset_days)
+        for boundary_hour in (0, 5, 11, 17, 21):
+            boundary = datetime.combine(candidate_date, time(hour=boundary_hour), tzinfo=local_tz)
+            if boundary > dt_local:
+                candidates.append(boundary)
+    return min(candidates) if candidates else dt_local + timedelta(hours=1)
+
+
+def _integrate_pool_pump_priority_window_runtime(
+    start_utc: datetime,
+    end_utc: datetime,
+    *,
+    windows: list[dict[str, object]],
+) -> None:
+    local_tz = windows[0]["start_local"].tzinfo if windows else UTC
+    current = start_utc.astimezone(UTC)
+    end = end_utc.astimezone(UTC)
+    while current < end:
+        current_local = current.astimezone(local_tz)
+        current_window = next(
+            (
+                item
+                for item in windows
+                if isinstance(item.get("start_local"), datetime)
+                and isinstance(item.get("end_local"), datetime)
+                and item["start_local"] <= current_local < item["end_local"]
+            ),
+            None,
+        )
+        if current_window is None:
+            current = min(end, _next_pool_pump_priority_boundary_local(current_local).astimezone(UTC))
+            continue
+        next_boundary_local = _next_pool_pump_priority_boundary_local(current_local)
+        segment_end = min(
+            end,
+            current_window["end_local"].astimezone(UTC),
+            next_boundary_local.astimezone(UTC),
+        )
+        duration_hours = max((segment_end - current).total_seconds(), 0.0) / 3600.0
+        if duration_hours > 0:
+            weight = _pool_pump_priority_weight_for_local_dt(current_local)
+            current_window["raw_runtime_hours"] = float(current_window.get("raw_runtime_hours") or 0.0) + duration_hours
+            current_window["weighted_runtime_hours"] = (
+                float(current_window.get("weighted_runtime_hours") or 0.0)
+                + (duration_hours * weight)
+            )
+        current = segment_end
+
+
+async def _build_device_priority_snapshot(
+    combined_flow: dict[str, object] | None,
+    *,
+    now_local: datetime | None = None,
+) -> dict[str, object]:
+    now_local = now_local or _tesla_grid_support_now_local()[0]
+    metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
+    metrics_map = metrics if isinstance(metrics, dict) else {}
+
+    window_defs = _priority_window_definitions(now_local)
+    history_start_local = window_defs[-1]["start_local"]
+    history_end_local = window_defs[0]["end_local"]
+    history_rows = await asyncio.to_thread(
+        get_metric_rows,
+        storage_db_path,
+        system="combined",
+        start_at_utc=history_start_local.astimezone(UTC),
+        end_at_utc=history_end_local.astimezone(UTC),
+        metric_keys=["pool_pump_enabled", "pool_pump_power_w"],
+    )
+    history_items = history_rows.get("items") if isinstance(history_rows, dict) else []
+    items = history_items if isinstance(history_items, list) else []
+
+    windows: list[dict[str, object]] = []
+    for item in window_defs:
+        windows.append(
+            {
+                **item,
+                "raw_runtime_hours": 0.0,
+                "weighted_runtime_hours": 0.0,
+            }
+        )
+
+    for current_item, next_item in zip(items, items[1:]):
+        sampled_epoch = _to_number(current_item.get("sampled_at_epoch")) if isinstance(current_item, dict) else None
+        next_epoch = _to_number(next_item.get("sampled_at_epoch")) if isinstance(next_item, dict) else None
+        if sampled_epoch is None or next_epoch is None or next_epoch <= sampled_epoch:
+            continue
+        pool_pump_enabled = bool(current_item.get("pool_pump_enabled")) if isinstance(current_item, dict) else False
+        pool_pump_power_w = _to_number(current_item.get("pool_pump_power_w")) if isinstance(current_item, dict) else None
+        if not pool_pump_enabled and not (pool_pump_power_w is not None and pool_pump_power_w > POWER_FLOW_ACTIVE_THRESHOLD_W):
+            continue
+        _integrate_pool_pump_priority_window_runtime(
+            datetime.fromtimestamp(sampled_epoch, UTC),
+            datetime.fromtimestamp(next_epoch, UTC),
+            windows=windows,
+        )
+
+    for item in windows:
+        weighted_runtime_hours = float(item.get("weighted_runtime_hours") or 0.0)
+        deficit_weighted_hours = max(POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MIN_HOURS - weighted_runtime_hours, 0.0)
+        item["raw_runtime_hours"] = round(float(item.get("raw_runtime_hours") or 0.0), 3)
+        item["weighted_runtime_hours"] = round(weighted_runtime_hours, 3)
+        item["deficit_weighted_hours"] = round(deficit_weighted_hours, 3)
+        item["start_local"] = item["start_local"].isoformat()
+        item["end_local"] = item["end_local"].isoformat()
+
+    current_window = next((item for item in windows if item.get("id") == "current"), {})
+    previous_window = next((item for item in windows if item.get("id") == "previous"), {})
+    pump_score_raw = (
+        float(current_window.get("deficit_weighted_hours") or 0.0) * POOL_PUMP_PRIORITY_CURRENT_WINDOW_WEIGHT
+        + float(previous_window.get("deficit_weighted_hours") or 0.0) * POOL_PUMP_PRIORITY_PREVIOUS_WINDOW_WEIGHT
+    )
+    pump_score = round(
+        _clamp(pump_score_raw / POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MIN_HOURS, 0.0, 1.0) * 100.0,
+        1,
+    )
+
+    tesla_soc_percent = _to_number(metrics_map.get("tesla_battery_soc_percent"))
+    tesla_ratio = (
+        (TESLA_PRIORITY_TARGET_SOC_PERCENT - tesla_soc_percent)
+        / (TESLA_PRIORITY_TARGET_SOC_PERCENT - TESLA_PRIORITY_MIN_SOC_PERCENT)
+        if tesla_soc_percent is not None
+        else 0.0
+    )
+    tesla_original_score = round(_clamp(float(tesla_ratio or 0.0), 0.0, 1.0) * 100.0, 1)
+    pump_original_score = pump_score
+    override_target = await _load_time_window_priority_override_state()
+    tesla_score = 100.0 if override_target == "tesla" else tesla_original_score
+    pump_score = 100.0 if override_target == "pool_pump" else pump_original_score
+
+    winner = "tesla" if tesla_score >= pump_score else "pool_pump"
+
+    return {
+        "updated_at_utc": datetime.now(UTC).isoformat(),
+        "override": {
+            "target": override_target,
+            "active": override_target in ("tesla", "pool_pump"),
+        },
+        "business_day": {
+            "definition": f"{PRIORITY_BUSINESS_DAY_START_HOUR:02d}:00 to next day {PRIORITY_BUSINESS_DAY_START_HOUR:02d}:00",
+            "current_window_start_local": window_defs[0]["start_local"].isoformat(),
+            "current_window_end_local": window_defs[0]["end_local"].isoformat(),
+            "previous_window_start_local": window_defs[1]["start_local"].isoformat(),
+            "previous_window_end_local": window_defs[1]["end_local"].isoformat(),
+        },
+        "tesla": {
+            "score": tesla_score,
+            "original_score": tesla_original_score,
+            "soc_percent": round(tesla_soc_percent, 1) if tesla_soc_percent is not None else None,
+            "target_soc_percent": TESLA_PRIORITY_TARGET_SOC_PERCENT,
+            "min_soc_percent": TESLA_PRIORITY_MIN_SOC_PERCENT,
+            "formula": "clamp((target_soc - current_soc) / (target_soc - min_soc), 0, 1) * 100",
+        },
+        "pool_pump": {
+            "score": pump_score,
+            "original_score": pump_original_score,
+            "weighted_target_min_hours": POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MIN_HOURS,
+            "weighted_target_max_hours": POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MAX_HOURS,
+            "formula": "clamp(((current_deficit * 0.7) + (previous_deficit * 0.3)) / 6.0, 0, 1) * 100",
+            "runtime_formula": "weighted_runtime = sum(runtime_hours * time_weight)",
+            "windows": windows,
+            "weights": [
+                {"range": f"{start_hour:02d}:00-{end_hour:02d}:00", "weight": weight}
+                for start_hour, end_hour, weight in POOL_PUMP_PRIORITY_TIME_WEIGHTS
+            ],
+        },
+        "winner": winner,
+    }
 
 
 def _data_kind_from_source(source_value: object, fallback_kind: str = "real") -> str:
@@ -3680,6 +3925,35 @@ async def _store_pool_pump_free_energy_state(state: dict[str, object]) -> None:
     )
 
 
+async def _load_time_window_priority_override_state() -> str:
+    kv_map = await asyncio.to_thread(
+        get_realtime_kv_by_prefix,
+        storage_db_path,
+        prefix=TIME_WINDOW_PRIORITY_OVERRIDE_STATE_KEY,
+    )
+    row = kv_map.get(TIME_WINDOW_PRIORITY_OVERRIDE_STATE_KEY)
+    value = (row or {}).get("value")
+    if isinstance(value, str):
+        normalized = str(value).strip().lower()
+        if normalized in ("tesla", "pool_pump"):
+            return normalized
+    return "auto"
+
+
+async def _store_time_window_priority_override_state(target: str) -> str:
+    normalized = str(target or "auto").strip().lower() or "auto"
+    if normalized not in ("auto", "tesla", "pool_pump"):
+        normalized = "auto"
+    await asyncio.to_thread(
+        upsert_realtime_kv,
+        storage_db_path,
+        [
+            (TIME_WINDOW_PRIORITY_OVERRIDE_STATE_KEY, normalized, "ui"),
+        ],
+    )
+    return normalized
+
+
 def _update_solar_surplus_export_energy_tracking(
     *,
     combined_status: dict[str, object],
@@ -3947,6 +4221,8 @@ async def _run_pool_pump_free_energy_control_check(
         metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
         metrics_map = metrics if isinstance(metrics, dict) else {}
         midday_map = midday_result if isinstance(midday_result, dict) else {}
+        priority_snapshot = midday_map.get("priority_snapshot")
+        priority_map = priority_snapshot if isinstance(priority_snapshot, dict) else {}
         tesla_before = midday_map.get("tesla_state_before")
         tesla_before_map = tesla_before if isinstance(tesla_before, dict) else {}
         tesla_decision = midday_map.get("decision")
@@ -4012,8 +4288,21 @@ async def _run_pool_pump_free_energy_control_check(
         result["predicted_grid_with_tesla_w"] = round(predicted_grid_with_tesla_w, 1)
         result["predicted_grid_with_pump_w"] = round(predicted_grid_with_pump_w, 1)
         result["tesla_action_type_before_pool_pump"] = tesla_action_type
+        result["priority_snapshot"] = priority_map
 
-        if tesla_priority_ready and within_grid_cap:
+        tesla_priority_score = _to_number((priority_map.get("tesla") or {}).get("score")) or 0.0
+        pump_priority_score = _to_number((priority_map.get("pool_pump") or {}).get("score")) or 0.0
+        priority_winner = str(priority_map.get("winner") or "tesla").strip() or "tesla"
+        result["tesla_priority_score"] = round(tesla_priority_score, 1)
+        result["pool_pump_priority_score"] = round(pump_priority_score, 1)
+        result["priority_winner"] = priority_winner
+
+        priority_blocks_pool_pump = (
+            tesla_should_charge
+            and predicted_grid_with_pump_w > POOL_PUMP_FREE_ENERGY_GRID_MAX_W
+            and priority_winner == "tesla"
+        )
+        if (tesla_priority_ready and within_grid_cap) or (priority_winner == "pool_pump" and within_grid_cap):
             result["decision"] = {
                 "mode": "run",
                 "predicted_grid_w": round(predicted_grid_with_pump_w, 1),
@@ -4040,7 +4329,7 @@ async def _run_pool_pump_free_energy_control_check(
         }
         result["decision_reason"] = (
             "tesla_priority_blocks_pool_pump"
-            if not tesla_priority_ready
+            if priority_blocks_pool_pump or not tesla_priority_ready
             else "pool_pump_would_exceed_free_energy_grid_cap"
         )
         if pump_enabled:
@@ -4049,13 +4338,13 @@ async def _run_pool_pump_free_energy_control_check(
             await _store_pool_pump_free_energy_state(persisted_state)
             result["action"] = {
                 "type": "stop_pool_pump",
-                "reason": "tesla_priority" if not tesla_priority_ready else "grid_cap_exceeded",
+                "reason": "tesla_priority" if (priority_blocks_pool_pump or not tesla_priority_ready) else "grid_cap_exceeded",
             }
             status = "applied"
         else:
             result["action"] = {
                 "type": "noop",
-                "reason": "tesla_priority_pending" if not tesla_priority_ready else "grid_cap_exceeded",
+                "reason": "tesla_priority_pending" if (priority_blocks_pool_pump or not tesla_priority_ready) else "grid_cap_exceeded",
             }
             status = "noop"
         return result
@@ -4633,6 +4922,9 @@ async def _run_midday_window_check(
             status = "noop"
             return result
 
+        priority_snapshot = await _build_device_priority_snapshot(combined_flow, now_local=now_local)
+        result["priority_snapshot"] = priority_snapshot
+
         base_grid_w = max(float(result["current_grid_import_w"]) - tesla_charge_power_w, 0.0)
         result["base_grid_without_tesla_w"] = round(base_grid_w, 1)
         desired = _calculate_tesla_grid_support_target(base_grid_w, charge_state)
@@ -4697,6 +4989,49 @@ async def _run_midday_window_check(
                 "predicted_grid_w": round(base_grid_w + (float(desired_amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V), 1),
             },
         ]
+
+        if window_mode == "free_energy":
+            pool_pump_score = _to_number((priority_snapshot.get("pool_pump") or {}).get("score")) or 0.0
+            tesla_score = _to_number((priority_snapshot.get("tesla") or {}).get("score")) or 0.0
+            pump_power_candidates = [
+                _to_number(metrics_map.get("pool_pump_power_w")),
+                POOL_PUMP_ASSUMED_POWER_W,
+            ]
+            pump_power_w = next(
+                (float(value) for value in pump_power_candidates if value is not None and float(value) > 0),
+                POOL_PUMP_ASSUMED_POWER_W,
+            )
+            predicted_grid_with_both_w = (
+                round(base_grid_w + (float(desired_amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V) + pump_power_w, 1)
+                if desired["mode"] != "off"
+                else round(base_grid_w + pump_power_w, 1)
+            )
+            result["priority_conflict"] = {
+                "tesla_score": tesla_score,
+                "pool_pump_score": pool_pump_score,
+                "winner": priority_snapshot.get("winner"),
+                "predicted_grid_with_both_w": predicted_grid_with_both_w,
+                "grid_cap_w": POOL_PUMP_FREE_ENERGY_GRID_MAX_W,
+            }
+            if (
+                desired["mode"] != "off"
+                and predicted_grid_with_both_w > POOL_PUMP_FREE_ENERGY_GRID_MAX_W
+                and pool_pump_score > tesla_score
+            ):
+                result["decision"] = {
+                    "mode": "off",
+                    "charge_current_amps": 0,
+                    "predicted_grid_w": round(base_grid_w, 1),
+                }
+                result["decision_reason"] = "pool_pump_priority_higher_in_business_window"
+                if charge_requested_enabled or charging_enabled:
+                    await _tesla_set_charging(False)
+                    result["action"] = {"type": "stop_charging", "reason": "pool_pump_priority_higher"}
+                    status = "applied"
+                else:
+                    result["action"] = {"type": "noop", "reason": "pool_pump_priority_higher"}
+                    status = "noop"
+                return result
 
         if (
             charging_enabled
@@ -4823,6 +5158,8 @@ async def _run_saj_battery_watch_check(
 
         metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
         metrics_map = metrics if isinstance(metrics, dict) else {}
+        priority_snapshot = await _build_device_priority_snapshot(combined_flow, now_local=now_local)
+        result["priority_snapshot"] = priority_snapshot
         saj_soc_percent = _to_number(metrics_map.get("battery1_soc_percent"))
         solplanet_soc_percent = _to_number(metrics_map.get("battery2_soc_percent"))
         result["saj_soc_percent"] = saj_soc_percent
@@ -4996,6 +5333,14 @@ async def _run_saj_battery_watch_check(
             charge_reason = "overnight_shoulder_solplanet_has_available_energy"
             stop_reason = "overnight_shoulder_solplanet_below_minimum_soc"
 
+        tesla_priority_score = _to_number((priority_snapshot.get("tesla") or {}).get("score")) or 0.0
+        pool_pump_priority_score = _to_number((priority_snapshot.get("pool_pump") or {}).get("score")) or 0.0
+        result["tesla_priority_score"] = round(tesla_priority_score, 1)
+        result["pool_pump_priority_score"] = round(pool_pump_priority_score, 1)
+        if should_charge and pool_pump_priority_score > tesla_priority_score:
+            should_charge = False
+            stop_reason = "pool_pump_priority_higher_in_business_window"
+
         if should_charge:
             result["decision"] = {
                 "mode": "charge",
@@ -5107,6 +5452,8 @@ async def _run_pool_pump_overnight_control_check(
 
         metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
         metrics_map = metrics if isinstance(metrics, dict) else {}
+        priority_snapshot = await _build_device_priority_snapshot(combined_flow, now_local=now_local)
+        result["priority_snapshot"] = priority_snapshot
         reference = _build_overnight_energy_reference(metrics_map)
         scenario = (
             (reference or {}).get("pool_pump_scenarios", {}).get("night_11pm_to_5am")
@@ -5221,6 +5568,11 @@ async def _run_pool_pump_overnight_control_check(
             "runtime_fraction": POOL_PUMP_OVERNIGHT_RUNTIME_FRACTION,
         }
 
+        tesla_priority_score = _to_number((priority_snapshot.get("tesla") or {}).get("score")) or 0.0
+        pool_pump_priority_score = _to_number((priority_snapshot.get("pool_pump") or {}).get("score")) or 0.0
+        result["tesla_priority_score"] = round(tesla_priority_score, 1)
+        result["pool_pump_priority_score"] = round(pool_pump_priority_score, 1)
+
         if not schedule_active:
             if pump_enabled:
                 await _pool_pump_set_enabled(False)
@@ -5241,6 +5593,16 @@ async def _run_pool_pump_overnight_control_check(
                 status = "noop"
             result["decision"] = {"mode": "off"}
             result["decision_reason"] = "pool_pump_runtime_budget_exhausted"
+        elif tesla_priority_score >= pool_pump_priority_score:
+            if pump_enabled:
+                await _pool_pump_set_enabled(False)
+                result["action"] = {"type": "stop_pool_pump", "reason": "tesla_priority_higher"}
+                status = "applied"
+            else:
+                result["action"] = {"type": "noop", "reason": "tesla_priority_higher"}
+                status = "noop"
+            result["decision"] = {"mode": "off"}
+            result["decision_reason"] = "tesla_priority_higher_in_business_window"
         else:
             result["decision"] = {
                 "mode": "run",
@@ -7713,6 +8075,18 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
     return flow
 
 
+def _load_combined_flow_from_realtime_kv_sync() -> dict[str, object] | None:
+    kv_map = get_realtime_kv_by_prefix(storage_db_path, prefix="combined.")
+    if not kv_map:
+        return None
+    flow = _build_flow_from_kv("combined", kv_map)
+    metrics = flow.get("metrics")
+    metrics_map = metrics if isinstance(metrics, dict) else {}
+    if not metrics_map:
+        return None
+    return flow
+
+
 def _build_storage_backed_flow(system: str, sample: dict[str, object]) -> dict[str, object]:
     payload_obj = sample.get("payload")
     payload = dict(payload_obj) if isinstance(payload_obj, dict) else {}
@@ -9697,10 +10071,21 @@ async def get_time_window_rules() -> dict[str, object]:
         }
         for code in TIME_WINDOW_RULE_CODES
     ]
+    try:
+        cached_combined_flow = await asyncio.to_thread(_load_combined_flow_from_realtime_kv_sync)
+        if cached_combined_flow is None:
+            latest_sample = await asyncio.to_thread(get_latest_sample, storage_db_path, system="combined")
+            if isinstance(latest_sample, dict):
+                cached_combined_flow = _build_storage_backed_flow("combined", latest_sample)
+        priority_snapshot = await _build_device_priority_snapshot(cached_combined_flow)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to build time-window priority snapshot")
+        priority_snapshot = await _build_device_priority_snapshot(None)
     return {
         "updated_at": datetime.now(UTC).isoformat(),
         "count": len(items),
         "items": items,
+        "priority": priority_snapshot,
     }
 
 
@@ -9721,6 +10106,18 @@ async def put_time_window_rule(rule_code: str, payload: TimeWindowRuleStatePaylo
     return {
         **updated,
         "windows": list(TIME_WINDOW_RULE_WINDOWS_BY_CODE.get(normalized_code, ())),
+    }
+
+
+@app.put("/api/time-window-priority-override")
+async def put_time_window_priority_override(payload: TimeWindowPriorityOverridePayload) -> dict[str, object]:
+    target = str(payload.target or "auto").strip().lower() or "auto"
+    if target not in ("auto", "tesla", "pool_pump"):
+        raise HTTPException(status_code=400, detail="target must be one of: auto, tesla, pool_pump")
+    stored = await _store_time_window_priority_override_state(target)
+    return {
+        "target": stored,
+        "updated_at": datetime.now(UTC).isoformat(),
     }
 
 

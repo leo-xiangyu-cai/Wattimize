@@ -165,6 +165,7 @@ First-run configuration:
 
 - The `Time Window` tab shows rule switches for each automation window, covering both notifications and automated operations.
 - Rule state is stored in SQLite and exposed through `GET /api/time-window-rules` and `PUT /api/time-window-rules/{rule_code}`.
+- `GET /api/time-window-rules` now also returns a `priority` snapshot for Tesla and pool pump, and the dashboard lets you temporarily override the winning device through `PUT /api/time-window-priority-override` with `auto`, `tesla`, or `pool_pump`.
 - SAJ profile automation and Tesla charge automation respect these rule switches before issuing control actions.
 - The overnight shoulder window (`23:00-11:00`) now starts Tesla charging only when the projected usable battery minus home load to `08:00` and remaining pool-pump load to `05:00` stays above the configured `1.0kWh` reserve, and stops once that budget is exhausted.
 - Tesla manual start/stop now returns UI feedback states so the dashboard can show pending, success, and failure confirmation after `/api/tesla/control/charging`.
@@ -176,6 +177,7 @@ First-run configuration:
 - The overnight shoulder automation matrix now includes `pool_pump_overnight_control`, which can keep the pool pump inside the configured `23:00-05:00` battery budget and reports its runtime budget in worker status.
 - That runtime budget now divides usable remaining battery by the current overnight runtime load, defined as current home load excluding Tesla charging plus the pool-pump power, so the dashboard formula matches the actual control calculation.
 - The free-energy window (`11:00-14:00`) now also includes `pool_pump_free_energy_control`, which only starts the pool pump after Tesla priority is already satisfied and only when the predicted combined grid draw with the pump stays within the configured `15.0kW` cap.
+- The Time Window dashboard now includes a device-priority card that shows Tesla SoC scoring, weighted pool-pump runtime deficits across the current and previous `11:00 -> 11:00` business-day windows, and the currently selected winner before free-energy or overnight decisions are applied.
 - Dashboard auto-refresh defaults to 30 seconds, keeps the last summary cached locally, and shows background refresh state while new data is loading.
 - The combined dashboard lets you click the Solplanet inverter node to read and update the live Solplanet `Pin` charging limit.
 - On phone-sized layouts, the dashboard now hides the weather/notification/reference panels and switches the combined flow card to a simplified mobile-first energy map with a central hub view that keeps load, remaining battery, live flow, pool pump, and Tesla state in view.

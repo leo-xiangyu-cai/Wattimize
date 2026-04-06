@@ -2222,6 +2222,68 @@ def get_series_samples(
     }
 
 
+def get_metric_rows(
+    db_path: DatabaseTarget,
+    *,
+    system: str,
+    start_at_utc: datetime,
+    end_at_utc: datetime,
+    metric_keys: list[str],
+) -> dict[str, object]:
+    start_at = start_at_utc.astimezone(UTC)
+    end_at = end_at_utc.astimezone(UTC)
+    normalized_keys = [str(key).strip() for key in metric_keys if str(key).strip()]
+    if not _db_exists(db_path):
+        return {
+            "system": system,
+            "count": 0,
+            "items": [],
+            "metric_keys": normalized_keys,
+            "start_at_utc": start_at.isoformat(),
+            "end_at_utc": end_at.isoformat(),
+        }
+
+    try:
+        with _session_scope(db_path) as session:
+            rows = session.execute(
+                select(
+                    AssembledFlowSnapshotRow.assembled_at_utc,
+                    AssembledFlowSnapshotRow.assembled_at_epoch,
+                    AssembledFlowSnapshotRow.flow_json,
+                )
+                .where(
+                    AssembledFlowSnapshotRow.system == system,
+                    AssembledFlowSnapshotRow.assembled_at_epoch >= start_at.timestamp(),
+                    AssembledFlowSnapshotRow.assembled_at_epoch <= end_at.timestamp(),
+                )
+                .order_by(AssembledFlowSnapshotRow.assembled_at_epoch.asc())
+            ).all()
+    except SQLAlchemyError:
+        rows = []
+
+    items: list[dict[str, object]] = []
+    for row in rows:
+        payload = _json_loads(row[2], default={})
+        metrics = payload.get("metrics")
+        metrics_map = metrics if isinstance(metrics, dict) else {}
+        item = {
+            "sampled_at_utc": row[0],
+            "sampled_at_epoch": row[1],
+        }
+        for key in normalized_keys:
+            item[key] = metrics_map.get(key)
+        items.append(item)
+
+    return {
+        "system": system,
+        "count": len(items),
+        "items": items,
+        "metric_keys": normalized_keys,
+        "start_at_utc": start_at.isoformat(),
+        "end_at_utc": end_at.isoformat(),
+    }
+
+
 def compute_usage_between(
     db_path: DatabaseTarget,
     *,

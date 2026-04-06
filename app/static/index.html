@@ -200,6 +200,13 @@
 
       <section id="notificationMatrixView" class="view hidden">
         <section class="card notification-matrix-card">
+          <div id="notificationMatrixLoadingOverlay" class="notification-matrix-loading-overlay hidden" aria-hidden="true">
+            <div class="notification-matrix-loading-shell" aria-live="polite" aria-busy="true">
+              <span class="loading-spinner notification-matrix-loading-spinner" aria-hidden="true"></span>
+              <strong id="notificationMatrixLoadingTitle" data-i18n="notificationMatrixLoadingTitle">Loading Time Window</strong>
+              <p id="notificationMatrixLoadingBody" data-i18n="notificationMatrixLoadingBody">Refreshing rules, priority scores, and live window state...</p>
+            </div>
+          </div>
           <div class="section-header">
             <h2 data-i18n="notificationMatrixTitle">Time Window</h2>
           </div>
