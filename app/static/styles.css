@@ -2816,20 +2816,20 @@ td {
 }
 
 .inline-icon {
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
+  border-radius: 7px;
   background: #e6efe9;
   color: #2f6c4d;
   flex-shrink: 0;
 }
 
 .inline-icon svg {
-  width: 13px;
-  height: 13px;
+  width: 17px;
+  height: 17px;
 }
 
 .inline-icon svg * {
@@ -3616,13 +3616,13 @@ td {
   }
 
   .inline-icon {
-    width: 14px;
-    height: 14px;
+    width: 18px;
+    height: 18px;
   }
 
   .inline-icon svg {
-    width: 10px;
-    height: 10px;
+    width: 13px;
+    height: 13px;
   }
 
   .soc-value-inside {

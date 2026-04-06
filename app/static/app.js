@@ -3544,7 +3544,7 @@ function buildCombinedDiagramSpec() {
       {
         id: "combined-poolPumpNode",
         kind: "load",
-        icon: "load",
+        icon: "pool-pump",
         title: "Pool Pump",
         titleKey: "poolPumpTitle",
         width: COMBINED_COMPACT_LOAD_NODE_SIZE.width,

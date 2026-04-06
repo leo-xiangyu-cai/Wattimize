@@ -63,59 +63,92 @@
       return (
         "<svg viewBox='0 0 24 24' focusable='false'>" +
         "<circle cx='12' cy='12' r='4'></circle>" +
-        "<path d='M12 2v3'></path>" +
-        "<path d='M12 19v3'></path>" +
-        "<path d='M2 12h3'></path>" +
-        "<path d='M19 12h3'></path>" +
+        "<path d='M12 2v2.5'></path>" +
+        "<path d='M12 19.5V22'></path>" +
+        "<path d='M4.93 4.93l1.77 1.77'></path>" +
+        "<path d='M17.3 17.3l1.77 1.77'></path>" +
+        "<path d='M2 12h2.5'></path>" +
+        "<path d='M19.5 12H22'></path>" +
+        "<path d='M4.93 19.07l1.77-1.77'></path>" +
+        "<path d='M17.3 6.7l1.77-1.77'></path>" +
         "</svg>"
       );
     }
     if (name === "grid") {
       return (
         "<svg viewBox='0 0 24 24' focusable='false'>" +
-        "<path d='M12 3l7 4v10l-7 4-7-4V7z'></path>" +
-        "<path d='M7 9h10'></path>" +
-        "<path d='M7 13h10'></path>" +
+        "<path d='M13 2L4 14h6l-1 8 9-12h-6z'></path>" +
         "</svg>"
       );
     }
     if (name === "switchboard") {
       return (
         "<svg viewBox='0 0 24 24' focusable='false'>" +
-        "<path d='M12 3l9 5v8l-9 5-9-5V8z'></path>" +
-        "<path d='M12 8v8'></path>" +
-        "<path d='M8 12h8'></path>" +
+        "<path d='M12 3v3'></path>" +
+        "<path d='M6.5 8.5a7.5 7.5 0 0 0 0 7'></path>" +
+        "<path d='M17.5 8.5a7.5 7.5 0 0 1 0 7'></path>" +
+        "<path d='M9.5 11.5a3.5 3.5 0 0 0 0 1'></path>" +
+        "<path d='M14.5 11.5a3.5 3.5 0 0 1 0 1'></path>" +
+        "<circle cx='12' cy='12' r='1.25'></circle>" +
+        "<path d='M12 13.5v6'></path>" +
+        "</svg>"
+      );
+    }
+    if (name === "inverter") {
+      return (
+        "<svg viewBox='0 0 24 24' focusable='false'>" +
+        "<rect x='4' y='4' width='16' height='16' rx='2'></rect>" +
+        "<path d='M9 4v3'></path>" +
+        "<path d='M15 4v3'></path>" +
+        "<path d='M9 17v3'></path>" +
+        "<path d='M15 17v3'></path>" +
+        "<path d='M20 9h-3'></path>" +
+        "<path d='M20 15h-3'></path>" +
+        "<path d='M7 9H4'></path>" +
+        "<path d='M7 15H4'></path>" +
+        "<rect x='9' y='9' width='6' height='6' rx='1'></rect>" +
         "</svg>"
       );
     }
     if (name === "load" || name === "home") {
       return (
         "<svg viewBox='0 0 24 24' focusable='false'>" +
-        "<path d='M3.5 11L12 3.75L20.5 11'></path>" +
-        "<path d='M5.75 10.25V19C5.75 19.83 6.42 20.5 7.25 20.5H16.75C17.58 20.5 18.25 19.83 18.25 19V10.25'></path>" +
-        "<path d='M8 20.5V15.5C8 14.67 8.67 14 9.5 14H14.5C15.33 14 16 14.67 16 15.5V20.5'></path>" +
-        "<path d='M7.9 9.25H16.1'></path>" +
-        "<path d='M9 11.75H11.25V13.95H9z'></path>" +
-        "<path d='M12.75 11.75H15V13.95H12.75z'></path>" +
-        "<path d='M16.9 5.9V8.05'></path>" +
-        "<path d='M15.7 8.05H18.1'></path>" +
-        "<path d='M12 3.75V2.25'></path>" +
+        "<path d='M3 10.5L12 3l9 7.5'></path>" +
+        "<path d='M5 9.5V20h14V9.5'></path>" +
+        "<path d='M9 20v-5h6v5'></path>" +
+        "</svg>"
+      );
+    }
+    if (name === "pool-pump") {
+      return (
+        "<svg viewBox='0 0 24 24' focusable='false'>" +
+        "<path d='M7.5 5.5C7.5 5.5 5 8.3 5 10a2.5 2.5 0 1 0 5 0c0-1.7-2.5-4.5-2.5-4.5z'></path>" +
+        "<path d='M16.5 5.5C16.5 5.5 14 8.3 14 10a2.5 2.5 0 1 0 5 0c0-1.7-2.5-4.5-2.5-4.5z'></path>" +
+        "<path d='M12 12.5c0 0-3 3.2-3 5.2a3 3 0 1 0 6 0c0-2-3-5.2-3-5.2z'></path>" +
         "</svg>"
       );
     }
     if (name === "tesla" || name === "ev") {
       return (
         "<svg viewBox='0 0 24 24' focusable='false'>" +
-        "<path d='M7 4h10l2 4v8l-2 4H7l-2-4V8z'></path>" +
-        "<path d='M10 9l4-2-2 5h3l-5 5 2-5H9z'></path>" +
+        "<path d='M5 14l1.6-4.5A2 2 0 0 1 8.5 8h7a2 2 0 0 1 1.9 1.5L19 14'></path>" +
+        "<path d='M4 16h16'></path>" +
+        "<path d='M6.5 16v2.5'></path>" +
+        "<path d='M17.5 16v2.5'></path>" +
+        "<circle cx='8' cy='16.5' r='1'></circle>" +
+        "<circle cx='16' cy='16.5' r='1'></circle>" +
+        "<path d='M7.5 8l1.5-2h6l1.5 2'></path>" +
         "</svg>"
       );
     }
     if (name === "battery") {
       return (
         "<svg viewBox='0 0 24 24' focusable='false'>" +
-        "<rect x='6' y='6' width='10' height='12' rx='2' ry='2'></rect>" +
-        "<rect x='16' y='10' width='2' height='4'></rect>" +
+        "<path d='M7 7h9'></path>" +
+        "<path d='M7 17h9'></path>" +
+        "<rect x='4' y='7' width='14' height='10' rx='2' ry='2'></rect>" +
+        "<path d='M18 10h2'></path>" +
+        "<path d='M18 14h2'></path>" +
         "</svg>"
       );
     }
