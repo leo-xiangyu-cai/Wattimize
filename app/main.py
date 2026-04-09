@@ -159,16 +159,12 @@ FREE_ENERGY_WINDOW_END_HOUR = 14
 PRIORITY_BUSINESS_DAY_START_HOUR = 11
 TESLA_PRIORITY_TARGET_SOC_PERCENT = 80.0
 TESLA_PRIORITY_MIN_SOC_PERCENT = 10.0
+TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT = 50.0
 POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MIN_HOURS = 6.0
 POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MAX_HOURS = 9.0
-POOL_PUMP_PRIORITY_CURRENT_WINDOW_WEIGHT = 0.7
-POOL_PUMP_PRIORITY_PREVIOUS_WINDOW_WEIGHT = 0.3
-POOL_PUMP_PRIORITY_TIME_WEIGHTS: tuple[tuple[int, int, float], ...] = (
-    (11, 17, 0.6),
-    (17, 21, 1.0),
-    (21, 24, 1.4),
-    (0, 5, 1.4),
-    (5, 11, 0.8),
+POOL_PUMP_PRIORITY_TIME_WEIGHTS: tuple[tuple[str, int, int, float], ...] = (
+    ("day", 11, 23, 1.0),
+    ("night", 23, 11, 2.0),
 )
 FREE_ENERGY_WINDOW_SELF_CONSUMPTION_START_MINUTE = 50
 AFTER_FREE_SHOULDER_WINDOW_START_HOUR = 14
@@ -1509,34 +1505,24 @@ def _priority_business_window_start(now_local: datetime) -> datetime:
 def _priority_window_definitions(now_local: datetime) -> list[dict[str, object]]:
     current_start_local = _priority_business_window_start(now_local)
     current_end_local = current_start_local + timedelta(days=1)
-    previous_start_local = current_start_local - timedelta(days=1)
-    previous_end_local = current_start_local
     return [
         {
             "id": "current",
             "label": "today",
-            "weight": POOL_PUMP_PRIORITY_CURRENT_WINDOW_WEIGHT,
             "start_local": current_start_local,
             "end_local": current_end_local,
-        },
-        {
-            "id": "previous",
-            "label": "yesterday",
-            "weight": POOL_PUMP_PRIORITY_PREVIOUS_WINDOW_WEIGHT,
-            "start_local": previous_start_local,
-            "end_local": previous_end_local,
         },
     ]
 
 
-def _pool_pump_priority_weight_for_local_dt(dt_local: datetime) -> float:
+def _pool_pump_priority_period_for_local_dt(dt_local: datetime) -> tuple[str, float]:
     hour = dt_local.hour
-    for start_hour, end_hour, weight in POOL_PUMP_PRIORITY_TIME_WEIGHTS:
+    for period, start_hour, end_hour, weight in POOL_PUMP_PRIORITY_TIME_WEIGHTS:
         if start_hour < end_hour and start_hour <= hour < end_hour:
-            return weight
+            return period, weight
         if start_hour > end_hour and (hour >= start_hour or hour < end_hour):
-            return weight
-    return 1.0
+            return period, weight
+    return "day", 1.0
 
 
 def _next_pool_pump_priority_boundary_local(dt_local: datetime) -> datetime:
@@ -1546,11 +1532,26 @@ def _next_pool_pump_priority_boundary_local(dt_local: datetime) -> datetime:
     candidates: list[datetime] = []
     for offset_days in (0, 1):
         candidate_date = dt_local.date() + timedelta(days=offset_days)
-        for boundary_hour in (0, 5, 11, 17, 21):
+        for boundary_hour in (11, 23):
             boundary = datetime.combine(candidate_date, time(hour=boundary_hour), tzinfo=local_tz)
             if boundary > dt_local:
                 candidates.append(boundary)
     return min(candidates) if candidates else dt_local + timedelta(hours=1)
+
+
+def _tesla_priority_score_for_soc(soc_percent: float | None) -> float:
+    if soc_percent is None:
+        return 0.0
+    soc_value = _clamp(float(soc_percent), TESLA_PRIORITY_MIN_SOC_PERCENT, TESLA_PRIORITY_TARGET_SOC_PERCENT)
+    if soc_value >= TESLA_PRIORITY_TARGET_SOC_PERCENT:
+        return 0.0
+    if soc_value >= TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT:
+        span = TESLA_PRIORITY_TARGET_SOC_PERCENT - TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT
+        progress = (TESLA_PRIORITY_TARGET_SOC_PERCENT - soc_value) / span if span > 0 else 1.0
+        return _clamp(progress, 0.0, 1.0) ** 2 * 60.0
+    span = TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT - TESLA_PRIORITY_MIN_SOC_PERCENT
+    progress = (TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT - soc_value) / span if span > 0 else 1.0
+    return 60.0 + (_clamp(progress, 0.0, 1.0) ** 2 * 40.0)
 
 
 def _integrate_pool_pump_priority_window_runtime(
@@ -1585,12 +1586,14 @@ def _integrate_pool_pump_priority_window_runtime(
         )
         duration_hours = max((segment_end - current).total_seconds(), 0.0) / 3600.0
         if duration_hours > 0:
-            weight = _pool_pump_priority_weight_for_local_dt(current_local)
+            period, weight = _pool_pump_priority_period_for_local_dt(current_local)
             current_window["raw_runtime_hours"] = float(current_window.get("raw_runtime_hours") or 0.0) + duration_hours
             current_window["weighted_runtime_hours"] = (
                 float(current_window.get("weighted_runtime_hours") or 0.0)
                 + (duration_hours * weight)
             )
+            runtime_key = "night_runtime_hours" if period == "night" else "day_runtime_hours"
+            current_window[runtime_key] = float(current_window.get(runtime_key) or 0.0) + duration_hours
         current = segment_end
 
 
@@ -1604,7 +1607,7 @@ async def _build_device_priority_snapshot(
     metrics_map = metrics if isinstance(metrics, dict) else {}
 
     window_defs = _priority_window_definitions(now_local)
-    history_start_local = window_defs[-1]["start_local"]
+    history_start_local = window_defs[0]["start_local"]
     history_end_local = window_defs[0]["end_local"]
     history_rows = await asyncio.to_thread(
         get_metric_rows,
@@ -1624,6 +1627,8 @@ async def _build_device_priority_snapshot(
                 **item,
                 "raw_runtime_hours": 0.0,
                 "weighted_runtime_hours": 0.0,
+                "day_runtime_hours": 0.0,
+                "night_runtime_hours": 0.0,
             }
         )
 
@@ -1646,30 +1651,22 @@ async def _build_device_priority_snapshot(
         weighted_runtime_hours = float(item.get("weighted_runtime_hours") or 0.0)
         deficit_weighted_hours = max(POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MIN_HOURS - weighted_runtime_hours, 0.0)
         item["raw_runtime_hours"] = round(float(item.get("raw_runtime_hours") or 0.0), 3)
+        item["day_runtime_hours"] = round(float(item.get("day_runtime_hours") or 0.0), 3)
+        item["night_runtime_hours"] = round(float(item.get("night_runtime_hours") or 0.0), 3)
         item["weighted_runtime_hours"] = round(weighted_runtime_hours, 3)
         item["deficit_weighted_hours"] = round(deficit_weighted_hours, 3)
         item["start_local"] = item["start_local"].isoformat()
         item["end_local"] = item["end_local"].isoformat()
 
-    current_window = next((item for item in windows if item.get("id") == "current"), {})
-    previous_window = next((item for item in windows if item.get("id") == "previous"), {})
-    pump_score_raw = (
-        float(current_window.get("deficit_weighted_hours") or 0.0) * POOL_PUMP_PRIORITY_CURRENT_WINDOW_WEIGHT
-        + float(previous_window.get("deficit_weighted_hours") or 0.0) * POOL_PUMP_PRIORITY_PREVIOUS_WINDOW_WEIGHT
-    )
+    current_window = windows[0] if windows else {}
+    pump_score_raw = float(current_window.get("deficit_weighted_hours") or 0.0)
     pump_score = round(
         _clamp(pump_score_raw / POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MIN_HOURS, 0.0, 1.0) * 100.0,
         1,
     )
 
     tesla_soc_percent = _to_number(metrics_map.get("tesla_battery_soc_percent"))
-    tesla_ratio = (
-        (TESLA_PRIORITY_TARGET_SOC_PERCENT - tesla_soc_percent)
-        / (TESLA_PRIORITY_TARGET_SOC_PERCENT - TESLA_PRIORITY_MIN_SOC_PERCENT)
-        if tesla_soc_percent is not None
-        else 0.0
-    )
-    tesla_original_score = round(_clamp(float(tesla_ratio or 0.0), 0.0, 1.0) * 100.0, 1)
+    tesla_original_score = round(_tesla_priority_score_for_soc(tesla_soc_percent), 1)
     pump_original_score = pump_score
     override_target = await _load_time_window_priority_override_state()
     tesla_score = 100.0 if override_target == "tesla" else tesla_original_score
@@ -1687,28 +1684,27 @@ async def _build_device_priority_snapshot(
             "definition": f"{PRIORITY_BUSINESS_DAY_START_HOUR:02d}:00 to next day {PRIORITY_BUSINESS_DAY_START_HOUR:02d}:00",
             "current_window_start_local": window_defs[0]["start_local"].isoformat(),
             "current_window_end_local": window_defs[0]["end_local"].isoformat(),
-            "previous_window_start_local": window_defs[1]["start_local"].isoformat(),
-            "previous_window_end_local": window_defs[1]["end_local"].isoformat(),
         },
         "tesla": {
             "score": tesla_score,
             "original_score": tesla_original_score,
             "soc_percent": round(tesla_soc_percent, 1) if tesla_soc_percent is not None else None,
             "target_soc_percent": TESLA_PRIORITY_TARGET_SOC_PERCENT,
+            "high_urgency_soc_percent": TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT,
             "min_soc_percent": TESLA_PRIORITY_MIN_SOC_PERCENT,
-            "formula": "clamp((target_soc - current_soc) / (target_soc - min_soc), 0, 1) * 100",
+            "formula": "80%+ => 0; 50%-80% => ((80-soc)/30)^2 * 60; below 50% => 60 + ((50-soc)/40)^2 * 40",
         },
         "pool_pump": {
             "score": pump_score,
             "original_score": pump_original_score,
             "weighted_target_min_hours": POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MIN_HOURS,
             "weighted_target_max_hours": POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MAX_HOURS,
-            "formula": "clamp(((current_deficit * 0.7) + (previous_deficit * 0.3)) / 6.0, 0, 1) * 100",
-            "runtime_formula": "weighted_runtime = sum(runtime_hours * time_weight)",
+            "formula": "clamp(current_deficit / 6.0, 0, 1) * 100",
+            "runtime_formula": "priority_hours = day_hours * 1.0 + night_hours * 2.0",
             "windows": windows,
             "weights": [
-                {"range": f"{start_hour:02d}:00-{end_hour:02d}:00", "weight": weight}
-                for start_hour, end_hour, weight in POOL_PUMP_PRIORITY_TIME_WEIGHTS
+                {"label": period, "range": f"{start_hour:02d}:00-{end_hour:02d}:00", "weight": weight}
+                for period, start_hour, end_hour, weight in POOL_PUMP_PRIORITY_TIME_WEIGHTS
             ],
         },
         "winner": winner,

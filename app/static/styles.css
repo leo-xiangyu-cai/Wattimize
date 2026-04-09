@@ -428,6 +428,23 @@ select {
   align-items: stretch;
 }
 
+.sampling-battery-trio {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.sampling-battery-mini {
+  min-width: 0;
+}
+
+.sampling-battery-mini-title {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 #samplingFilterBar {
   margin-top: 14px;
   padding: 14px;
@@ -1108,6 +1125,10 @@ select {
 
 @media (max-width: 720px) {
   .sampling-top-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .sampling-battery-trio {
     grid-template-columns: 1fr;
   }
 

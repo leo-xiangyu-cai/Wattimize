@@ -158,7 +158,8 @@ First-run configuration:
 - When SQLite corruption is detected during runtime recovery flows, the backend attempts an automatic recovery into the recovery directory and reinitializes the runtime connection pool.
 - Daily usage endpoint integrates power snapshots into kWh (UTC day).
 - `system=combined` is available on range usage and trend series endpoints for the frontend overall view.
-- The `History` tab combines range selection with an energy breakdown card, a power timeline chart, a multi-battery SOC timeline for SAJ/Solplanet/Tesla, and compact date/week/month context for the selected window.
+- The `History` tab combines range selection with an energy breakdown card, a power timeline chart, split SOC mini-charts for SAJ/Solplanet/Tesla, a pool-pump on/off timeline, and compact date/week/month context for the selected window.
+- `GET /api/storage/samples?system=combined` now includes `tesla_charge_power_w` and `pool_pump_power_w` so frontend charts can separate home load from Tesla/pool-pump overlays.
 - The frontend can export and import the full SQLite database from the Database tab.
 
 ## 7) Time Window Rules And Tesla Control
@@ -177,7 +178,7 @@ First-run configuration:
 - The overnight shoulder automation matrix now includes `pool_pump_overnight_control`, which can keep the pool pump inside the configured `23:00-05:00` battery budget and reports its runtime budget in worker status.
 - That runtime budget now divides usable remaining battery by the current overnight runtime load, defined as current home load excluding Tesla charging plus the pool-pump power, so the dashboard formula matches the actual control calculation.
 - The free-energy window (`11:00-14:00`) now also includes `pool_pump_free_energy_control`, which only starts the pool pump after Tesla priority is already satisfied and only when the predicted combined grid draw with the pump stays within the configured `15.0kW` cap.
-- The Time Window dashboard now includes a device-priority card that shows Tesla SoC scoring, weighted pool-pump runtime deficits across the current and previous `11:00 -> 11:00` business-day windows, and the currently selected winner before free-energy or overnight decisions are applied.
+- The Time Window dashboard now includes a device-priority card with a non-linear Tesla SoC score (`80%+ => 0`, `50%-80% => 0..60`, `<50% => 60..100`) and pool-pump priority hours from the current `11:00 -> next 11:00` window (`day 11:00-23:00 ×1`, `night 23:00-11:00 ×2`), plus the currently selected winner before free-energy or overnight decisions are applied.
 - Dashboard auto-refresh defaults to 30 seconds, keeps the last summary cached locally, and shows background refresh state while new data is loading.
 - The combined dashboard lets you click the Solplanet inverter node to read and update the live Solplanet `Pin` charging limit.
 - On phone-sized layouts, the dashboard now hides the weather/notification/reference panels and switches the combined flow card to a simplified mobile-first energy map with a central hub view that keeps load, remaining battery, live flow, pool pump, and Tesla state in view.

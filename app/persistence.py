@@ -2205,12 +2205,16 @@ def get_series_samples(
     items = []
     for row in rows:
         tesla_battery_soc_percent = None
+        tesla_charge_power_w = None
+        pool_pump_power_w = None
         if system == "combined":
             payload = _json_loads(row[7], default={})
             if isinstance(payload, dict):
                 metrics = payload.get("metrics")
                 if isinstance(metrics, dict):
                     tesla_battery_soc_percent = metrics.get("tesla_battery_soc_percent")
+                    tesla_charge_power_w = metrics.get("tesla_charge_power_w")
+                    pool_pump_power_w = metrics.get("pool_pump_power_w")
                 if tesla_battery_soc_percent is None:
                     display_items = payload.get("display", {}).get("items", {})
                     if isinstance(display_items, dict):
@@ -2227,6 +2231,8 @@ def get_series_samples(
                 "load_w": row[5],
                 "battery_soc_percent": row[6],
                 "tesla_battery_soc_percent": tesla_battery_soc_percent,
+                "tesla_charge_power_w": tesla_charge_power_w,
+                "pool_pump_power_w": pool_pump_power_w,
             }
         )
     return {
