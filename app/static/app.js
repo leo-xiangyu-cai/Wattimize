@@ -3119,6 +3119,7 @@ function formatRuntimeBudgetFormula(runtimeBudget) {
   const remainingBaseKwh = Number(runtimeBudget?.remaining_base_kwh);
   const currentHomeLoadW = Number(runtimeBudget?.current_home_load_w);
   const pumpPowerW = Number(runtimeBudget?.pump_power_w);
+  const teslaRuntimePowerW = Number(runtimeBudget?.tesla_runtime_power_w);
   const runtimeLoadW = Number(runtimeBudget?.runtime_load_w);
   const availableHours = Number(runtimeBudget?.available_runtime_hours);
   const targetHours = Number(runtimeBudget?.target_runtime_hours);
@@ -3127,7 +3128,9 @@ function formatRuntimeBudgetFormula(runtimeBudget) {
   const runtimeFraction = Number(runtimeBudget?.runtime_fraction);
   const pumpPowerKw = Number.isFinite(pumpPowerW) ? pumpPowerW / 1000 : NaN;
   const currentHomeLoadKw = Number.isFinite(currentHomeLoadW) ? currentHomeLoadW / 1000 : NaN;
+  const teslaRuntimePowerKw = Number.isFinite(teslaRuntimePowerW) ? teslaRuntimePowerW / 1000 : NaN;
   const runtimeLoadKw = Number.isFinite(runtimeLoadW) ? runtimeLoadW / 1000 : NaN;
+  const hasTeslaRuntimeLoad = Number.isFinite(teslaRuntimePowerKw) && teslaRuntimePowerKw > 0;
   const lines = [];
 
   if (
@@ -3138,8 +3141,14 @@ function formatRuntimeBudgetFormula(runtimeBudget) {
     && Number.isFinite(pumpPowerKw)
     && Number.isFinite(currentHomeLoadKw)
   ) {
+    const denominatorText = hasTeslaRuntimeLoad
+      ? `(${formatTrimmedDecimal(pumpPowerKw, 2)}kW + ${formatTrimmedDecimal(currentHomeLoadKw, 2)}kW + ${formatTrimmedDecimal(teslaRuntimePowerKw, 2)}kW)`
+      : `(${formatTrimmedDecimal(pumpPowerKw, 2)}kW + ${formatTrimmedDecimal(currentHomeLoadKw, 2)}kW)`;
+    const formulaText = hasTeslaRuntimeLoad
+      ? "pump_power + home_load + tesla_runtime_power"
+      : "pump_power + home_load";
     lines.push(
-      `available = usable_remaining_battery / (pump_power + home_load) = ${formatTrimmedDecimal(remainingBaseKwh, 2)}kWh / (${formatTrimmedDecimal(pumpPowerKw, 2)}kW + ${formatTrimmedDecimal(currentHomeLoadKw, 2)}kW) = ${formatTrimmedDecimal(remainingBaseKwh, 2)}kWh / ${formatTrimmedDecimal(runtimeLoadKw, 2)}kW = ${formatTrimmedDecimal(availableHours, 2)}h`
+      `available = usable_remaining_battery / (${formulaText}) = ${formatTrimmedDecimal(remainingBaseKwh, 2)}kWh / ${denominatorText} = ${formatTrimmedDecimal(remainingBaseKwh, 2)}kWh / ${formatTrimmedDecimal(runtimeLoadKw, 2)}kW = ${formatTrimmedDecimal(availableHours, 2)}h`
     );
   }
   if (Number.isFinite(targetHours) && Number.isFinite(availableHours) && Number.isFinite(runtimeFraction)) {
