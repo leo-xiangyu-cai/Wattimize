@@ -931,7 +931,7 @@ select {
 .eb-row-grouped {
   margin-left: 10px;
   height: 34px;
-  margin-bottom: 1px;
+  margin-bottom: 0;
   border-radius: 0;
 }
 
@@ -943,7 +943,7 @@ select {
 }
 
 .eb-row-grouped + .eb-row-grouped {
-  margin-bottom: 6px;
+  margin-bottom: 0;
 }
 
 .eb-group-header {
@@ -1176,6 +1176,11 @@ select {
 
 #samplingChartCanvas [class*="ec-extension-brush"],
 #samplingChartCanvas [class*="brush-panel"] {
+  display: none !important;
+}
+
+#samplingBatteryTimelineCanvas [class*="ec-extension-brush"],
+#samplingBatteryTimelineCanvas [class*="brush-panel"] {
   display: none !important;
 }
 

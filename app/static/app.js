@@ -633,6 +633,12 @@ const I18N = {
     samplingChartTitle: "Power Timeline",
     samplingChartMeta: "{system} · {range} · {count} points",
     samplingChartNoData: "No chart data yet for this range",
+    samplingBatteryTimelineTitle: "Battery timeline",
+    samplingBatteryTimelineMeta: "{range} · SAJ + Solplanet SOC · {count} points",
+    samplingBatteryTimelineNoData: "No battery timeline data yet for this range",
+    samplingBatteryTimelineSeriesSaj: "SAJ Battery",
+    samplingBatteryTimelineSeriesSolplanet: "Solplanet Battery",
+    samplingBatteryTimelineSeriesTesla: "Tesla Battery",
     samplingTotalsTitle: "Energy Breakdown",
     samplingTotalsMeta: "{system} · {range} · directional energy totals",
     samplingTotalsMetaNoData: "{system} · {range} · not enough samples for totals yet",
@@ -1411,6 +1417,12 @@ const I18N = {
     samplingChartTitle: "功率时间线",
     samplingChartMeta: "{system} · {range} · {count} 个点",
     samplingChartNoData: "当前时间范围暂无图表数据",
+    samplingBatteryTimelineTitle: "电池时间线",
+    samplingBatteryTimelineMeta: "{range} · SAJ + Solplanet SOC · {count} 个点",
+    samplingBatteryTimelineNoData: "当前时间范围暂无电池时间线数据",
+    samplingBatteryTimelineSeriesSaj: "SAJ 电池",
+    samplingBatteryTimelineSeriesSolplanet: "Solplanet 电池",
+    samplingBatteryTimelineSeriesTesla: "Tesla 电池",
     samplingTotalsTitle: "电量分布",
     samplingTotalsMeta: "{system} · {range} · 分方向累计电量",
     samplingTotalsMetaNoData: "{system} · {range} · 当前样本不足，无法统计累计值",
@@ -1744,20 +1756,28 @@ const SAMPLING_SERIES = [
   { key: "pv_w", labelKey: "samplingSeriesPv", color: "#d97706" },
   { key: "grid_w", labelKey: "samplingSeriesGrid", color: "#2563eb" },
   { key: "battery_w", labelKey: "samplingSeriesBattery", color: "#16a34a" },
-  { key: "load_w", labelKey: "samplingSeriesLoad", color: "#dc2626" },
+  { key: "load_w", labelKey: "samplingSeriesLoad", color: "#64748b" },
 ];
 const SAMPLING_OVERALL_SERIES = [
   { key: "pv_total_w", labelKey: "samplingOverallMetricPv", color: "#d97706" },
   { key: "grid_import_w", labelKey: "samplingOverallMetricGridImport", color: "#2563eb" },
   { key: "grid_export_w", labelKey: "samplingOverallMetricGridExport", color: "#0891b2" },
+  { key: "tesla_charge_power_w", labelKey: "samplingOverallMetricHomeLoadTesla", color: "#dc2626" },
+  { key: "pool_pump_power_w", labelKey: "samplingOverallMetricHomeLoadPoolPump", color: "#0ea5e9" },
+  { key: "load_w", labelKey: "samplingOverallMetricHomeLoadOther", color: "#64748b" },
   { key: "saj_battery_charge_w", labelKey: "samplingOverallSeriesSajBatteryCharge", color: "#15803d" },
-  { key: "saj_battery_discharge_w", labelKey: "samplingOverallSeriesSajBatteryDischarge", color: "#16a34a" },
-  { key: "solplanet_battery_charge_w", labelKey: "samplingOverallSeriesSolplanetBatteryCharge", color: "#6d28d9" },
+  { key: "saj_battery_discharge_w", labelKey: "samplingOverallSeriesSajBatteryDischarge", color: "#22c55e" },
+  { key: "solplanet_battery_charge_w", labelKey: "samplingOverallSeriesSolplanetBatteryCharge", color: "#7c3aed" },
   { key: "solplanet_battery_discharge_w", labelKey: "samplingOverallSeriesSolplanetBatteryDischarge", color: "#c026d3" },
+];
+const SAMPLING_BATTERY_TIMELINE_SERIES = [
+  { key: "saj_battery_soc_percent", labelKey: "samplingBatteryTimelineSeriesSaj", color: "#22c55e" },
+  { key: "solplanet_battery_soc_percent", labelKey: "samplingBatteryTimelineSeriesSolplanet", color: "#7c3aed" },
+  { key: "tesla_battery_soc_percent", labelKey: "samplingBatteryTimelineSeriesTesla", color: "#dc2626" },
 ];
 
 const SAMPLING_SERIES_META_BY_KEY = Object.fromEntries(
-  [...SAMPLING_SERIES, ...SAMPLING_OVERALL_SERIES].map((item) => [item.key, item]),
+  [...SAMPLING_SERIES, ...SAMPLING_OVERALL_SERIES, ...SAMPLING_BATTERY_TIMELINE_SERIES].map((item) => [item.key, item]),
 );
 const SOLPLANET_RAW_FIELD_HELP = {
   getdevdata_device_2: {
@@ -1933,6 +1953,7 @@ const stateCache = {
   lastSamplingUsageBySystem: null,
   lastSamplingPage: null,
   lastSamplingSeries: null,
+  lastSamplingBatteryTimeline: null,
   lastDatabaseTables: null,
   lastDatabasePage: null,
   lastWorkerLogsPage: null,
@@ -2225,6 +2246,8 @@ let samplingChart = null;
 let samplingChartFocusSeries = null;
 let samplingChartLastPayload = null;
 let samplingChartHandlersBound = false;
+let samplingBatteryTimelineChart = null;
+let samplingBatteryTimelineLastPayload = null;
 let samplingTotalsChart = null;
 let samplingLoadInFlight = false;
 let samplingRangeApplyingFromBrush = false;
@@ -8491,6 +8514,7 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         value: combinedHasData ? Number(combinedBreakdown?.home_load?.tesla || combinedEnergy.tesla_load || 0) : 0,
         kind: "load",
         seriesKey: "tesla_charge_power_w",
+        rowKey: "home_load_tesla",
         scope: t("samplingTotalsScopeOverall"),
         layout: "single",
         showGroupHeader: true,
@@ -8502,6 +8526,7 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         value: combinedHasData ? Number(combinedBreakdown?.home_load?.pool_pump || combinedEnergy.pool_pump_load || 0) : 0,
         kind: "load",
         seriesKey: "pool_pump_power_w",
+        rowKey: "home_load_pool_pump",
         scope: t("samplingTotalsScopeOverall"),
         layout: "single",
         samples: combinedHasData ? Number(combinedUsage?.samples || 0) : 0,
@@ -8512,6 +8537,7 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         value: combinedHasData ? Number(combinedBreakdown?.home_load?.other || combinedEnergy.other_home_load || 0) : 0,
         kind: "load",
         seriesKey: "load_w",
+        rowKey: "home_load_other",
         scope: t("samplingTotalsScopeOverall"),
         layout: "single",
         samples: combinedHasData ? Number(combinedUsage?.samples || 0) : 0,
@@ -8712,6 +8738,38 @@ function buildOverallSeriesPayload(seriesBySystem, status, range) {
   };
 }
 
+function buildBatteryTimelinePayload(seriesBySystem, range) {
+  const systems = [
+    { key: "saj_battery_soc_percent", source: "saj", labelKey: "samplingBatteryTimelineSeriesSaj" },
+    { key: "solplanet_battery_soc_percent", source: "solplanet", labelKey: "samplingBatteryTimelineSeriesSolplanet" },
+    {
+      key: "tesla_battery_soc_percent",
+      source: "combined",
+      valueKey: "tesla_battery_soc_percent",
+      labelKey: "samplingBatteryTimelineSeriesTesla",
+    },
+  ];
+  const series = systems.map((meta) => {
+    const payload = seriesBySystem?.[meta.source];
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    const data = items
+      .map((item) => [new Date(item.sampled_at_utc || "").getTime(), Number(item[meta.valueKey || "battery_soc_percent"])])
+      .filter((pair) => Number.isFinite(pair[0]) && Number.isFinite(pair[1]));
+    return {
+      key: meta.key,
+      labelKey: meta.labelKey,
+      color: getSamplingSeriesColor(meta.key),
+      data,
+    };
+  });
+  return {
+    count: series.reduce((sum, item) => sum + item.data.length, 0),
+    start_at_utc: range.startUtc,
+    end_at_utc: range.endUtc,
+    series,
+  };
+}
+
 function ensureSamplingChart() {
   if (samplingChart) return samplingChart;
   const canvas = document.getElementById("samplingChartCanvas");
@@ -8770,8 +8828,32 @@ function ensureSamplingChart() {
   return samplingChart;
 }
 
+function ensureSamplingBatteryTimelineChart() {
+  if (samplingBatteryTimelineChart) return samplingBatteryTimelineChart;
+  const canvas = document.getElementById("samplingBatteryTimelineCanvas");
+  if (!canvas) return null;
+  if (typeof window.echarts === "undefined") return null;
+  samplingBatteryTimelineChart = window.echarts.init(canvas, null, { renderer: "canvas" });
+  return samplingBatteryTimelineChart;
+}
+
 function setSamplingChartLoading(loading) {
   const chart = ensureSamplingChart();
+  if (!chart) return;
+  if (loading) {
+    chart.showLoading("default", {
+      text: "",
+      color: "#4f8a6b",
+      maskColor: "rgba(246, 250, 247, 0.62)",
+      lineWidth: 2,
+    });
+    return;
+  }
+  chart.hideLoading();
+}
+
+function setSamplingBatteryTimelineLoading(loading) {
+  const chart = ensureSamplingBatteryTimelineChart();
   if (!chart) return;
   if (loading) {
     chart.showLoading("default", {
@@ -8897,9 +8979,15 @@ function renderSamplingChart(seriesPayload) {
         textStyle: { color: "#56675d", fontSize: 12 },
       },
       tooltip: {
+        show: true,
         trigger: "axis",
+        triggerOn: "mousemove|click",
+        alwaysShowContent: false,
+        enterable: false,
         axisPointer: {
           type: "cross",
+          snap: true,
+          animation: false,
           lineStyle: { type: "dashed", color: "#7d9588" },
           crossStyle: { color: "#7d9588" },
         },
@@ -8963,6 +9051,130 @@ function renderSamplingChart(seriesPayload) {
   });
 }
 
+function renderSamplingBatteryTimeline(payload) {
+  samplingBatteryTimelineLastPayload = payload;
+  const chart = ensureSamplingBatteryTimelineChart();
+  if (!chart) return;
+  chart.hideLoading();
+  const rangeSeries = Array.isArray(payload?.series) ? payload.series : [];
+  const startMs = new Date(payload?.start_at_utc || "").getTime();
+  const endMs = new Date(payload?.end_at_utc || "").getTime();
+  const xMin = Number.isFinite(startMs) ? startMs : null;
+  const xMax = Number.isFinite(endMs) ? endMs : null;
+  const timeAxisConfig = buildSamplingTimeAxisConfig(xMin, xMax);
+  const series = rangeSeries.map((item) => {
+    const sampledData = downsampleByBucket(Array.isArray(item.data) ? item.data : [], 220);
+    const smoothedData = movingAverage(movingAverage(sampledData, 5), 5);
+    return {
+      name: item.key,
+      type: "line",
+      smooth: 0.55,
+      showSymbol: false,
+      connectNulls: false,
+      data: smoothedData,
+      lineStyle: { width: 2.8, opacity: 0.95, color: item.color, cap: "round", join: "round" },
+      itemStyle: { color: item.color },
+      emphasis: { focus: "series" },
+      animation: false,
+    };
+  });
+  const pickBatteryTimelineValueAt = (data, ts) => {
+    if (!Array.isArray(data) || !data.length || !Number.isFinite(ts)) return null;
+    let low = 0;
+    let high = data.length - 1;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const midTs = Number(data[mid]?.[0]);
+      if (midTs === ts) return Number(data[mid]?.[1]);
+      if (midTs < ts) low = mid + 1;
+      else high = mid - 1;
+    }
+    const candidates = [];
+    if (high >= 0) candidates.push(data[high]);
+    if (low < data.length) candidates.push(data[low]);
+    if (!candidates.length) return null;
+    let best = null;
+    for (const candidate of candidates) {
+      const candidateTs = Number(candidate?.[0]);
+      const candidateValue = Number(candidate?.[1]);
+      if (!Number.isFinite(candidateTs) || !Number.isFinite(candidateValue)) continue;
+      const distance = Math.abs(candidateTs - ts);
+      if (!best || distance < best.distance) {
+        best = { distance, value: candidateValue };
+      }
+    }
+    return best ? best.value : null;
+  };
+
+  chart.setOption(
+    {
+      animation: false,
+      grid: { left: 58, right: 18, top: 58, bottom: 52 },
+      legend: {
+        top: 10,
+        left: 12,
+        itemWidth: 12,
+        itemHeight: 8,
+        textStyle: { color: "#56675d", fontSize: 12 },
+        formatter: (name) => {
+          const hit = rangeSeries.find((item) => item.key === name);
+          return hit ? t(hit.labelKey) : String(name);
+        },
+      },
+      tooltip: {
+        trigger: "axis",
+        axisPointer: {
+          type: "cross",
+          lineStyle: { type: "dashed", color: "#7d9588" },
+          crossStyle: { color: "#7d9588" },
+        },
+        formatter: (params) => {
+          if (!Array.isArray(params) || !params.length) return "";
+          const hoveredTs = Number(params[0].axisValue);
+          const lines = [formatSamplingClock(hoveredTs, true)];
+          for (const item of series) {
+            const hit = rangeSeries.find((entry) => entry.key === item.name);
+            const label = hit ? t(hit.labelKey) : item.name;
+            const value = pickBatteryTimelineValueAt(item.data, hoveredTs);
+            const marker = `<span style="display:inline-block;margin-right:6px;border-radius:50%;width:8px;height:8px;background:${item.itemStyle.color};"></span>`;
+            lines.push(`${marker}${label}: ${Number.isFinite(value) ? `${formatTrimmedDecimal(value, 1)}%` : "-"}`);
+          }
+          return lines.join("<br/>");
+        },
+      },
+      xAxis: {
+        type: "time",
+        min: xMin,
+        max: xMax,
+        axisLine: { lineStyle: { color: "#adc2b5" } },
+        splitLine: { lineStyle: { color: "#eef4ee" } },
+        ...timeAxisConfig,
+      },
+      yAxis: {
+        type: "value",
+        min: 0,
+        max: 100,
+        axisLine: { lineStyle: { color: "#adc2b5" } },
+        splitLine: { lineStyle: { color: "#dbe7df", type: "dashed" } },
+        axisLabel: { color: "#6b7f72", formatter: (v) => `${Number(v).toFixed(0)}%` },
+      },
+      series,
+      graphic: series.some((item) => Array.isArray(item.data) && item.data.length)
+        ? []
+        : [
+            {
+              type: "text",
+              left: "center",
+              top: "middle",
+              style: { text: t("samplingBatteryTimelineNoData"), fill: "#6b7f72", fontSize: 14 },
+            },
+          ],
+    },
+    true,
+  );
+  chart.resize();
+}
+
 function ensureSamplingTotalsChart() {
   if (samplingTotalsChart) return samplingTotalsChart;
   const canvas = document.getElementById("samplingTotalsChartCanvas");
@@ -9010,6 +9222,7 @@ function buildSamplingTotalsChartRows(cards) {
       rows.push({
         type: "stacked",
         label: card.title,
+        rowKey: card.rowKey || null,
         totalValue: totalVal,
         segments: [
           {
@@ -9049,6 +9262,7 @@ function buildSamplingTotalsChartRows(cards) {
               : "";
       rows.push({
         label: `${card.leftLabel || ""}${suffix}`.trim(),
+        rowKey: card.leftRowKey || null,
         value: Math.max(Number(card.leftValue || 0), 0),
         overlayValue: Math.max(Number(card.leftWindowValue || 0), 0),
         overlayLabel: card.leftWindowLabel || "",
@@ -9070,6 +9284,7 @@ function buildSamplingTotalsChartRows(cards) {
       });
       rows.push({
         label: `${card.rightLabel || ""}${suffix}`.trim(),
+        rowKey: card.rightRowKey || null,
         value: Math.max(Number(card.rightValue || 0), 0),
         overlayValue: Math.max(Number(card.rightWindowValue || 0), 0),
         overlayLabel: card.rightWindowLabel || "",
@@ -9092,6 +9307,7 @@ function buildSamplingTotalsChartRows(cards) {
     } else {
       rows.push({
         label: card.rowLabel || card.title,
+        rowKey: card.rowKey || null,
         value: Math.max(Number(card.value || 0), 0),
         valueLabel:
           Number(card.value || 0) > 0
@@ -9204,7 +9420,7 @@ function renderSamplingTotalsChart(cards) {
           })
           .join("");
 
-        return `<div class="eb-row${dimmed ? " eb-dimmed" : ""}${inGroup ? " eb-row-grouped" : ""}" title="${escapeHtml(titleText)}">
+        return `<div class="eb-row${dimmed ? " eb-dimmed" : ""}${inGroup ? " eb-row-grouped" : ""}" data-row-key="${escapeHtml(row.rowKey || "")}" title="${escapeHtml(titleText)}">
   <div class="eb-track">
     <div class="eb-fill eb-fill-stacked" style="width:${pct.toFixed(2)}%;">${segmentsHtml}</div>
   </div>
@@ -9243,7 +9459,7 @@ function renderSamplingTotalsChart(cards) {
       const rightPct = (100 - pct).toFixed(2);
       const labelHtml = escapeHtml(formatEnergyBreakdownLabel(row));
       const valueHtml = buildEbValueHtml(row);
-      return `<div class="eb-row${dimmed ? " eb-dimmed" : ""}${inGroup ? " eb-row-grouped" : ""}" data-series-key="${escapeHtml(row.seriesKey || "")}" title="${escapeHtml(titleText)}">
+      return `<div class="eb-row${dimmed ? " eb-dimmed" : ""}${inGroup ? " eb-row-grouped" : ""}" data-row-key="${escapeHtml(row.rowKey || "")}" data-series-key="${escapeHtml(row.seriesKey || "")}" title="${escapeHtml(titleText)}">
   <div class="eb-track">
     <div class="eb-fill" style="width:${pct.toFixed(2)}%;background:${color};">${overlayHtml}</div>
   </div>
@@ -11635,6 +11851,7 @@ async function importDatabaseFile(file) {
     stateCache.lastDatabasePage = null;
     stateCache.lastSampling = null;
     stateCache.lastSamplingSeries = null;
+    stateCache.lastSamplingBatteryTimeline = null;
     stateCache.lastStorageStatus = null;
     await loadDatabase();
     await loadSampling();
@@ -11675,6 +11892,7 @@ async function loadSampling() {
   setSamplingRangeControlsDisabled(true);
   setSamplingTotalsChartLoading(true);
   setSamplingChartLoading(true);
+  setSamplingBatteryTimelineLoading(true);
   try {
     if (!range.startUtc || !range.endUtc || range.invalid) {
       const invalidMessage = range.invalidReason || "Invalid time range";
@@ -11682,10 +11900,13 @@ async function loadSampling() {
       stateCache.lastSamplingUsageBySystem = null;
       stateCache.lastSamplingPage = null;
       stateCache.lastSamplingSeries = null;
+      stateCache.lastSamplingBatteryTimeline = null;
       setText("samplingDailyMeta", t("loadFailed", { error: invalidMessage }));
       setText("samplingChartMeta", t("loadFailed", { error: invalidMessage }));
+      setText("samplingBatteryTimelineMeta", t("loadFailed", { error: invalidMessage }));
       renderSamplingRows([]);
       renderSamplingChart({ items: [] });
+      renderSamplingBatteryTimeline({ series: [] });
       renderSamplingTotals(null, system, range.label, { metaText: t("loadFailed", { error: invalidMessage }) });
       return;
     }
@@ -11786,9 +12007,28 @@ async function loadSampling() {
       setText("samplingChartMeta", t("loadFailed", { error: String(seriesResult.reason) }));
       renderSamplingChart({ items: [] });
     }
+
+    const batteryTimelinePayload = buildBatteryTimelinePayload(
+      {
+        combined: seriesResult.status === "fulfilled" ? seriesResult.value : null,
+        saj: overallSajSeriesResult.status === "fulfilled" ? overallSajSeriesResult.value : null,
+        solplanet: overallSolplanetSeriesResult.status === "fulfilled" ? overallSolplanetSeriesResult.value : null,
+      },
+      range,
+    );
+    stateCache.lastSamplingBatteryTimeline = batteryTimelinePayload;
+    setText(
+      "samplingBatteryTimelineMeta",
+      t("samplingBatteryTimelineMeta", {
+        range: range.label,
+        count: batteryTimelinePayload.count || 0,
+      }),
+    );
+    renderSamplingBatteryTimeline(batteryTimelinePayload);
   } finally {
     setSamplingTotalsChartLoading(false);
     setSamplingChartLoading(false);
+    setSamplingBatteryTimelineLoading(false);
     setSamplingRangeControlsDisabled(false);
     samplingLoadInFlight = false;
   }
@@ -11855,6 +12095,17 @@ function rerenderSamplingViewFromCache() {
       }),
     );
     renderSamplingChart(payload);
+  }
+  if (stateCache.lastSamplingBatteryTimeline) {
+    const range = getSamplingRange();
+    setText(
+      "samplingBatteryTimelineMeta",
+      t("samplingBatteryTimelineMeta", {
+        range: range.label,
+        count: stateCache.lastSamplingBatteryTimeline.count || 0,
+      }),
+    );
+    renderSamplingBatteryTimeline(stateCache.lastSamplingBatteryTimeline);
   }
 }
 
@@ -12074,6 +12325,13 @@ function setActiveTab(tab, load = true) {
   if (dashboardActive) {
     window.requestAnimationFrame(() => {
       refreshFlowDiagrams();
+    });
+  }
+  if (samplingActive) {
+    window.requestAnimationFrame(() => {
+      if (samplingChart) samplingChart.resize();
+      if (samplingBatteryTimelineChart) samplingBatteryTimelineChart.resize();
+      if (samplingTotalsChart) samplingTotalsChart.resize();
     });
   }
 
@@ -12582,6 +12840,7 @@ bindClickIfPresent("configAutoDiscoverBtn", async () => {
 
 window.addEventListener("resize", () => {
   if (samplingChart) samplingChart.resize();
+  if (samplingBatteryTimelineChart) samplingBatteryTimelineChart.resize();
   if (samplingTotalsChart) samplingTotalsChart.resize();
   refreshFlowDiagrams();
   refreshMobileCombinedFlowDiagram();

@@ -2182,6 +2182,8 @@ def get_series_samples(
                     AssembledFlowSnapshotRow.grid_w,
                     AssembledFlowSnapshotRow.battery_w,
                     AssembledFlowSnapshotRow.load_w,
+                    AssembledFlowSnapshotRow.battery_soc_percent,
+                    AssembledFlowSnapshotRow.flow_json,
                 )
                 .where(
                     AssembledFlowSnapshotRow.system == system,
@@ -2200,17 +2202,33 @@ def get_series_samples(
             sampled_rows.append(rows[-1])
         rows = sampled_rows
 
-    items = [
-        {
-            "sampled_at_utc": row[0],
-            "sampled_at_epoch": row[1],
-            "pv_w": row[2],
-            "grid_w": row[3],
-            "battery_w": row[4],
-            "load_w": row[5],
-        }
-        for row in rows
-    ]
+    items = []
+    for row in rows:
+        tesla_battery_soc_percent = None
+        if system == "combined":
+            payload = _json_loads(row[7], default={})
+            if isinstance(payload, dict):
+                metrics = payload.get("metrics")
+                if isinstance(metrics, dict):
+                    tesla_battery_soc_percent = metrics.get("tesla_battery_soc_percent")
+                if tesla_battery_soc_percent is None:
+                    display_items = payload.get("display", {}).get("items", {})
+                    if isinstance(display_items, dict):
+                        tesla_item = display_items.get("tesla_soc")
+                        if isinstance(tesla_item, dict):
+                            tesla_battery_soc_percent = tesla_item.get("value")
+        items.append(
+            {
+                "sampled_at_utc": row[0],
+                "sampled_at_epoch": row[1],
+                "pv_w": row[2],
+                "grid_w": row[3],
+                "battery_w": row[4],
+                "load_w": row[5],
+                "battery_soc_percent": row[6],
+                "tesla_battery_soc_percent": tesla_battery_soc_percent,
+            }
+        )
     return {
         "system": system,
         "hours": safe_hours,

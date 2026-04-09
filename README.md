@@ -158,7 +158,7 @@ First-run configuration:
 - When SQLite corruption is detected during runtime recovery flows, the backend attempts an automatic recovery into the recovery directory and reinitializes the runtime connection pool.
 - Daily usage endpoint integrates power snapshots into kWh (UTC day).
 - `system=combined` is available on range usage and trend series endpoints for the frontend overall view.
-- The `History` tab combines range selection with an energy breakdown card, a power timeline chart, and compact date/week/month context for the selected window.
+- The `History` tab combines range selection with an energy breakdown card, a power timeline chart, a multi-battery SOC timeline for SAJ/Solplanet/Tesla, and compact date/week/month context for the selected window.
 - The frontend can export and import the full SQLite database from the Database tab.
 
 ## 7) Time Window Rules And Tesla Control
