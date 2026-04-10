@@ -1,6 +1,6 @@
 # API Inventory
 
-Last updated: 2026-04-06
+Last updated: 2026-04-10
 
 This file tracks all backend APIs and their current usage status.
 
@@ -26,6 +26,7 @@ Status values:
 - `POST /api/devices/pool-pump/toggle`
 - `POST /api/tesla/control/charging`
 - `POST /api/tesla/control/current`
+- `GET /api/operations/timeline`
 
 ### Entities tab
 - `GET /api/entities`

@@ -85,6 +85,7 @@ curl -s "http://<wattimize-host>:18000/api/storage/series?system=saj&start_utc=2
 curl -s "http://<wattimize-host>:18000/api/storage/usage-range?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z" | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/charging -H 'Content-Type: application/json' -d '{"enabled":true}' | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/current -H 'Content-Type: application/json' -d '{"amps":16}' | jq
+curl -s "http://<wattimize-host>:18000/api/operations/timeline?limit=50" | jq
 curl -s http://<wattimize-host>:18000/api/devices/pool-pump | jq
 curl -s -X POST http://<wattimize-host>:18000/api/devices/pool-pump/toggle -H 'Content-Type: application/json' -d '{"enabled":true}' | jq
 curl -s http://<wattimize-host>:18000/api/database/export.sqlite3 -o wattimize.sqlite3
@@ -173,13 +174,14 @@ First-run configuration:
 - Tesla manual current control is available through `POST /api/tesla/control/current`, and the combined dashboard shows pending current-change state until Home Assistant confirms it.
 - The combined Tesla card now shows battery energy, live voltage, charge ETA, and an inline current-control trigger instead of only the raw charging power number.
 - Manual inverter and backend actions now register operation definitions plus run history in SQLite so the UI can reconcile pending and completed control actions.
+- The dashboard now includes an `Operations` tab backed by `GET /api/operations/timeline`, which merges automatic worker actions and manual operations into a single chronological timeline.
 - The combined dashboard now includes an overnight battery reference panel that projects remaining usable battery at the next `08:00` and `11:00`, based on recent combined base home-load history with Tesla charging and pool-pump load excluded.
 - The combined dashboard now exposes pool-pump live state and manual toggle controls through `GET /api/devices/pool-pump` and `POST /api/devices/pool-pump/toggle`.
 - The overnight shoulder automation matrix now includes `pool_pump_overnight_control`, which can keep the pool pump inside the configured `23:00-05:00` battery budget and reports its runtime budget in worker status.
 - That runtime budget now divides usable remaining battery by the current overnight runtime load, defined as current base home load plus pool-pump power, and also includes Tesla runtime power when Tesla is expected to stay active, so the dashboard formula matches the actual control calculation.
 - The free-energy window (`11:00-14:00`) now also includes `pool_pump_free_energy_control` and Tesla shared-capacity handling: the priority winner is evaluated first, its resource reservation is applied first, and the second device is then evaluated against the remaining grid budget (`15.0kW` cap), so both can continue when capacity is sufficient.
 - Worker check payloads now include explicit `execution_order`, `resource_reservation`, and `final_switch_states` (`tesla_enabled`, `pool_pump_enabled`) so the UI can show the final on/off result of each round directly.
-- The Time Window dashboard now includes a device-priority card with a non-linear Tesla SoC score (`80%+ => 0`, `50%-80% => 0..60`, `<50% => 60..100`) and pool-pump priority hours from the current `11:00 -> next 11:00` window (`day 11:00-23:00 ×1`, `night 23:00-11:00 ×2`), plus the currently selected winner before free-energy or overnight decisions are applied.
+- The Time Window dashboard now includes a device-priority card with a non-linear Tesla SoC score (`80%+ => 0`, `60%-80% => 0..45`, `40%-60% => 45..100`, `<=40% => 100`) and pool-pump priority hours from the current `11:00 -> next 11:00` window (`day 11:00-23:00 ×1`, `night 23:00-11:00 ×2`), plus the currently selected winner before free-energy or overnight decisions are applied.
 - Dashboard auto-refresh defaults to 30 seconds, keeps the last summary cached locally, and shows background refresh state while new data is loading.
 - The combined dashboard lets you click the Solplanet inverter node to read and update the live Solplanet `Pin` charging limit.
 - On phone-sized layouts, the dashboard now hides the weather/notification/reference panels and switches the combined flow card to a simplified mobile-first energy map with a central hub view that keeps load, remaining battery, live flow, pool pump, and Tesla state in view.

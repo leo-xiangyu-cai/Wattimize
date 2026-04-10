@@ -49,6 +49,9 @@
         <button id="tabWorkerLogs" class="tab-btn" type="button" data-tab="workerLogs" data-i18n="workerLogsTab" role="tab" aria-selected="false" aria-controls="workerLogsView" tabindex="-1">
           Worker Logs
         </button>
+        <button id="tabOperationTimeline" class="tab-btn" type="button" data-tab="operationTimeline" data-i18n="operationTimelineTab" role="tab" aria-selected="false" aria-controls="operationTimelineView" tabindex="-1">
+          Operations
+        </button>
         <button id="tabWorkerFailureLog" class="tab-btn" type="button" data-tab="workerFailureLog" data-i18n="failureLogTab" role="tab" aria-selected="false" aria-controls="workerFailureLogView" tabindex="-1">
           Failure Logs
         </button>
@@ -436,6 +439,28 @@
             <table>
               <thead id="workerLogsHead"></thead>
               <tbody id="workerLogsBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="operationTimelineView" class="view hidden">
+        <section class="card">
+          <div class="section-header">
+            <h2 data-i18n="operationTimelineTitle">Operation Timeline</h2>
+            <span id="operationTimelineUpdatedAt" class="muted">-</span>
+          </div>
+          <p id="operationTimelineCount" class="muted">-</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th data-i18n="operationTimelineTableTime">Time</th>
+                  <th data-i18n="operationTimelineTableAction">Operation</th>
+                  <th data-i18n="operationTimelineTableReason">Reason</th>
+                </tr>
+              </thead>
+              <tbody id="operationTimelineBody"></tbody>
             </table>
           </div>
         </section>

@@ -1019,6 +1019,68 @@ def get_latest_operation_runs(
         return {}
 
 
+def list_operation_runs(
+    db_path: DatabaseTarget,
+    *,
+    limit: int = 200,
+    statuses: list[str] | tuple[str, ...] | None = None,
+) -> list[dict[str, object]]:
+    safe_limit = max(1, min(int(limit or 200), 1000))
+    if not _db_exists(db_path):
+        return []
+    normalized_statuses = tuple(
+        str(item or "").strip()
+        for item in (statuses or ())
+        if str(item or "").strip()
+    )
+    try:
+        with _session_scope(db_path) as session:
+            stmt = (
+                select(OperationRunRow, OperationDefinitionRow)
+                .outerjoin(
+                    OperationDefinitionRow,
+                    OperationDefinitionRow.operation_code == OperationRunRow.operation_code,
+                )
+                .order_by(desc(OperationRunRow.started_at_epoch), desc(OperationRunRow.id))
+                .limit(safe_limit)
+            )
+            if normalized_statuses:
+                stmt = stmt.where(OperationRunRow.status.in_(normalized_statuses))
+            rows = session.execute(stmt).all()
+    except SQLAlchemyError:
+        return []
+
+    items: list[dict[str, object]] = []
+    for run_row, definition_row in rows:
+        title = (
+            str((definition_row.title if definition_row is not None else "") or "").strip()
+            or str(run_row.operation_code or "").strip()
+            or "operation"
+        )
+        items.append(
+            {
+                "id": int(run_row.id),
+                "operation_code": str(run_row.operation_code or "").strip(),
+                "title": title,
+                "system": str((definition_row.system if definition_row is not None else "") or "").strip(),
+                "operation_type": str((definition_row.operation_type if definition_row is not None else "") or "").strip(),
+                "action": str((definition_row.action if definition_row is not None else "") or "").strip(),
+                "trigger_source": str(run_row.trigger_source or "").strip(),
+                "status": str(run_row.status or "").strip(),
+                "started_at_utc": run_row.started_at_utc,
+                "started_at_epoch": run_row.started_at_epoch,
+                "updated_at_utc": run_row.updated_at_utc,
+                "updated_at_epoch": run_row.updated_at_epoch,
+                "completed_at_utc": run_row.completed_at_utc,
+                "completed_at_epoch": run_row.completed_at_epoch,
+                "request_payload": _json_loads(run_row.request_payload_json, default=None),
+                "response_payload": _json_loads(run_row.response_payload_json, default=None),
+                "error_text": str(run_row.error_text or "").strip(),
+            }
+        )
+    return items
+
+
 def list_worker_api_logs(
     db_path: DatabaseTarget,
     *,

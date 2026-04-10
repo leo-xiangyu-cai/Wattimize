@@ -278,6 +278,7 @@ const I18N = {
     samplingTab: "History",
     databaseTab: "Database",
     workerLogsTab: "Worker Logs",
+    operationTimelineTab: "Operations",
     failureLogTab: "Failure Logs",
     databaseTitle: "Database Browser",
     databaseTableLabel: "Table",
@@ -740,6 +741,11 @@ const I18N = {
     workerLogsStatusOutsideWindow: "Outside Window",
     workerLogDetailTitle: "Worker Log Detail",
     workerLogDetailMeta: "{service} · {status} · {time}",
+    operationTimelineTitle: "Operation Timeline",
+    operationTimelineTableTime: "Time",
+    operationTimelineTableAction: "Operation",
+    operationTimelineTableReason: "Reason",
+    operationTimelineCount: "Total {total} operations",
     failureLogTitle: "Worker Failure Logs",
     failureLogMeta: "File {path} · lines {fromLine}-{toLine} / {total}",
     failureLogLoadMore: "Load More",
@@ -1071,6 +1077,7 @@ const I18N = {
     samplingTab: "历史",
     databaseTab: "Database",
     workerLogsTab: "Worker日志",
+    operationTimelineTab: "操作记录",
     failureLogTab: "失败日志",
     databaseTitle: "数据库浏览",
     databaseTableLabel: "数据表",
@@ -1533,6 +1540,11 @@ const I18N = {
     workerLogsStatusOutsideWindow: "窗口外",
     workerLogDetailTitle: "Worker 日志详情",
     workerLogDetailMeta: "{service} · {status} · {time}",
+    operationTimelineTitle: "操作记录",
+    operationTimelineTableTime: "时间",
+    operationTimelineTableAction: "操作",
+    operationTimelineTableReason: "原因",
+    operationTimelineCount: "共 {total} 条操作",
     failureLogTitle: "Worker 失败日志",
     failureLogMeta: "文件 {path} · 第 {fromLine}-{toLine} 行 / 共 {total} 行",
     failureLogLoadMore: "加载更多",
@@ -1975,6 +1987,7 @@ const stateCache = {
   lastDatabaseTables: null,
   lastDatabasePage: null,
   lastWorkerLogsPage: null,
+  lastOperationTimeline: null,
   lastWorkerFailureLog: null,
   rawCardMode: {},
   rawCardCollapse: (() => {
@@ -2244,12 +2257,12 @@ function getLang() {
 
 let currentLang = getLang();
 const _hashTab = location.hash.slice(1);
-let currentTab = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"].includes(_hashTab)
+let currentTab = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "operationTimeline", "workerFailureLog"].includes(_hashTab)
   ? _hashTab
-  : (["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"].includes(localStorage.getItem("activeTab"))
+  : (["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "operationTimeline", "workerFailureLog"].includes(localStorage.getItem("activeTab"))
     ? localStorage.getItem("activeTab")
     : "dashboard");
-const ALL_TABS = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "workerFailureLog"];
+const ALL_TABS = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "operationTimeline", "workerFailureLog"];
 let solplanetRawMode = localStorage.getItem(SOLPLANET_RAW_MODE_KEY) === "table" ? "table" : "cards";
 let rawDataSystem = localStorage.getItem(RAW_DATA_SYSTEM_KEY) === "saj" ? "saj" : "solplanet";
 let sajActionDebugMode = localStorage.getItem(SAJ_ACTION_DEBUG_MODE_KEY) === "1";
@@ -2296,6 +2309,7 @@ const tabLoadState = {
   sampling: { inFlight: false },
   database: { inFlight: false },
   workerLogs: { inFlight: false },
+  operationTimeline: { inFlight: false },
   workerFailureLog: { inFlight: false },
 };
 const samplingRangeState = {
@@ -2960,6 +2974,7 @@ function applyTranslations() {
   renderNotificationMatrix();
   rerenderSamplingViewFromCache();
   rerenderDatabaseViewFromCache();
+  if (stateCache.lastOperationTimeline) renderOperationTimelinePage(stateCache.lastOperationTimeline);
 }
 
 function updateSamplingTimeHeader() {
@@ -8311,6 +8326,32 @@ function renderWorkerLogsConfigMeta(configPayload) {
   setText("workerLogsConfigMeta", t("workerLogsConfigMeta", { host }));
 }
 
+function renderOperationTimelineRows(items) {
+  const body = document.getElementById("operationTimelineBody");
+  if (!body) return;
+  body.innerHTML = "";
+  for (const item of items || []) {
+    const tr = document.createElement("tr");
+    const operationText = String(item?.operation || "").trim() || "-";
+    const reasonText = String(item?.reason || "").trim() || "-";
+    const timeText = formatDateTimeWithAgo(item?.time_utc || null);
+    tr.innerHTML = `
+      <td>${escapeHtml(timeText)}</td>
+      <td><pre class="worker-result-pre" title="${escapeHtml(operationText)}">${escapeHtml(operationText)}</pre></td>
+      <td><pre class="worker-result-pre" title="${escapeHtml(reasonText)}">${escapeHtml(reasonText)}</pre></td>
+    `;
+    body.appendChild(tr);
+  }
+}
+
+function renderOperationTimelinePage(payload) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  stateCache.lastOperationTimeline = payload || null;
+  setText("operationTimelineCount", t("operationTimelineCount", { total: payload?.count || items.length || 0 }));
+  setText("operationTimelineUpdatedAt", formatUpdatedAt(payload?.updated_at || null));
+  renderOperationTimelineRows(items);
+}
+
 function renderWorkerFailureLogPage(payload, { appendOlder = false } = {}) {
   const currentLines = appendOlder ? stateCache.lastWorkerFailureLog?.lines || [] : [];
   const mergedLines = appendOlder ? [...(payload.lines || []), ...currentLines] : payload.lines || [];
@@ -12522,6 +12563,18 @@ async function loadWorkerLogs() {
   }
 }
 
+async function loadOperationTimeline() {
+  try {
+    const payload = await fetchJson("/api/operations/timeline?limit=300", { timeoutMs: 10000 });
+    renderOperationTimelinePage(payload);
+  } catch (err) {
+    stateCache.lastOperationTimeline = null;
+    setText("operationTimelineCount", t("loadFailed", { error: String(err) }));
+    setText("operationTimelineUpdatedAt", formatUpdatedAt(null));
+    renderOperationTimelineRows([]);
+  }
+}
+
 async function loadWorkerFailureLog({ appendOlder = false } = {}) {
   try {
     const before = appendOlder ? workerFailureLogState.before : 0;
@@ -12586,6 +12639,10 @@ async function loadTabWithGuard(tab, fromAutoRefresh = false) {
       await loadWorkerLogs();
       return true;
     }
+    if (tabKey === "operationTimeline") {
+      await loadOperationTimeline();
+      return true;
+    }
     if (tabKey === "workerFailureLog") {
       await loadWorkerFailureLog();
       return true;
@@ -12633,6 +12690,7 @@ function setActiveTab(tab, load = true) {
     tab === "sampling" ||
     tab === "database" ||
     tab === "workerLogs" ||
+    tab === "operationTimeline" ||
     tab === "workerFailureLog"
       ? tab
       : "dashboard";
@@ -12649,6 +12707,7 @@ function setActiveTab(tab, load = true) {
   const samplingView = document.getElementById("samplingView");
   const databaseView = document.getElementById("databaseView");
   const workerLogsView = document.getElementById("workerLogsView");
+  const operationTimelineView = document.getElementById("operationTimelineView");
   const workerFailureLogView = document.getElementById("workerFailureLogView");
   const tabDashboard = document.getElementById("tabDashboard");
   const tabNotificationMatrix = document.getElementById("tabNotificationMatrix");
@@ -12657,6 +12716,7 @@ function setActiveTab(tab, load = true) {
   const tabSampling = document.getElementById("tabSampling");
   const tabDatabase = document.getElementById("tabDatabase");
   const tabWorkerLogs = document.getElementById("tabWorkerLogs");
+  const tabOperationTimeline = document.getElementById("tabOperationTimeline");
   const tabWorkerFailureLog = document.getElementById("tabWorkerFailureLog");
 
   const dashboardActive = currentTab === "dashboard";
@@ -12666,6 +12726,7 @@ function setActiveTab(tab, load = true) {
   const samplingActive = currentTab === "sampling";
   const databaseActive = currentTab === "database";
   const workerLogsActive = currentTab === "workerLogs";
+  const operationTimelineActive = currentTab === "operationTimeline";
   const workerFailureLogActive = currentTab === "workerFailureLog";
   if (dashboardView) dashboardView.classList.toggle("hidden", !dashboardActive);
   if (notificationMatrixView) notificationMatrixView.classList.toggle("hidden", !notificationMatrixActive);
@@ -12674,6 +12735,7 @@ function setActiveTab(tab, load = true) {
   if (samplingView) samplingView.classList.toggle("hidden", !samplingActive);
   if (databaseView) databaseView.classList.toggle("hidden", !databaseActive);
   if (workerLogsView) workerLogsView.classList.toggle("hidden", !workerLogsActive);
+  if (operationTimelineView) operationTimelineView.classList.toggle("hidden", !operationTimelineActive);
   if (workerFailureLogView) workerFailureLogView.classList.toggle("hidden", !workerFailureLogActive);
   if (tabDashboard) tabDashboard.classList.toggle("active", dashboardActive);
   if (tabNotificationMatrix) tabNotificationMatrix.classList.toggle("active", notificationMatrixActive);
@@ -12682,6 +12744,7 @@ function setActiveTab(tab, load = true) {
   if (tabSampling) tabSampling.classList.toggle("active", samplingActive);
   if (tabDatabase) tabDatabase.classList.toggle("active", databaseActive);
   if (tabWorkerLogs) tabWorkerLogs.classList.toggle("active", workerLogsActive);
+  if (tabOperationTimeline) tabOperationTimeline.classList.toggle("active", operationTimelineActive);
   if (tabWorkerFailureLog) tabWorkerFailureLog.classList.toggle("active", workerFailureLogActive);
   [
     [tabDashboard, dashboardActive],
@@ -12691,6 +12754,7 @@ function setActiveTab(tab, load = true) {
     [tabSampling, samplingActive],
     [tabDatabase, databaseActive],
     [tabWorkerLogs, workerLogsActive],
+    [tabOperationTimeline, operationTimelineActive],
     [tabWorkerFailureLog, workerFailureLogActive],
   ].forEach(([tab, active]) => {
     if (!tab) return;
@@ -12726,6 +12790,7 @@ bindChangeIfPresent("langSelect", (event) => {
   renderSamplingRangeInputContainer();
   syncWorkerLogsFilters();
   if (stateCache.lastWorkerLogsPage) renderWorkerLogsPage(stateCache.lastWorkerLogsPage);
+  if (stateCache.lastOperationTimeline) renderOperationTimelinePage(stateCache.lastOperationTimeline);
 });
 
 bindChangeIfPresent("autoRefreshSelect", (event) => {
@@ -12772,6 +12837,9 @@ bindClickIfPresent("tabDatabase", () => {
 });
 bindClickIfPresent("tabWorkerLogs", () => {
   setActiveTab("workerLogs");
+});
+bindClickIfPresent("tabOperationTimeline", () => {
+  setActiveTab("operationTimeline");
 });
 bindClickIfPresent("tabWorkerFailureLog", () => {
   setActiveTab("workerFailureLog");

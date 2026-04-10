@@ -56,6 +56,7 @@ from app.persistence import (
     export_database_bytes,
     finalize_pending_worker_api_logs_for_round,
     get_latest_operation_runs,
+    list_operation_runs,
     get_realtime_kv_by_prefix,
     get_latest_sample,
     get_metric_rows,
@@ -133,10 +134,12 @@ POOL_PUMP_SWITCH_ENTITY_ID = "switch.cuco_v3_3c00_switch"
 POOL_PUMP_POWER_ENTITY_ID = "sensor.cuco_v3_3c00_electric_power"
 POOL_PUMP_ASSUMED_POWER_W = 1100.0
 POOL_PUMP_FREE_ENERGY_GRID_MAX_W = 15_000.0
+POOL_PUMP_FREE_ENERGY_RESTART_COOLDOWN_SECONDS = 15 * 60
 POOL_PUMP_FREE_ENERGY_STATE_KEY = "operation_state.pool_pump_free_energy"
 POOL_PUMP_OVERNIGHT_RUNTIME_FRACTION = 0.8
 POOL_PUMP_OVERNIGHT_TARGET_START_HOUR = 23
 POOL_PUMP_OVERNIGHT_TARGET_END_HOUR = 5
+POOL_PUMP_OVERNIGHT_RESTART_COOLDOWN_SECONDS = 15 * 60
 POOL_PUMP_OVERNIGHT_STATE_KEY = "operation_state.pool_pump_overnight"
 TIME_WINDOW_PRIORITY_OVERRIDE_STATE_KEY = "time_window.priority_override"
 BATTERY_CAPACITY_KWH = {
@@ -159,7 +162,8 @@ FREE_ENERGY_WINDOW_END_HOUR = 14
 PRIORITY_BUSINESS_DAY_START_HOUR = 11
 TESLA_PRIORITY_TARGET_SOC_PERCENT = 80.0
 TESLA_PRIORITY_MIN_SOC_PERCENT = 10.0
-TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT = 50.0
+TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT = 60.0
+TESLA_PRIORITY_CRITICAL_SOC_PERCENT = 40.0
 POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MIN_HOURS = 6.0
 POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MAX_HOURS = 9.0
 POOL_PUMP_PRIORITY_TIME_WEIGHTS: tuple[tuple[str, int, int, float], ...] = (
@@ -1545,13 +1549,17 @@ def _tesla_priority_score_for_soc(soc_percent: float | None) -> float:
     soc_value = _clamp(float(soc_percent), TESLA_PRIORITY_MIN_SOC_PERCENT, TESLA_PRIORITY_TARGET_SOC_PERCENT)
     if soc_value >= TESLA_PRIORITY_TARGET_SOC_PERCENT:
         return 0.0
+    if soc_value <= TESLA_PRIORITY_CRITICAL_SOC_PERCENT:
+        return 100.0
     if soc_value >= TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT:
         span = TESLA_PRIORITY_TARGET_SOC_PERCENT - TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT
         progress = (TESLA_PRIORITY_TARGET_SOC_PERCENT - soc_value) / span if span > 0 else 1.0
-        return _clamp(progress, 0.0, 1.0) ** 2 * 60.0
-    span = TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT - TESLA_PRIORITY_MIN_SOC_PERCENT
+        # 60%-80% keeps moderate urgency, but grows faster than the old curve.
+        return (_clamp(progress, 0.0, 1.0) ** 1.7) * 45.0
+    span = TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT - TESLA_PRIORITY_CRITICAL_SOC_PERCENT
     progress = (TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT - soc_value) / span if span > 0 else 1.0
-    return 60.0 + (_clamp(progress, 0.0, 1.0) ** 2 * 40.0)
+    # 40%-60% ramps aggressively towards max priority.
+    return 45.0 + (_clamp(progress, 0.0, 1.0) ** 1.2) * 55.0
 
 
 def _integrate_pool_pump_priority_window_runtime(
@@ -1691,8 +1699,9 @@ async def _build_device_priority_snapshot(
             "soc_percent": round(tesla_soc_percent, 1) if tesla_soc_percent is not None else None,
             "target_soc_percent": TESLA_PRIORITY_TARGET_SOC_PERCENT,
             "high_urgency_soc_percent": TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT,
+            "critical_soc_percent": TESLA_PRIORITY_CRITICAL_SOC_PERCENT,
             "min_soc_percent": TESLA_PRIORITY_MIN_SOC_PERCENT,
-            "formula": "80%+ => 0; 50%-80% => ((80-soc)/30)^2 * 60; below 50% => 60 + ((50-soc)/40)^2 * 40",
+            "formula": "80%+ => 0; 60%-80% => ((80-soc)/20)^1.7 * 45; 40%-60% => 45 + ((60-soc)/20)^1.2 * 55; 40%- => 100",
         },
         "pool_pump": {
             "score": pump_score,
@@ -3507,6 +3516,213 @@ def _worker_action_steps(action_map: dict[str, object]) -> list[str]:
     return [str(item) for item in steps if str(item).strip()] if isinstance(steps, list) else []
 
 
+def _worker_operation_action_label(action_code: str) -> str:
+    normalized = str(action_code or "").strip().lower()
+    if not normalized:
+        return ""
+    if normalized == "start_pool_pump":
+        return "开启水泵(start_pool_pump)"
+    if normalized == "stop_pool_pump":
+        return "关闭水泵(stop_pool_pump)"
+    if normalized == "start_charging":
+        return "开启特斯拉充电(start_charging)"
+    if normalized == "stop_charging":
+        return "关闭特斯拉充电(stop_charging)"
+    if normalized == "restart_charging":
+        return "重启特斯拉充电(restart_charging)"
+    if normalized == "restart_charging_for_current_mismatch":
+        return "重启特斯拉充电(电流不一致)(restart_charging_for_current_mismatch)"
+    set_current_match = re.fullmatch(r"set_current_(\d+)a", normalized)
+    if set_current_match:
+        amps = set_current_match.group(1)
+        return f"设置特斯拉充电电流为{amps}A({normalized})"
+    return normalized
+
+
+def _worker_operation_action_detail(action_map: dict[str, object]) -> str:
+    action_type = str(action_map.get("type") or "").strip().lower()
+    if action_type in ("", "noop"):
+        return str(action_map.get("reason") or "noop")
+
+    if action_type == "apply":
+        step_labels = [
+            _worker_operation_action_label(step)
+            for step in _worker_action_steps(action_map)
+        ]
+        applied_steps = [item for item in step_labels if item]
+        if applied_steps:
+            return ", ".join(applied_steps)
+        reason = str(action_map.get("reason") or "").strip()
+        return reason or action_type
+
+    return _worker_operation_action_label(action_type)
+
+
+def _operation_reason_label(reason: object) -> str:
+    raw = str(reason or "").strip()
+    code = raw.lower()
+    if not raw:
+        return "-"
+    if code in (
+        "supply_insufficient_for_pool_pump",
+        "free_energy_supply_insufficient_for_pool_pump",
+        "tesla_priority",
+        "grid_cap_exceeded",
+        "tesla_priority_pending",
+        "tesla_priority_blocks_pool_pump",
+        "pool_pump_would_exceed_free_energy_grid_cap",
+    ):
+        return "供电不足（电网余量不足）"
+    if code in ("within_grid_cap_after_tesla_priority", "free_energy_pool_pump_within_grid_cap_after_tesla_priority"):
+        return "供电充足（电网余量充足）"
+    if code in ("recent_stop_cooldown", "free_energy_recent_stop_cooldown_active", "pool_pump_recent_stop_cooldown_active"):
+        return "防抖冷却中（距离上次停泵不足15分钟）"
+    if code == "runtime_budget_available":
+        return "预算充足（夜间运行时长仍有余额）"
+    if code == "runtime_budget_exhausted":
+        return "预算耗尽（夜间运行时长已用完）"
+    if code == "runtime_budget_unavailable":
+        return "预算不可用（缺少有效计算数据）"
+    if code == "outside_window":
+        return "不在当前控制窗口"
+    if code == "rule_disabled":
+        return "该规则已禁用"
+    return raw
+
+
+def _operation_checks(payload: dict[str, object]) -> list[dict[str, object]]:
+    checks = payload.get("checks")
+    return [item for item in checks if isinstance(item, dict)] if isinstance(checks, list) else []
+
+
+def _operation_find_check_for_action(payload: dict[str, object], action_type: str) -> dict[str, object] | None:
+    normalized_type = str(action_type or "").strip().lower()
+    if not normalized_type:
+        return None
+    for check in reversed(_operation_checks(payload)):
+        action = check.get("action")
+        action_map = action if isinstance(action, dict) else {}
+        check_action_type = str(action_map.get("type") or "").strip().lower()
+        if check_action_type == normalized_type:
+            return check
+    return None
+
+
+def _operation_reason_with_metrics(
+    payload: dict[str, object],
+    *,
+    action_code: str,
+    action_map: dict[str, object],
+    fallback_reason: str,
+) -> str:
+    action_type = str(action_code or "").strip().lower()
+    reason_code = str(action_map.get("reason") or "").strip() or str(fallback_reason or "").strip()
+    base_reason = _operation_reason_label(reason_code)
+
+    check = _operation_find_check_for_action(payload, action_type)
+    if not isinstance(check, dict):
+        return base_reason
+    details = check.get("details")
+    details_map = details if isinstance(details, dict) else {}
+    decision = check.get("decision")
+    decision_map = decision if isinstance(decision, dict) else {}
+    decision_reason = str(check.get("decision_reason") or "").strip().lower()
+
+    supply_insufficient_codes = {
+        "supply_insufficient_for_pool_pump",
+        "free_energy_supply_insufficient_for_pool_pump",
+        "tesla_priority",
+        "grid_cap_exceeded",
+        "tesla_priority_pending",
+        "tesla_priority_blocks_pool_pump",
+        "pool_pump_would_exceed_free_energy_grid_cap",
+    }
+    if action_type == "start_pool_pump":
+        supply_sufficient_codes = {
+            "within_grid_cap_after_tesla_priority",
+            "free_energy_pool_pump_within_grid_cap_after_tesla_priority",
+        }
+        if reason_code.lower() in supply_sufficient_codes or decision_reason in supply_sufficient_codes:
+            predicted_with_pump_w = _to_number(details_map.get("predicted_grid_with_pump_w"))
+            if predicted_with_pump_w is None:
+                predicted_with_pump_w = _to_number(decision_map.get("predicted_grid_w"))
+            if predicted_with_pump_w is not None:
+                cap_w = float(POOL_PUMP_FREE_ENERGY_GRID_MAX_W)
+                margin_w = cap_w - predicted_with_pump_w
+                if margin_w >= 0:
+                    return (
+                        f"{base_reason}（预测并网{int(round(predicted_with_pump_w))}W，"
+                        f"上限{int(round(cap_w))}W，余量{int(round(margin_w))}W）"
+                    )
+                return (
+                    f"{base_reason}（预测并网{int(round(predicted_with_pump_w))}W，"
+                    f"上限{int(round(cap_w))}W，超出{int(round(-margin_w))}W）"
+                )
+        return base_reason
+
+    if action_type == "stop_pool_pump" and (
+        reason_code.lower() in supply_insufficient_codes or decision_reason in supply_insufficient_codes
+    ):
+        cap_w = float(POOL_PUMP_FREE_ENERGY_GRID_MAX_W)
+        current_grid_import_w = _to_number(details_map.get("current_grid_import_w"))
+        if current_grid_import_w is not None and current_grid_import_w > cap_w:
+            exceed_w = current_grid_import_w - cap_w
+            return (
+                f"供电不足（实测并网{int(round(current_grid_import_w))}W，"
+                f"上限{int(round(cap_w))}W，超出{int(round(exceed_w))}W）"
+            )
+
+        predicted_with_pump_w = _to_number(details_map.get("predicted_grid_with_pump_w"))
+        if predicted_with_pump_w is None:
+            predicted_with_pump_w = _to_number(decision_map.get("predicted_grid_w"))
+        if predicted_with_pump_w is not None:
+            exceed_w = predicted_with_pump_w - cap_w
+            if exceed_w > 0:
+                return (
+                    f"供电不足（当前实测{int(round(current_grid_import_w))}W，"
+                    f"按目标预计{int(round(predicted_with_pump_w))}W，"
+                    f"将超出上限{int(round(exceed_w))}W）"
+                    if current_grid_import_w is not None
+                    else (
+                        f"供电不足（按目标预计{int(round(predicted_with_pump_w))}W，"
+                        f"上限{int(round(cap_w))}W，超出{int(round(exceed_w))}W）"
+                    )
+                )
+            return (
+                f"{base_reason}（当前实测{int(round(current_grid_import_w))}W，"
+                f"上限{int(round(cap_w))}W）"
+                if current_grid_import_w is not None
+                else (
+                    f"{base_reason}（按目标预计{int(round(predicted_with_pump_w))}W，"
+                    f"上限{int(round(cap_w))}W）"
+                )
+            )
+        return base_reason
+
+    runtime_budget = details_map.get("runtime_budget")
+    runtime_budget_map = runtime_budget if isinstance(runtime_budget, dict) else {}
+    if reason_code.lower() in ("runtime_budget_exhausted", "runtime_budget_unavailable"):
+        parts: list[str] = []
+        remaining_h = _to_number(runtime_budget_map.get("remaining_runtime_hours"))
+        elapsed_h = _to_number(runtime_budget_map.get("elapsed_runtime_hours"))
+        target_h = _to_number(runtime_budget_map.get("target_runtime_hours"))
+        if remaining_h is not None:
+            parts.append(f"剩余{remaining_h:.2f}h")
+        if elapsed_h is not None:
+            parts.append(f"已用{elapsed_h:.2f}h")
+        if target_h is not None:
+            parts.append(f"目标{target_h:.2f}h")
+        if parts:
+            return f"{base_reason}（{'，'.join(parts)}）"
+        return base_reason
+
+    if reason_code.lower() == "recent_stop_cooldown":
+        cooldown_remaining_minutes = _to_number(details_map.get("restart_cooldown_remaining_minutes"))
+        if cooldown_remaining_minutes is not None:
+            return f"{base_reason}（剩余冷却{cooldown_remaining_minutes:.1f}分钟）"
+    return base_reason
+
+
 def _worker_has_operation(payload: dict[str, object]) -> bool:
     for action_map in _worker_action_list(payload):
         action_type = str(action_map.get("type") or "").strip().lower()
@@ -3585,18 +3801,202 @@ def _worker_primary_notification(payload: dict[str, object]) -> dict[str, object
 
 
 def _worker_operation_detail_text(payload: dict[str, object]) -> str:
+    action_list = _worker_action_list(payload)
+    has_applied_action = any(
+        str(action_map.get("type") or "").strip().lower() not in ("", "noop")
+        for action_map in action_list
+    )
     details: list[str] = []
-    for action_map in _worker_action_list(payload):
+    for action_map in action_list:
         action_type = str(action_map.get("type") or "noop").strip().lower()
-        steps = _worker_action_steps(action_map)
-        if action_type == "stop_charging":
-            details.append("stop_charging")
+        if has_applied_action and action_type in ("", "noop"):
             continue
-        if steps:
-            details.append(", ".join(steps))
-            continue
-        details.append(str(action_map.get("reason") or action_type or "noop"))
+        detail = _worker_operation_action_detail(action_map).strip()
+        if detail and detail not in details:
+            details.append(detail)
     return " | ".join(item for item in details if item) or "noop"
+
+
+def _operation_timeline_status_suffix(status: object) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized == OPERATION_RUN_STATUS_PENDING:
+        return "（进行中）"
+    if normalized == OPERATION_RUN_STATUS_FAILED:
+        return "（失败）"
+    if normalized == OPERATION_RUN_STATUS_TIMEOUT:
+        return "（超时）"
+    return ""
+
+
+def _operation_timeline_worker_entries(payload: dict[str, object]) -> list[dict[str, str]]:
+    action_list = _worker_action_list(payload)
+    decision_reason = str(payload.get("decision_reason") or "").strip()
+    entries: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _append_entry(operation_text: str, reason_text: str) -> None:
+        operation = str(operation_text or "").strip()
+        reason = str(reason_text or "").strip() or "-"
+        if not operation:
+            return
+        key = (operation, reason)
+        if key in seen:
+            return
+        seen.add(key)
+        entries.append({"operation": operation, "reason": reason})
+
+    for action_map in action_list:
+        action_type = str(action_map.get("type") or "").strip().lower()
+        if action_type in ("", "noop"):
+            continue
+        if action_type == "apply":
+            steps = _worker_action_steps(action_map)
+            if steps:
+                for step in steps:
+                    reason = _operation_reason_with_metrics(
+                        payload,
+                        action_code=step,
+                        action_map=action_map,
+                        fallback_reason=decision_reason,
+                    )
+                    _append_entry(_worker_operation_action_label(step), reason)
+            else:
+                reason = _operation_reason_with_metrics(
+                    payload,
+                    action_code=action_type,
+                    action_map=action_map,
+                    fallback_reason=decision_reason,
+                )
+                _append_entry(_worker_operation_action_label(action_type), reason)
+            continue
+        reason = _operation_reason_with_metrics(
+            payload,
+            action_code=action_type,
+            action_map=action_map,
+            fallback_reason=decision_reason,
+        )
+        _append_entry(_worker_operation_action_label(action_type), reason)
+
+    if entries:
+        return entries
+
+    detail = _worker_operation_detail_text(payload).strip()
+    if not detail or detail.lower() == "noop":
+        return []
+    for part in detail.split("|"):
+        item = part.strip()
+        if not item or item.lower() == "noop":
+            continue
+        _append_entry(item, _operation_reason_label(decision_reason or "-"))
+    return entries
+
+
+def _operation_timeline_manual_reason(run: dict[str, object]) -> str:
+    status = str(run.get("status") or "").strip().lower()
+    error_text = str(run.get("error_text") or "").strip()
+    if status in (OPERATION_RUN_STATUS_FAILED, OPERATION_RUN_STATUS_TIMEOUT):
+        return error_text or "执行失败"
+    if status == OPERATION_RUN_STATUS_PENDING:
+        return "手动触发，等待结果"
+    return "手动触发"
+
+
+def _operation_timeline_manual_text(run: dict[str, object]) -> str:
+    operation_code = str(run.get("operation_code") or "").strip().lower()
+    title = str(run.get("title") or run.get("operation_code") or "operation").strip() or "operation"
+    request_payload = run.get("request_payload")
+    request_map = request_payload if isinstance(request_payload, dict) else {}
+
+    if operation_code == "tesla.manual.toggle_charging":
+        enabled = _to_bool(request_map.get("enabled"))
+        if enabled is True:
+            base = "开启特斯拉充电"
+        elif enabled is False:
+            base = "关闭特斯拉充电"
+        else:
+            base = title
+    elif operation_code == "tesla.manual.set_charge_current":
+        amps = _to_number(request_map.get("amps"))
+        base = f"设置特斯拉充电电流为{int(round(amps))}A" if amps is not None else title
+    elif operation_code == "backend.manual.restart_collector":
+        base = "重启后台采集器"
+    elif operation_code == "solplanet.manual.restart_api":
+        base = "重启Solplanet接口"
+    elif operation_code == "saj.manual.set_working_mode":
+        mode_code = _to_number(request_map.get("mode_code"))
+        base = f"设置SAJ工作模式为{int(round(mode_code))}" if mode_code is not None else "设置SAJ工作模式"
+    elif operation_code == "saj.manual.apply_profile":
+        profile_id = str(request_map.get("profile_id") or "").strip()
+        base = f"应用SAJ配置({profile_id})" if profile_id else "应用SAJ配置"
+    elif operation_code in ("saj.manual.set_charge_slot", "saj.manual.set_discharge_slot"):
+        slot_value = _to_number(request_map.get("slot"))
+        slot_text = f"#{int(round(slot_value))}" if slot_value is not None else ""
+        start_time = str(request_map.get("start_time") or "").strip()
+        end_time = str(request_map.get("end_time") or "").strip()
+        time_text = f"({start_time}-{end_time})" if start_time or end_time else ""
+        base = (
+            f"设置SAJ{'充电' if operation_code.endswith('set_charge_slot') else '放电'}时段{slot_text}{time_text}"
+        )
+    elif operation_code == "saj.manual.set_toggles":
+        parts: list[str] = []
+        charging_control = _to_bool(request_map.get("charging_control"))
+        if charging_control is not None:
+            parts.append(f"充电开关={'开' if charging_control else '关'}")
+        discharging_control = _to_bool(request_map.get("discharging_control"))
+        if discharging_control is not None:
+            parts.append(f"放电开关={'开' if discharging_control else '关'}")
+        charge_mask = _to_number(request_map.get("charge_time_enable_mask"))
+        if charge_mask is not None:
+            parts.append(f"充电掩码={int(round(charge_mask))}")
+        discharge_mask = _to_number(request_map.get("discharge_time_enable_mask"))
+        if discharge_mask is not None:
+            parts.append(f"放电掩码={int(round(discharge_mask))}")
+        base = f"设置SAJ开关({', '.join(parts)})" if parts else "设置SAJ开关"
+    elif operation_code == "saj.manual.set_limits":
+        parts: list[str] = []
+        for key, label in (
+            ("battery_charge_power_limit", "电池充电"),
+            ("battery_discharge_power_limit", "电池放电"),
+            ("grid_max_charge_power", "电网充电"),
+            ("grid_max_discharge_power", "电网放电"),
+        ):
+            value = _to_number(request_map.get(key))
+            if value is not None:
+                parts.append(f"{label}={int(round(value))}%")
+        base = f"设置SAJ功率限制({', '.join(parts)})" if parts else "设置SAJ功率限制"
+    elif operation_code == "saj.manual.refresh_touch":
+        base = "刷新SAJ被动控制"
+    elif operation_code == "solplanet.manual.set_limits":
+        parts: list[str] = []
+        pin = _to_number(request_map.get("pin"))
+        if pin is not None:
+            parts.append(f"Pin={int(round(pin))}W")
+        pout = _to_number(request_map.get("pout"))
+        if pout is not None:
+            parts.append(f"Pout={int(round(pout))}W")
+        base = f"设置Solplanet功率限制({', '.join(parts)})" if parts else "设置Solplanet功率限制"
+    elif operation_code == "solplanet.manual.set_day_schedule":
+        day = str(request_map.get("day") or "").strip()
+        base = f"设置Solplanet日程({day})" if day else "设置Solplanet日程"
+    elif operation_code == "solplanet.manual.set_day_schedule_slot":
+        day = str(request_map.get("day") or "").strip()
+        slot_value = _to_number(request_map.get("slot"))
+        slot_text = f", 槽位#{int(round(slot_value))}" if slot_value is not None else ""
+        base = f"设置Solplanet日程槽位({day}{slot_text})" if day or slot_text else "设置Solplanet日程槽位"
+    elif operation_code == "solplanet.manual.set_raw_setting":
+        raw_payload = request_map.get("payload")
+        raw_map = raw_payload if isinstance(raw_payload, dict) else {}
+        keys = list(raw_map.keys())
+        if keys:
+            preview = ", ".join(keys[:3]) + ("..." if len(keys) > 3 else "")
+            base = f"设置Solplanet原始参数({preview})"
+        else:
+            base = "设置Solplanet原始参数"
+    else:
+        base = title
+
+    suffix = _operation_timeline_status_suffix(run.get("status"))
+    return f"{base}{suffix}" if suffix else base
 
 
 def _worker_check_priority(payload: dict[str, object]) -> tuple[int, int]:
@@ -3748,6 +4148,10 @@ def _operation_check_summary(source: dict[str, object]) -> dict[str, object]:
         "notification_state",
         "thresholds_soc_percent",
         "threshold_soc_percent",
+        "runtime_budget",
+        "restart_cooldown_minutes",
+        "restart_cooldown_remaining_minutes",
+        "last_stop_reason",
     ):
         value = source.get(key)
         if value is not None:
@@ -4173,9 +4577,50 @@ async def _run_pool_pump_free_energy_control_check(
         auto_started = bool(persisted_state.get("auto_started"))
         if persisted_window_key != window_key:
             auto_started = False
-            persisted_state = {"window_key": window_key, "auto_started": False}
+            persisted_state = {
+                "window_key": window_key,
+                "auto_started": False,
+                "last_stop_at_utc": None,
+                "last_stop_reason": None,
+            }
         result["window_key"] = window_key
         result["auto_started"] = auto_started
+        last_stop_at_utc = str(persisted_state.get("last_stop_at_utc") or "").strip()
+        last_stop_reason = str(persisted_state.get("last_stop_reason") or "").strip().lower()
+        cooldown_remaining_seconds: float = 0.0
+        if (
+            last_stop_at_utc
+            and last_stop_reason in (
+                "supply_insufficient_for_pool_pump",
+                "tesla_priority",
+                "grid_cap_exceeded",
+                "tesla_priority_pending",
+            )
+        ):
+            try:
+                last_stop_dt = datetime.fromisoformat(last_stop_at_utc.replace("Z", "+00:00"))
+                if last_stop_dt.tzinfo is None:
+                    last_stop_dt = last_stop_dt.replace(tzinfo=UTC)
+                elapsed_since_stop = max(
+                    (datetime.now(UTC) - last_stop_dt.astimezone(UTC)).total_seconds(),
+                    0.0,
+                )
+                cooldown_remaining_seconds = max(
+                    POOL_PUMP_FREE_ENERGY_RESTART_COOLDOWN_SECONDS - elapsed_since_stop,
+                    0.0,
+                )
+            except ValueError:
+                cooldown_remaining_seconds = 0.0
+        cooldown_active_for_restart = cooldown_remaining_seconds > 0.0
+        result["restart_cooldown_minutes"] = round(
+            POOL_PUMP_FREE_ENERGY_RESTART_COOLDOWN_SECONDS / 60.0, 1
+        )
+        result["restart_cooldown_remaining_minutes"] = round(
+            cooldown_remaining_seconds / 60.0, 2
+        )
+        result["last_stop_reason"] = last_stop_reason or None
+        switch_action_applied: str | None = None
+        switch_reason_applied: str | None = None
 
         if not pump_available:
             result["decision"] = {"mode": "observe_only"}
@@ -4188,6 +4633,8 @@ async def _run_pool_pump_free_energy_control_check(
             if auto_started and pump_enabled:
                 await _pool_pump_set_enabled(False)
                 persisted_state["auto_started"] = False
+                persisted_state["last_stop_at_utc"] = requested_at_utc
+                persisted_state["last_stop_reason"] = "outside_free_energy_window"
                 await _store_pool_pump_free_energy_state(persisted_state)
                 result["action"] = {"type": "stop_pool_pump", "reason": "outside_free_energy_window"}
                 result["decision"] = {"mode": "off"}
@@ -4204,6 +4651,8 @@ async def _run_pool_pump_free_energy_control_check(
             if auto_started and pump_enabled:
                 await _pool_pump_set_enabled(False)
                 persisted_state["auto_started"] = False
+                persisted_state["last_stop_at_utc"] = requested_at_utc
+                persisted_state["last_stop_reason"] = "rule_disabled"
                 await _store_pool_pump_free_energy_state(persisted_state)
                 result["action"] = {"type": "stop_pool_pump", "reason": "rule_disabled"}
                 result["decision"] = {"mode": "off"}
@@ -4261,8 +4710,12 @@ async def _run_pool_pump_free_energy_control_check(
             (float(value) for value in pump_power_w_candidates if value is not None and float(value) > 0),
             POOL_PUMP_ASSUMED_POWER_W,
         )
+        # current_grid_import_w already includes the pump load when pump is running.
+        # Only add the incremental pump load when predicting "with pump" state.
+        current_pump_power_w = pump_power_w if pump_enabled else 0.0
+        pump_additional_grid_w = max(pump_power_w - current_pump_power_w, 0.0)
         predicted_grid_with_tesla_w = base_grid_without_tesla_w + tesla_priority_power_w
-        predicted_grid_with_pump_w = predicted_grid_with_tesla_w + pump_power_w
+        predicted_grid_with_pump_w = predicted_grid_with_tesla_w + pump_additional_grid_w
         tesla_priority_ready = (not tesla_should_charge) or tesla_currently_active
         within_grid_cap = predicted_grid_with_pump_w <= POOL_PUMP_FREE_ENERGY_GRID_MAX_W
 
@@ -4282,6 +4735,9 @@ async def _run_pool_pump_free_energy_control_check(
             if tesla_currently_active
             else "tesla_start_pending"
         )
+        result["pump_enabled_before"] = pump_enabled
+        result["current_pump_power_w"] = round(current_pump_power_w, 1)
+        result["pump_additional_grid_w"] = round(pump_additional_grid_w, 1)
         result["pool_pump_power_w"] = round(pump_power_w, 1)
         result["predicted_grid_with_tesla_w"] = round(predicted_grid_with_tesla_w, 1)
         result["predicted_grid_with_pump_w"] = round(predicted_grid_with_pump_w, 1)
@@ -4313,11 +4769,6 @@ async def _run_pool_pump_free_energy_control_check(
             ),
         }
 
-        priority_blocks_pool_pump = (
-            tesla_should_charge
-            and predicted_grid_with_pump_w > POOL_PUMP_FREE_ENERGY_GRID_MAX_W
-            and priority_winner == "tesla"
-        )
         if (tesla_priority_ready and within_grid_cap) or (priority_winner == "pool_pump" and within_grid_cap):
             result["decision"] = {
                 "mode": "run",
@@ -4330,12 +4781,25 @@ async def _run_pool_pump_free_energy_control_check(
             if pump_enabled:
                 result["action"] = {"type": "noop", "reason": "already_running"}
                 status = "noop"
+            elif cooldown_active_for_restart:
+                result["action"] = {"type": "noop", "reason": "recent_stop_cooldown"}
+                result["decision_reason"] = "free_energy_recent_stop_cooldown_active"
+                status = "noop"
             else:
                 await _pool_pump_set_enabled(True)
                 persisted_state["auto_started"] = True
-                await _store_pool_pump_free_energy_state(persisted_state)
                 result["action"] = {"type": "start_pool_pump", "reason": "within_grid_cap_after_tesla_priority"}
                 status = "applied"
+                switch_action_applied = "start_pool_pump"
+                switch_reason_applied = "within_grid_cap_after_tesla_priority"
+            next_last_stop_at_utc = last_stop_at_utc or None
+            next_last_stop_reason = last_stop_reason or None
+            if switch_action_applied == "stop_pool_pump":
+                next_last_stop_at_utc = requested_at_utc
+                next_last_stop_reason = switch_reason_applied
+            persisted_state["last_stop_at_utc"] = next_last_stop_at_utc
+            persisted_state["last_stop_reason"] = next_last_stop_reason
+            await _store_pool_pump_free_energy_state(persisted_state)
             return result
 
         result["decision"] = {
@@ -4343,26 +4807,31 @@ async def _run_pool_pump_free_energy_control_check(
             "predicted_grid_w": round(predicted_grid_with_pump_w, 1),
             "pool_pump_power_w": round(pump_power_w, 1),
         }
-        result["decision_reason"] = (
-            "tesla_priority_blocks_pool_pump"
-            if priority_blocks_pool_pump or not tesla_priority_ready
-            else "pool_pump_would_exceed_free_energy_grid_cap"
-        )
+        result["decision_reason"] = "free_energy_supply_insufficient_for_pool_pump"
         if pump_enabled:
             await _pool_pump_set_enabled(False)
             persisted_state["auto_started"] = False
-            await _store_pool_pump_free_energy_state(persisted_state)
             result["action"] = {
                 "type": "stop_pool_pump",
-                "reason": "tesla_priority" if (priority_blocks_pool_pump or not tesla_priority_ready) else "grid_cap_exceeded",
+                "reason": "supply_insufficient_for_pool_pump",
             }
             status = "applied"
+            switch_action_applied = "stop_pool_pump"
+            switch_reason_applied = "supply_insufficient_for_pool_pump"
         else:
             result["action"] = {
                 "type": "noop",
-                "reason": "tesla_priority_pending" if (priority_blocks_pool_pump or not tesla_priority_ready) else "grid_cap_exceeded",
+                "reason": "supply_insufficient_for_pool_pump",
             }
             status = "noop"
+        next_last_stop_at_utc = last_stop_at_utc or None
+        next_last_stop_reason = last_stop_reason or None
+        if switch_action_applied == "stop_pool_pump":
+            next_last_stop_at_utc = requested_at_utc
+            next_last_stop_reason = switch_reason_applied
+        persisted_state["last_stop_at_utc"] = next_last_stop_at_utc
+        persisted_state["last_stop_reason"] = next_last_stop_reason
+        await _store_pool_pump_free_energy_state(persisted_state)
         return result
     except Exception as exc:  # noqa: BLE001
         ok = False
@@ -5641,10 +6110,14 @@ async def _run_pool_pump_overnight_control_check(
                 "elapsed_runtime_seconds": 0.0,
                 "last_enabled": False,
                 "last_evaluated_at_utc": requested_at_utc,
+                "last_stop_at_utc": None,
+                "last_stop_reason": None,
             }
 
         last_enabled = bool(persisted_state.get("last_enabled"))
         elapsed_runtime_seconds = float(persisted_state.get("elapsed_runtime_seconds") or 0.0)
+        last_stop_at_utc = str(persisted_state.get("last_stop_at_utc") or "").strip()
+        last_stop_reason = str(persisted_state.get("last_stop_reason") or "").strip().lower()
         last_evaluated_at_text = str(persisted_state.get("last_evaluated_at_utc") or "").strip()
         if last_enabled and last_evaluated_at_text:
             try:
@@ -5663,6 +6136,28 @@ async def _run_pool_pump_overnight_control_check(
             if target_runtime_seconds is not None
             else None
         )
+        cooldown_remaining_seconds: float = 0.0
+        if (
+            last_stop_at_utc
+            and last_stop_reason in ("runtime_budget_exhausted", "runtime_budget_unavailable")
+        ):
+            try:
+                last_stop_dt = datetime.fromisoformat(last_stop_at_utc.replace("Z", "+00:00"))
+                if last_stop_dt.tzinfo is None:
+                    last_stop_dt = last_stop_dt.replace(tzinfo=UTC)
+                elapsed_since_stop = max(
+                    (datetime.now(UTC) - last_stop_dt.astimezone(UTC)).total_seconds(),
+                    0.0,
+                )
+                cooldown_remaining_seconds = max(
+                    POOL_PUMP_OVERNIGHT_RESTART_COOLDOWN_SECONDS - elapsed_since_stop,
+                    0.0,
+                )
+            except ValueError:
+                cooldown_remaining_seconds = 0.0
+        cooldown_active_for_restart = cooldown_remaining_seconds > 0.0
+        switch_action_applied: str | None = None
+        switch_reason_applied: str | None = None
         result["runtime_budget"] = {
             "window_key": window_key,
             "remaining_base_kwh": round(remaining_base_kwh, 3) if remaining_base_kwh is not None else None,
@@ -5679,6 +6174,9 @@ async def _run_pool_pump_overnight_control_check(
                 else None
             ),
             "runtime_fraction": POOL_PUMP_OVERNIGHT_RUNTIME_FRACTION,
+            "restart_cooldown_minutes": round(POOL_PUMP_OVERNIGHT_RESTART_COOLDOWN_SECONDS / 60.0, 1),
+            "restart_cooldown_remaining_minutes": round(cooldown_remaining_seconds / 60.0, 2),
+            "last_stop_reason": last_stop_reason or None,
         }
 
         tesla_priority_score = _to_number((priority_snapshot.get("tesla") or {}).get("score")) or 0.0
@@ -5707,34 +6205,71 @@ async def _run_pool_pump_overnight_control_check(
                 await _pool_pump_set_enabled(False)
                 result["action"] = {"type": "stop_pool_pump", "reason": "outside_pump_schedule"}
                 status = "applied"
+                switch_action_applied = "stop_pool_pump"
+                switch_reason_applied = "outside_pump_schedule"
             else:
                 result["action"] = {"type": "noop", "reason": "outside_pump_schedule"}
                 status = "noop"
             result["decision"] = {"mode": "off"}
             result["decision_reason"] = "outside_pool_pump_schedule"
-        elif remaining_runtime_seconds is None or remaining_runtime_seconds <= 0:
+        elif remaining_runtime_seconds is None:
+            if pump_enabled:
+                await _pool_pump_set_enabled(False)
+                result["action"] = {"type": "stop_pool_pump", "reason": "runtime_budget_unavailable"}
+                status = "applied"
+                switch_action_applied = "stop_pool_pump"
+                switch_reason_applied = "runtime_budget_unavailable"
+            else:
+                result["action"] = {"type": "noop", "reason": "runtime_budget_unavailable"}
+                status = "noop"
+            result["decision"] = {"mode": "off"}
+            result["decision_reason"] = "pool_pump_runtime_budget_unavailable"
+        elif remaining_runtime_seconds <= 0:
             if pump_enabled:
                 await _pool_pump_set_enabled(False)
                 result["action"] = {"type": "stop_pool_pump", "reason": "runtime_budget_exhausted"}
                 status = "applied"
+                switch_action_applied = "stop_pool_pump"
+                switch_reason_applied = "runtime_budget_exhausted"
             else:
                 result["action"] = {"type": "noop", "reason": "runtime_budget_exhausted"}
                 status = "noop"
             result["decision"] = {"mode": "off"}
             result["decision_reason"] = "pool_pump_runtime_budget_exhausted"
         else:
-            result["decision"] = {
-                "mode": "run",
-                "remaining_runtime_hours": round(float(remaining_runtime_seconds) / 3600.0, 3),
-            }
-            result["decision_reason"] = "pool_pump_runtime_budget_available"
             if pump_enabled:
+                result["decision"] = {
+                    "mode": "run",
+                    "remaining_runtime_hours": round(float(remaining_runtime_seconds) / 3600.0, 3),
+                }
+                result["decision_reason"] = "pool_pump_runtime_budget_available"
                 result["action"] = {"type": "noop", "reason": "already_running_within_budget"}
                 status = "noop"
+            elif cooldown_active_for_restart:
+                result["decision"] = {
+                    "mode": "off",
+                    "remaining_runtime_hours": round(float(remaining_runtime_seconds) / 3600.0, 3),
+                }
+                result["decision_reason"] = "pool_pump_recent_stop_cooldown_active"
+                result["action"] = {"type": "noop", "reason": "recent_stop_cooldown"}
+                status = "noop"
             else:
+                result["decision"] = {
+                    "mode": "run",
+                    "remaining_runtime_hours": round(float(remaining_runtime_seconds) / 3600.0, 3),
+                }
+                result["decision_reason"] = "pool_pump_runtime_budget_available"
                 await _pool_pump_set_enabled(True)
                 result["action"] = {"type": "start_pool_pump", "reason": "runtime_budget_available"}
                 status = "applied"
+                switch_action_applied = "start_pool_pump"
+                switch_reason_applied = "runtime_budget_available"
+
+        next_last_stop_at_utc = last_stop_at_utc or None
+        next_last_stop_reason = last_stop_reason or None
+        if switch_action_applied == "stop_pool_pump":
+            next_last_stop_at_utc = requested_at_utc
+            next_last_stop_reason = switch_reason_applied
 
         await _store_pool_pump_overnight_state(
             {
@@ -5743,6 +6278,8 @@ async def _run_pool_pump_overnight_control_check(
                 "target_runtime_seconds": target_runtime_seconds,
                 "last_enabled": bool(result.get("decision", {}).get("mode") == "run" and remaining_runtime_seconds and remaining_runtime_seconds > 0),
                 "last_evaluated_at_utc": requested_at_utc,
+                "last_stop_at_utc": next_last_stop_at_utc,
+                "last_stop_reason": next_last_stop_reason,
             }
         )
         return result
@@ -8669,7 +9206,7 @@ def _worker_control_result_text(
         window_mode = _worker_window_name(payload)
         window_schedule = _worker_window_label(payload)
         detail = _worker_operation_detail_text(payload)
-        decision_reason = str(payload.get("decision_reason") or "-")
+        decision_reason = _operation_reason_label(payload.get("decision_reason") or "-")
         checks = payload.get("checks")
         check_list = [item for item in checks if isinstance(item, dict)] if isinstance(checks, list) else []
         check_parts: list[str] = []
@@ -8705,7 +9242,7 @@ def _worker_control_result_text(
             return (
                 f"Operation {status}: "
                 f"window={window_mode}, schedule={window_schedule}, "
-                f"action={detail}, reason={decision_reason}"
+                f"actions={detail}, reason={decision_reason}"
             )
         return (
             f"Operation {status}: "
@@ -10164,6 +10701,96 @@ async def worker_logs(
     )
     payload["updated_at"] = datetime.now(UTC).isoformat()
     return payload
+
+
+@app.get("/api/operations/timeline")
+async def operations_timeline(
+    limit: int = Query(default=200, ge=1, le=500),
+) -> dict[str, object]:
+    fetch_limit = min(1000, max(200, int(limit) * 4))
+    worker_payload = await asyncio.to_thread(
+        list_worker_api_logs,
+        storage_db_path,
+        page=1,
+        page_size=fetch_limit,
+        worker="worker",
+        system=OPERATION_LOG_SYSTEM,
+        service=OPERATION_SUMMARY_SERVICE,
+        status=WORKER_LOG_STATUS_APPLIED,
+        exclude_statuses=(),
+    )
+    manual_runs = await asyncio.to_thread(
+        list_operation_runs,
+        storage_db_path,
+        limit=fetch_limit,
+    )
+
+    items: list[dict[str, object]] = []
+    for row in worker_payload.get("items") or []:
+        if not isinstance(row, dict):
+            continue
+        payload = row.get("payload_json")
+        payload_map = payload if isinstance(payload, dict) else {}
+        action_entries = _operation_timeline_worker_entries(payload_map)
+        if not action_entries:
+            continue
+        requested_at_utc = str(row.get("requested_at_utc") or "").strip()
+        requested_at_epoch = _to_number(row.get("requested_at_epoch")) or 0.0
+        for idx, action_entry in enumerate(action_entries):
+            operation_text = str(action_entry.get("operation") or "").strip()
+            reason_text = str(action_entry.get("reason") or "").strip() or "-"
+            if not operation_text:
+                continue
+            items.append(
+                {
+                    "id": f"worker:{int(row.get('id') or 0)}:{idx}",
+                    "time_utc": requested_at_utc,
+                    "time_epoch": requested_at_epoch,
+                    "operation": operation_text,
+                    "reason": reason_text,
+                    "source": "auto",
+                }
+            )
+
+    for run in manual_runs:
+        if not isinstance(run, dict):
+            continue
+        operation_text = _operation_timeline_manual_text(run).strip()
+        if not operation_text:
+            continue
+        time_utc = str(run.get("started_at_utc") or "").strip()
+        time_epoch = _to_number(run.get("started_at_epoch")) or 0.0
+        items.append(
+            {
+                "id": f"manual:{int(run.get('id') or 0)}",
+                "time_utc": time_utc,
+                "time_epoch": time_epoch,
+                "operation": operation_text,
+                "reason": _operation_timeline_manual_reason(run),
+                "source": "manual",
+            }
+        )
+
+    items.sort(
+        key=lambda item: (float(item.get("time_epoch") or 0.0), str(item.get("id") or "")),
+        reverse=True,
+    )
+    trimmed = items[: int(limit)]
+    return {
+        "updated_at": datetime.now(UTC).isoformat(),
+        "count": len(trimmed),
+        "items": [
+            {
+                "id": str(item.get("id") or ""),
+                "time_utc": str(item.get("time_utc") or ""),
+                "time_epoch": float(item.get("time_epoch") or 0.0),
+                "operation": str(item.get("operation") or ""),
+                "reason": str(item.get("reason") or "-"),
+                "source": str(item.get("source") or ""),
+            }
+            for item in trimmed
+        ],
+    }
 
 
 @app.get("/api/dashboard/notifications")
