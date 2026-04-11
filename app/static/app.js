@@ -455,6 +455,7 @@ const I18N = {
     coreTitle: "Core Entities",
     flowTitle: "Real-time Energy Flow Comparison",
     integratedFlowTitle: "Dashboard",
+    dashboardUsableBatteryTitle: "Usable Battery Total",
     dashboardNotificationsTitle: "Notifications",
     dashboardNotificationStateNotified: "Notified",
     dashboardNotificationStateDismissed: "Dismissed",
@@ -594,6 +595,10 @@ const I18N = {
     batteryRateDischarging: "Discharge rate {value}%/h",
     batteryRateIdle: "No active charge/discharge",
     batteryRateNoData: "Rate unavailable",
+    batteryWindowForecastFreeLabel: "Free",
+    batteryWindowForecastDischargeLabel: "Discharge",
+    batteryWindowForecastCompact: "{window} end: {soc}",
+    batteryWindowForecastCompactNoData: "{window} end: -",
     switchboardStateActive: "Bus Active",
     switchboardStateIdle: "Bus Idle",
     socLabel: "SOC",
@@ -1254,6 +1259,7 @@ const I18N = {
     coreTitle: "核心实体",
     flowTitle: "实时能量流向对比",
     integratedFlowTitle: "Dashboard",
+    dashboardUsableBatteryTitle: "两电池可用总电量",
     dashboardNotificationsTitle: "通知",
     dashboardNotificationStateNotified: "已通知",
     dashboardNotificationStateDismissed: "已忽略",
@@ -1393,6 +1399,10 @@ const I18N = {
     batteryRateDischarging: "放电速率 {value}%/小时",
     batteryRateIdle: "当前未在充放电",
     batteryRateNoData: "暂时无法估算速率",
+    batteryWindowForecastFreeLabel: "免费充电",
+    batteryWindowForecastDischargeLabel: "放电",
+    batteryWindowForecastCompact: "{window}结束：{soc}",
+    batteryWindowForecastCompactNoData: "{window}结束：-",
     switchboardStateActive: "母线工作中",
     switchboardStateIdle: "母线空闲",
     socLabel: "电池电量",
@@ -3116,6 +3126,11 @@ const BATTERY_MIN_DISCHARGE_SOC = {
   solplanet: 10,
 };
 
+const SOLPLANET_WINDOW_FORECASTS = [
+  { labelKey: "batteryWindowForecastFreeLabel", startHour: 11, endHour: 14 },
+  { labelKey: "batteryWindowForecastDischargeLabel", startHour: 18, endHour: 20 },
+];
+
 const POWER_FLOW_ACTIVE_THRESHOLD_W = 30;
 const BATTERY_SOC_COLOR_STOPS = [
   { pct: 0, rgb: [180, 88, 88] },
@@ -3211,6 +3226,73 @@ function formatBatteryRuntimeTargetTime(targetAt) {
     targetAt.getDate() === now.getDate();
   if (sameDay) return timeText;
   return currentLang === "zh" ? `明天 ${timeText}` : `tmr ${timeText}`;
+}
+
+function getNextWindowEndLocalTime(endHour, now = new Date()) {
+  const candidate = new Date(now);
+  candidate.setHours(endHour, 0, 0, 0);
+  if (candidate.getTime() <= now.getTime()) {
+    candidate.setDate(candidate.getDate() + 1);
+  }
+  return candidate;
+}
+
+function isLocalTimeInHourWindow(now, startHour, endHour) {
+  const hour = now.getHours();
+  if (!Number.isFinite(startHour) || !Number.isFinite(endHour)) return false;
+  if (startHour === endHour) return true;
+  if (startHour < endHour) {
+    return hour >= startHour && hour < endHour;
+  }
+  return hour >= startHour || hour < endHour;
+}
+
+function projectBatterySocAtTarget(system, batterySoc, batteryW, targetAt) {
+  const capacityKwh = BATTERY_CAPACITY_KWH[system];
+  if (!Number.isFinite(capacityKwh)) return null;
+  const socValue = Number(batterySoc);
+  const powerW = Number(batteryW);
+  if (!Number.isFinite(socValue) || !Number.isFinite(powerW)) return null;
+  if (!(targetAt instanceof Date) || Number.isNaN(targetAt.getTime())) return null;
+  const now = Date.now();
+  const targetMs = targetAt.getTime();
+  if (targetMs <= now) return null;
+  const hoursToTarget = (targetMs - now) / 3600000;
+  const currentSoc = Math.max(0, Math.min(100, socValue));
+  const deltaSoc = ((-powerW / 1000) * hoursToTarget * 100) / capacityKwh;
+  const projectedSoc = Math.max(0, Math.min(100, currentSoc + deltaSoc));
+  return {
+    socPercent: projectedSoc,
+    energyKwh: (capacityKwh * projectedSoc) / 100,
+  };
+}
+
+function formatSolplanetWindowForecastHtml(batterySoc, batteryW) {
+  const now = new Date();
+  const activeWindows = SOLPLANET_WINDOW_FORECASTS.filter((item) => (
+    isLocalTimeInHourWindow(now, Number(item.startHour), Number(item.endHour))
+  ));
+  if (!activeWindows.length) return "";
+
+  const lines = activeWindows.map((item) => {
+    const targetAt = getNextWindowEndLocalTime(item.endHour);
+    const projection = projectBatterySocAtTarget("solplanet", batterySoc, batteryW, targetAt);
+    const windowLabel = t(item.labelKey);
+    if (!projection) {
+      return (
+        `<div class="battery-window-forecast-item">` +
+        `<span class="battery-window-forecast-compact">${escapeHtml(t("batteryWindowForecastCompactNoData", { window: windowLabel }))}</span>` +
+        `</div>`
+      );
+    }
+    const socText = `${formatTrimmedDecimal(projection.socPercent, 0)}%`;
+    return (
+      `<div class="battery-window-forecast-item">` +
+      `<span class="battery-window-forecast-compact">${escapeHtml(t("batteryWindowForecastCompact", { window: windowLabel, soc: socText }))}</span>` +
+      `</div>`
+    );
+  });
+  return lines.join("");
 }
 
 function getBatteryRuntimeProjection(system, batterySoc, batteryW) {
@@ -3397,6 +3479,7 @@ const COMBINED_LAYOUT = {
   nodes: {
     grid: { x: 582, y: 594 },
     solar: { x: 8, y: 594 },
+    usableBattery: { x: 1086, y: 594 },
     switchboard: { x: 558, y: 318 },
     load: { x: 354, y: 48 },
     poolPump: { x: 578, y: 48 },
@@ -3589,6 +3672,19 @@ function buildCombinedDiagramSpec() {
         lines: [
           { id: "combined-solarPowerValue", className: "node-value", text: "-" },
           { id: "combined-solarState", className: "node-state muted", text: "idle" },
+        ],
+      },
+      {
+        id: "combined-usableBatteryNode",
+        kind: "load",
+        icon: "battery",
+        title: "Usable Battery",
+        titleKey: "dashboardUsableBatteryTitle",
+        width: 230,
+        height: 102,
+        position: layout.nodes.usableBattery,
+        lines: [
+          { id: "combined-usableBatteryValue", className: "node-value", text: "-" },
         ],
       },
       {
@@ -4132,7 +4228,7 @@ function buildMobileCombinedFlowGraph(graph) {
       attrs: {
         line: {
           class: "mobile-energy-edge",
-          stroke: "rgba(24, 204, 255, 0.32)",
+          stroke: "rgba(36, 122, 190, 0.32)",
           strokeWidth: 2,
           strokeLinecap: "round",
           strokeLinejoin: "round",
@@ -4329,7 +4425,7 @@ function renderBatterySocDisplay({
     setText(socValueId, "-");
     if (energyValueId) setHtml(energyValueId, formatValueWithDataKindHtml(formatBatteryEnergyKwh(system, null), energyDataKind));
     if (usableValueId) setHtml(usableValueId, formatValueWithDataKindHtml(formatBatteryUsableKwh(system, null), usableDataKind));
-    if (runtimeValueId) setHtml(runtimeValueId, formatBatteryRuntimeEstimateHtml(system, null, batteryW));
+    if (runtimeValueId) setText(runtimeValueId, "");
     if (rateValueId) setText(rateValueId, formatBatterySocRateEstimate(system, batteryW));
     setSocFillLevel(socFillId, 0);
     setSocTextContrastBySocValueId(socValueId, 0);
@@ -4340,7 +4436,7 @@ function renderBatterySocDisplay({
   setHtml(socValueId, formatValueWithDataKindHtml(`${clampedSoc.toFixed(0)}%`, socDataKind));
   if (energyValueId) setHtml(energyValueId, formatValueWithDataKindHtml(formatBatteryEnergyKwh(system, clampedSoc), energyDataKind));
   if (usableValueId) setHtml(usableValueId, formatValueWithDataKindHtml(formatBatteryUsableKwh(system, clampedSoc), usableDataKind));
-  if (runtimeValueId) setHtml(runtimeValueId, formatBatteryRuntimeEstimateHtml(system, clampedSoc, batteryW));
+  if (runtimeValueId) setText(runtimeValueId, "");
   if (rateValueId) setText(rateValueId, formatBatterySocRateEstimate(system, batteryW));
   setSocFillLevel(socFillId, clampedSoc);
   setSocTextContrastBySocValueId(socValueId, clampedSoc);
@@ -5279,6 +5375,12 @@ function renderOvernightEnergyReference(combinedFlow) {
   );
 }
 
+function renderCombinedUsableBatteryNode(combinedFlow) {
+  const reference = overnightEnergyReferenceFromCombinedFlow(combinedFlow);
+  const usableBatteryKwh = toFiniteNumber(reference?.usable_battery_total_kwh);
+  setText("combined-usableBatteryValue", formatEnergyReferenceValue(usableBatteryKwh));
+}
+
 function renderTeslaControlButton(teslaInfo = null) {
   const button = document.getElementById("combined-teslaChargingToggleBtn");
   if (!button) return;
@@ -5573,8 +5675,6 @@ function renderMobileCombinedFlow({
     battery2W,
     inverter1W,
     inverter2W,
-    inverter1Status,
-    inverter2Status,
     solarToInverter1W,
     dataKinds,
   } = combined;
@@ -5593,8 +5693,6 @@ function renderMobileCombinedFlow({
   const solar1Active = solarToInverter1W !== null && solarToInverter1W >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const solar2Active = solar2W !== null && solar2W >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const homeLoadActive = homeLoadW !== null && homeLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
-  const sajModeText = getSajDashboardModeText() || inverterStateText(inverter1Status);
-  const solplanetModeText = inverterStateText(inverter2Status);
   const teslaConnection = formatTeslaConnectionSummary(teslaInfo);
   const poolPumpStateText = poolPumpEnabled
     ? t("poolPumpStateOn")
@@ -5605,6 +5703,16 @@ function renderMobileCombinedFlow({
   const teslaEnergyText = teslaCurrentEnergyKwh !== null && teslaTotalCapacityKwh !== null
     ? `${formatTrimmedDecimal(teslaCurrentEnergyKwh, 1)} / ${formatTrimmedDecimal(teslaTotalCapacityKwh, 1)} kWh`
     : teslaConnection;
+  const sajSocText = battery1Soc === null ? "-" : `${Math.max(0, Math.min(100, battery1Soc)).toFixed(0)}%`;
+  const solplanetSocText = battery2Soc === null ? "-" : `${Math.max(0, Math.min(100, battery2Soc)).toFixed(0)}%`;
+  const sajInverterRatioHtml = formatValueWithDataKindHtml(
+    formatInverterConversion(inverter1W, battery1W, solarToInverter1W),
+    dataKinds.inverterRatio,
+  );
+  const solplanetInverterRatioHtml = formatValueWithDataKindHtml(
+    formatInverterConversion(inverter2W, battery2W, solar2W),
+    dataKinds.inverterRatio,
+  );
   const teslaValueHtml = formatValueWithDataKindHtml(
     teslaSoc === null ? formatPowerKwFromWatts(teslaChargingW) : `${Math.max(0, Math.min(100, teslaSoc)).toFixed(0)}%`,
     teslaSoc === null ? "real" : dataKinds.teslaSoc,
@@ -5637,8 +5745,8 @@ function renderMobileCombinedFlow({
         cls: "node-saj",
         kind: "chip",
         title: "SAJ",
-        valueHtml: formatValueWithDataKindHtml(formatInverterConversion(inverter1W, battery1W, solarToInverter1W), dataKinds.inverterRatio),
-        subValueHtml: escapeHtml(`${sajModeText} · Battery ${Math.max(0, Math.min(100, battery1Soc || 0)).toFixed(0)}%`),
+        valueHtml: escapeHtml(sajSocText),
+        subValueHtml: sajInverterRatioHtml,
         metaHtml: escapeHtml(`${formatBatteryEnergyKwh("saj", battery1Soc)} · ${formatBatteryUsableKwh("saj", battery1Soc)}`),
         accent: "cyan",
         active: sajActive,
@@ -5650,8 +5758,8 @@ function renderMobileCombinedFlow({
         cls: "node-solplanet",
         kind: "chip",
         title: "SOLPLANET",
-        valueHtml: formatValueWithDataKindHtml(formatInverterConversion(inverter2W, battery2W, solar2W), dataKinds.inverterRatio),
-        subValueHtml: escapeHtml(`${solplanetModeText} · Battery ${Math.max(0, Math.min(100, battery2Soc || 0)).toFixed(0)}%`),
+        valueHtml: escapeHtml(solplanetSocText),
+        subValueHtml: solplanetInverterRatioHtml,
         metaHtml: escapeHtml(`${formatBatteryEnergyKwh("solplanet", battery2Soc)} · ${formatBatteryUsableKwh("solplanet", battery2Soc)}`),
         accent: "battery",
         active: solplanetActive,
@@ -5750,6 +5858,7 @@ function renderMobileCombinedFlow({
 }
 
 function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null, poolPumpDevice = null) {
+  renderCombinedUsableBatteryNode(combinedFlow);
   const combined = buildCombinedFlowMetrics(combinedFlow);
   const {
     pvW,
@@ -5963,6 +6072,12 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null, poolPumpDevice
     runtimeDataKind: "estimate",
     rateDataKind: "estimate",
   });
+  const battery2WindowForecastHtml = formatSolplanetWindowForecastHtml(battery2Soc, battery2W);
+  setHtml("combined-battery2RuntimeValue", battery2WindowForecastHtml);
+  const battery2WindowForecastEl = document.getElementById("combined-battery2RuntimeValue");
+  if (battery2WindowForecastEl) {
+    battery2WindowForecastEl.classList.toggle("hidden", !battery2WindowForecastHtml);
+  }
 
   const gridHigh = gridW !== null && Math.abs(gridW) > 15000;
   const gridPowerEl = document.getElementById("combined-gridPowerValue");
@@ -12565,7 +12680,7 @@ async function loadWorkerLogs() {
 
 async function loadOperationTimeline() {
   try {
-    const payload = await fetchJson("/api/operations/timeline?limit=300", { timeoutMs: 10000 });
+    const payload = await fetchJson(`/api/operations/timeline?limit=300&lang=${encodeURIComponent(currentLang)}`, { timeoutMs: 10000 });
     renderOperationTimelinePage(payload);
   } catch (err) {
     stateCache.lastOperationTimeline = null;
@@ -12681,6 +12796,16 @@ function setAutoRefresh(seconds) {
   if (autoRefreshSelect) autoRefreshSelect.value = String(safeSeconds);
 }
 
+function forceRefreshCurrentView() {
+  // Re-render the UI from cached state only, without fetching fresh data.
+  applyTranslations();
+  setActiveTab(currentTab, false);
+  refreshMobileCombinedFlowDiagram();
+  if (currentTab === "sampling") {
+    scheduleSamplingChartsHoverReset({ resize: true });
+  }
+}
+
 function setActiveTab(tab, load = true) {
   const previousTab = currentTab;
   currentTab =
@@ -12791,6 +12916,9 @@ bindChangeIfPresent("langSelect", (event) => {
   syncWorkerLogsFilters();
   if (stateCache.lastWorkerLogsPage) renderWorkerLogsPage(stateCache.lastWorkerLogsPage);
   if (stateCache.lastOperationTimeline) renderOperationTimelinePage(stateCache.lastOperationTimeline);
+  if (stateCache.lastOperationTimeline || currentTab === "operationTimeline") {
+    void loadOperationTimeline();
+  }
 });
 
 bindChangeIfPresent("autoRefreshSelect", (event) => {
@@ -12798,7 +12926,7 @@ bindChangeIfPresent("autoRefreshSelect", (event) => {
 });
 
 bindClickIfPresent("refreshBtn", () => {
-  void loadCurrentTab();
+  forceRefreshCurrentView();
 });
 bindClickIfPresent("combined-teslaChargingToggleBtn", () => {
   void toggleTeslaCharging();

@@ -3516,37 +3516,54 @@ def _worker_action_steps(action_map: dict[str, object]) -> list[str]:
     return [str(item) for item in steps if str(item).strip()] if isinstance(steps, list) else []
 
 
-def _worker_operation_action_label(action_code: str) -> str:
+def _normalize_operation_timeline_lang(value: object) -> Literal["zh", "en"]:
+    normalized = str(value or "").strip().lower()
+    if normalized.startswith("en"):
+        return "en"
+    if normalized.startswith("zh"):
+        return "zh"
+    return "zh"
+
+
+def _worker_operation_action_label(action_code: str, *, lang: Literal["zh", "en"] = "zh") -> str:
     normalized = str(action_code or "").strip().lower()
     if not normalized:
         return ""
     if normalized == "start_pool_pump":
-        return "开启水泵(start_pool_pump)"
+        return "Start pool pump (start_pool_pump)" if lang == "en" else "开启水泵(start_pool_pump)"
     if normalized == "stop_pool_pump":
-        return "关闭水泵(stop_pool_pump)"
+        return "Stop pool pump (stop_pool_pump)" if lang == "en" else "关闭水泵(stop_pool_pump)"
     if normalized == "start_charging":
-        return "开启特斯拉充电(start_charging)"
+        return "Start Tesla charging (start_charging)" if lang == "en" else "开启特斯拉充电(start_charging)"
     if normalized == "stop_charging":
-        return "关闭特斯拉充电(stop_charging)"
+        return "Stop Tesla charging (stop_charging)" if lang == "en" else "关闭特斯拉充电(stop_charging)"
     if normalized == "restart_charging":
-        return "重启特斯拉充电(restart_charging)"
+        return "Restart Tesla charging (restart_charging)" if lang == "en" else "重启特斯拉充电(restart_charging)"
     if normalized == "restart_charging_for_current_mismatch":
-        return "重启特斯拉充电(电流不一致)(restart_charging_for_current_mismatch)"
+        return (
+            "Restart Tesla charging (current mismatch) (restart_charging_for_current_mismatch)"
+            if lang == "en"
+            else "重启特斯拉充电(电流不一致)(restart_charging_for_current_mismatch)"
+        )
     set_current_match = re.fullmatch(r"set_current_(\d+)a", normalized)
     if set_current_match:
         amps = set_current_match.group(1)
-        return f"设置特斯拉充电电流为{amps}A({normalized})"
+        return (
+            f"Set Tesla charge current to {amps}A ({normalized})"
+            if lang == "en"
+            else f"设置特斯拉充电电流为{amps}A({normalized})"
+        )
     return normalized
 
 
-def _worker_operation_action_detail(action_map: dict[str, object]) -> str:
+def _worker_operation_action_detail(action_map: dict[str, object], *, lang: Literal["zh", "en"] = "zh") -> str:
     action_type = str(action_map.get("type") or "").strip().lower()
     if action_type in ("", "noop"):
         return str(action_map.get("reason") or "noop")
 
     if action_type == "apply":
         step_labels = [
-            _worker_operation_action_label(step)
+            _worker_operation_action_label(step, lang=lang)
             for step in _worker_action_steps(action_map)
         ]
         applied_steps = [item for item in step_labels if item]
@@ -3555,10 +3572,10 @@ def _worker_operation_action_detail(action_map: dict[str, object]) -> str:
         reason = str(action_map.get("reason") or "").strip()
         return reason or action_type
 
-    return _worker_operation_action_label(action_type)
+    return _worker_operation_action_label(action_type, lang=lang)
 
 
-def _operation_reason_label(reason: object) -> str:
+def _operation_reason_label(reason: object, *, lang: Literal["zh", "en"] = "zh") -> str:
     raw = str(reason or "").strip()
     code = raw.lower()
     if not raw:
@@ -3572,21 +3589,25 @@ def _operation_reason_label(reason: object) -> str:
         "tesla_priority_blocks_pool_pump",
         "pool_pump_would_exceed_free_energy_grid_cap",
     ):
-        return "供电不足（电网余量不足）"
+        return "Insufficient supply (grid headroom is not enough)" if lang == "en" else "供电不足（电网余量不足）"
     if code in ("within_grid_cap_after_tesla_priority", "free_energy_pool_pump_within_grid_cap_after_tesla_priority"):
-        return "供电充足（电网余量充足）"
+        return "Sufficient supply (grid headroom is available)" if lang == "en" else "供电充足（电网余量充足）"
     if code in ("recent_stop_cooldown", "free_energy_recent_stop_cooldown_active", "pool_pump_recent_stop_cooldown_active"):
-        return "防抖冷却中（距离上次停泵不足15分钟）"
+        return (
+            "Restart cooldown active (less than 15 minutes since last stop)"
+            if lang == "en"
+            else "防抖冷却中（距离上次停泵不足15分钟）"
+        )
     if code == "runtime_budget_available":
-        return "预算充足（夜间运行时长仍有余额）"
+        return "Runtime budget available (overnight runtime still has room)" if lang == "en" else "预算充足（夜间运行时长仍有余额）"
     if code == "runtime_budget_exhausted":
-        return "预算耗尽（夜间运行时长已用完）"
+        return "Runtime budget exhausted (overnight runtime used up)" if lang == "en" else "预算耗尽（夜间运行时长已用完）"
     if code == "runtime_budget_unavailable":
-        return "预算不可用（缺少有效计算数据）"
+        return "Runtime budget unavailable (missing valid calculation data)" if lang == "en" else "预算不可用（缺少有效计算数据）"
     if code == "outside_window":
-        return "不在当前控制窗口"
+        return "Outside current control window" if lang == "en" else "不在当前控制窗口"
     if code == "rule_disabled":
-        return "该规则已禁用"
+        return "This rule is disabled" if lang == "en" else "该规则已禁用"
     return raw
 
 
@@ -3614,10 +3635,11 @@ def _operation_reason_with_metrics(
     action_code: str,
     action_map: dict[str, object],
     fallback_reason: str,
+    lang: Literal["zh", "en"] = "zh",
 ) -> str:
     action_type = str(action_code or "").strip().lower()
     reason_code = str(action_map.get("reason") or "").strip() or str(fallback_reason or "").strip()
-    base_reason = _operation_reason_label(reason_code)
+    base_reason = _operation_reason_label(reason_code, lang=lang)
 
     check = _operation_find_check_for_action(payload, action_type)
     if not isinstance(check, dict):
@@ -3650,9 +3672,19 @@ def _operation_reason_with_metrics(
                 cap_w = float(POOL_PUMP_FREE_ENERGY_GRID_MAX_W)
                 margin_w = cap_w - predicted_with_pump_w
                 if margin_w >= 0:
+                    if lang == "en":
+                        return (
+                            f"{base_reason} (predicted grid {int(round(predicted_with_pump_w))}W, "
+                            f"cap {int(round(cap_w))}W, margin {int(round(margin_w))}W)"
+                        )
                     return (
                         f"{base_reason}（预测并网{int(round(predicted_with_pump_w))}W，"
                         f"上限{int(round(cap_w))}W，余量{int(round(margin_w))}W）"
+                    )
+                if lang == "en":
+                    return (
+                        f"{base_reason} (predicted grid {int(round(predicted_with_pump_w))}W, "
+                        f"cap {int(round(cap_w))}W, exceeds by {int(round(-margin_w))}W)"
                     )
                 return (
                     f"{base_reason}（预测并网{int(round(predicted_with_pump_w))}W，"
@@ -3667,6 +3699,11 @@ def _operation_reason_with_metrics(
         current_grid_import_w = _to_number(details_map.get("current_grid_import_w"))
         if current_grid_import_w is not None and current_grid_import_w > cap_w:
             exceed_w = current_grid_import_w - cap_w
+            if lang == "en":
+                return (
+                    f"Insufficient supply (measured grid {int(round(current_grid_import_w))}W, "
+                    f"cap {int(round(cap_w))}W, exceeds by {int(round(exceed_w))}W)"
+                )
             return (
                 f"供电不足（实测并网{int(round(current_grid_import_w))}W，"
                 f"上限{int(round(cap_w))}W，超出{int(round(exceed_w))}W）"
@@ -3678,6 +3715,17 @@ def _operation_reason_with_metrics(
         if predicted_with_pump_w is not None:
             exceed_w = predicted_with_pump_w - cap_w
             if exceed_w > 0:
+                if lang == "en":
+                    return (
+                        f"Insufficient supply (measured {int(round(current_grid_import_w))}W, "
+                        f"target predicts {int(round(predicted_with_pump_w))}W, "
+                        f"exceeds cap by {int(round(exceed_w))}W)"
+                        if current_grid_import_w is not None
+                        else (
+                            f"Insufficient supply (target predicts {int(round(predicted_with_pump_w))}W, "
+                            f"cap {int(round(cap_w))}W, exceeds by {int(round(exceed_w))}W)"
+                        )
+                    )
                 return (
                     f"供电不足（当前实测{int(round(current_grid_import_w))}W，"
                     f"按目标预计{int(round(predicted_with_pump_w))}W，"
@@ -3686,6 +3734,16 @@ def _operation_reason_with_metrics(
                     else (
                         f"供电不足（按目标预计{int(round(predicted_with_pump_w))}W，"
                         f"上限{int(round(cap_w))}W，超出{int(round(exceed_w))}W）"
+                    )
+                )
+            if lang == "en":
+                return (
+                    f"{base_reason} (measured {int(round(current_grid_import_w))}W, "
+                    f"cap {int(round(cap_w))}W)"
+                    if current_grid_import_w is not None
+                    else (
+                        f"{base_reason} (target predicts {int(round(predicted_with_pump_w))}W, "
+                        f"cap {int(round(cap_w))}W)"
                     )
                 )
             return (
@@ -3707,18 +3765,20 @@ def _operation_reason_with_metrics(
         elapsed_h = _to_number(runtime_budget_map.get("elapsed_runtime_hours"))
         target_h = _to_number(runtime_budget_map.get("target_runtime_hours"))
         if remaining_h is not None:
-            parts.append(f"剩余{remaining_h:.2f}h")
+            parts.append(f"remaining {remaining_h:.2f}h" if lang == "en" else f"剩余{remaining_h:.2f}h")
         if elapsed_h is not None:
-            parts.append(f"已用{elapsed_h:.2f}h")
+            parts.append(f"used {elapsed_h:.2f}h" if lang == "en" else f"已用{elapsed_h:.2f}h")
         if target_h is not None:
-            parts.append(f"目标{target_h:.2f}h")
+            parts.append(f"target {target_h:.2f}h" if lang == "en" else f"目标{target_h:.2f}h")
         if parts:
-            return f"{base_reason}（{'，'.join(parts)}）"
+            return f"{base_reason} ({', '.join(parts)})" if lang == "en" else f"{base_reason}（{'，'.join(parts)}）"
         return base_reason
 
     if reason_code.lower() == "recent_stop_cooldown":
         cooldown_remaining_minutes = _to_number(details_map.get("restart_cooldown_remaining_minutes"))
         if cooldown_remaining_minutes is not None:
+            if lang == "en":
+                return f"{base_reason} (cooldown remaining {cooldown_remaining_minutes:.1f} min)"
             return f"{base_reason}（剩余冷却{cooldown_remaining_minutes:.1f}分钟）"
     return base_reason
 
@@ -3800,7 +3860,7 @@ def _worker_primary_notification(payload: dict[str, object]) -> dict[str, object
     )
 
 
-def _worker_operation_detail_text(payload: dict[str, object]) -> str:
+def _worker_operation_detail_text(payload: dict[str, object], *, lang: Literal["zh", "en"] = "zh") -> str:
     action_list = _worker_action_list(payload)
     has_applied_action = any(
         str(action_map.get("type") or "").strip().lower() not in ("", "noop")
@@ -3811,24 +3871,28 @@ def _worker_operation_detail_text(payload: dict[str, object]) -> str:
         action_type = str(action_map.get("type") or "noop").strip().lower()
         if has_applied_action and action_type in ("", "noop"):
             continue
-        detail = _worker_operation_action_detail(action_map).strip()
+        detail = _worker_operation_action_detail(action_map, lang=lang).strip()
         if detail and detail not in details:
             details.append(detail)
     return " | ".join(item for item in details if item) or "noop"
 
 
-def _operation_timeline_status_suffix(status: object) -> str:
+def _operation_timeline_status_suffix(status: object, *, lang: Literal["zh", "en"] = "zh") -> str:
     normalized = str(status or "").strip().lower()
     if normalized == OPERATION_RUN_STATUS_PENDING:
-        return "（进行中）"
+        return " (pending)" if lang == "en" else "（进行中）"
     if normalized == OPERATION_RUN_STATUS_FAILED:
-        return "（失败）"
+        return " (failed)" if lang == "en" else "（失败）"
     if normalized == OPERATION_RUN_STATUS_TIMEOUT:
-        return "（超时）"
+        return " (timeout)" if lang == "en" else "（超时）"
     return ""
 
 
-def _operation_timeline_worker_entries(payload: dict[str, object]) -> list[dict[str, str]]:
+def _operation_timeline_worker_entries(
+    payload: dict[str, object],
+    *,
+    lang: Literal["zh", "en"] = "zh",
+) -> list[dict[str, str]]:
     action_list = _worker_action_list(payload)
     decision_reason = str(payload.get("decision_reason") or "").strip()
     entries: list[dict[str, str]] = []
@@ -3858,50 +3922,53 @@ def _operation_timeline_worker_entries(payload: dict[str, object]) -> list[dict[
                         action_code=step,
                         action_map=action_map,
                         fallback_reason=decision_reason,
+                        lang=lang,
                     )
-                    _append_entry(_worker_operation_action_label(step), reason)
+                    _append_entry(_worker_operation_action_label(step, lang=lang), reason)
             else:
                 reason = _operation_reason_with_metrics(
                     payload,
                     action_code=action_type,
                     action_map=action_map,
                     fallback_reason=decision_reason,
+                    lang=lang,
                 )
-                _append_entry(_worker_operation_action_label(action_type), reason)
+                _append_entry(_worker_operation_action_label(action_type, lang=lang), reason)
             continue
         reason = _operation_reason_with_metrics(
             payload,
             action_code=action_type,
             action_map=action_map,
             fallback_reason=decision_reason,
+            lang=lang,
         )
-        _append_entry(_worker_operation_action_label(action_type), reason)
+        _append_entry(_worker_operation_action_label(action_type, lang=lang), reason)
 
     if entries:
         return entries
 
-    detail = _worker_operation_detail_text(payload).strip()
+    detail = _worker_operation_detail_text(payload, lang=lang).strip()
     if not detail or detail.lower() == "noop":
         return []
     for part in detail.split("|"):
         item = part.strip()
         if not item or item.lower() == "noop":
             continue
-        _append_entry(item, _operation_reason_label(decision_reason or "-"))
+        _append_entry(item, _operation_reason_label(decision_reason or "-", lang=lang))
     return entries
 
 
-def _operation_timeline_manual_reason(run: dict[str, object]) -> str:
+def _operation_timeline_manual_reason(run: dict[str, object], *, lang: Literal["zh", "en"] = "zh") -> str:
     status = str(run.get("status") or "").strip().lower()
     error_text = str(run.get("error_text") or "").strip()
     if status in (OPERATION_RUN_STATUS_FAILED, OPERATION_RUN_STATUS_TIMEOUT):
-        return error_text or "执行失败"
+        return error_text or ("Execution failed" if lang == "en" else "执行失败")
     if status == OPERATION_RUN_STATUS_PENDING:
-        return "手动触发，等待结果"
-    return "手动触发"
+        return "Manually triggered, waiting for result" if lang == "en" else "手动触发，等待结果"
+    return "Manually triggered" if lang == "en" else "手动触发"
 
 
-def _operation_timeline_manual_text(run: dict[str, object]) -> str:
+def _operation_timeline_manual_text(run: dict[str, object], *, lang: Literal["zh", "en"] = "zh") -> str:
     operation_code = str(run.get("operation_code") or "").strip().lower()
     title = str(run.get("title") or run.get("operation_code") or "operation").strip() or "operation"
     request_payload = run.get("request_payload")
@@ -3910,62 +3977,103 @@ def _operation_timeline_manual_text(run: dict[str, object]) -> str:
     if operation_code == "tesla.manual.toggle_charging":
         enabled = _to_bool(request_map.get("enabled"))
         if enabled is True:
-            base = "开启特斯拉充电"
+            base = "Start Tesla charging" if lang == "en" else "开启特斯拉充电"
         elif enabled is False:
-            base = "关闭特斯拉充电"
+            base = "Stop Tesla charging" if lang == "en" else "关闭特斯拉充电"
         else:
             base = title
     elif operation_code == "tesla.manual.set_charge_current":
         amps = _to_number(request_map.get("amps"))
-        base = f"设置特斯拉充电电流为{int(round(amps))}A" if amps is not None else title
+        if amps is not None:
+            base = (
+                f"Set Tesla charge current to {int(round(amps))}A"
+                if lang == "en"
+                else f"设置特斯拉充电电流为{int(round(amps))}A"
+            )
+        else:
+            base = title
     elif operation_code == "backend.manual.restart_collector":
-        base = "重启后台采集器"
+        base = "Restart backend collector" if lang == "en" else "重启后台采集器"
     elif operation_code == "solplanet.manual.restart_api":
-        base = "重启Solplanet接口"
+        base = "Restart Solplanet API" if lang == "en" else "重启Solplanet接口"
     elif operation_code == "saj.manual.set_working_mode":
         mode_code = _to_number(request_map.get("mode_code"))
-        base = f"设置SAJ工作模式为{int(round(mode_code))}" if mode_code is not None else "设置SAJ工作模式"
+        if mode_code is not None:
+            base = (
+                f"Set SAJ working mode to {int(round(mode_code))}"
+                if lang == "en"
+                else f"设置SAJ工作模式为{int(round(mode_code))}"
+            )
+        else:
+            base = "Set SAJ working mode" if lang == "en" else "设置SAJ工作模式"
     elif operation_code == "saj.manual.apply_profile":
         profile_id = str(request_map.get("profile_id") or "").strip()
-        base = f"应用SAJ配置({profile_id})" if profile_id else "应用SAJ配置"
+        if profile_id:
+            base = f"Apply SAJ profile ({profile_id})" if lang == "en" else f"应用SAJ配置({profile_id})"
+        else:
+            base = "Apply SAJ profile" if lang == "en" else "应用SAJ配置"
     elif operation_code in ("saj.manual.set_charge_slot", "saj.manual.set_discharge_slot"):
         slot_value = _to_number(request_map.get("slot"))
         slot_text = f"#{int(round(slot_value))}" if slot_value is not None else ""
         start_time = str(request_map.get("start_time") or "").strip()
         end_time = str(request_map.get("end_time") or "").strip()
         time_text = f"({start_time}-{end_time})" if start_time or end_time else ""
-        base = (
-            f"设置SAJ{'充电' if operation_code.endswith('set_charge_slot') else '放电'}时段{slot_text}{time_text}"
-        )
+        if lang == "en":
+            slot_kind = "charge" if operation_code.endswith("set_charge_slot") else "discharge"
+            base = f"Set SAJ {slot_kind} slot {slot_text}{time_text}".strip()
+        else:
+            base = f"设置SAJ{'充电' if operation_code.endswith('set_charge_slot') else '放电'}时段{slot_text}{time_text}"
     elif operation_code == "saj.manual.set_toggles":
         parts: list[str] = []
         charging_control = _to_bool(request_map.get("charging_control"))
         if charging_control is not None:
-            parts.append(f"充电开关={'开' if charging_control else '关'}")
+            parts.append(
+                f"charge control={'on' if charging_control else 'off'}"
+                if lang == "en"
+                else f"充电开关={'开' if charging_control else '关'}"
+            )
         discharging_control = _to_bool(request_map.get("discharging_control"))
         if discharging_control is not None:
-            parts.append(f"放电开关={'开' if discharging_control else '关'}")
+            parts.append(
+                f"discharge control={'on' if discharging_control else 'off'}"
+                if lang == "en"
+                else f"放电开关={'开' if discharging_control else '关'}"
+            )
         charge_mask = _to_number(request_map.get("charge_time_enable_mask"))
         if charge_mask is not None:
-            parts.append(f"充电掩码={int(round(charge_mask))}")
+            parts.append(
+                f"charge mask={int(round(charge_mask))}"
+                if lang == "en"
+                else f"充电掩码={int(round(charge_mask))}"
+            )
         discharge_mask = _to_number(request_map.get("discharge_time_enable_mask"))
         if discharge_mask is not None:
-            parts.append(f"放电掩码={int(round(discharge_mask))}")
-        base = f"设置SAJ开关({', '.join(parts)})" if parts else "设置SAJ开关"
+            parts.append(
+                f"discharge mask={int(round(discharge_mask))}"
+                if lang == "en"
+                else f"放电掩码={int(round(discharge_mask))}"
+            )
+        if parts:
+            base = f"Set SAJ toggles ({', '.join(parts)})" if lang == "en" else f"设置SAJ开关({', '.join(parts)})"
+        else:
+            base = "Set SAJ toggles" if lang == "en" else "设置SAJ开关"
     elif operation_code == "saj.manual.set_limits":
         parts: list[str] = []
         for key, label in (
-            ("battery_charge_power_limit", "电池充电"),
-            ("battery_discharge_power_limit", "电池放电"),
-            ("grid_max_charge_power", "电网充电"),
-            ("grid_max_discharge_power", "电网放电"),
+            ("battery_charge_power_limit", "battery charge" if lang == "en" else "电池充电"),
+            ("battery_discharge_power_limit", "battery discharge" if lang == "en" else "电池放电"),
+            ("grid_max_charge_power", "grid charge" if lang == "en" else "电网充电"),
+            ("grid_max_discharge_power", "grid discharge" if lang == "en" else "电网放电"),
         ):
             value = _to_number(request_map.get(key))
             if value is not None:
                 parts.append(f"{label}={int(round(value))}%")
-        base = f"设置SAJ功率限制({', '.join(parts)})" if parts else "设置SAJ功率限制"
+        if parts:
+            base = f"Set SAJ power limits ({', '.join(parts)})" if lang == "en" else f"设置SAJ功率限制({', '.join(parts)})"
+        else:
+            base = "Set SAJ power limits" if lang == "en" else "设置SAJ功率限制"
     elif operation_code == "saj.manual.refresh_touch":
-        base = "刷新SAJ被动控制"
+        base = "Refresh SAJ passive control" if lang == "en" else "刷新SAJ被动控制"
     elif operation_code == "solplanet.manual.set_limits":
         parts: list[str] = []
         pin = _to_number(request_map.get("pin"))
@@ -3974,28 +4082,38 @@ def _operation_timeline_manual_text(run: dict[str, object]) -> str:
         pout = _to_number(request_map.get("pout"))
         if pout is not None:
             parts.append(f"Pout={int(round(pout))}W")
-        base = f"设置Solplanet功率限制({', '.join(parts)})" if parts else "设置Solplanet功率限制"
+        if parts:
+            base = f"Set Solplanet power limits ({', '.join(parts)})" if lang == "en" else f"设置Solplanet功率限制({', '.join(parts)})"
+        else:
+            base = "Set Solplanet power limits" if lang == "en" else "设置Solplanet功率限制"
     elif operation_code == "solplanet.manual.set_day_schedule":
         day = str(request_map.get("day") or "").strip()
-        base = f"设置Solplanet日程({day})" if day else "设置Solplanet日程"
+        if day:
+            base = f"Set Solplanet day schedule ({day})" if lang == "en" else f"设置Solplanet日程({day})"
+        else:
+            base = "Set Solplanet day schedule" if lang == "en" else "设置Solplanet日程"
     elif operation_code == "solplanet.manual.set_day_schedule_slot":
         day = str(request_map.get("day") or "").strip()
         slot_value = _to_number(request_map.get("slot"))
-        slot_text = f", 槽位#{int(round(slot_value))}" if slot_value is not None else ""
-        base = f"设置Solplanet日程槽位({day}{slot_text})" if day or slot_text else "设置Solplanet日程槽位"
+        if lang == "en":
+            slot_text = f", slot #{int(round(slot_value))}" if slot_value is not None else ""
+            base = f"Set Solplanet day schedule slot ({day}{slot_text})" if day or slot_text else "Set Solplanet day schedule slot"
+        else:
+            slot_text = f", 槽位#{int(round(slot_value))}" if slot_value is not None else ""
+            base = f"设置Solplanet日程槽位({day}{slot_text})" if day or slot_text else "设置Solplanet日程槽位"
     elif operation_code == "solplanet.manual.set_raw_setting":
         raw_payload = request_map.get("payload")
         raw_map = raw_payload if isinstance(raw_payload, dict) else {}
         keys = list(raw_map.keys())
         if keys:
             preview = ", ".join(keys[:3]) + ("..." if len(keys) > 3 else "")
-            base = f"设置Solplanet原始参数({preview})"
+            base = f"Set Solplanet raw settings ({preview})" if lang == "en" else f"设置Solplanet原始参数({preview})"
         else:
-            base = "设置Solplanet原始参数"
+            base = "Set Solplanet raw settings" if lang == "en" else "设置Solplanet原始参数"
     else:
         base = title
 
-    suffix = _operation_timeline_status_suffix(run.get("status"))
+    suffix = _operation_timeline_status_suffix(run.get("status"), lang=lang)
     return f"{base}{suffix}" if suffix else base
 
 
@@ -10706,7 +10824,9 @@ async def worker_logs(
 @app.get("/api/operations/timeline")
 async def operations_timeline(
     limit: int = Query(default=200, ge=1, le=500),
+    lang: str = Query(default="zh"),
 ) -> dict[str, object]:
+    timeline_lang = _normalize_operation_timeline_lang(lang)
     fetch_limit = min(1000, max(200, int(limit) * 4))
     worker_payload = await asyncio.to_thread(
         list_worker_api_logs,
@@ -10731,7 +10851,7 @@ async def operations_timeline(
             continue
         payload = row.get("payload_json")
         payload_map = payload if isinstance(payload, dict) else {}
-        action_entries = _operation_timeline_worker_entries(payload_map)
+        action_entries = _operation_timeline_worker_entries(payload_map, lang=timeline_lang)
         if not action_entries:
             continue
         requested_at_utc = str(row.get("requested_at_utc") or "").strip()
@@ -10755,7 +10875,7 @@ async def operations_timeline(
     for run in manual_runs:
         if not isinstance(run, dict):
             continue
-        operation_text = _operation_timeline_manual_text(run).strip()
+        operation_text = _operation_timeline_manual_text(run, lang=timeline_lang).strip()
         if not operation_text:
             continue
         time_utc = str(run.get("started_at_utc") or "").strip()
@@ -10766,7 +10886,7 @@ async def operations_timeline(
                 "time_utc": time_utc,
                 "time_epoch": time_epoch,
                 "operation": operation_text,
-                "reason": _operation_timeline_manual_reason(run),
+                "reason": _operation_timeline_manual_reason(run, lang=timeline_lang),
                 "source": "manual",
             }
         )
