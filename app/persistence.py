@@ -72,6 +72,7 @@ OPERATION_RUN_STATUS_PENDING = "pending"
 OPERATION_RUN_STATUS_SUCCEEDED = "succeeded"
 OPERATION_RUN_STATUS_FAILED = "failed"
 OPERATION_RUN_STATUS_TIMEOUT = "timeout"
+POOL_PUMP_POWER_STALE_SECONDS = 30 * 60
 
 
 @dataclass(frozen=True)
@@ -336,6 +337,40 @@ def _json_loads(value: str | None, *, default: object) -> object:
         return json.loads(value)
     except json.JSONDecodeError:
         return default
+
+
+def _extract_pool_pump_power_last_updated(payload: object) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    raw = payload.get("raw")
+    raw_map = raw if isinstance(raw, dict) else {}
+    pool_pump = raw_map.get("pool_pump")
+    pool_pump_map = pool_pump if isinstance(pool_pump, dict) else {}
+    metrics = pool_pump_map.get("metrics")
+    metrics_map = metrics if isinstance(metrics, dict) else {}
+    power_entity = metrics_map.get("power_entity")
+    power_entity_map = power_entity if isinstance(power_entity, dict) else {}
+    value = power_entity_map.get("last_updated") or power_entity_map.get("last_changed")
+    text = str(value or "").strip()
+    return text or None
+
+
+def _compute_pool_pump_power_stale(
+    *,
+    sampled_at_utc: object,
+    power_last_updated: object,
+) -> bool | None:
+    sampled_text = str(sampled_at_utc or "").strip()
+    power_text = str(power_last_updated or "").strip()
+    if not sampled_text or not power_text:
+        return None
+    try:
+        sampled_at = _parse_iso_to_utc(sampled_text)
+        power_updated_at = _parse_iso_to_utc(power_text)
+    except ValueError:
+        return None
+    age_seconds = max((sampled_at - power_updated_at).total_seconds(), 0.0)
+    return age_seconds > POOL_PUMP_POWER_STALE_SECONDS
 
 
 def _truncate_result_text(text_value: str | None) -> str:
@@ -2269,6 +2304,10 @@ def get_series_samples(
         tesla_battery_soc_percent = None
         tesla_charge_power_w = None
         pool_pump_power_w = None
+        pool_pump_power_stale = None
+        pool_pump_power_last_updated = None
+        pool_pump_available = None
+        pool_pump_unavailable_reason = None
         if system == "combined":
             payload = _json_loads(row[7], default={})
             if isinstance(payload, dict):
@@ -2277,6 +2316,15 @@ def get_series_samples(
                     tesla_battery_soc_percent = metrics.get("tesla_battery_soc_percent")
                     tesla_charge_power_w = metrics.get("tesla_charge_power_w")
                     pool_pump_power_w = metrics.get("pool_pump_power_w")
+                    pool_pump_power_stale = metrics.get("pool_pump_power_stale")
+                    pool_pump_available = metrics.get("pool_pump_available")
+                    pool_pump_unavailable_reason = metrics.get("pool_pump_unavailable_reason")
+                pool_pump_power_last_updated = _extract_pool_pump_power_last_updated(payload)
+                if pool_pump_power_stale is None and pool_pump_power_last_updated:
+                    pool_pump_power_stale = _compute_pool_pump_power_stale(
+                        sampled_at_utc=row[0],
+                        power_last_updated=pool_pump_power_last_updated,
+                    )
                 if tesla_battery_soc_percent is None:
                     display_items = payload.get("display", {}).get("items", {})
                     if isinstance(display_items, dict):
@@ -2295,6 +2343,10 @@ def get_series_samples(
                 "tesla_battery_soc_percent": tesla_battery_soc_percent,
                 "tesla_charge_power_w": tesla_charge_power_w,
                 "pool_pump_power_w": pool_pump_power_w,
+                "pool_pump_power_stale": pool_pump_power_stale,
+                "pool_pump_power_last_updated": pool_pump_power_last_updated,
+                "pool_pump_available": pool_pump_available,
+                "pool_pump_unavailable_reason": pool_pump_unavailable_reason,
             }
         )
     return {
@@ -2352,12 +2404,26 @@ def get_metric_rows(
         payload = _json_loads(row[2], default={})
         metrics = payload.get("metrics")
         metrics_map = metrics if isinstance(metrics, dict) else {}
+        pool_pump_power_last_updated = _extract_pool_pump_power_last_updated(payload)
+        computed_pool_pump_power_stale = (
+            _compute_pool_pump_power_stale(
+                sampled_at_utc=row[0],
+                power_last_updated=pool_pump_power_last_updated,
+            )
+            if pool_pump_power_last_updated
+            else None
+        )
         item = {
             "sampled_at_utc": row[0],
             "sampled_at_epoch": row[1],
         }
         for key in normalized_keys:
-            item[key] = metrics_map.get(key)
+            value = metrics_map.get(key)
+            if key == "pool_pump_power_stale" and value is None:
+                value = computed_pool_pump_power_stale
+            elif key == "pool_pump_power_last_updated" and value is None:
+                value = pool_pump_power_last_updated
+            item[key] = value
         items.append(item)
 
     return {

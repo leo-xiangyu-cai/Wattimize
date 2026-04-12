@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from time import monotonic
 from typing import Any, Callable
+from urllib.parse import urlencode
 from uuid import uuid4
 
 import httpx
@@ -164,3 +165,21 @@ class HomeAssistantClient:
         if not isinstance(payload, list):
             return []
         return payload
+
+    async def entity_history(
+        self,
+        entity_id: str,
+        *,
+        start_at_utc: datetime,
+        minimal_response: bool = True,
+    ) -> list[dict[str, Any]]:
+        start_text = start_at_utc.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        params: dict[str, Any] = {"filter_entity_id": entity_id}
+        if minimal_response:
+            params["minimal_response"] = "1"
+        query = urlencode(params)
+        payload = await self._request_json("GET", f"/api/history/period/{start_text}?{query}")
+        if not isinstance(payload, list) or not payload:
+            return []
+        first = payload[0]
+        return first if isinstance(first, list) else []
