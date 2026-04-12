@@ -202,14 +202,14 @@ const I18N = {
     notificationMatrixProgressRemaining: "{value} remaining",
     notificationMatrixProgressAboveThreshold: "{value} above threshold",
     notificationMatrixProgressBelowThreshold: "{value} below threshold",
-    notificationMatrixWindowFreeEnergyTitle: "Free Energy Window",
+    notificationMatrixWindowFreeEnergyTitle: "Zero Window",
     notificationMatrixWindowFreeEnergySummary: "11:00-14:00. Worker prioritizes Tesla first, then only allows the pool pump when predicted grid stays within 15.0kW.",
     notificationMatrixWindowAfterFreeShoulderTitle: "After-Free Shoulder",
     notificationMatrixWindowAfterFreeShoulderSummary: "14:00-16:00. Worker watches Solplanet battery headroom before the export period.",
     notificationMatrixWindowAfterFreePeakTitle: "After-Free Peak",
     notificationMatrixWindowAfterFreePeakSummary: "16:00-18:00. Worker keeps watching Solplanet battery headroom before export pricing starts.",
-    notificationMatrixWindowExportTitle: "ZeroHero Window",
-    notificationMatrixWindowExportSummary: "18:00-20:00. Worker tracks ZeroHero Window export behavior and low-battery/import alarms while Tesla charging follows surplus logic.",
+    notificationMatrixWindowExportTitle: "Hero Window",
+    notificationMatrixWindowExportSummary: "18:00-20:00. Worker tracks Hero Window export behavior and low-battery/import alarms while Tesla charging follows surplus logic.",
     notificationMatrixWindowPostExportPeakTitle: "Post-Export Peak",
     notificationMatrixWindowPostExportPeakSummary: "20:00-23:00. Worker tries to avoid expensive import and raises early warnings when that risk appears.",
     notificationMatrixWindowOvernightTitle: "Overnight Shoulder",
@@ -218,13 +218,13 @@ const I18N = {
     notificationMatrixWindowAlwaysSummary: "Not part of the 24-hour window split. Worker sends a one-time notification when either battery newly reaches 100% SOC.",
     notificationMatrixRuleTypeNotification: "Notification",
     notificationMatrixRuleTypeOperation: "Operation",
-    notificationRuleSajProfileFreeEnergyTitle: "SAJ inverter uses Time of Use in free-energy window",
+    notificationRuleSajProfileFreeEnergyTitle: "SAJ inverter uses Time of Use in Zero Window",
     notificationRuleSajProfileFreeEnergyTrigger: "During 11:00-13:50 target SAJ profile is Time of Use, then it switches back to Self Consumption for the last 10 minutes.",
     notificationRuleSajProfileSelfConsumptionTitle: "SAJ inverter stays in Self Consumption",
-    notificationRuleSajProfileSelfConsumptionTrigger: "Outside the main free-energy period, target SAJ profile stays on Self Consumption.",
-    notificationRuleTeslaFreeEnergyTitle: "Tesla charging current follows free-energy window rule",
+    notificationRuleSajProfileSelfConsumptionTrigger: "Outside the main Zero Window period, target SAJ profile stays on Self Consumption.",
+    notificationRuleTeslaFreeEnergyTitle: "Tesla charging current follows Zero Window rule",
     notificationRuleTeslaFreeEnergyTrigger: "During 11:00-14:00 the worker adjusts Tesla charging current under the configured grid cap.",
-    notificationRulePoolPumpFreeEnergyTitle: "Pool pump follows Tesla priority in free-energy window",
+    notificationRulePoolPumpFreeEnergyTitle: "Pool pump follows Tesla priority in Zero Window",
     notificationRulePoolPumpFreeEnergyTrigger: "During 11:00-14:00 start the pool pump only when Tesla does not need to start first, or Tesla is already charging, and predicted grid stays within 15.0kW.",
     notificationRuleTeslaAfterFreeShoulderTitle: "Tesla charging follows Solplanet SOC after free-energy window",
     notificationRuleTeslaAfterFreeShoulderTrigger: "Start when Solplanet SOC reaches 95%, stop when it falls below 90%, otherwise hold the current state.",
@@ -234,7 +234,7 @@ const I18N = {
     notificationRuleTeslaOvernightShoulderTrigger: "During 23:00-11:00, start Tesla charging when projected battery minus home load to 8am minus pool pump to 5am is above 1.0 kWh; stop when that budget is exhausted.",
     notificationRulePoolPumpOvernightTitle: "Pool pump uses overnight battery budget",
     notificationRulePoolPumpOvernightTrigger: "During 23:00-05:00, estimate how long the pump can run from the overnight battery forecast, then use only 80% of that available runtime.",
-    notificationRuleTeslaExportWindowTitle: "Tesla charging uses solar surplus during ZeroHero Window",
+    notificationRuleTeslaExportWindowTitle: "Tesla charging uses solar surplus during Hero Window",
     notificationRuleTeslaExportWindowTrigger: "Use solar surplus and Solplanet SOC thresholds to decide charging state and current while avoiding unnecessary grid import.",
     notificationRuleTeslaPostExportPeakTitle: "Tesla charging is forced off in expensive period",
     notificationRuleTeslaPostExportPeakTrigger: "During 20:00-23:00 the worker stops Tesla charging to avoid expensive grid import.",
@@ -247,14 +247,14 @@ const I18N = {
     notificationMatrixTeslaCurrent: "Tesla {actual} / set {configured}",
     notificationRuleSolplanetLowAvailableCapacityTitle: "Solplanet available capacity is low",
     notificationRuleSolplanetLowAvailableCapacityTrigger: "Triggers when Solplanet available capacity drops below 25 kWh during this window.",
-    notificationRuleSolplanetLowBatteryTitle: "Solplanet battery is low during ZeroHero Window",
-    notificationRuleSolplanetLowBatteryTrigger: "Triggers when Solplanet SOC drops below 20% during ZeroHero Window.",
-    notificationRuleGridImportStartedTitle: "Grid import started during ZeroHero Window",
-    notificationRuleGridImportStartedTrigger: "Triggers once when grid import changes from inactive to active during ZeroHero Window.",
+    notificationRuleSolplanetLowBatteryTitle: "Solplanet battery is low during Hero Window",
+    notificationRuleSolplanetLowBatteryTrigger: "Triggers when Solplanet SOC drops below 20% during Hero Window.",
+    notificationRuleGridImportStartedTitle: "Grid import started during Hero Window",
+    notificationRuleGridImportStartedTrigger: "Triggers once when grid import changes from inactive to active during Hero Window.",
     notificationRuleSolarSurplusExportEnergyReached5000Title: "Export energy reached 5 kWh",
-    notificationRuleSolarSurplusExportEnergyReached5000Trigger: "Triggers once when exported energy in ZeroHero Window reaches 5 kWh.",
+    notificationRuleSolarSurplusExportEnergyReached5000Trigger: "Triggers once when exported energy in Hero Window reaches 5 kWh.",
     notificationRuleSolarSurplusExportEnergyReached9000Title: "Export energy reached 9 kWh",
-    notificationRuleSolarSurplusExportEnergyReached9000Trigger: "Triggers once when exported energy in ZeroHero Window reaches 9 kWh.",
+    notificationRuleSolarSurplusExportEnergyReached9000Trigger: "Triggers once when exported energy in Hero Window reaches 9 kWh.",
     notificationRuleSolplanetLowBatteryPostExportPeakTitle: "Solplanet battery is low in the expensive period",
     notificationRuleSolplanetLowBatteryPostExportPeakTrigger: "Triggers when Solplanet SOC drops below 20% during the post-export peak window.",
     notificationRuleGridImportStartedPostExportPeakTitle: "Grid import started in the expensive period",
@@ -472,6 +472,7 @@ const I18N = {
     poolPumpStateLabel: "State",
     poolPumpStateOn: "Running",
     poolPumpStateOff: "Stopped",
+    poolPumpStateUnknown: "Unknown",
     poolPumpStateUnavailable: "Unavailable",
     poolPumpActionTurnOn: "Turn On Pump",
     poolPumpActionTurnOff: "Turn Off Pump",
@@ -1006,14 +1007,14 @@ const I18N = {
     notificationMatrixProgressRemaining: "还差 {value}",
     notificationMatrixProgressAboveThreshold: "高于阈值 {value}",
     notificationMatrixProgressBelowThreshold: "低于阈值 {value}",
-    notificationMatrixWindowFreeEnergyTitle: "免费电时段",
+    notificationMatrixWindowFreeEnergyTitle: "Zero 时段",
     notificationMatrixWindowFreeEnergySummary: "11:00-14:00。这个窗口里 worker 会先处理 Tesla 充电，再在预测电网功率不超过 15.0kW 时决定是否打开水泵。",
     notificationMatrixWindowAfterFreeShoulderTitle: "免费电后肩时段",
     notificationMatrixWindowAfterFreeShoulderSummary: "14:00-16:00。这个窗口里 worker 主要观察 Solplanet 电池余量，为后续 export 时段做准备。",
     notificationMatrixWindowAfterFreePeakTitle: "免费电后峰前时段",
     notificationMatrixWindowAfterFreePeakSummary: "16:00-18:00。这个窗口继续观察 Solplanet 电池余量，确保 export 时段前有足够储能。",
-    notificationMatrixWindowExportTitle: "ZeroHero 时段",
-    notificationMatrixWindowExportSummary: "18:00-20:00。这个窗口会跟踪 ZeroHero 时段内的外送行为，同时监控低电量和电网反向转正向导入告警。",
+    notificationMatrixWindowExportTitle: "Hero 时段",
+    notificationMatrixWindowExportSummary: "18:00-20:00。这个窗口会跟踪 Hero 时段内的外送行为，同时监控低电量和电网反向转正向导入告警。",
     notificationMatrixWindowPostExportPeakTitle: "Export 后高价时段",
     notificationMatrixWindowPostExportPeakSummary: "20:00-23:00。这个窗口会尽量避免高价购电，并在风险出现时尽早提醒。",
     notificationMatrixWindowOvernightTitle: "夜间肩时段",
@@ -1022,13 +1023,13 @@ const I18N = {
     notificationMatrixWindowAlwaysSummary: "不属于 24 小时时段切分。任一电池新达到 100% SOC 时发送一次通知。",
     notificationMatrixRuleTypeNotification: "通知",
     notificationMatrixRuleTypeOperation: "操作",
-    notificationRuleSajProfileFreeEnergyTitle: "免费电时段 SAJ inverter 切到 Time of Use",
+    notificationRuleSajProfileFreeEnergyTitle: "Zero 时段 SAJ inverter 切到 Time of Use",
     notificationRuleSajProfileFreeEnergyTrigger: "11:00-13:50 目标 profile 为 Time of Use，最后 10 分钟切回 Self Consumption。",
     notificationRuleSajProfileSelfConsumptionTitle: "SAJ inverter 保持 Self Consumption",
-    notificationRuleSajProfileSelfConsumptionTrigger: "主免费电时段以外，SAJ 目标 profile 保持在 Self Consumption。",
-    notificationRuleTeslaFreeEnergyTitle: "Tesla 充电电流跟随免费电窗口规则",
+    notificationRuleSajProfileSelfConsumptionTrigger: "Zero 时段以外，SAJ 目标 profile 保持在 Self Consumption。",
+    notificationRuleTeslaFreeEnergyTitle: "Tesla 充电电流跟随 Zero 时段规则",
     notificationRuleTeslaFreeEnergyTrigger: "11:00-14:00 期间，worker 会在配置的电网功率上限内调节 Tesla 充电电流。",
-    notificationRulePoolPumpFreeEnergyTitle: "免费电时段水泵跟随 Tesla 优先级规则",
+    notificationRulePoolPumpFreeEnergyTitle: "Zero 时段水泵跟随 Tesla 优先级规则",
     notificationRulePoolPumpFreeEnergyTrigger: "11:00-14:00 期间，只有在 Tesla 不需要先启动，或 Tesla 已经在充电时，且预测电网功率仍不超过 15.0kW，才会打开水泵。",
     notificationRuleTeslaAfterFreeShoulderTitle: "免费电后肩时段 Tesla 跟随 Solplanet SOC 规则",
     notificationRuleTeslaAfterFreeShoulderTrigger: "Solplanet SOC 到 95% 开始充，低于 90% 停止，区间内维持当前状态。",
@@ -1038,7 +1039,7 @@ const I18N = {
     notificationRuleTeslaOvernightShoulderTrigger: "23:00-次日11:00 期间，当两块电池总可用电量扣除到早上8点的家庭负载和到早上5点的水泵用电后仍超过 1.0 kWh 时允许 Tesla 充电；预算耗尽时停止。",
     notificationRulePoolPumpOvernightTitle: "夜间按电池预算运行水泵",
     notificationRulePoolPumpOvernightTrigger: "23:00-05:00 期间，根据夜间电池预测算出水泵可运行时长，再只运行其中的 80%。",
-    notificationRuleTeslaExportWindowTitle: "ZeroHero 时段 Tesla 按太阳能富余充电",
+    notificationRuleTeslaExportWindowTitle: "Hero 时段 Tesla 按太阳能富余充电",
     notificationRuleTeslaExportWindowTrigger: "结合太阳能富余和 Solplanet SOC 阈值来决定 Tesla 的充电状态和充电电流，尽量避免不必要的电网取电。",
     notificationRuleTeslaPostExportPeakTitle: "高价时段强制关闭 Tesla 充电",
     notificationRuleTeslaPostExportPeakTrigger: "20:00-23:00 期间，worker 会停止 Tesla 充电，避免高价电网取电。",
@@ -1051,14 +1052,14 @@ const I18N = {
     notificationMatrixTeslaCurrent: "Tesla 实际 {actual} / 设定 {configured}",
     notificationRuleSolplanetLowAvailableCapacityTitle: "Solplanet 可用电量过低",
     notificationRuleSolplanetLowAvailableCapacityTrigger: "当这个窗口内 Solplanet 可用容量低于 25 kWh 时触发。",
-    notificationRuleSolplanetLowBatteryTitle: "ZeroHero 时段 Solplanet 电量过低",
-    notificationRuleSolplanetLowBatteryTrigger: "当 ZeroHero 时段内 Solplanet SOC 低于 20% 时触发。",
-    notificationRuleGridImportStartedTitle: "ZeroHero 时段开始从电网取电",
-    notificationRuleGridImportStartedTrigger: "当 ZeroHero 时段内电网状态从未取电切换到开始取电时触发一次。",
-    notificationRuleSolarSurplusExportEnergyReached5000Title: "ZeroHero 能量达到 5 kWh",
-    notificationRuleSolarSurplusExportEnergyReached5000Trigger: "当 ZeroHero 时段累计外送电量达到 5 kWh 时触发一次。",
-    notificationRuleSolarSurplusExportEnergyReached9000Title: "ZeroHero 能量达到 9 kWh",
-    notificationRuleSolarSurplusExportEnergyReached9000Trigger: "当 ZeroHero 时段累计外送电量达到 9 kWh 时触发一次。",
+    notificationRuleSolplanetLowBatteryTitle: "Hero 时段 Solplanet 电量过低",
+    notificationRuleSolplanetLowBatteryTrigger: "当 Hero 时段内 Solplanet SOC 低于 20% 时触发。",
+    notificationRuleGridImportStartedTitle: "Hero 时段开始从电网取电",
+    notificationRuleGridImportStartedTrigger: "当 Hero 时段内电网状态从未取电切换到开始取电时触发一次。",
+    notificationRuleSolarSurplusExportEnergyReached5000Title: "Hero 时段能量达到 5 kWh",
+    notificationRuleSolarSurplusExportEnergyReached5000Trigger: "当 Hero 时段累计外送电量达到 5 kWh 时触发一次。",
+    notificationRuleSolarSurplusExportEnergyReached9000Title: "Hero 时段能量达到 9 kWh",
+    notificationRuleSolarSurplusExportEnergyReached9000Trigger: "当 Hero 时段累计外送电量达到 9 kWh 时触发一次。",
     notificationRuleSolplanetLowBatteryPostExportPeakTitle: "高价时段 Solplanet 电量过低",
     notificationRuleSolplanetLowBatteryPostExportPeakTrigger: "当 export 后高价时段内 Solplanet SOC 低于 20% 时触发。",
     notificationRuleGridImportStartedPostExportPeakTitle: "高价时段开始从电网取电",
@@ -1276,6 +1277,7 @@ const I18N = {
     poolPumpStateLabel: "状态",
     poolPumpStateOn: "运行中",
     poolPumpStateOff: "已停止",
+    poolPumpStateUnknown: "状态未知",
     poolPumpStateUnavailable: "不可用",
     poolPumpActionTurnOn: "打开水泵",
     poolPumpActionTurnOff: "关闭水泵",
@@ -3132,6 +3134,10 @@ const SOLPLANET_WINDOW_FORECASTS = [
 ];
 
 const POWER_FLOW_ACTIVE_THRESHOLD_W = 30;
+const POOL_PUMP_POWER_STALE_SECONDS = 30 * 60;
+const PUMP_STATUS_OFF = 0;
+const PUMP_STATUS_ON = 1;
+const PUMP_STATUS_UNAVAILABLE = -1;
 const BATTERY_SOC_COLOR_STOPS = [
   { pct: 0, rgb: [180, 88, 88] },
   { pct: 25, rgb: [205, 146, 78] },
@@ -5694,9 +5700,11 @@ function renderMobileCombinedFlow({
   const solar2Active = solar2W !== null && solar2W >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const homeLoadActive = homeLoadW !== null && homeLoadW >= POWER_FLOW_ACTIVE_THRESHOLD_W;
   const teslaConnection = formatTeslaConnectionSummary(teslaInfo);
-  const poolPumpStateText = poolPumpEnabled
-    ? t("poolPumpStateOn")
-    : (poolPumpDevice?.control?.enabled === false ? t("poolPumpStateOff") : t("poolPumpStateUnavailable"));
+  const poolPumpStateText = !poolPumpAvailable
+    ? t("poolPumpStateUnavailable")
+    : poolPumpEnabled
+      ? t("poolPumpStateOn")
+      : (poolPumpDevice?.control?.enabled === false ? t("poolPumpStateOff") : t("poolPumpStateUnknown"));
   const sajActive = inverter1Active || battery1Active || solar1Active;
   const solplanetActive = inverter2Active || battery2Active || solar2Active;
   const anyHubActive = totalLoadActive || gridActive || sajActive || solplanetActive;
@@ -5929,7 +5937,11 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null, poolPumpDevice
   setHtml("combined-poolPumpPowerValue", formatValueWithDataKindHtml(formatPowerKwFromWatts(poolPumpW), "real"));
   setText(
     "combined-poolPumpState",
-    poolPumpEnabled ? t("poolPumpStateOn") : (poolPumpDevice?.control?.enabled === false ? t("poolPumpStateOff") : t("poolPumpStateUnavailable")),
+    !poolPumpAvailable
+      ? t("poolPumpStateUnavailable")
+      : poolPumpEnabled
+        ? t("poolPumpStateOn")
+        : (poolPumpDevice?.control?.enabled === false ? t("poolPumpStateOff") : t("poolPumpStateUnknown")),
   );
   setHtml(
     "combined-teslaChargingPowerValue",
@@ -8988,8 +9000,38 @@ function buildPumpStatusTimelinePayload(combinedSeriesPayload, range) {
   const data = items
     .map((item) => {
       const ts = new Date(item.sampled_at_utc || "").getTime();
+      const availableRaw = item?.pool_pump_available;
+      let pumpAvailable = null;
+      if (typeof availableRaw === "boolean") pumpAvailable = availableRaw;
+      else if (typeof availableRaw === "number") pumpAvailable = availableRaw > 0;
+      else if (typeof availableRaw === "string") {
+        const normalized = availableRaw.trim().toLowerCase();
+        if (["true", "1", "yes", "on"].includes(normalized)) pumpAvailable = true;
+        else if (["false", "0", "no", "off"].includes(normalized)) pumpAvailable = false;
+      }
+      if (pumpAvailable === null) {
+        const unavailableReason = String(item?.pool_pump_unavailable_reason || "").trim();
+        if (unavailableReason) pumpAvailable = false;
+      }
+      if (pumpAvailable === false) {
+        return [ts, PUMP_STATUS_UNAVAILABLE];
+      }
       const power = Number(item.pool_pump_power_w || 0);
-      return [ts, power > 30 ? 1 : 0];
+      const staleRaw = item?.pool_pump_power_stale;
+      let powerStale = false;
+      if (typeof staleRaw === "boolean") powerStale = staleRaw;
+      else if (typeof staleRaw === "number") powerStale = staleRaw > 0;
+      else if (typeof staleRaw === "string") {
+        const normalized = staleRaw.trim().toLowerCase();
+        if (normalized === "true" || normalized === "1" || normalized === "yes") powerStale = true;
+      }
+      if (!powerStale) {
+        const powerLastUpdatedTs = new Date(item?.pool_pump_power_last_updated || "").getTime();
+        if (Number.isFinite(ts) && Number.isFinite(powerLastUpdatedTs)) {
+          powerStale = (ts - powerLastUpdatedTs) > (POOL_PUMP_POWER_STALE_SECONDS * 1000);
+        }
+      }
+      return [ts, (!powerStale && power > POWER_FLOW_ACTIVE_THRESHOLD_W) ? PUMP_STATUS_ON : PUMP_STATUS_OFF];
     })
     .filter((pair) => Number.isFinite(pair[0]) && Number.isFinite(pair[1]));
   let dayOnMs = 0;
@@ -9017,7 +9059,7 @@ function buildPumpStatusTimelinePayload(combinedSeriesPayload, range) {
     const next = data[index + 1];
     let cursor = Number(current?.[0]);
     const end = Number(next?.[0] ?? new Date(range.endUtc || "").getTime());
-    const isOn = Number(current?.[1]) >= 1;
+    const isOn = Number(current?.[1]) === PUMP_STATUS_ON;
     if (!isOn || !Number.isFinite(cursor) || !Number.isFinite(end) || end <= cursor) continue;
     while (cursor < end) {
       const boundary = nextBoundaryAfter(cursor);
@@ -11305,7 +11347,10 @@ function renderSamplingPumpStatusTimeline(payload) {
     const segmentEnd = Number(next?.[0] ?? xMax);
     const segmentValue = Number(current?.[1]);
     if (!Number.isFinite(segmentStart) || !Number.isFinite(segmentEnd) || segmentEnd <= segmentStart) continue;
-    segments.push([segmentStart, segmentEnd, segmentValue >= 1 ? 1 : 0]);
+    const normalizedStatus = segmentValue === PUMP_STATUS_UNAVAILABLE
+      ? PUMP_STATUS_UNAVAILABLE
+      : (segmentValue === PUMP_STATUS_ON ? PUMP_STATUS_ON : PUMP_STATUS_OFF);
+    segments.push([segmentStart, segmentEnd, normalizedStatus]);
   }
   chart.setOption(
     {
@@ -11319,9 +11364,12 @@ function renderSamplingPumpStatusTimeline(payload) {
           const segmentStart = Number(value[0]);
           const segmentEnd = Number(value[1]);
           const statusValue = Number(value[2]);
+          const statusText = statusValue === PUMP_STATUS_ON
+            ? t("samplingPumpStatusOn")
+            : (statusValue === PUMP_STATUS_UNAVAILABLE ? t("poolPumpStateUnavailable") : t("samplingPumpStatusOff"));
           return [
             `${formatSamplingClock(segmentStart, true)} - ${formatSamplingClock(segmentEnd, true)}`,
-            `${t("samplingPumpStatusTitle")}: ${statusValue >= 1 ? t("samplingPumpStatusOn") : t("samplingPumpStatusOff")}`,
+            `${t("samplingPumpStatusTitle")}: ${statusText}`,
           ].join("<br/>");
         },
       },
@@ -11366,13 +11414,15 @@ function renderSamplingPumpStatusTimeline(payload) {
                   },
                 );
                 if (!rect) return null;
-                const isOn = Number(api.value(2)) >= 1;
+                const statusValue = Number(api.value(2));
+                const isUnavailable = statusValue === PUMP_STATUS_UNAVAILABLE;
+                const isOn = statusValue === PUMP_STATUS_ON;
                 return {
                   type: "rect",
                   shape: rect,
                   style: {
-                    fill: isOn ? "#0ea5e9" : "#dbe7df",
-                    stroke: isOn ? "#0284c7" : "#c7d4cc",
+                    fill: isUnavailable ? "#fbbf24" : (isOn ? "#0ea5e9" : "#dbe7df"),
+                    stroke: isUnavailable ? "#d97706" : (isOn ? "#0284c7" : "#c7d4cc"),
                     lineWidth: 1,
                   },
                 };
