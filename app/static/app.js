@@ -205,7 +205,7 @@ const I18N = {
     notificationMatrixWindowFreeEnergyTitle: "Zero Window",
     notificationMatrixWindowFreeEnergySummary: "11:00-14:00. Worker prioritizes Tesla first, then only allows the pool pump when predicted grid stays within 15.0kW.",
     notificationMatrixWindowAfterFreeShoulderTitle: "Climb Window",
-    notificationMatrixWindowAfterFreeShoulderSummary: "14:00-16:00. Worker watches Solplanet battery headroom before the Hero Window.",
+    notificationMatrixWindowAfterFreeShoulderSummary: "14:00-18:00. Worker watches Solplanet battery headroom before the Hero Window.",
     notificationMatrixWindowAfterFreePeakTitle: "Climb Window",
     notificationMatrixWindowAfterFreePeakSummary: "16:00-18:00. Worker keeps watching Solplanet battery headroom before Hero Window pricing starts.",
     notificationMatrixWindowExportTitle: "Hero Window",
@@ -1010,7 +1010,7 @@ const I18N = {
     notificationMatrixWindowFreeEnergyTitle: "Zero 时段",
     notificationMatrixWindowFreeEnergySummary: "11:00-14:00。这个窗口里 worker 会先处理 Tesla 充电，再在预测电网功率不超过 15.0kW 时决定是否打开水泵。",
     notificationMatrixWindowAfterFreeShoulderTitle: "Climb 时段",
-    notificationMatrixWindowAfterFreeShoulderSummary: "14:00-16:00。这个窗口里 worker 主要观察 Solplanet 电池余量，为 Hero 时段蓄力。",
+    notificationMatrixWindowAfterFreeShoulderSummary: "14:00-18:00。这个窗口里 worker 主要观察 Solplanet 电池余量，为 Hero 时段蓄力。",
     notificationMatrixWindowAfterFreePeakTitle: "Climb 时段",
     notificationMatrixWindowAfterFreePeakSummary: "16:00-18:00。这个窗口继续观察 Solplanet 电池余量，确保 Hero 时段前有足够储能。",
     notificationMatrixWindowExportTitle: "Hero 时段",
@@ -2107,7 +2107,7 @@ const NOTIFICATION_MATRIX_WINDOWS = [
   },
   {
     id: "after_free_shoulder",
-    schedule: "14:00-16:00",
+    schedule: "14:00-18:00",
     titleKey: "notificationMatrixWindowAfterFreeShoulderTitle",
     summaryKey: "notificationMatrixWindowAfterFreeShoulderSummary",
     rules: [
@@ -2124,28 +2124,6 @@ const NOTIFICATION_MATRIX_WINDOWS = [
         code: "tesla_after_free_shoulder_control",
         titleKey: "notificationRuleTeslaAfterFreeShoulderTitle",
         triggerKey: "notificationRuleTeslaAfterFreeShoulderTrigger",
-      },
-      {
-        kind: "notification",
-        level: "alarm",
-        code: "solplanet_low_available_capacity",
-        titleKey: "notificationRuleSolplanetLowAvailableCapacityTitle",
-        triggerKey: "notificationRuleSolplanetLowAvailableCapacityTrigger",
-      },
-    ],
-  },
-  {
-    id: "after_free_peak",
-    schedule: "16:00-18:00",
-    titleKey: "notificationMatrixWindowAfterFreePeakTitle",
-    summaryKey: "notificationMatrixWindowAfterFreePeakSummary",
-    rules: [
-      {
-        kind: "operation",
-        level: "info",
-        code: "saj_profile_self_consumption",
-        titleKey: "notificationRuleSajProfileSelfConsumptionTitle",
-        triggerKey: "notificationRuleSajProfileSelfConsumptionTrigger",
       },
       {
         kind: "operation",
