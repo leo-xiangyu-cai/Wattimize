@@ -83,6 +83,7 @@ from app.persistence import (
     update_operation_run,
     upsert_realtime_kv,
 )
+from app.pool_pump_client import PoolPumpClient
 from app.solplanet_cgi import SolplanetCgiClient
 from app.worker_log_schema import (
     WORKER_LOG_CATEGORY_ALL,
@@ -132,7 +133,12 @@ WORKER_API_LOG_TTL_DAYS = 3
 WORKER_API_LOG_CLEANUP_INTERVAL_SECONDS = 6 * 60 * 60
 POOL_PUMP_SWITCH_ENTITY_ID = "switch.cuco_v3_3c00_switch"
 POOL_PUMP_POWER_ENTITY_ID = "sensor.cuco_v3_3c00_electric_power"
+POOL_PUMP_ENERGY_TODAY_ENTITY_ID = "sensor.cuco_v3_3c00_power_cost_today"
+POOL_PUMP_INFO_ENTITY_ID = "button.cuco_v3_3c00_info"
 POOL_PUMP_ASSUMED_POWER_W = 1100.0
+POOL_PUMP_POWER_STATE_STALE_SECONDS = 30 * 60
+POOL_PUMP_ENERGY_STATE_FRESH_SECONDS = 20 * 60
+POOL_PUMP_CONTROL_OVERRIDE_TTL_SECONDS = 20 * 60
 POOL_PUMP_FREE_ENERGY_GRID_MAX_W = 15_000.0
 POOL_PUMP_FREE_ENERGY_RESTART_COOLDOWN_SECONDS = 15 * 60
 POOL_PUMP_FREE_ENERGY_STATE_KEY = "operation_state.pool_pump_free_energy"
@@ -141,6 +147,10 @@ POOL_PUMP_OVERNIGHT_TARGET_START_HOUR = 23
 POOL_PUMP_OVERNIGHT_TARGET_END_HOUR = 5
 POOL_PUMP_OVERNIGHT_RESTART_COOLDOWN_SECONDS = 15 * 60
 POOL_PUMP_OVERNIGHT_STATE_KEY = "operation_state.pool_pump_overnight"
+POOL_PUMP_OFF_PERIOD_MORNING_START_HOUR = 5
+POOL_PUMP_OFF_PERIOD_MORNING_END_HOUR = 11
+POOL_PUMP_OFF_PERIOD_AFTERNOON_START_HOUR = 14
+POOL_PUMP_OFF_PERIOD_AFTERNOON_END_HOUR = 23
 TIME_WINDOW_PRIORITY_OVERRIDE_STATE_KEY = "time_window.priority_override"
 BATTERY_CAPACITY_KWH = {
     "saj": 15.0,
@@ -242,6 +252,7 @@ TIME_WINDOW_RULE_DEFINITIONS: tuple[dict[str, str], ...] = (
     {"code": "saj_profile_free_energy", "window": "free_energy", "kind": "operation"},
     {"code": "tesla_free_energy_control", "window": "free_energy", "kind": "operation"},
     {"code": "pool_pump_free_energy_control", "window": "free_energy", "kind": "operation"},
+    {"code": "pool_pump_off_period_control", "window": "pump_off_period", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "after_free_shoulder", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "after_free_peak", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "export_window", "kind": "operation"},
@@ -512,6 +523,10 @@ collector_status: dict[str, dict[str, object]] = {
         "success_count": 0,
         "failure_count": 0,
     },
+}
+pool_pump_control_override: dict[str, object] = {
+    "enabled": None,
+    "set_at_utc": None,
 }
 
 
@@ -1243,6 +1258,13 @@ ha_client = HomeAssistantClient(
     token=settings.ha_token,
     request_logger=_handle_outbound_request_log,
 )
+pool_pump_client = PoolPumpClient(
+    ha_client=ha_client,
+    switch_entity_id=POOL_PUMP_SWITCH_ENTITY_ID,
+    power_entity_id=POOL_PUMP_POWER_ENTITY_ID,
+    energy_today_entity_id=POOL_PUMP_ENERGY_TODAY_ENTITY_ID,
+    info_entity_id=POOL_PUMP_INFO_ENTITY_ID,
+)
 solplanet_client = SolplanetCgiClient(
     host=settings.solplanet_dongle_host,
     port=settings.solplanet_dongle_port,
@@ -1623,7 +1645,7 @@ async def _build_device_priority_snapshot(
         system="combined",
         start_at_utc=history_start_local.astimezone(UTC),
         end_at_utc=history_end_local.astimezone(UTC),
-        metric_keys=["pool_pump_enabled", "pool_pump_power_w"],
+        metric_keys=["pool_pump_enabled", "pool_pump_power_w", "pool_pump_power_stale"],
     )
     history_items = history_rows.get("items") if isinstance(history_rows, dict) else []
     items = history_items if isinstance(history_items, list) else []
@@ -1647,6 +1669,10 @@ async def _build_device_priority_snapshot(
             continue
         pool_pump_enabled = bool(current_item.get("pool_pump_enabled")) if isinstance(current_item, dict) else False
         pool_pump_power_w = _to_number(current_item.get("pool_pump_power_w")) if isinstance(current_item, dict) else None
+        pool_pump_power_stale = bool(current_item.get("pool_pump_power_stale")) if isinstance(current_item, dict) else False
+        if pool_pump_power_stale:
+            pool_pump_enabled = False
+            pool_pump_power_w = None
         if not pool_pump_enabled and not (pool_pump_power_w is not None and pool_pump_power_w > POWER_FLOW_ACTIVE_THRESHOLD_W):
             continue
         _integrate_pool_pump_priority_window_runtime(
@@ -3327,6 +3353,13 @@ def _window_schedule_text(window_mode: str) -> str:
             f"{POST_EXPORT_PEAK_WINDOW_START_HOUR:02d}:00-"
             f"{POST_EXPORT_PEAK_WINDOW_END_HOUR:02d}:00"
         )
+    if window_mode == "pump_off_period":
+        return (
+            f"{POOL_PUMP_OFF_PERIOD_MORNING_START_HOUR:02d}:00-"
+            f"{POOL_PUMP_OFF_PERIOD_MORNING_END_HOUR:02d}:00"
+            f" / {POOL_PUMP_OFF_PERIOD_AFTERNOON_START_HOUR:02d}:00-"
+            f"{POOL_PUMP_OFF_PERIOD_AFTERNOON_END_HOUR:02d}:00"
+        )
     if window_mode == "overnight_shoulder":
         return (
             f"{OVERNIGHT_SHOULDER_WINDOW_START_HOUR:02d}:00-"
@@ -4748,17 +4781,6 @@ async def _run_pool_pump_free_energy_control_check(
             return result
 
         if not window_active:
-            if auto_started and pump_enabled:
-                await _pool_pump_set_enabled(False)
-                persisted_state["auto_started"] = False
-                persisted_state["last_stop_at_utc"] = requested_at_utc
-                persisted_state["last_stop_reason"] = "outside_free_energy_window"
-                await _store_pool_pump_free_energy_state(persisted_state)
-                result["action"] = {"type": "stop_pool_pump", "reason": "outside_free_energy_window"}
-                result["decision"] = {"mode": "off"}
-                result["decision_reason"] = "outside_free_energy_window_cleanup"
-                status = "applied"
-                return result
             result["decision"] = {"mode": "observe_only"}
             result["action"] = {"type": "noop", "reason": "outside_window"}
             result["decision_reason"] = "outside_free_energy_window"
@@ -4766,17 +4788,6 @@ async def _run_pool_pump_free_energy_control_check(
             return result
 
         if not rule_enabled:
-            if auto_started and pump_enabled:
-                await _pool_pump_set_enabled(False)
-                persisted_state["auto_started"] = False
-                persisted_state["last_stop_at_utc"] = requested_at_utc
-                persisted_state["last_stop_reason"] = "rule_disabled"
-                await _store_pool_pump_free_energy_state(persisted_state)
-                result["action"] = {"type": "stop_pool_pump", "reason": "rule_disabled"}
-                result["decision"] = {"mode": "off"}
-                result["decision_reason"] = "time_window_rule_disabled_cleanup"
-                status = "applied"
-                return result
             result["decision"] = {"mode": "observe_only"}
             result["action"] = {"type": "noop", "reason": "rule_disabled"}
             result["decision_reason"] = "time_window_rule_disabled"
@@ -6055,6 +6066,91 @@ async def _run_saj_battery_watch_check(
         result["tesla_overnight_last_action_type"] = _combined_status.get("tesla_overnight_last_action_type")
 
 
+async def _run_pool_pump_off_period_check(
+    *,
+    round_id: str | None = None,
+    requested_at_utc: str | None = None,
+) -> dict[str, object]:
+    requested_at_utc = str(requested_at_utc or "").strip() or datetime.now(UTC).isoformat()
+    now_local, timezone_name = _tesla_grid_support_now_local()
+    window_active = (
+        _is_hour_in_window(now_local.hour, POOL_PUMP_OFF_PERIOD_MORNING_START_HOUR, POOL_PUMP_OFF_PERIOD_MORNING_END_HOUR)
+        or _is_hour_in_window(now_local.hour, POOL_PUMP_OFF_PERIOD_AFTERNOON_START_HOUR, POOL_PUMP_OFF_PERIOD_AFTERNOON_END_HOUR)
+    )
+    result: dict[str, object] = {
+        "executed_at_utc": datetime.now(UTC).isoformat(),
+        "evaluated_at_local": now_local.isoformat(),
+        "timezone": timezone_name,
+        "window_active": window_active,
+        "window_mode": "pump_off_period" if window_active else "off",
+        "window_schedule": _window_schedule_text("pump_off_period"),
+        "target": "pool_pump",
+    }
+    status = "ok"
+    ok = True
+    error_text: str | None = None
+    try:
+        if not window_active:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "outside_window"}
+            status = "outside_window"
+            return result
+
+        enabled_map = await _load_time_window_rule_enabled_map()
+        rule_code = "pool_pump_off_period_control"
+        rule_enabled = _is_time_window_rule_enabled(enabled_map, rule_code)
+        result["pool_pump_rule_code"] = rule_code
+        result["pool_pump_rule_enabled"] = rule_enabled
+
+        if not rule_enabled:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "rule_disabled"}
+            result["decision_reason"] = "time_window_rule_disabled"
+            status = "noop"
+            return result
+
+        states_by_id = await _pool_pump_states_by_id()
+        pool_pump_state = _build_pool_pump_state(states_by_id)
+        result["pool_pump_state_before"] = pool_pump_state
+        control = pool_pump_state.get("control")
+        control_map = control if isinstance(control, dict) else {}
+        pump_enabled = bool(control_map.get("enabled"))
+        pump_available = bool(control_map.get("available"))
+        result["pool_pump_available"] = pump_available
+
+        if not pump_available:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "pool_pump_unavailable"}
+            result["decision_reason"] = "pool_pump_unavailable"
+            status = "noop"
+            return result
+
+        result["decision"] = {"mode": "off"}
+        result["decision_reason"] = "pump_off_period_active"
+        if pump_enabled:
+            await _pool_pump_set_enabled(False)
+            result["action"] = {"type": "stop_pool_pump", "reason": "pump_off_period_active"}
+            status = "applied"
+        else:
+            result["action"] = {"type": "noop", "reason": "already_off"}
+            status = "noop"
+        return result
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        status = "failed"
+        error_text = f"{type(exc).__name__}: {exc}"
+        result["error"] = error_text
+        raise
+    finally:
+        try:
+            result["final_switch_states"] = await _collect_final_switch_states()
+        except Exception as state_exc:  # noqa: BLE001
+            result["final_switch_states_error"] = f"{type(state_exc).__name__}: {state_exc}"
+        result["log_ok"] = ok
+        result["log_status"] = status
+        result["log_error_text"] = error_text
+
+
 async def _run_pool_pump_overnight_control_check(
     combined_flow: dict[str, object] | None,
     tesla_overnight_result: dict[str, object] | None = None,
@@ -6319,17 +6415,10 @@ async def _run_pool_pump_overnight_control_check(
         }
 
         if not schedule_active:
-            if pump_enabled:
-                await _pool_pump_set_enabled(False)
-                result["action"] = {"type": "stop_pool_pump", "reason": "outside_pump_schedule"}
-                status = "applied"
-                switch_action_applied = "stop_pool_pump"
-                switch_reason_applied = "outside_pump_schedule"
-            else:
-                result["action"] = {"type": "noop", "reason": "outside_pump_schedule"}
-                status = "noop"
+            result["action"] = {"type": "noop", "reason": "outside_pump_schedule"}
             result["decision"] = {"mode": "off"}
             result["decision_reason"] = "outside_pool_pump_schedule"
+            status = "noop"
         elif remaining_runtime_seconds is None:
             if pump_enabled:
                 await _pool_pump_set_enabled(False)
@@ -7296,6 +7385,18 @@ def _build_combined_flow_payload(
     pool_pump_control = pool_pump_state.get("control") if isinstance(pool_pump_state, dict) else None
     pool_pump_metrics = pool_pump_state.get("metrics") if isinstance(pool_pump_state, dict) else None
     pool_pump_power_w = _to_number(pool_pump_metrics.get("power_w")) if isinstance(pool_pump_metrics, dict) else None
+    pool_pump_power_stale = bool(pool_pump_metrics.get("power_stale")) if isinstance(pool_pump_metrics, dict) else False
+    pool_pump_power_age_seconds = _to_number(pool_pump_metrics.get("power_age_seconds")) if isinstance(pool_pump_metrics, dict) else None
+    pool_pump_available = (
+        bool(pool_pump_control.get("available"))
+        if isinstance(pool_pump_control, dict) and pool_pump_control.get("available") is not None
+        else None
+    )
+    pool_pump_unavailable_reason = (
+        str(pool_pump_control.get("unavailable_reason") or "").strip() or None
+        if isinstance(pool_pump_control, dict)
+        else None
+    )
     pool_pump_enabled = pool_pump_control.get("enabled") if isinstance(pool_pump_control, dict) else None
     saj_pv_estimate_w: float | None = None
     if inverter1_w is not None and battery1_w is not None:
@@ -7365,6 +7466,10 @@ def _build_combined_flow_payload(
         "tesla_charge_requested_enabled": tesla_requested_enabled,
         "tesla_cable_connected": tesla_cable_connected,
         "pool_pump_power_w": pool_pump_power_w,
+        "pool_pump_power_stale": pool_pump_power_stale,
+        "pool_pump_power_age_seconds": pool_pump_power_age_seconds,
+        "pool_pump_available": pool_pump_available,
+        "pool_pump_unavailable_reason": pool_pump_unavailable_reason,
         "pool_pump_enabled": pool_pump_enabled,
         "inverter_status": "combined",
         "inverter1_status": inverter1_status,
@@ -7765,14 +7870,59 @@ def _compact_raw_ha_state(state: dict[str, object] | None) -> dict[str, object] 
     }
 
 
+def _set_pool_pump_control_override(enabled: bool | None) -> None:
+    pool_pump_control_override["enabled"] = enabled if isinstance(enabled, bool) else None
+    pool_pump_control_override["set_at_utc"] = datetime.now(UTC).isoformat() if isinstance(enabled, bool) else None
+
+
+def _resolve_pool_pump_control_override(now_utc: datetime) -> tuple[bool | None, float | None]:
+    enabled = pool_pump_control_override.get("enabled")
+    if not isinstance(enabled, bool):
+        return None, None
+    set_at_raw = pool_pump_control_override.get("set_at_utc")
+    set_at = _safe_parse_utc(set_at_raw)
+    if not set_at:
+        _set_pool_pump_control_override(None)
+        return None, None
+    age_seconds = max((now_utc - set_at).total_seconds(), 0.0)
+    if age_seconds > POOL_PUMP_CONTROL_OVERRIDE_TTL_SECONDS:
+        _set_pool_pump_control_override(None)
+        return None, None
+    return enabled, age_seconds
+
+
 async def _pool_pump_states_by_id() -> dict[str, dict[str, object]]:
-    switch_state, power_state = await asyncio.gather(
-        ha_client.entity_state(POOL_PUMP_SWITCH_ENTITY_ID),
-        ha_client.entity_state(POOL_PUMP_POWER_ENTITY_ID),
-    )
+    status_payload = await pool_pump_client.check_status()
+    switch_state = status_payload.get("switch_state")
+    power_state = status_payload.get("power_state")
+    energy_today_state = status_payload.get("energy_today_state")
+    fetched_at_utc = datetime.now(UTC).isoformat()
+
+    def _normalize_pool_pump_state(entity_id: str, value: object) -> dict[str, object]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, Exception):
+            return {
+                "entity_id": entity_id,
+                "state": "unavailable",
+                "attributes": {},
+                "last_updated": fetched_at_utc,
+                "last_changed": fetched_at_utc,
+                "_fetch_error": f"{type(value).__name__}: {value}",
+            }
+        return {
+            "entity_id": entity_id,
+            "state": "unavailable",
+            "attributes": {},
+            "last_updated": fetched_at_utc,
+            "last_changed": fetched_at_utc,
+            "_fetch_error": "invalid_state_payload",
+        }
+
     return {
-        POOL_PUMP_SWITCH_ENTITY_ID: switch_state if isinstance(switch_state, dict) else {},
-        POOL_PUMP_POWER_ENTITY_ID: power_state if isinstance(power_state, dict) else {},
+        POOL_PUMP_SWITCH_ENTITY_ID: _normalize_pool_pump_state(POOL_PUMP_SWITCH_ENTITY_ID, switch_state),
+        POOL_PUMP_POWER_ENTITY_ID: _normalize_pool_pump_state(POOL_PUMP_POWER_ENTITY_ID, power_state),
+        POOL_PUMP_ENERGY_TODAY_ENTITY_ID: _normalize_pool_pump_state(POOL_PUMP_ENERGY_TODAY_ENTITY_ID, energy_today_state),
     }
 
 
@@ -7780,12 +7930,19 @@ async def _pool_pump_set_enabled(enabled: bool) -> dict[str, object]:
     states_by_id = await _pool_pump_states_by_id()
     current_state = _build_pool_pump_state(states_by_id)
     control = current_state.get("control")
+    control_map = control if isinstance(control, dict) else {}
+    if not bool(control_map.get("available")):
+        unavailable_reason = str(control_map.get("unavailable_reason") or "pool_pump_unavailable").strip()
+        raise HTTPException(status_code=503, detail=f"Pool pump switch unavailable: {unavailable_reason}")
     switch_entity = control.get("switch_entity") if isinstance(control, dict) else None
     entity_id = str((switch_entity or {}).get("entity_id") or "")
     if not entity_id:
         raise HTTPException(status_code=400, detail="Pool pump switch entity unavailable")
-    service = "turn_on" if enabled else "turn_off"
-    await ha_client.call_service("switch", service, {"entity_id": entity_id})
+    if enabled:
+        await pool_pump_client.turn_on()
+    else:
+        await pool_pump_client.turn_off()
+    _set_pool_pump_control_override(enabled)
     refreshed_states_by_id = await _pool_pump_states_by_id()
     return {
         "ok": True,
@@ -7797,20 +7954,148 @@ async def _pool_pump_set_enabled(enabled: bool) -> dict[str, object]:
 def _build_pool_pump_state(states_by_id: dict[str, dict[str, object]]) -> dict[str, object]:
     switch_state = states_by_id.get(POOL_PUMP_SWITCH_ENTITY_ID)
     power_state = states_by_id.get(POOL_PUMP_POWER_ENTITY_ID)
-    switch_available = isinstance(switch_state, dict) and str(switch_state.get("state") or "").lower() not in ("", "unavailable", "unknown")
-    enabled = str(switch_state.get("state") or "").lower() == "on" if isinstance(switch_state, dict) else None
-    power_value = _to_number(power_state.get("state")) if isinstance(power_state, dict) else None
+    energy_today_state = states_by_id.get(POOL_PUMP_ENERGY_TODAY_ENTITY_ID)
+    now_utc = datetime.now(UTC)
+    switch_fetch_error = str(switch_state.get("_fetch_error") or "").strip() if isinstance(switch_state, dict) else "state_payload_missing"
+    switch_state_value = str(switch_state.get("state") or "").strip().lower() if isinstance(switch_state, dict) else ""
+    switch_entity_present = isinstance(switch_state, dict) and bool(str(switch_state.get("entity_id") or "").strip())
+    switch_reachable = switch_entity_present and not switch_fetch_error
+    switch_state_known_base = switch_state_value in ("on", "off")
+    if switch_state_known_base:
+        _set_pool_pump_control_override(None)
+    switch_available = switch_reachable
+    switch_unavailable_reason: str | None = None
+    if not switch_available:
+        if switch_fetch_error:
+            switch_unavailable_reason = f"switch_fetch_error:{switch_fetch_error}"
+        elif not switch_entity_present:
+            switch_unavailable_reason = "switch_entity_missing"
+
+    power_fetch_error = str(power_state.get("_fetch_error") or "").strip() if isinstance(power_state, dict) else "state_payload_missing"
+    power_state_value = str(power_state.get("state") or "").strip().lower() if isinstance(power_state, dict) else ""
+    power_available = (
+        isinstance(power_state, dict)
+        and not power_fetch_error
+        and power_state_value not in ("", "unavailable", "unknown")
+    )
+    power_unavailable_reason: str | None = None
+    if not power_available:
+        if power_fetch_error:
+            power_unavailable_reason = f"power_fetch_error:{power_fetch_error}"
+        elif power_state_value in ("", "unknown"):
+            power_unavailable_reason = "power_state_unknown"
+        elif power_state_value == "unavailable":
+            power_unavailable_reason = "power_state_unavailable"
+        else:
+            power_unavailable_reason = f"power_state_{power_state_value}"
+    power_last_updated = None
+    if isinstance(power_state, dict):
+        power_last_updated = power_state.get("last_updated") or power_state.get("last_changed")
+    power_age_seconds: float | None = None
+    power_stale = False
+    if power_available and power_last_updated:
+        parsed_power_last_updated = _safe_parse_utc(power_last_updated)
+        if parsed_power_last_updated:
+            power_age_seconds = max((now_utc - parsed_power_last_updated).total_seconds(), 0.0)
+            power_stale = power_age_seconds > POOL_PUMP_POWER_STATE_STALE_SECONDS
+    power_value = _to_number(power_state.get("state")) if power_available else None
     power_unit = (
         power_state.get("attributes", {}).get("unit_of_measurement")
         if isinstance(power_state, dict) and isinstance(power_state.get("attributes"), dict)
         else None
     )
-    power_w = _power_to_watts(power_value, str(power_unit) if power_unit is not None else None)
+    power_w_raw = _power_to_watts(power_value, str(power_unit) if power_unit is not None else None)
+
+    energy_today_fetch_error = (
+        str(energy_today_state.get("_fetch_error") or "").strip()
+        if isinstance(energy_today_state, dict)
+        else "state_payload_missing"
+    )
+    energy_today_state_value = (
+        str(energy_today_state.get("state") or "").strip().lower()
+        if isinstance(energy_today_state, dict)
+        else ""
+    )
+    energy_today_available = (
+        isinstance(energy_today_state, dict)
+        and not energy_today_fetch_error
+        and energy_today_state_value not in ("", "unavailable", "unknown")
+    )
+    energy_today_unavailable_reason: str | None = None
+    if not energy_today_available:
+        if energy_today_fetch_error:
+            energy_today_unavailable_reason = f"energy_today_fetch_error:{energy_today_fetch_error}"
+        elif energy_today_state_value in ("", "unknown"):
+            energy_today_unavailable_reason = "energy_today_state_unknown"
+        elif energy_today_state_value == "unavailable":
+            energy_today_unavailable_reason = "energy_today_state_unavailable"
+        else:
+            energy_today_unavailable_reason = f"energy_today_state_{energy_today_state_value}"
+    energy_today_last_updated = None
+    if isinstance(energy_today_state, dict):
+        energy_today_last_updated = energy_today_state.get("last_updated") or energy_today_state.get("last_changed")
+    energy_today_age_seconds: float | None = None
+    energy_today_recent = False
+    if energy_today_available and energy_today_last_updated:
+        parsed_energy_last_updated = _safe_parse_utc(energy_today_last_updated)
+        if parsed_energy_last_updated:
+            energy_today_age_seconds = max((now_utc - parsed_energy_last_updated).total_seconds(), 0.0)
+            energy_today_recent = energy_today_age_seconds <= POOL_PUMP_ENERGY_STATE_FRESH_SECONDS
+    energy_today_kwh = _to_number(energy_today_state.get("state")) if energy_today_available else None
+
+    override_enabled, override_age_seconds = _resolve_pool_pump_control_override(now_utc)
+    override_active = isinstance(override_enabled, bool)
+
+    power_stale_overridden_by_energy = False
+    if power_stale and energy_today_recent and power_w_raw is not None and not (override_active and override_enabled is False):
+        power_stale = False
+        power_stale_overridden_by_energy = True
+
+    enabled_inferred_from_power = False
+    enabled_from_override = False
+    enabled_source: str | None = None
+    enabled: bool | None
+    if not switch_available:
+        enabled = None
+    elif switch_state_value == "on":
+        enabled = True
+        enabled_source = "switch_state"
+    elif switch_state_value == "off":
+        enabled = False
+        enabled_source = "switch_state"
+    elif override_active:
+        enabled = override_enabled
+        enabled_from_override = True
+        enabled_source = "manual_control_override"
+    else:
+        enabled = None
+        if energy_today_recent and power_w_raw is not None:
+            enabled = power_w_raw > POWER_FLOW_ACTIVE_THRESHOLD_W
+            enabled_inferred_from_power = True
+            enabled_source = "power_energy_fallback"
+
+    switch_state_known = switch_state_known_base or enabled_inferred_from_power or enabled_from_override
+    switch_state_unknown = bool(switch_available and not switch_state_known)
+    effective_state: str | None
+    if enabled is True:
+        effective_state = "on"
+    elif enabled is False:
+        effective_state = "off"
+    else:
+        effective_state = None
+
+    power_w = power_w_raw
+    if power_stale:
+        power_w = None
+    if not switch_available and not enabled_inferred_from_power:
+        power_w = None
     updated_at = None
     if isinstance(power_state, dict):
         updated_at = power_state.get("last_updated") or power_state.get("last_changed")
     if not updated_at and isinstance(switch_state, dict):
         updated_at = switch_state.get("last_updated") or switch_state.get("last_changed")
+    if not updated_at and isinstance(energy_today_state, dict):
+        updated_at = energy_today_state.get("last_updated") or energy_today_state.get("last_changed")
     return {
         "device_key": "pool_pump",
         "label": "Pool Pump",
@@ -7819,11 +8104,41 @@ def _build_pool_pump_state(states_by_id: dict[str, dict[str, object]]) -> dict[s
         "control": {
             "enabled": enabled,
             "available": switch_available,
+            "unavailable_reason": switch_unavailable_reason,
+            "fetch_error": switch_fetch_error or None,
+            "state": switch_state_value or None,
+            "effective_state": effective_state,
+            "state_known": switch_state_known,
+            "state_unknown": switch_state_unknown,
+            "enabled_source": enabled_source,
+            "enabled_inferred_from_power": enabled_inferred_from_power,
+            "enabled_from_override": enabled_from_override,
+            "control_override_active": override_active,
+            "control_override_age_seconds": round(override_age_seconds, 1) if override_age_seconds is not None else None,
             "switch_entity": _compact_raw_ha_state(switch_state),
         },
         "metrics": {
             "power_w": power_w,
+            "power_w_raw": power_w_raw,
+            "power_available": power_available,
+            "power_unavailable_reason": power_unavailable_reason,
+            "power_fetch_error": power_fetch_error or None,
+            "power_stale": power_stale,
+            "power_stale_overridden_by_energy": power_stale_overridden_by_energy,
+            "power_age_seconds": round(power_age_seconds, 1) if power_age_seconds is not None else None,
+            "power_stale_threshold_seconds": POOL_PUMP_POWER_STATE_STALE_SECONDS,
+            "power_ignored_due_to_switch_unavailable": not switch_available,
             "power_entity": _compact_raw_ha_state(power_state),
+            "energy_today_kwh": energy_today_kwh,
+            "energy_today_available": energy_today_available,
+            "energy_today_recent": energy_today_recent,
+            "energy_today_age_seconds": (
+                round(energy_today_age_seconds, 1) if energy_today_age_seconds is not None else None
+            ),
+            "energy_today_fresh_threshold_seconds": POOL_PUMP_ENERGY_STATE_FRESH_SECONDS,
+            "energy_today_unavailable_reason": energy_today_unavailable_reason,
+            "energy_today_fetch_error": energy_today_fetch_error or None,
+            "energy_today_entity": _compact_raw_ha_state(energy_today_state),
         },
     }
 
@@ -8403,7 +8718,7 @@ def _validate_solplanet_day_slots(slots: list[int]) -> list[int]:
 
 
 async def _replace_runtime(new_settings: Settings) -> None:
-    global settings, ha_client, sample_interval_seconds, solplanet_client, solplanet_sample_interval_seconds  # noqa: PLW0603
+    global settings, ha_client, pool_pump_client, sample_interval_seconds, solplanet_client, solplanet_sample_interval_seconds  # noqa: PLW0603
     async with runtime_lock:
         old_solplanet = solplanet_client
         settings = new_settings
@@ -8413,6 +8728,13 @@ async def _replace_runtime(new_settings: Settings) -> None:
             base_url=settings.ha_url,
             token=settings.ha_token,
             request_logger=_handle_outbound_request_log,
+        )
+        pool_pump_client = PoolPumpClient(
+            ha_client=ha_client,
+            switch_entity_id=POOL_PUMP_SWITCH_ENTITY_ID,
+            power_entity_id=POOL_PUMP_POWER_ENTITY_ID,
+            energy_today_entity_id=POOL_PUMP_ENERGY_TODAY_ENTITY_ID,
+            info_entity_id=POOL_PUMP_INFO_ENTITY_ID,
         )
         solplanet_client = _new_solplanet_client(settings)
         collector_status.setdefault("saj", {})["interval_seconds"] = None
@@ -9754,6 +10076,7 @@ async def _persist_worker_summary_logs(
     started_monotonic: float,
     midday_result: dict[str, object] | None,
     pool_pump_free_energy_result: dict[str, object] | None,
+    pool_pump_off_period_result: dict[str, object] | None,
     saj_watch_result: dict[str, object] | None,
     pool_pump_result: dict[str, object] | None,
     battery_full_result: dict[str, object] | None,
@@ -9761,6 +10084,7 @@ async def _persist_worker_summary_logs(
     source = _select_worker_summary_source(
         midday_result,
         pool_pump_free_energy_result,
+        pool_pump_off_period_result,
         saj_watch_result,
         pool_pump_result,
         battery_full_result,
@@ -9768,6 +10092,7 @@ async def _persist_worker_summary_logs(
     all_notifications = _collect_worker_notifications(
         midday_result,
         pool_pump_free_energy_result,
+        pool_pump_off_period_result,
         saj_watch_result,
         pool_pump_result,
         battery_full_result,
@@ -9775,13 +10100,14 @@ async def _persist_worker_summary_logs(
     all_actions = _collect_worker_actions(
         midday_result,
         pool_pump_free_energy_result,
+        pool_pump_off_period_result,
         saj_watch_result,
         pool_pump_result,
         battery_full_result,
     )
     all_decision_reasons = [
         str(item.get("decision_reason") or "").strip()
-        for item in (midday_result, pool_pump_free_energy_result, saj_watch_result, pool_pump_result, battery_full_result)
+        for item in (midday_result, pool_pump_free_energy_result, pool_pump_off_period_result, saj_watch_result, pool_pump_result, battery_full_result)
         if isinstance(item, dict) and str(item.get("decision_reason") or "").strip()
     ]
     notification_status, notification_ok, notification_payload, notification_error_text = _build_notification_summary_payload(
@@ -9820,7 +10146,7 @@ async def _persist_worker_summary_logs(
         actions=all_actions,
         check_sources=[
             item
-            for item in (midday_result, pool_pump_free_energy_result, saj_watch_result, pool_pump_result, battery_full_result)
+            for item in (midday_result, pool_pump_free_energy_result, pool_pump_off_period_result, saj_watch_result, pool_pump_result, battery_full_result)
             if isinstance(item, dict)
         ],
     )
@@ -10179,6 +10505,24 @@ async def _collector_loop() -> None:
                 "executed_at": datetime.now(UTC).isoformat(),
             }
 
+        pool_pump_off_period_result: dict[str, object] | None = None
+        try:
+            pool_pump_off_period_result = await _run_pool_pump_off_period_check(
+                round_id=round_id,
+                requested_at_utc=round_started_at_utc,
+            )
+            collector_status.setdefault("combined", {})["last_pool_pump_off_period_check"] = pool_pump_off_period_result
+        except Exception as pool_pump_off_period_exc:  # noqa: BLE001
+            _append_worker_failure_log(
+                "combined",
+                stage="pool_pump_off_period",
+                error=pool_pump_off_period_exc,
+            )
+            collector_status.setdefault("combined", {})["last_pool_pump_off_period_check"] = {
+                "error": f"{type(pool_pump_off_period_exc).__name__}: {pool_pump_off_period_exc}",
+                "executed_at": datetime.now(UTC).isoformat(),
+            }
+
         try:
             saj_battery_watch_result = await _run_saj_battery_watch_check(
                 round_results.get("combined", {}).get("flow") if isinstance(round_results.get("combined"), dict) else None,
@@ -10245,6 +10589,7 @@ async def _collector_loop() -> None:
                 started_monotonic=summary_started_monotonic,
                 midday_result=midday_window_result,
                 pool_pump_free_energy_result=pool_pump_free_energy_result,
+                pool_pump_off_period_result=pool_pump_off_period_result,
                 saj_watch_result=saj_battery_watch_result,
                 pool_pump_result=pool_pump_overnight_result,
                 battery_full_result=battery_full_notification_result,
