@@ -88,6 +88,7 @@ curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/current -H 'Cont
 curl -s "http://<wattimize-host>:18000/api/operations/timeline?limit=50" | jq
 curl -s http://<wattimize-host>:18000/api/devices/pool-pump | jq
 curl -s -X POST http://<wattimize-host>:18000/api/devices/pool-pump/toggle -H 'Content-Type: application/json' -d '{"enabled":true}' | jq
+curl -s -X PUT http://<wattimize-host>:18000/api/devices/pool-pump/auto-control -H 'Content-Type: application/json' -d '{"enabled":false}' | jq
 curl -s http://<wattimize-host>:18000/api/database/export.sqlite3 -o wattimize.sqlite3
 curl -s -X POST http://<wattimize-host>:18000/api/database/import.sqlite3 -F "file=@wattimize.sqlite3" | jq
 curl -s -X POST http://<wattimize-host>:18000/api/config/solplanet/discover -H 'Content-Type: application/json' -d '{"solplanet_dongle_host":"192.168.1.10"}' | jq
@@ -168,6 +169,7 @@ First-run configuration:
 - The `Time Window` tab shows rule switches for each automation window, covering both notifications and automated operations.
 - Rule state is stored in SQLite and exposed through `GET /api/time-window-rules` and `PUT /api/time-window-rules/{rule_code}`.
 - `GET /api/time-window-rules` now also returns a `priority` snapshot for Tesla and pool pump, and the dashboard lets you temporarily override the winning device through `PUT /api/time-window-priority-override` with `auto`, `tesla`, or `pool_pump`.
+- Pool-pump automation is now managed only from the `Priority Scores` card through `PUT /api/devices/pool-pump/auto-control`; when disabled, the worker stops issuing automatic pool-pump actions and the pump remains manual-only.
 - SAJ profile automation and Tesla charge automation respect these rule switches before issuing control actions.
 - The overnight shoulder window (`23:00-11:00`) now starts Tesla charging only when the projected usable battery minus home load to `08:00` and remaining pool-pump load to `05:00` stays above the configured `1.0kWh` reserve, and stops once that budget is exhausted.
 - Tesla manual start/stop now returns UI feedback states so the dashboard can show pending, success, and failure confirmation after `/api/tesla/control/charging`.

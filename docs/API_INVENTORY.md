@@ -24,6 +24,7 @@ Status values:
 - `PUT /api/time-window-priority-override`
 - `GET /api/devices/pool-pump`
 - `POST /api/devices/pool-pump/toggle`
+- `PUT /api/devices/pool-pump/auto-control`
 - `POST /api/tesla/control/charging`
 - `POST /api/tesla/control/current`
 - `GET /api/operations/timeline`

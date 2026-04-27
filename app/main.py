@@ -151,6 +151,7 @@ POOL_PUMP_OFF_PERIOD_MORNING_START_HOUR = 5
 POOL_PUMP_OFF_PERIOD_MORNING_END_HOUR = 11
 POOL_PUMP_OFF_PERIOD_AFTERNOON_START_HOUR = 14
 POOL_PUMP_OFF_PERIOD_AFTERNOON_END_HOUR = 23
+POOL_PUMP_AUTO_CONTROL_STATE_KEY = "pool_pump.auto_control_enabled"
 TIME_WINDOW_PRIORITY_OVERRIDE_STATE_KEY = "time_window.priority_override"
 BATTERY_CAPACITY_KWH = {
     "saj": 15.0,
@@ -1701,10 +1702,17 @@ async def _build_device_priority_snapshot(
 
     tesla_soc_percent = _to_number(metrics_map.get("tesla_battery_soc_percent"))
     tesla_original_score = round(_tesla_priority_score_for_soc(tesla_soc_percent), 1)
+    pool_pump_auto_control_enabled = await _load_pool_pump_auto_control_enabled()
     pump_original_score = pump_score
     override_target = await _load_time_window_priority_override_state()
+    if not pool_pump_auto_control_enabled and override_target == "pool_pump":
+        override_target = "auto"
     tesla_score = 100.0 if override_target == "tesla" else tesla_original_score
-    pump_score = 100.0 if override_target == "pool_pump" else pump_original_score
+    pump_score = (
+        100.0
+        if pool_pump_auto_control_enabled and override_target == "pool_pump"
+        else (pump_original_score if pool_pump_auto_control_enabled else 0.0)
+    )
 
     winner = "tesla" if tesla_score >= pump_score else "pool_pump"
 
@@ -1732,6 +1740,7 @@ async def _build_device_priority_snapshot(
         "pool_pump": {
             "score": pump_score,
             "original_score": pump_original_score,
+            "auto_control_enabled": pool_pump_auto_control_enabled,
             "weighted_target_min_hours": POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MIN_HOURS,
             "weighted_target_max_hours": POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MAX_HOURS,
             "formula": "clamp(current_deficit / 6.0, 0, 1) * 100",
@@ -3637,6 +3646,8 @@ def _operation_reason_label(reason: object, *, lang: Literal["zh", "en"] = "zh")
         return "Runtime budget exhausted (overnight runtime used up)" if lang == "en" else "预算耗尽（夜间运行时长已用完）"
     if code == "runtime_budget_unavailable":
         return "Runtime budget unavailable (missing valid calculation data)" if lang == "en" else "预算不可用（缺少有效计算数据）"
+    if code == "pool_pump_auto_control_disabled":
+        return "Pool pump auto control disabled (manual-only mode)" if lang == "en" else "水泵自动控制已关闭（仅手动模式）"
     if code == "outside_window":
         return "Outside current control window" if lang == "en" else "不在当前控制窗口"
     if code == "rule_disabled":
@@ -4476,6 +4487,29 @@ async def _store_pool_pump_free_energy_state(state: dict[str, object]) -> None:
     )
 
 
+async def _load_pool_pump_auto_control_enabled() -> bool:
+    kv_map = await asyncio.to_thread(
+        get_realtime_kv_by_prefix,
+        storage_db_path,
+        prefix=POOL_PUMP_AUTO_CONTROL_STATE_KEY,
+    )
+    row = kv_map.get(POOL_PUMP_AUTO_CONTROL_STATE_KEY)
+    parsed = _to_bool((row or {}).get("value"))
+    return True if parsed is None else bool(parsed)
+
+
+async def _store_pool_pump_auto_control_enabled(enabled: bool) -> bool:
+    normalized = bool(enabled)
+    await asyncio.to_thread(
+        upsert_realtime_kv,
+        storage_db_path,
+        [
+            (POOL_PUMP_AUTO_CONTROL_STATE_KEY, json.dumps(normalized), "ui"),
+        ],
+    )
+    return normalized
+
+
 async def _load_time_window_priority_override_state() -> str:
     kv_map = await asyncio.to_thread(
         get_realtime_kv_by_prefix,
@@ -4721,6 +4755,8 @@ async def _run_pool_pump_free_energy_control_check(
         pump_enabled = bool(control_map.get("enabled"))
         pump_available = bool(control_map.get("available"))
         result["pool_pump_available"] = pump_available
+        auto_control_enabled = await _load_pool_pump_auto_control_enabled()
+        result["pool_pump_auto_control_enabled"] = auto_control_enabled
 
         persisted_state = await _load_pool_pump_free_energy_state()
         window_key = _pool_pump_free_energy_window_key(now_local)
@@ -4773,6 +4809,13 @@ async def _run_pool_pump_free_energy_control_check(
         switch_action_applied: str | None = None
         switch_reason_applied: str | None = None
 
+        if not auto_control_enabled:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "pool_pump_auto_control_disabled"}
+            result["decision_reason"] = "pool_pump_auto_control_disabled"
+            status = "noop"
+            return result
+
         if not pump_available:
             result["decision"] = {"mode": "observe_only"}
             result["action"] = {"type": "noop", "reason": "pool_pump_unavailable"}
@@ -4785,13 +4828,6 @@ async def _run_pool_pump_free_energy_control_check(
             result["action"] = {"type": "noop", "reason": "outside_window"}
             result["decision_reason"] = "outside_free_energy_window"
             status = "outside_window"
-            return result
-
-        if not rule_enabled:
-            result["decision"] = {"mode": "observe_only"}
-            result["action"] = {"type": "noop", "reason": "rule_disabled"}
-            result["decision_reason"] = "time_window_rule_disabled"
-            status = "noop"
             return result
 
         metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
@@ -5542,6 +5578,8 @@ async def _run_midday_window_check(
 
         priority_snapshot = await _build_device_priority_snapshot(combined_flow, now_local=now_local)
         result["priority_snapshot"] = priority_snapshot
+        pool_pump_auto_control_enabled = bool((priority_snapshot.get("pool_pump") or {}).get("auto_control_enabled", True))
+        result["pool_pump_auto_control_enabled"] = pool_pump_auto_control_enabled
 
         base_grid_w = max(float(result["current_grid_import_w"]) - tesla_charge_power_w, 0.0)
         result["base_grid_without_tesla_w"] = round(base_grid_w, 1)
@@ -5556,7 +5594,7 @@ async def _run_midday_window_check(
         current_grid_import_w = float(result["current_grid_import_w"])
         effective_current_amps = current_actual_amps or current_configured_amps or 0.0
 
-        if window_mode == "free_energy":
+        if window_mode == "free_energy" and pool_pump_auto_control_enabled:
             pool_pump_score = _to_number((priority_snapshot.get("pool_pump") or {}).get("score")) or 0.0
             tesla_score = _to_number((priority_snapshot.get("tesla") or {}).get("score")) or 0.0
             pump_power_candidates = [
@@ -5801,6 +5839,8 @@ async def _run_saj_battery_watch_check(
         metrics_map = metrics if isinstance(metrics, dict) else {}
         priority_snapshot = await _build_device_priority_snapshot(combined_flow, now_local=now_local)
         result["priority_snapshot"] = priority_snapshot
+        pool_pump_auto_control_enabled = bool((priority_snapshot.get("pool_pump") or {}).get("auto_control_enabled", True))
+        result["pool_pump_auto_control_enabled"] = pool_pump_auto_control_enabled
         saj_soc_percent = _to_number(metrics_map.get("battery1_soc_percent"))
         solplanet_soc_percent = _to_number(metrics_map.get("battery2_soc_percent"))
         result["saj_soc_percent"] = saj_soc_percent
@@ -5892,7 +5932,11 @@ async def _run_saj_battery_watch_check(
                 pump_end_local += timedelta(days=1)
             pump_duration_hours = (pump_end_local - now_local).total_seconds() / 3600.0
             pump_max_hours = float((24 - POOL_PUMP_OVERNIGHT_TARGET_START_HOUR) + POOL_PUMP_OVERNIGHT_TARGET_END_HOUR)
-            pump_remaining_hours = max(0.0, min(pump_duration_hours, pump_max_hours))
+            pump_remaining_hours = (
+                max(0.0, min(pump_duration_hours, pump_max_hours))
+                if pool_pump_auto_control_enabled
+                else 0.0
+            )
             pool_pump_remaining_kwh = round((pump_power_w * pump_remaining_hours) / 1000.0, 4)
             if usable_battery_total_kwh is not None and home_load_kwh is not None:
                 available_for_tesla_kwh = round(usable_battery_total_kwh - home_load_kwh - pool_pump_remaining_kwh, 4)
@@ -5904,6 +5948,7 @@ async def _run_saj_battery_watch_check(
                 "pool_pump_power_w": pump_power_w,
                 "pool_pump_remaining_hours": round(pump_remaining_hours, 2),
                 "pool_pump_remaining_kwh": pool_pump_remaining_kwh,
+                "pool_pump_auto_control_enabled": pool_pump_auto_control_enabled,
                 "available_for_tesla_kwh": available_for_tesla_kwh,
                 "min_available_kwh": TESLA_OVERNIGHT_SHOULDER_MIN_AVAILABLE_KWH,
             }
@@ -5976,7 +6021,11 @@ async def _run_saj_battery_watch_check(
 
         budget_map = (result.get("overnight_shoulder_tesla") or {}).get("energy_budget")
         budget_info = budget_map if isinstance(budget_map, dict) else {}
-        pump_power_w = _to_number(budget_info.get("pool_pump_power_w")) or POOL_PUMP_ASSUMED_POWER_W
+        pump_power_w = (
+            _to_number(budget_info.get("pool_pump_power_w")) or POOL_PUMP_ASSUMED_POWER_W
+            if pool_pump_auto_control_enabled
+            else 0.0
+        )
         tesla_runtime_power_w = max(
             float(_to_number(charge_state.get("power_w")) or 0.0),
             float(current_configured_amps or 0.0) * TESLA_ASSUMED_CHARGING_VOLTAGE_V if should_charge else 0.0,
@@ -6101,11 +6150,13 @@ async def _run_pool_pump_off_period_check(
         rule_enabled = _is_time_window_rule_enabled(enabled_map, rule_code)
         result["pool_pump_rule_code"] = rule_code
         result["pool_pump_rule_enabled"] = rule_enabled
+        auto_control_enabled = await _load_pool_pump_auto_control_enabled()
+        result["pool_pump_auto_control_enabled"] = auto_control_enabled
 
-        if not rule_enabled:
+        if not auto_control_enabled:
             result["decision"] = {"mode": "observe_only"}
-            result["action"] = {"type": "noop", "reason": "rule_disabled"}
-            result["decision_reason"] = "time_window_rule_disabled"
+            result["action"] = {"type": "noop", "reason": "pool_pump_auto_control_disabled"}
+            result["decision_reason"] = "pool_pump_auto_control_disabled"
             status = "noop"
             return result
 
@@ -6196,13 +6247,6 @@ async def _run_pool_pump_overnight_control_check(
         rule_enabled = _is_time_window_rule_enabled(enabled_map, rule_code)
         result["pool_pump_rule_code"] = rule_code
         result["pool_pump_rule_enabled"] = rule_enabled
-        if not rule_enabled:
-            result["decision"] = {"mode": "observe_only"}
-            result["action"] = {"type": "noop", "reason": "rule_disabled"}
-            result["decision_reason"] = "time_window_rule_disabled"
-            status = "noop"
-            return result
-
         metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
         metrics_map = metrics if isinstance(metrics, dict) else {}
         priority_snapshot = await _build_device_priority_snapshot(combined_flow, now_local=now_local)
@@ -6242,6 +6286,8 @@ async def _run_pool_pump_overnight_control_check(
             if tesla_expected_active and any(value is not None for value in tesla_runtime_power_candidates)
             else 0.0
         )
+        auto_control_enabled = await _load_pool_pump_auto_control_enabled()
+        result["pool_pump_auto_control_enabled"] = auto_control_enabled
         result["tesla_state_before"] = tesla_state_before_map
         result["tesla_decision_before_pool_pump"] = tesla_decision_map
         result["tesla_action_before_pool_pump"] = tesla_action_map
@@ -6270,6 +6316,12 @@ async def _run_pool_pump_overnight_control_check(
         pump_enabled = bool(control_map.get("enabled"))
         pump_available = bool(control_map.get("available"))
         result["pool_pump_available"] = pump_available
+        if not auto_control_enabled:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "pool_pump_auto_control_disabled"}
+            result["decision_reason"] = "pool_pump_auto_control_disabled"
+            status = "noop"
+            return result
         if not pump_available:
             result["decision"] = {"mode": "observe_only"}
             result["action"] = {"type": "noop", "reason": "pool_pump_unavailable"}
@@ -11348,6 +11400,8 @@ async def put_time_window_priority_override(payload: TimeWindowPriorityOverrideP
     target = str(payload.target or "auto").strip().lower() or "auto"
     if target not in ("auto", "tesla", "pool_pump"):
         raise HTTPException(status_code=400, detail="target must be one of: auto, tesla, pool_pump")
+    if target == "pool_pump" and not await _load_pool_pump_auto_control_enabled():
+        raise HTTPException(status_code=400, detail="Pool pump auto control is disabled")
     stored = await _store_time_window_priority_override_state(target)
     return {
         "target": stored,
@@ -11998,6 +12052,19 @@ async def post_pool_pump_toggle(payload: DeviceTogglePayload) -> dict[str, objec
         raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+@app.put("/api/devices/pool-pump/auto-control")
+async def put_pool_pump_auto_control(payload: DeviceTogglePayload) -> dict[str, object]:
+    enabled = await _store_pool_pump_auto_control_enabled(payload.enabled)
+    priority_override_target = await _load_time_window_priority_override_state()
+    if not enabled and priority_override_target == "pool_pump":
+        priority_override_target = await _store_time_window_priority_override_state("auto")
+    return {
+        "enabled": enabled,
+        "priority_override_target": priority_override_target,
+        "updated_at_utc": datetime.now(UTC).isoformat(),
+    }
 
 
 @app.get("/api/saj/control/capabilities")

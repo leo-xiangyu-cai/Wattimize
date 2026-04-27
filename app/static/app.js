@@ -126,7 +126,7 @@ const I18N = {
     dashboardTab: "Dashboard",
     notificationMatrixTab: "Time Window",
     notificationMatrixTitle: "Time Window",
-    notificationMatrixIntro: "Each panel groups rules by Operation and Notification so you can quickly distinguish automated actions from alerts. Checkboxes are currently fixed on because the system behavior is already enabled.",
+    notificationMatrixIntro: "Each panel groups rules by Operation and Notification so you can quickly distinguish automated actions from alerts. Pool pump auto control is managed only from Priority Scores, not from each time-window rule.",
     notificationMatrixPriorityTitle: "Priority Scores",
     notificationMatrixPrioritySummary: "Tesla uses a non-linear SOC score: below 80% it rises faster and below 50% it becomes high quickly. Pool pump priority is based on day/night runtime hours times weight.",
     notificationMatrixPriorityWinner: "Current winner: {winner}",
@@ -150,6 +150,10 @@ const I18N = {
     notificationMatrixPriorityOverrideTesla: "Tesla",
     notificationMatrixPriorityOverridePump: "Pool Pump",
     notificationMatrixPriorityOverriddenScore: "{score} ({original})",
+    notificationMatrixPriorityPumpAutoControlLabel: "Pool pump auto control",
+    notificationMatrixPriorityPumpAutoControlHint: "Checked: worker may start or stop the pump automatically. Unchecked: the pump stays manual only.",
+    notificationMatrixPriorityPumpAutoControlEnabled: "Auto enabled",
+    notificationMatrixPriorityPumpAutoControlDisabled: "Manual only",
     notificationMatrixLoadingTitle: "Loading Time Window",
     notificationMatrixLoadingBody: "Refreshing rules, priority scores, and live window state...",
     notificationMatrixPriorityExpand: "Expand priority",
@@ -931,7 +935,7 @@ const I18N = {
     dashboardTab: "总览",
     notificationMatrixTab: "Time Window",
     notificationMatrixTitle: "Time Window",
-    notificationMatrixIntro: "每个面板会按 Operation 和 Notification 分组展示规则，这样你可以更快区分自动执行的动作和提醒通知。当前复选框固定为开启，因为系统行为已经默认启用。",
+    notificationMatrixIntro: "每个面板会按 Operation 和 Notification 分组展示规则，这样你可以更快区分自动执行的动作和提醒通知。水泵自动控制只在 Priority Scores 里统一管理，不在各个 time window 规则里单独修改。",
     notificationMatrixPriorityTitle: "优先级分数",
     notificationMatrixPrioritySummary: "Tesla 改成非线性 SOC 分数：低于 80% 后上涨会越来越快，低于 50% 后会很快变高。水泵只看白天/晚上运行小时数乘权重。",
     notificationMatrixPriorityWinner: "当前优先者：{winner}",
@@ -955,6 +959,10 @@ const I18N = {
     notificationMatrixPriorityOverrideTesla: "Tesla",
     notificationMatrixPriorityOverridePump: "水泵",
     notificationMatrixPriorityOverriddenScore: "{score}（原始 {original}）",
+    notificationMatrixPriorityPumpAutoControlLabel: "水泵自动控制",
+    notificationMatrixPriorityPumpAutoControlHint: "勾选后 worker 可以自动开关水泵；取消勾选后水泵完全改为手动控制。",
+    notificationMatrixPriorityPumpAutoControlEnabled: "允许自动控制",
+    notificationMatrixPriorityPumpAutoControlDisabled: "仅手动",
     notificationMatrixLoadingTitle: "正在加载 Time Window",
     notificationMatrixLoadingBody: "正在刷新规则、优先级分数和当前窗口状态...",
     notificationMatrixPriorityExpand: "展开优先级",
@@ -2021,6 +2029,7 @@ let teslaControlBusy = false;
 let teslaCurrentControlBusy = false;
 let solplanetPinModalBusy = false;
 let poolPumpControlBusy = false;
+let poolPumpAutoControlBusy = false;
 let timeWindowPriorityOverrideBusy = false;
 const TESLA_CONTROL_CONFIRM_POLL_MS = 1500;
 const TESLA_CONTROL_CONFIRM_TIMEOUT_MS = 15000;
@@ -2052,13 +2061,6 @@ const NOTIFICATION_MATRIX_WINDOWS = [
         code: "tesla_overnight_shoulder_control",
         titleKey: "notificationRuleTeslaOvernightShoulderTitle",
         triggerKey: "notificationRuleTeslaOvernightShoulderTrigger",
-      },
-      {
-        kind: "operation",
-        level: "info",
-        code: "pool_pump_overnight_control",
-        titleKey: "notificationRulePoolPumpOvernightTitle",
-        triggerKey: "notificationRulePoolPumpOvernightTrigger",
       },
       {
         kind: "notification",
@@ -2095,13 +2097,6 @@ const NOTIFICATION_MATRIX_WINDOWS = [
         code: "tesla_free_energy_control",
         titleKey: "notificationRuleTeslaFreeEnergyTitle",
         triggerKey: "notificationRuleTeslaFreeEnergyTrigger",
-      },
-      {
-        kind: "operation",
-        level: "info",
-        code: "pool_pump_free_energy_control",
-        titleKey: "notificationRulePoolPumpFreeEnergyTitle",
-        triggerKey: "notificationRulePoolPumpFreeEnergyTrigger",
       },
     ],
   },
@@ -6353,6 +6348,7 @@ function renderNotificationMatrixPriorityCard() {
   const tesla = priority?.tesla || {};
   const pump = priority?.pool_pump || {};
   const override = priority?.override || {};
+  const pumpAutoControlEnabled = pump?.auto_control_enabled !== false;
   const windows = Array.isArray(pump?.windows) ? pump.windows : [];
   const currentWindow = windows.find((item) => item?.id === "current") || {};
   const formatHours = (value) => (Number.isFinite(Number(value)) ? `${formatTrimmedDecimal(Number(value), 2)}h` : "-");
@@ -6375,6 +6371,15 @@ function renderNotificationMatrixPriorityCard() {
       return `${label}${item?.range ? ` (${item.range})` : ""} × ${formatTrimmedDecimal(Number(item?.weight), 1)}`;
     })
     .join(" · ");
+  const teslaPriorityText = formatScoreWithOverride(tesla?.score, tesla?.original_score, String(override?.target || "") === "tesla");
+  const pumpPriorityText = pumpAutoControlEnabled
+    ? formatScoreWithOverride(pump?.score, pump?.original_score, String(override?.target || "") === "pool_pump")
+    : t("notificationMatrixPriorityPumpAutoControlDisabled");
+  const pumpAutoControlStateText = poolPumpAutoControlBusy
+    ? t("notificationMatrixProgressSaving")
+    : t(pumpAutoControlEnabled
+      ? "notificationMatrixPriorityPumpAutoControlEnabled"
+      : "notificationMatrixPriorityPumpAutoControlDisabled");
   const winnerLabel = String(priority?.winner || "tie").trim() === "pool_pump"
     ? t("notificationMatrixPriorityPumpLabel")
     : t("notificationMatrixPriorityTeslaLabel");
@@ -6402,11 +6407,11 @@ function renderNotificationMatrixPriorityCard() {
       <div class="notification-priority-score-strip">
         <div class="notification-priority-score-pill">
           <span>${escapeHtml(t("notificationMatrixPriorityTeslaLabel"))}</span>
-          <strong>${escapeHtml(formatScoreWithOverride(tesla?.score, tesla?.original_score, String(override?.target || "") === "tesla"))}</strong>
+          <strong>${escapeHtml(teslaPriorityText)}</strong>
         </div>
         <div class="notification-priority-score-pill">
           <span>${escapeHtml(t("notificationMatrixPriorityPumpLabel"))}</span>
-          <strong>${escapeHtml(formatScoreWithOverride(pump?.score, pump?.original_score, String(override?.target || "") === "pool_pump"))}</strong>
+          <strong>${escapeHtml(pumpPriorityText)}</strong>
         </div>
       </div>
       ${isCollapsed ? "" : `
@@ -6421,7 +6426,7 @@ function renderNotificationMatrixPriorityCard() {
           <span>${escapeHtml(t("notificationMatrixPriorityOverrideTesla"))}</span>
         </label>
         <label class="notification-priority-radio">
-          <input type="radio" name="time-window-priority-override" value="pool_pump" ${String(override?.target || "") === "pool_pump" ? "checked" : ""} ${timeWindowPriorityOverrideBusy ? "disabled" : ""} />
+          <input type="radio" name="time-window-priority-override" value="pool_pump" ${String(override?.target || "") === "pool_pump" ? "checked" : ""} ${(timeWindowPriorityOverrideBusy || !pumpAutoControlEnabled || poolPumpAutoControlBusy) ? "disabled" : ""} />
           <span>${escapeHtml(t("notificationMatrixPriorityOverridePump"))}</span>
         </label>
       </div>
@@ -6429,7 +6434,7 @@ function renderNotificationMatrixPriorityCard() {
         <section class="notification-priority-device">
           <div class="notification-priority-device-topline">
             <span class="notification-priority-device-name">${escapeHtml(t("notificationMatrixPriorityTeslaLabel"))}</span>
-            <strong class="notification-priority-score">${escapeHtml(formatScoreWithOverride(tesla?.score, tesla?.original_score, String(override?.target || "") === "tesla"))}</strong>
+            <strong class="notification-priority-score">${escapeHtml(teslaPriorityText)}</strong>
           </div>
           <div class="notification-priority-device-meta">${escapeHtml(t("notificationMatrixPrioritySoc"))}: ${escapeHtml(Number.isFinite(Number(tesla?.soc_percent)) ? `${formatTrimmedDecimal(Number(tesla?.soc_percent), 1)}%` : "-")}</div>
           <div class="notification-priority-formula-label">${escapeHtml(t("notificationMatrixPriorityFormula"))}</div>
@@ -6438,8 +6443,16 @@ function renderNotificationMatrixPriorityCard() {
         <section class="notification-priority-device">
           <div class="notification-priority-device-topline">
             <span class="notification-priority-device-name">${escapeHtml(t("notificationMatrixPriorityPumpLabel"))}</span>
-            <strong class="notification-priority-score">${escapeHtml(formatScoreWithOverride(pump?.score, pump?.original_score, String(override?.target || "") === "pool_pump"))}</strong>
+            <strong class="notification-priority-score">${escapeHtml(pumpPriorityText)}</strong>
           </div>
+          <label class="notification-priority-checkbox">
+            <input type="checkbox" name="pool-pump-auto-control" ${pumpAutoControlEnabled ? "checked" : ""} ${poolPumpAutoControlBusy ? "disabled" : ""} />
+            <span class="notification-priority-checkbox-copy">
+              <strong>${escapeHtml(t("notificationMatrixPriorityPumpAutoControlLabel"))}</strong>
+              <span>${escapeHtml(pumpAutoControlStateText)}</span>
+            </span>
+          </label>
+          <p class="notification-priority-checkbox-hint">${escapeHtml(t("notificationMatrixPriorityPumpAutoControlHint"))}</p>
           <div class="notification-priority-device-meta">${escapeHtml(t("notificationMatrixPriorityWeights"))}: ${escapeHtml(weightText || "-")}</div>
           <div class="notification-priority-formula-label">${escapeHtml(t("notificationMatrixPriorityFormula"))}</div>
           <code class="notification-priority-formula">${escapeHtml(String(pump?.formula || "-"))}</code>
@@ -6508,6 +6521,13 @@ function renderNotificationMatrix() {
     radio.addEventListener("change", (event) => {
       const target = event.currentTarget;
       void updateTimeWindowPriorityOverride(target?.value || "auto");
+    });
+  }
+  const pumpAutoControlCheckbox = root.querySelector('input[name="pool-pump-auto-control"]');
+  if (pumpAutoControlCheckbox) {
+    pumpAutoControlCheckbox.addEventListener("change", (event) => {
+      const target = event.currentTarget;
+      void updatePoolPumpAutoControl(Boolean(target?.checked));
     });
   }
   const currentWindowId = getCurrentNotificationMatrixWindowId(stateCache.lastNotificationSummary);
@@ -7269,6 +7289,28 @@ async function updateTimeWindowPriorityOverride(target) {
     window.alert(String(err));
   } finally {
     timeWindowPriorityOverrideBusy = false;
+    renderNotificationMatrix();
+  }
+}
+
+async function updatePoolPumpAutoControl(enabled) {
+  if (poolPumpAutoControlBusy) return;
+  poolPumpAutoControlBusy = true;
+  renderNotificationMatrix();
+  try {
+    await fetchJson("/api/devices/pool-pump/auto-control", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: Boolean(enabled) }),
+      timeoutMs: 10000,
+    });
+    const refreshed = await fetchJson("/api/time-window-rules", { timeoutMs: 10000 });
+    stateCache.lastTimeWindowRules = refreshed;
+    renderNotificationMatrix();
+  } catch (err) {
+    window.alert(String(err));
+  } finally {
+    poolPumpAutoControlBusy = false;
     renderNotificationMatrix();
   }
 }

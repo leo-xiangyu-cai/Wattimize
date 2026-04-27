@@ -5087,6 +5087,43 @@ td {
   accent-color: #5d7a27;
 }
 
+.notification-priority-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #d7dfc2;
+  background: rgba(246, 249, 238, 0.95);
+}
+
+.notification-priority-checkbox input {
+  margin-top: 2px;
+  accent-color: #5d7a27;
+}
+
+.notification-priority-checkbox-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.notification-priority-checkbox-copy strong {
+  font-size: 12px;
+  color: #334022;
+}
+
+.notification-priority-checkbox-copy span {
+  font-size: 12px;
+  color: #556349;
+}
+
+.notification-priority-checkbox-hint {
+  margin: -2px 0 0;
+  font-size: 12px;
+  color: #66785a;
+}
+
 .notification-priority-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
