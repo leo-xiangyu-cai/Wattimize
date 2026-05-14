@@ -152,6 +152,9 @@ POOL_PUMP_OFF_PERIOD_MORNING_END_HOUR = 11
 POOL_PUMP_OFF_PERIOD_AFTERNOON_START_HOUR = 14
 POOL_PUMP_OFF_PERIOD_AFTERNOON_END_HOUR = 23
 POOL_PUMP_AUTO_CONTROL_STATE_KEY = "pool_pump.auto_control_enabled"
+POOL_PUMP_FORCE_MIN_RUNTIME_HOURS_STATE_KEY = "pool_pump.force_min_runtime_hours"
+TESLA_AUTO_CONTROL_STATE_KEY = "tesla.auto_control_enabled"
+TESLA_FORCE_MAX_CHARGE_THRESHOLD_STATE_KEY = "tesla.force_max_charge_threshold_soc_percent"
 TIME_WINDOW_PRIORITY_OVERRIDE_STATE_KEY = "time_window.priority_override"
 BATTERY_CAPACITY_KWH = {
     "saj": 15.0,
@@ -162,6 +165,7 @@ BATTERY_MIN_DISCHARGE_SOC_PERCENT = {
     "saj": 20.0,
     "solplanet": 10.0,
 }
+TESLA_OVERNIGHT_FORCE_MAX_CHARGE_BELOW_SOC_PERCENT_DEFAULT = 45.0
 TESLA_OVERNIGHT_SHOULDER_MIN_SOLPLANET_SOC_PERCENT = BATTERY_MIN_DISCHARGE_SOC_PERCENT["solplanet"]
 TESLA_OVERNIGHT_SHOULDER_MIN_AVAILABLE_KWH = 1.0
 TESLA_POST_EXPORT_FORECAST_WINDOW_START_HOUR = 20
@@ -177,6 +181,8 @@ TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT = 60.0
 TESLA_PRIORITY_CRITICAL_SOC_PERCENT = 40.0
 POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MIN_HOURS = 6.0
 POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MAX_HOURS = 9.0
+POOL_PUMP_FORCE_MIN_RUNTIME_LOOKBACK_HOURS = 24.0
+POOL_PUMP_FORCE_MIN_RUNTIME_HOURS_DEFAULT = 1.0
 POOL_PUMP_PRIORITY_TIME_WEIGHTS: tuple[tuple[str, int, int, float], ...] = (
     ("day", 11, 23, 1.0),
     ("night", 23, 11, 2.0),
@@ -281,6 +287,9 @@ TIME_WINDOW_RULE_WINDOWS_BY_CODE: dict[str, tuple[str, ...]] = {
     code: tuple(item["window"] for item in TIME_WINDOW_RULE_DEFINITIONS if item["code"] == code)
     for code in TIME_WINDOW_RULE_CODES
 }
+TESLA_AUTO_CONTROL_RULE_CODES: tuple[str, ...] = tuple(
+    code for code in TIME_WINDOW_RULE_CODES if code.startswith("tesla_") and code.endswith("_control")
+)
 MANUAL_OPERATION_DEFINITIONS: tuple[dict[str, object], ...] = (
     {
         "operation_code": "tesla.manual.toggle_charging",
@@ -1413,6 +1422,14 @@ class DeviceTogglePayload(BaseModel):
     enabled: bool = Field(...)
 
 
+class TeslaForceChargeThresholdPayload(BaseModel):
+    threshold_percent: int = Field(..., ge=0, le=100)
+
+
+class PoolPumpForceMinRuntimeThresholdPayload(BaseModel):
+    threshold_hours: float = Field(..., ge=0, le=POOL_PUMP_FORCE_MIN_RUNTIME_LOOKBACK_HOURS)
+
+
 class NotificationDismissRequest(BaseModel):
     notification_key: str = Field(..., min_length=1, max_length=200)
 
@@ -1638,8 +1655,9 @@ async def _build_device_priority_snapshot(
     metrics_map = metrics if isinstance(metrics, dict) else {}
 
     window_defs = _priority_window_definitions(now_local)
-    history_start_local = window_defs[0]["start_local"]
-    history_end_local = window_defs[0]["end_local"]
+    rolling_runtime_start_local = now_local - timedelta(hours=POOL_PUMP_FORCE_MIN_RUNTIME_LOOKBACK_HOURS)
+    history_start_local = min(window_defs[0]["start_local"], rolling_runtime_start_local)
+    history_end_local = now_local
     history_rows = await asyncio.to_thread(
         get_metric_rows,
         storage_db_path,
@@ -1662,6 +1680,19 @@ async def _build_device_priority_snapshot(
                 "night_runtime_hours": 0.0,
             }
         )
+    rolling_runtime_window = {
+        "id": "rolling_24h",
+        "label": "rolling_24h",
+        "start_local": rolling_runtime_start_local,
+        "end_local": now_local,
+        "raw_runtime_hours": 0.0,
+        "weighted_runtime_hours": 0.0,
+        "day_runtime_hours": 0.0,
+        "night_runtime_hours": 0.0,
+    }
+    rolling_runtime_window_start_local_iso = rolling_runtime_start_local.isoformat()
+    rolling_runtime_window_end_local_iso = now_local.isoformat()
+    runtime_windows = windows + [rolling_runtime_window]
 
     for current_item, next_item in zip(items, items[1:]):
         sampled_epoch = _to_number(current_item.get("sampled_at_epoch")) if isinstance(current_item, dict) else None
@@ -1679,10 +1710,10 @@ async def _build_device_priority_snapshot(
         _integrate_pool_pump_priority_window_runtime(
             datetime.fromtimestamp(sampled_epoch, UTC),
             datetime.fromtimestamp(next_epoch, UTC),
-            windows=windows,
+            windows=runtime_windows,
         )
 
-    for item in windows:
+    for item in runtime_windows:
         weighted_runtime_hours = float(item.get("weighted_runtime_hours") or 0.0)
         deficit_weighted_hours = max(POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MIN_HOURS - weighted_runtime_hours, 0.0)
         item["raw_runtime_hours"] = round(float(item.get("raw_runtime_hours") or 0.0), 3)
@@ -1694,6 +1725,7 @@ async def _build_device_priority_snapshot(
         item["end_local"] = item["end_local"].isoformat()
 
     current_window = windows[0] if windows else {}
+    rolling_runtime_hours = float(rolling_runtime_window.get("raw_runtime_hours") or 0.0)
     pump_score_raw = float(current_window.get("deficit_weighted_hours") or 0.0)
     pump_score = round(
         _clamp(pump_score_raw / POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MIN_HOURS, 0.0, 1.0) * 100.0,
@@ -1702,19 +1734,35 @@ async def _build_device_priority_snapshot(
 
     tesla_soc_percent = _to_number(metrics_map.get("tesla_battery_soc_percent"))
     tesla_original_score = round(_tesla_priority_score_for_soc(tesla_soc_percent), 1)
+    tesla_auto_control_enabled = await _load_tesla_auto_control_enabled()
+    tesla_force_max_charge_threshold_soc_percent = await _load_tesla_force_max_charge_threshold_soc_percent()
     pool_pump_auto_control_enabled = await _load_pool_pump_auto_control_enabled()
+    pool_pump_force_min_runtime_hours = await _load_pool_pump_force_min_runtime_hours()
     pump_original_score = pump_score
     override_target = await _load_time_window_priority_override_state()
+    if not tesla_auto_control_enabled and override_target == "tesla":
+        override_target = "auto"
     if not pool_pump_auto_control_enabled and override_target == "pool_pump":
         override_target = "auto"
-    tesla_score = 100.0 if override_target == "tesla" else tesla_original_score
+    tesla_score = (
+        100.0
+        if tesla_auto_control_enabled and override_target == "tesla"
+        else (tesla_original_score if tesla_auto_control_enabled else 0.0)
+    )
     pump_score = (
         100.0
         if pool_pump_auto_control_enabled and override_target == "pool_pump"
         else (pump_original_score if pool_pump_auto_control_enabled else 0.0)
     )
 
-    winner = "tesla" if tesla_score >= pump_score else "pool_pump"
+    if tesla_auto_control_enabled and not pool_pump_auto_control_enabled:
+        winner = "tesla"
+    elif pool_pump_auto_control_enabled and not tesla_auto_control_enabled:
+        winner = "pool_pump"
+    elif not tesla_auto_control_enabled and not pool_pump_auto_control_enabled:
+        winner = "none"
+    else:
+        winner = "tesla" if tesla_score >= pump_score else "pool_pump"
 
     return {
         "updated_at_utc": datetime.now(UTC).isoformat(),
@@ -1730,7 +1778,9 @@ async def _build_device_priority_snapshot(
         "tesla": {
             "score": tesla_score,
             "original_score": tesla_original_score,
+            "auto_control_enabled": tesla_auto_control_enabled,
             "soc_percent": round(tesla_soc_percent, 1) if tesla_soc_percent is not None else None,
+            "force_max_charge_threshold_soc_percent": int(tesla_force_max_charge_threshold_soc_percent),
             "target_soc_percent": TESLA_PRIORITY_TARGET_SOC_PERCENT,
             "high_urgency_soc_percent": TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT,
             "critical_soc_percent": TESLA_PRIORITY_CRITICAL_SOC_PERCENT,
@@ -1745,6 +1795,12 @@ async def _build_device_priority_snapshot(
             "weighted_target_max_hours": POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MAX_HOURS,
             "formula": "clamp(current_deficit / 6.0, 0, 1) * 100",
             "runtime_formula": "priority_hours = day_hours * 1.0 + night_hours * 2.0",
+            "rolling_runtime_hours_24h": round(rolling_runtime_hours, 3),
+            "rolling_runtime_window_hours": POOL_PUMP_FORCE_MIN_RUNTIME_LOOKBACK_HOURS,
+            "force_min_runtime_hours": round(pool_pump_force_min_runtime_hours, 1),
+            "force_run_active": rolling_runtime_hours < pool_pump_force_min_runtime_hours,
+            "rolling_runtime_window_start_local": rolling_runtime_window_start_local_iso,
+            "rolling_runtime_window_end_local": rolling_runtime_window_end_local_iso,
             "windows": windows,
             "weights": [
                 {"label": period, "range": f"{start_hour:02d}:00-{end_hour:02d}:00", "weight": weight}
@@ -3418,6 +3474,15 @@ def _tesla_rule_code_for_window(window_mode: str) -> str | None:
     }.get(str(window_mode or "").strip())
 
 
+def _is_tesla_auto_control_rule(rule_code: str) -> bool:
+    normalized_code = str(rule_code or "").strip()
+    return normalized_code in TESLA_AUTO_CONTROL_RULE_CODES
+
+
+def _is_time_window_rule_editable(rule_code: str) -> bool:
+    return not _is_tesla_auto_control_rule(rule_code)
+
+
 def _saj_profile_rule_code_for_time(now_local: datetime) -> str:
     return "saj_profile_free_energy" if _is_within_free_energy_window(now_local) else "saj_profile_self_consumption"
 
@@ -3648,6 +3713,54 @@ def _operation_reason_label(reason: object, *, lang: Literal["zh", "en"] = "zh")
         return "Runtime budget unavailable (missing valid calculation data)" if lang == "en" else "预算不可用（缺少有效计算数据）"
     if code == "pool_pump_auto_control_disabled":
         return "Pool pump auto control disabled (manual-only mode)" if lang == "en" else "水泵自动控制已关闭（仅手动模式）"
+    if code == "tesla_auto_control_disabled":
+        return "Tesla auto control disabled (manual-only mode)" if lang == "en" else "Tesla 自动控制已关闭（仅手动模式）"
+    if code == "overnight_tesla_force_max_charge_below_45_soc":
+        return "Tesla SOC below forced charge threshold, force max charging overnight" if lang == "en" else "Tesla 电量低于强制充电阈值，夜间强制满功率充电"
+    if code == "overnight_tesla_force_max_charge_blocks_pool_pump":
+        return "Tesla SOC below forced charge threshold, force max charging blocks pool pump" if lang == "en" else "Tesla 电量低于强制充电阈值，强制满功率充电，水泵不参与"
+    if code == "force_max_charge_below_45_soc":
+        return "Tesla SOC below forced charge threshold, force max charging" if lang == "en" else "Tesla 电量低于强制充电阈值，强制满功率充电"
+    if code == "already_charging_with_force_max_power":
+        return "Tesla already charging at forced max power" if lang == "en" else "Tesla 已按强制最大功率充电"
+    if code == "overnight_pool_pump_force_run_below_1h_24h":
+        return "Pool pump ran less than the configured minimum in the last 24 hours, force run overnight" if lang == "en" else "水泵过去24小时运行低于配置的最小时长，夜间强制运行"
+    if code == "overnight_pool_pump_force_run_blocks_tesla":
+        return "Pool pump force-run requirement blocks Tesla allocation" if lang == "en" else "水泵强制补足运行时长，Tesla 本轮不分配"
+    if code == "force_min_runtime_24h":
+        return "Pool pump force minimum 24-hour runtime" if lang == "en" else "水泵补足24小时最小时长"
+    if code == "already_running_forced_min_runtime":
+        return "Pool pump already running for minimum 24-hour runtime" if lang == "en" else "水泵已在补足24小时最小时长"
+    if code == "outside_pool_pump_schedule":
+        return "Outside pool pump overnight schedule" if lang == "en" else "不在水泵夜间运行时段"
+    if code == "overnight_shared_power_budget_unavailable":
+        return "Shared overnight power budget unavailable" if lang == "en" else "夜间共享功率预算不可用"
+    if code == "shared_power_budget_unavailable":
+        return "Shared overnight power budget unavailable" if lang == "en" else "夜间共享功率预算不可用"
+    if code == "overnight_tesla_priority_allocated_shared_power":
+        return "Shared overnight power allocated to Tesla by priority" if lang == "en" else "夜间共享功率已按优先级分配给 Tesla"
+    if code == "overnight_remaining_shared_power_allocated_to_tesla":
+        return "Remaining overnight power allocated to Tesla" if lang == "en" else "夜间剩余功率已分配给 Tesla"
+    if code == "overnight_shared_power_allocated_to_pool_pump_first":
+        return "Shared overnight power allocated to pool pump first" if lang == "en" else "夜间共享功率优先分配给水泵"
+    if code == "overnight_pool_pump_priority_allocated_shared_power":
+        return "Shared overnight power allocated to pool pump by priority" if lang == "en" else "夜间共享功率已按优先级分配给水泵"
+    if code == "overnight_remaining_shared_power_allocated_to_pool_pump":
+        return "Remaining overnight power allocated to pool pump" if lang == "en" else "夜间剩余功率已分配给水泵"
+    if code == "overnight_shared_power_allocated_to_tesla_first":
+        return "Shared overnight power allocated to Tesla first" if lang == "en" else "夜间共享功率优先分配给 Tesla"
+    if code == "overnight_shared_power_insufficient_for_tesla":
+        return "Shared overnight power insufficient for Tesla" if lang == "en" else "夜间共享功率不足以给 Tesla 充电"
+    if code == "overnight_shared_power_insufficient_for_pool_pump":
+        return "Shared overnight power insufficient for pool pump" if lang == "en" else "夜间共享功率不足以带动水泵"
+    if code == "allocated_shared_power":
+        return "Shared overnight power allocated" if lang == "en" else "已分配夜间共享功率"
+    if code == "not_allocated_shared_power":
+        return "Shared overnight power not allocated" if lang == "en" else "未分配到夜间共享功率"
+    if code == "already_running_with_allocated_power":
+        return "Already running with allocated shared power" if lang == "en" else "已按分配功率运行中"
+    if code == "outside_pump_schedule":
+        return "Outside pool pump overnight schedule" if lang == "en" else "不在水泵夜间运行时段"
     if code == "outside_window":
         return "Outside current control window" if lang == "en" else "不在当前控制窗口"
     if code == "rule_disabled":
@@ -4311,6 +4424,12 @@ def _operation_check_summary(source: dict[str, object]) -> dict[str, object]:
         "thresholds_soc_percent",
         "threshold_soc_percent",
         "runtime_budget",
+        "overnight_allocation",
+        "resource_reservation",
+        "tesla_priority_score",
+        "pool_pump_priority_score",
+        "priority_winner",
+        "execution_order",
         "restart_cooldown_minutes",
         "restart_cooldown_remaining_minutes",
         "last_stop_reason",
@@ -4498,6 +4617,43 @@ async def _load_pool_pump_auto_control_enabled() -> bool:
     return True if parsed is None else bool(parsed)
 
 
+async def _load_tesla_auto_control_enabled() -> bool:
+    kv_map = await asyncio.to_thread(
+        get_realtime_kv_by_prefix,
+        storage_db_path,
+        prefix=TESLA_AUTO_CONTROL_STATE_KEY,
+    )
+    row = kv_map.get(TESLA_AUTO_CONTROL_STATE_KEY)
+    parsed = _to_bool((row or {}).get("value"))
+    return True if parsed is None else bool(parsed)
+
+
+async def _load_tesla_force_max_charge_threshold_soc_percent() -> int:
+    kv_map = await asyncio.to_thread(
+        get_realtime_kv_by_prefix,
+        storage_db_path,
+        prefix=TESLA_FORCE_MAX_CHARGE_THRESHOLD_STATE_KEY,
+    )
+    row = kv_map.get(TESLA_FORCE_MAX_CHARGE_THRESHOLD_STATE_KEY)
+    parsed = _to_number((row or {}).get("value"))
+    if parsed is None:
+        return int(TESLA_OVERNIGHT_FORCE_MAX_CHARGE_BELOW_SOC_PERCENT_DEFAULT)
+    return int(_clamp(float(parsed), 0.0, 100.0) + 0.5)
+
+
+async def _load_pool_pump_force_min_runtime_hours() -> float:
+    kv_map = await asyncio.to_thread(
+        get_realtime_kv_by_prefix,
+        storage_db_path,
+        prefix=POOL_PUMP_FORCE_MIN_RUNTIME_HOURS_STATE_KEY,
+    )
+    row = kv_map.get(POOL_PUMP_FORCE_MIN_RUNTIME_HOURS_STATE_KEY)
+    parsed = _to_number((row or {}).get("value"))
+    if parsed is None:
+        return POOL_PUMP_FORCE_MIN_RUNTIME_HOURS_DEFAULT
+    return _clamp(float(parsed), 0.0, POOL_PUMP_FORCE_MIN_RUNTIME_LOOKBACK_HOURS)
+
+
 async def _store_pool_pump_auto_control_enabled(enabled: bool) -> bool:
     normalized = bool(enabled)
     await asyncio.to_thread(
@@ -4505,6 +4661,42 @@ async def _store_pool_pump_auto_control_enabled(enabled: bool) -> bool:
         storage_db_path,
         [
             (POOL_PUMP_AUTO_CONTROL_STATE_KEY, json.dumps(normalized), "ui"),
+        ],
+    )
+    return normalized
+
+
+async def _store_tesla_auto_control_enabled(enabled: bool) -> bool:
+    normalized = bool(enabled)
+    await asyncio.to_thread(
+        upsert_realtime_kv,
+        storage_db_path,
+        [
+            (TESLA_AUTO_CONTROL_STATE_KEY, json.dumps(normalized), "ui"),
+        ],
+    )
+    return normalized
+
+
+async def _store_tesla_force_max_charge_threshold_soc_percent(threshold_percent: int) -> int:
+    normalized = max(0, min(100, int(threshold_percent)))
+    await asyncio.to_thread(
+        upsert_realtime_kv,
+        storage_db_path,
+        [
+            (TESLA_FORCE_MAX_CHARGE_THRESHOLD_STATE_KEY, json.dumps(normalized), "ui"),
+        ],
+    )
+    return normalized
+
+
+async def _store_pool_pump_force_min_runtime_hours(threshold_hours: float) -> float:
+    normalized = round(_clamp(float(threshold_hours), 0.0, POOL_PUMP_FORCE_MIN_RUNTIME_LOOKBACK_HOURS), 1)
+    await asyncio.to_thread(
+        upsert_realtime_kv,
+        storage_db_path,
+        [
+            (POOL_PUMP_FORCE_MIN_RUNTIME_HOURS_STATE_KEY, json.dumps(normalized), "ui"),
         ],
     )
     return normalized
@@ -4676,6 +4868,58 @@ def _calculate_tesla_grid_support_target(
         "charge_current_amps": clamped,
         "tesla_power_w": tesla_power_w,
         "predicted_grid_w": base_grid_w + tesla_power_w,
+    }
+
+
+def _calculate_tesla_target_for_power_budget(
+    charge_state: dict[str, object],
+    target_power_w: float | None,
+) -> dict[str, object]:
+    off: dict[str, object] = {"mode": "off", "charge_current_amps": 0, "tesla_power_w": 0.0}
+    if target_power_w is None or float(target_power_w) <= 0:
+        return off
+    min_a = _to_number(charge_state.get("min_current_amps"))
+    max_a = _to_number(charge_state.get("max_current_amps"))
+    step_a = _to_number(charge_state.get("current_step_amps"))
+    if min_a is None or max_a is None or float(max_a) <= 0:
+        return off
+    min_i = max(int(round(float(min_a))), 1)
+    max_i = int(round(float(max_a)))
+    step_i = max(int(round(float(step_a or 1.0))), 1)
+    raw_amps = float(target_power_w) / TESLA_ASSUMED_CHARGING_VOLTAGE_V
+    if raw_amps < float(min_i):
+        return off
+    snapped = (int(raw_amps) // step_i) * step_i
+    clamped = max(min_i, min(max_i, snapped))
+    if clamped < min_i:
+        return off
+    tesla_power_w = float(clamped) * TESLA_ASSUMED_CHARGING_VOLTAGE_V
+    return {
+        "mode": "charge",
+        "charge_current_amps": clamped,
+        "tesla_power_w": tesla_power_w,
+    }
+
+
+def _calculate_tesla_max_power_target(charge_state: dict[str, object]) -> dict[str, object]:
+    off: dict[str, object] = {"mode": "off", "charge_current_amps": 0, "tesla_power_w": 0.0}
+    min_a = _to_number(charge_state.get("min_current_amps"))
+    max_a = _to_number(charge_state.get("max_current_amps"))
+    step_a = _to_number(charge_state.get("current_step_amps"))
+    if min_a is None or max_a is None or float(max_a) <= 0:
+        return off
+    min_i = max(int(round(float(min_a))), 1)
+    max_i = int(round(float(max_a)))
+    step_i = max(int(round(float(step_a or 1.0))), 1)
+    snapped = (max_i // step_i) * step_i
+    clamped = max(min_i, min(max_i, snapped))
+    if clamped < min_i:
+        return off
+    tesla_power_w = float(clamped) * TESLA_ASSUMED_CHARGING_VOLTAGE_V
+    return {
+        "mode": "charge",
+        "charge_current_amps": clamped,
+        "tesla_power_w": tesla_power_w,
     }
 
 
@@ -5067,6 +5311,8 @@ async def _run_midday_window_check(
     try:
         enabled_map = await _load_time_window_rule_enabled_map()
         result["rule_enabled_map"] = enabled_map
+        tesla_auto_control_enabled = await _load_tesla_auto_control_enabled()
+        result["tesla_auto_control_enabled"] = tesla_auto_control_enabled
         result["saj_profile_guard"] = await _guard_saj_profile_for_time(now_local, enabled_map)
         observation = (
             tesla_observation_result.get("observation")
@@ -5101,7 +5347,7 @@ async def _run_midday_window_check(
             return result
 
         tesla_rule_code = _tesla_rule_code_for_window(window_mode)
-        tesla_rule_enabled = _is_time_window_rule_enabled(enabled_map, tesla_rule_code or "")
+        tesla_rule_enabled = tesla_auto_control_enabled if tesla_rule_code else True
         result["tesla_rule_code"] = tesla_rule_code
         result["tesla_rule_enabled"] = tesla_rule_enabled
 
@@ -5294,8 +5540,8 @@ async def _run_midday_window_check(
                     "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
                     "predicted_grid_w": round(float(grid_w), 1),
                 }
-                result["decision_reason"] = "time_window_rule_disabled"
-                result["action"] = {"type": "noop", "reason": "rule_disabled"}
+                result["decision_reason"] = "tesla_auto_control_disabled"
+                result["action"] = {"type": "noop", "reason": "tesla_auto_control_disabled"}
                 status = "noop"
                 return result
 
@@ -5396,8 +5642,8 @@ async def _run_midday_window_check(
                     "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
                     "predicted_grid_w": round(float(grid_w), 1),
                 }
-                result["decision_reason"] = "time_window_rule_disabled"
-                result["action"] = {"type": "noop", "reason": "rule_disabled"}
+                result["decision_reason"] = "tesla_auto_control_disabled"
+                result["action"] = {"type": "noop", "reason": "tesla_auto_control_disabled"}
                 status = "noop"
                 return result
 
@@ -5733,8 +5979,8 @@ async def _run_midday_window_check(
                 "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else desired_amps,
                 "predicted_grid_w": round(current_grid_import_w, 1),
             }
-            result["decision_reason"] = "time_window_rule_disabled"
-            result["action"] = {"type": "noop", "reason": "rule_disabled"}
+            result["decision_reason"] = "tesla_auto_control_disabled"
+            result["action"] = {"type": "noop", "reason": "tesla_auto_control_disabled"}
             status = "noop"
             return result
 
@@ -5839,6 +6085,8 @@ async def _run_saj_battery_watch_check(
         metrics_map = metrics if isinstance(metrics, dict) else {}
         priority_snapshot = await _build_device_priority_snapshot(combined_flow, now_local=now_local)
         result["priority_snapshot"] = priority_snapshot
+        tesla_auto_control_enabled = bool((priority_snapshot.get("tesla") or {}).get("auto_control_enabled", True))
+        result["tesla_auto_control_enabled"] = tesla_auto_control_enabled
         pool_pump_auto_control_enabled = bool((priority_snapshot.get("pool_pump") or {}).get("auto_control_enabled", True))
         result["pool_pump_auto_control_enabled"] = pool_pump_auto_control_enabled
         saj_soc_percent = _to_number(metrics_map.get("battery1_soc_percent"))
@@ -5904,9 +6152,13 @@ async def _run_saj_battery_watch_check(
             "reminder_20_sent": bool(combined_status.get("saj_battery_watch_20_notified")),
         }
         tesla_rule_code = "tesla_overnight_shoulder_control"
-        tesla_rule_enabled = _is_time_window_rule_enabled(enabled_map, tesla_rule_code)
+        tesla_rule_enabled = tesla_auto_control_enabled
+        pool_pump_rule_code = "pool_pump_overnight_control"
+        pool_pump_rule_enabled = _is_time_window_rule_enabled(enabled_map, pool_pump_rule_code)
         result["tesla_rule_code"] = tesla_rule_code
         result["tesla_rule_enabled"] = tesla_rule_enabled
+        result["pool_pump_rule_code"] = pool_pump_rule_code
+        result["pool_pump_rule_enabled"] = pool_pump_rule_enabled
         result["overnight_shoulder_tesla"] = {
             "solplanet_soc_percent": solplanet_soc_percent,
             "min_solplanet_soc_percent": TESLA_OVERNIGHT_SHOULDER_MIN_SOLPLANET_SOC_PERCENT,
@@ -5915,9 +6167,11 @@ async def _run_saj_battery_watch_check(
             },
         }
 
-        # Build energy budget: total usable battery - home load to 8am - pool pump to 5am
         energy_ref = _build_overnight_energy_reference(metrics_map)
         available_for_tesla_kwh: float | None = None
+        shared_remaining_energy_kwh: float | None = None
+        shared_hours_to_8am: float | None = None
+        shared_available_power_w: float | None = None
         if energy_ref is not None:
             usable_battery_total_kwh = _to_number(energy_ref.get("usable_battery_total_kwh"))
             proj_8am = (energy_ref.get("projections") or {}).get("next_8am") or {}
@@ -5934,13 +6188,36 @@ async def _run_saj_battery_watch_check(
             pump_max_hours = float((24 - POOL_PUMP_OVERNIGHT_TARGET_START_HOUR) + POOL_PUMP_OVERNIGHT_TARGET_END_HOUR)
             pump_remaining_hours = (
                 max(0.0, min(pump_duration_hours, pump_max_hours))
-                if pool_pump_auto_control_enabled
+                if pool_pump_auto_control_enabled and pool_pump_rule_enabled
                 else 0.0
             )
             pool_pump_remaining_kwh = round((pump_power_w * pump_remaining_hours) / 1000.0, 4)
             if usable_battery_total_kwh is not None and home_load_kwh is not None:
                 available_for_tesla_kwh = round(usable_battery_total_kwh - home_load_kwh - pool_pump_remaining_kwh, 4)
             home_load_hours_to_8am = _to_number(proj_8am.get("hours_from_now"))
+            remaining_candidates = [
+                value
+                for value in (
+                    _to_number((proj_8am.get("estimated_remaining_battery_kwh") or {}).get("days_3"))
+                    if isinstance(proj_8am.get("estimated_remaining_battery_kwh"), dict)
+                    else None,
+                    _to_number((proj_8am.get("estimated_remaining_battery_kwh") or {}).get("days_7"))
+                    if isinstance(proj_8am.get("estimated_remaining_battery_kwh"), dict)
+                    else None,
+                )
+                if value is not None
+            ]
+            shared_remaining_energy_kwh = min(remaining_candidates) if remaining_candidates else None
+            shared_hours_to_8am = home_load_hours_to_8am
+            if (
+                shared_remaining_energy_kwh is not None
+                and shared_hours_to_8am is not None
+                and shared_hours_to_8am > 0
+            ):
+                shared_available_power_w = max(
+                    (shared_remaining_energy_kwh / shared_hours_to_8am) * 1000.0,
+                    0.0,
+                )
             result["overnight_shoulder_tesla"]["energy_budget"] = {
                 "usable_battery_total_kwh": usable_battery_total_kwh,
                 "projected_home_load_to_8am_kwh": home_load_kwh,
@@ -5951,6 +6228,8 @@ async def _run_saj_battery_watch_check(
                 "pool_pump_auto_control_enabled": pool_pump_auto_control_enabled,
                 "available_for_tesla_kwh": available_for_tesla_kwh,
                 "min_available_kwh": TESLA_OVERNIGHT_SHOULDER_MIN_AVAILABLE_KWH,
+                "shared_remaining_energy_kwh": round(shared_remaining_energy_kwh, 4) if shared_remaining_energy_kwh is not None else None,
+                "shared_available_power_w": round(shared_available_power_w, 1) if shared_available_power_w is not None else None,
             }
 
         observation = (
@@ -5972,104 +6251,258 @@ async def _run_saj_battery_watch_check(
         charging_enabled = bool(charge_state.get("enabled"))
         charge_requested_enabled = bool(charge_state.get("requested_enabled"))
         current_configured_amps = _to_number(charge_state.get("configured_current_amps"))
+        current_actual_amps = _to_number(charge_state.get("current_amps"))
         connection_state = str(charge_state.get("connection_state") or "").strip().lower()
         status_text = str(charge_state.get("status_text") or "").strip().lower()
         active_or_requested = charging_enabled or charge_requested_enabled
 
+        tesla_block_reason: str | None = None
         if not tesla_rule_enabled:
+            tesla_block_reason = "tesla_auto_control_disabled"
+        elif connection_state == "unplugged":
+            tesla_block_reason = "tesla_unplugged"
+        elif status_text in ("disconnected", "unknown", "unavailable"):
+            tesla_block_reason = "tesla_not_ready"
+
+        pump_schedule_active = _is_hour_in_window(
+            now_local.hour,
+            POOL_PUMP_OVERNIGHT_TARGET_START_HOUR,
+            POOL_PUMP_OVERNIGHT_TARGET_END_HOUR,
+        )
+        pool_pump_state_for_allocation: dict[str, object] | None = None
+        pool_pump_available = False
+        pool_pump_enabled = False
+        pool_pump_fetch_error: str | None = None
+        try:
+            pool_pump_states_by_id = await _pool_pump_states_by_id()
+            pool_pump_state_for_allocation = _build_pool_pump_state(pool_pump_states_by_id)
+            control_map = (
+                pool_pump_state_for_allocation.get("control")
+                if isinstance(pool_pump_state_for_allocation.get("control"), dict)
+                else {}
+            )
+            pool_pump_available = bool(control_map.get("available"))
+            pool_pump_enabled = bool(control_map.get("enabled"))
+        except Exception as pump_exc:  # noqa: BLE001
+            pool_pump_fetch_error = f"{type(pump_exc).__name__}: {pump_exc}"
+        result["pool_pump_available"] = pool_pump_available
+        if pool_pump_fetch_error:
+            result["pool_pump_fetch_error"] = pool_pump_fetch_error
+
+        tesla_priority_score = _to_number((priority_snapshot.get("tesla") or {}).get("score")) or 0.0
+        pool_pump_priority_score = _to_number((priority_snapshot.get("pool_pump") or {}).get("score")) or 0.0
+        tesla_soc_percent = _to_number((priority_snapshot.get("tesla") or {}).get("soc_percent"))
+        pool_pump_runtime_24h_hours = _to_number((priority_snapshot.get("pool_pump") or {}).get("rolling_runtime_hours_24h"))
+        pool_pump_force_min_runtime_hours = _to_number((priority_snapshot.get("pool_pump") or {}).get("force_min_runtime_hours"))
+        if pool_pump_force_min_runtime_hours is None:
+            pool_pump_force_min_runtime_hours = POOL_PUMP_FORCE_MIN_RUNTIME_HOURS_DEFAULT
+        tesla_force_max_charge_threshold_soc_percent = _to_number((priority_snapshot.get("tesla") or {}).get("force_max_charge_threshold_soc_percent"))
+        if tesla_force_max_charge_threshold_soc_percent is None:
+            tesla_force_max_charge_threshold_soc_percent = TESLA_OVERNIGHT_FORCE_MAX_CHARGE_BELOW_SOC_PERCENT_DEFAULT
+        result["tesla_soc_percent"] = tesla_soc_percent
+        result["tesla_force_max_charge_threshold_soc_percent"] = tesla_force_max_charge_threshold_soc_percent
+        result["pool_pump_runtime_24h_hours"] = pool_pump_runtime_24h_hours
+        result["pool_pump_force_min_runtime_hours"] = pool_pump_force_min_runtime_hours
+        budget_map = (result.get("overnight_shoulder_tesla") or {}).get("energy_budget")
+        budget_info = budget_map if isinstance(budget_map, dict) else {}
+        pump_power_w = _to_number(budget_info.get("pool_pump_power_w")) or POOL_PUMP_ASSUMED_POWER_W
+        tesla_candidate_enabled = tesla_block_reason is None
+        pump_candidate_enabled = bool(
+            pool_pump_auto_control_enabled
+            and pool_pump_rule_enabled
+            and pool_pump_available
+            and pump_schedule_active
+        )
+        allocation_order = [
+            device
+            for device in ("tesla", "pool_pump")
+            if (device == "tesla" and tesla_candidate_enabled) or (device == "pool_pump" and pump_candidate_enabled)
+        ]
+        force_max_target = _calculate_tesla_max_power_target(charge_state)
+        tesla_force_max_charge = bool(
+            tesla_candidate_enabled
+            and tesla_soc_percent is not None
+            and tesla_soc_percent < tesla_force_max_charge_threshold_soc_percent
+            and str(force_max_target.get("mode") or "").strip().lower() == "charge"
+        )
+        pool_pump_force_run = bool(
+            pump_candidate_enabled
+            and pool_pump_runtime_24h_hours is not None
+            and pool_pump_runtime_24h_hours < pool_pump_force_min_runtime_hours
+        )
+        result["tesla_force_max_charge_active"] = tesla_force_max_charge
+        result["pool_pump_force_run_active"] = pool_pump_force_run
+        forced_devices: list[str] = []
+        if tesla_force_max_charge:
+            forced_devices.append("tesla")
+        if pool_pump_force_run:
+            forced_devices.append("pool_pump")
+        normal_devices = [device for device in allocation_order if device not in forced_devices]
+        normal_devices.sort(
+            key=lambda device: (
+                -(tesla_priority_score if device == "tesla" else pool_pump_priority_score),
+                0 if device == "tesla" else 1,
+            )
+        )
+        allocation_order = forced_devices + normal_devices
+        remaining_alloc_power_w = max(float(shared_available_power_w or 0.0), 0.0)
+        tesla_target = {"mode": "off", "charge_current_amps": 0, "tesla_power_w": 0.0}
+        pool_pump_target_mode = "off"
+        if pool_pump_force_run:
+            pool_pump_target_mode = "run"
+            if shared_available_power_w is not None:
+                remaining_alloc_power_w = max(remaining_alloc_power_w - pump_power_w, 0.0)
+        if tesla_force_max_charge:
+            tesla_target = force_max_target
+            if shared_available_power_w is not None:
+                remaining_alloc_power_w = max(
+                    remaining_alloc_power_w - float(force_max_target.get("tesla_power_w") or 0.0),
+                    0.0,
+                )
+        for device in normal_devices:
+            if device == "tesla":
+                candidate_target = _calculate_tesla_target_for_power_budget(charge_state, remaining_alloc_power_w)
+                if str(candidate_target.get("mode") or "").strip().lower() == "charge":
+                    tesla_target = candidate_target
+                    remaining_alloc_power_w = max(
+                        remaining_alloc_power_w - float(candidate_target.get("tesla_power_w") or 0.0),
+                        0.0,
+                    )
+            else:
+                if remaining_alloc_power_w >= pump_power_w:
+                    pool_pump_target_mode = "run"
+                    remaining_alloc_power_w = max(remaining_alloc_power_w - pump_power_w, 0.0)
+        tesla_allocated = str(tesla_target.get("mode") or "").strip().lower() == "charge"
+        pool_pump_allocated = pool_pump_target_mode == "run"
+        result["tesla_priority_score"] = round(tesla_priority_score, 1)
+        result["pool_pump_priority_score"] = round(pool_pump_priority_score, 1)
+        result["priority_winner"] = allocation_order[0] if allocation_order else "none"
+        result["execution_order"] = {
+            "first": allocation_order[0] if allocation_order else "none",
+            "second": allocation_order[1] if len(allocation_order) > 1 else "none",
+            "winner": allocation_order[0] if allocation_order else "none",
+        }
+        result["resource_reservation"] = {
+            "shared_available_power_w": round(shared_available_power_w, 1) if shared_available_power_w is not None else None,
+            "tesla_reserved_power_w": round(float(tesla_target.get("tesla_power_w") or 0.0), 1),
+            "pool_pump_reserved_power_w": round(pump_power_w if pool_pump_allocated else 0.0, 1),
+            "remaining_unallocated_power_w": round(remaining_alloc_power_w, 1),
+        }
+        result["overnight_allocation"] = {
+            "available_device_energy_kwh": round(shared_remaining_energy_kwh, 4) if shared_remaining_energy_kwh is not None else None,
+            "hours_to_8am": round(shared_hours_to_8am, 2) if shared_hours_to_8am is not None else None,
+            "available_device_power_w": round(shared_available_power_w, 1) if shared_available_power_w is not None else None,
+            "remaining_unallocated_power_w": round(remaining_alloc_power_w, 1),
+            "order": allocation_order,
+            "tesla": {
+                "candidate_enabled": tesla_candidate_enabled,
+                "block_reason": tesla_block_reason,
+                "force_max_charge": tesla_force_max_charge,
+                "target_mode": str(tesla_target.get("mode") or "off"),
+                "charge_current_amps": int(tesla_target.get("charge_current_amps") or 0),
+                "power_w": round(float(tesla_target.get("tesla_power_w") or 0.0), 1),
+                "score": round(tesla_priority_score, 1),
+            },
+            "pool_pump": {
+                "candidate_enabled": pump_candidate_enabled,
+                "force_run": pool_pump_force_run,
+                "runtime_24h_hours": round(pool_pump_runtime_24h_hours, 3) if pool_pump_runtime_24h_hours is not None else None,
+                "force_min_runtime_hours": round(pool_pump_force_min_runtime_hours, 1),
+                "target_mode": pool_pump_target_mode,
+                "power_w": round(pump_power_w if pool_pump_allocated else 0.0, 1),
+                "score": round(pool_pump_priority_score, 1),
+                "schedule_active": pump_schedule_active,
+                "available": pool_pump_available,
+                "enabled_now": pool_pump_enabled,
+            },
+        }
+
+        if tesla_block_reason is not None:
             result["decision"] = {
                 "mode": "observe_only",
                 "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
                 "predicted_grid_w": None,
             }
-            result["decision_reason"] = "time_window_rule_disabled"
-            result["action"] = {"type": "noop", "reason": "rule_disabled"}
+            result["decision_reason"] = tesla_block_reason
+            result["action"] = {"type": "noop", "reason": tesla_block_reason}
+            if tesla_block_reason == "tesla_not_ready":
+                result["tesla_status"] = status_text
             status = "noop"
             return result
 
-        if solplanet_soc_percent is None:
-            result["decision"] = {"mode": "observe_only", "charge_current_amps": 0, "predicted_grid_w": None}
-            result["decision_reason"] = "combined_solplanet_soc_unavailable"
-            result["action"] = {"type": "noop", "reason": "combined_solplanet_soc_unavailable"}
-            status = "noop"
-            return result
-
-        if connection_state == "unplugged":
-            result["decision"] = {"mode": "observe_only", "charge_current_amps": 0, "predicted_grid_w": None}
-            result["decision_reason"] = "tesla_unplugged"
-            result["action"] = {"type": "noop", "reason": "tesla_unplugged"}
-            status = "noop"
-            return result
-
-        if status_text in ("disconnected", "unknown", "unavailable"):
-            result["decision"] = {"mode": "observe_only", "charge_current_amps": 0, "predicted_grid_w": None}
-            result["decision_reason"] = "tesla_not_ready"
-            result["tesla_status"] = status_text
-            result["action"] = {"type": "noop", "reason": "tesla_not_ready"}
-            status = "noop"
-            return result
-
-        # Prefer energy budget check; fall back to simple SOC check if data unavailable
-        if available_for_tesla_kwh is not None:
-            should_charge = available_for_tesla_kwh > TESLA_OVERNIGHT_SHOULDER_MIN_AVAILABLE_KWH
-            charge_reason = "overnight_shoulder_energy_budget_positive"
-            stop_reason = "overnight_shoulder_energy_budget_exhausted"
-        else:
-            should_charge = solplanet_soc_percent is not None and solplanet_soc_percent > TESLA_OVERNIGHT_SHOULDER_MIN_SOLPLANET_SOC_PERCENT
-            charge_reason = "overnight_shoulder_solplanet_has_available_energy"
-            stop_reason = "overnight_shoulder_solplanet_below_minimum_soc"
-
-        budget_map = (result.get("overnight_shoulder_tesla") or {}).get("energy_budget")
-        budget_info = budget_map if isinstance(budget_map, dict) else {}
-        pump_power_w = (
-            _to_number(budget_info.get("pool_pump_power_w")) or POOL_PUMP_ASSUMED_POWER_W
-            if pool_pump_auto_control_enabled
-            else 0.0
-        )
-        tesla_runtime_power_w = max(
-            float(_to_number(charge_state.get("power_w")) or 0.0),
-            float(current_configured_amps or 0.0) * TESLA_ASSUMED_CHARGING_VOLTAGE_V if should_charge else 0.0,
-        )
-        runtime_load_w = pump_power_w + tesla_runtime_power_w
-
-        tesla_priority_score = _to_number((priority_snapshot.get("tesla") or {}).get("score")) or 0.0
-        pool_pump_priority_score = _to_number((priority_snapshot.get("pool_pump") or {}).get("score")) or 0.0
-        priority_winner = str(priority_snapshot.get("winner") or "tesla").strip() or "tesla"
-        priority_first = "pool_pump" if priority_winner == "pool_pump" else "tesla"
-        priority_second = "tesla" if priority_first == "pool_pump" else "pool_pump"
-        first_reserved_runtime_w = pump_power_w if priority_first == "pool_pump" else tesla_runtime_power_w
-        second_runtime_budget_w = max((runtime_load_w or 0.0) - first_reserved_runtime_w, 0.0)
-        result["tesla_priority_score"] = round(tesla_priority_score, 1)
-        result["pool_pump_priority_score"] = round(pool_pump_priority_score, 1)
-        result["priority_winner"] = priority_winner
-        result["execution_order"] = {
-            "first": priority_first,
-            "second": priority_second,
-            "winner": priority_winner,
-        }
-        result["resource_reservation"] = {
-            "first_reserved_runtime_w": round(first_reserved_runtime_w, 1),
-            "second_runtime_budget_w": round(second_runtime_budget_w, 1),
-            "runtime_load_w": round(runtime_load_w, 1) if runtime_load_w is not None else None,
-        }
-
-        if should_charge:
+        if shared_available_power_w is None and not tesla_force_max_charge:
             result["decision"] = {
-                "mode": "charge",
-                "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
+                "mode": "off",
+                "charge_current_amps": 0,
                 "predicted_grid_w": None,
             }
-            result["decision_reason"] = charge_reason
-            if charging_enabled:
-                result["action"] = {"type": "noop", "reason": "already_charging"}
+            result["decision_reason"] = "overnight_shared_power_budget_unavailable"
+            if active_or_requested:
+                await _tesla_set_charging(False)
+                result["action"] = {"type": "stop_charging", "reason": "overnight_shared_power_budget_unavailable"}
+                status = "applied"
+            else:
+                result["action"] = {"type": "noop", "reason": "already_stopped"}
                 status = "noop"
+            return result
+
+        if tesla_allocated:
+            desired_amps = int(tesla_target.get("charge_current_amps") or 0)
+            configured_matches_desired = (
+                current_configured_amps is not None
+                and int(round(current_configured_amps)) == desired_amps
+            )
+            actual_matches_desired = (
+                current_actual_amps is not None
+                and int(round(current_actual_amps)) == desired_amps
+            )
+            result["decision"] = {
+                "mode": "charge",
+                "charge_current_amps": desired_amps,
+                "predicted_grid_w": None,
+            }
+            if tesla_force_max_charge:
+                result["decision_reason"] = "overnight_tesla_force_max_charge_below_45_soc"
+            else:
+                result["decision_reason"] = (
+                    "overnight_tesla_priority_allocated_shared_power"
+                    if allocation_order and allocation_order[0] == "tesla"
+                    else "overnight_remaining_shared_power_allocated_to_tesla"
+                )
+            if charging_enabled and configured_matches_desired and (current_actual_amps is None or actual_matches_desired):
+                result["action"] = {
+                    "type": "noop",
+                    "reason": "already_charging_with_force_max_power" if tesla_force_max_charge else "already_charging_with_allocated_power",
+                }
+                status = "noop"
+                return result
+            if not configured_matches_desired:
+                await _tesla_set_charge_current(desired_amps)
+            if charging_enabled:
+                result["action"] = {
+                    "type": "set_charge_current",
+                    "reason": "force_max_charge_below_45_soc" if tesla_force_max_charge else "allocated_shared_power_changed",
+                }
+                status = "applied" if not configured_matches_desired else "noop"
+                if not configured_matches_desired:
+                    return result
+                result["action"] = {
+                    "type": "noop",
+                    "reason": "already_charging_with_force_max_power" if tesla_force_max_charge else "already_charging_with_allocated_power",
+                }
                 return result
             if charge_requested_enabled:
                 await _tesla_restart_charging()
-                result["action"] = {"type": "restart_charging", "reason": "charging_requested_but_not_active"}
+                result["action"] = {
+                    "type": "restart_charging",
+                    "reason": "force_max_charge_below_45_soc" if tesla_force_max_charge else "allocated_shared_power",
+                }
             else:
                 await _tesla_set_charging(True)
-                result["action"] = {"type": "start_charging", "reason": "energy_budget_above_minimum"}
+                result["action"] = {
+                    "type": "start_charging",
+                    "reason": "force_max_charge_below_45_soc" if tesla_force_max_charge else "allocated_shared_power",
+                }
             status = "applied"
             return result
 
@@ -6078,10 +6511,18 @@ async def _run_saj_battery_watch_check(
             "charge_current_amps": 0,
             "predicted_grid_w": None,
         }
-        result["decision_reason"] = stop_reason
+        result["decision_reason"] = (
+            "overnight_pool_pump_force_run_blocks_tesla"
+            if pool_pump_force_run
+            else (
+                "overnight_shared_power_allocated_to_pool_pump_first"
+                if pool_pump_allocated and allocation_order and allocation_order[0] == "pool_pump"
+                else "overnight_shared_power_insufficient_for_tesla"
+            )
+        )
         if active_or_requested:
             await _tesla_set_charging(False)
-            result["action"] = {"type": "stop_charging", "reason": "energy_budget_below_minimum"}
+            result["action"] = {"type": "stop_charging", "reason": "not_allocated_shared_power"}
             status = "applied"
         else:
             result["action"] = {"type": "noop", "reason": "already_stopped"}
@@ -6405,7 +6846,12 @@ async def _run_pool_pump_overnight_control_check(
         cooldown_remaining_seconds: float = 0.0
         if (
             last_stop_at_utc
-            and last_stop_reason in ("runtime_budget_exhausted", "runtime_budget_unavailable")
+            and last_stop_reason in (
+                "runtime_budget_exhausted",
+                "runtime_budget_unavailable",
+                "not_allocated_shared_power",
+                "shared_power_budget_unavailable",
+            )
         ):
             try:
                 last_stop_dt = datetime.fromisoformat(last_stop_at_utc.replace("Z", "+00:00"))
@@ -6445,84 +6891,190 @@ async def _run_pool_pump_overnight_control_check(
             "last_stop_reason": last_stop_reason or None,
         }
 
+        overnight_allocation = tesla_result_map.get("overnight_allocation")
+        overnight_allocation_map = overnight_allocation if isinstance(overnight_allocation, dict) else {}
+        pool_pump_allocation = overnight_allocation_map.get("pool_pump")
+        pool_pump_allocation_map = pool_pump_allocation if isinstance(pool_pump_allocation, dict) else {}
+        tesla_allocation = overnight_allocation_map.get("tesla")
+        tesla_allocation_map = tesla_allocation if isinstance(tesla_allocation, dict) else {}
+        allocation_order_raw = overnight_allocation_map.get("order")
+        allocation_order = (
+            [str(item).strip() for item in allocation_order_raw if str(item).strip()]
+            if isinstance(allocation_order_raw, list)
+            else []
+        )
+        shared_available_power_w = _to_number(overnight_allocation_map.get("available_device_power_w"))
+        shared_remaining_power_w = _to_number(overnight_allocation_map.get("remaining_unallocated_power_w"))
+        pool_pump_target_mode = str(pool_pump_allocation_map.get("target_mode") or "").strip().lower()
+        pool_pump_allocated_power_w = _to_number(pool_pump_allocation_map.get("power_w")) or 0.0
+        tesla_target_mode = str(tesla_allocation_map.get("target_mode") or "").strip().lower()
+        tesla_force_max_charge = bool(tesla_allocation_map.get("force_max_charge"))
+        pool_pump_force_run = bool(pool_pump_allocation_map.get("force_run"))
+        pool_pump_runtime_24h_hours = _to_number(pool_pump_allocation_map.get("runtime_24h_hours"))
+        pool_pump_force_min_runtime_hours = _to_number(pool_pump_allocation_map.get("force_min_runtime_hours"))
+        if pool_pump_force_min_runtime_hours is None:
+            pool_pump_force_min_runtime_hours = POOL_PUMP_FORCE_MIN_RUNTIME_HOURS_DEFAULT
+        runtime_budget_map = result.get("runtime_budget")
+        if isinstance(runtime_budget_map, dict):
+            runtime_budget_map["shared_available_power_w"] = (
+                round(shared_available_power_w, 1) if shared_available_power_w is not None else None
+            )
+            runtime_budget_map["shared_remaining_power_w"] = (
+                round(shared_remaining_power_w, 1) if shared_remaining_power_w is not None else None
+            )
+            runtime_budget_map["pool_pump_allocated_power_w"] = round(pool_pump_allocated_power_w, 1)
+            runtime_budget_map["tesla_force_max_charge"] = tesla_force_max_charge
+            runtime_budget_map["pool_pump_force_run"] = pool_pump_force_run
+            runtime_budget_map["pool_pump_runtime_24h_hours"] = (
+                round(pool_pump_runtime_24h_hours, 3) if pool_pump_runtime_24h_hours is not None else None
+            )
+            runtime_budget_map["pool_pump_force_min_runtime_hours"] = round(pool_pump_force_min_runtime_hours, 1)
+        result["pool_pump_force_run_active"] = pool_pump_force_run
+        result["pool_pump_runtime_24h_hours"] = pool_pump_runtime_24h_hours
+        result["pool_pump_force_min_runtime_hours"] = pool_pump_force_min_runtime_hours
+
         tesla_priority_score = _to_number((priority_snapshot.get("tesla") or {}).get("score")) or 0.0
         pool_pump_priority_score = _to_number((priority_snapshot.get("pool_pump") or {}).get("score")) or 0.0
-        priority_winner = str(priority_snapshot.get("winner") or "tesla").strip() or "tesla"
-        priority_first = "pool_pump" if priority_winner == "pool_pump" else "tesla"
-        priority_second = "tesla" if priority_first == "pool_pump" else "pool_pump"
-        first_reserved_runtime_w = pump_power_w if priority_first == "pool_pump" else tesla_runtime_power_w
-        second_runtime_budget_w = max((runtime_load_w or 0.0) - first_reserved_runtime_w, 0.0)
-        result["tesla_priority_score"] = round(tesla_priority_score, 1)
-        result["pool_pump_priority_score"] = round(pool_pump_priority_score, 1)
-        result["priority_winner"] = priority_winner
+        result["tesla_priority_score"] = round(
+            _to_number(tesla_allocation_map.get("score")) if _to_number(tesla_allocation_map.get("score")) is not None else tesla_priority_score,
+            1,
+        )
+        result["pool_pump_priority_score"] = round(
+            _to_number(pool_pump_allocation_map.get("score")) if _to_number(pool_pump_allocation_map.get("score")) is not None else pool_pump_priority_score,
+            1,
+        )
+        result["priority_winner"] = allocation_order[0] if allocation_order else (str(priority_snapshot.get("winner") or "none").strip() or "none")
         result["execution_order"] = {
-            "first": priority_first,
-            "second": priority_second,
-            "winner": priority_winner,
+            "first": allocation_order[0] if allocation_order else "none",
+            "second": allocation_order[1] if len(allocation_order) > 1 else "none",
+            "winner": allocation_order[0] if allocation_order else "none",
         }
-        result["resource_reservation"] = {
-            "first_reserved_runtime_w": round(first_reserved_runtime_w, 1),
-            "second_runtime_budget_w": round(second_runtime_budget_w, 1),
-            "runtime_load_w": round(runtime_load_w, 1) if runtime_load_w is not None else None,
-        }
+        if isinstance(tesla_result_map.get("resource_reservation"), dict):
+            result["resource_reservation"] = tesla_result_map.get("resource_reservation")
+        else:
+            first_reserved_runtime_w = pump_power_w if result["priority_winner"] == "pool_pump" else tesla_runtime_power_w
+            second_runtime_budget_w = max((runtime_load_w or 0.0) - first_reserved_runtime_w, 0.0)
+            result["resource_reservation"] = {
+                "first_reserved_runtime_w": round(first_reserved_runtime_w, 1),
+                "second_runtime_budget_w": round(second_runtime_budget_w, 1),
+                "runtime_load_w": round(runtime_load_w, 1) if runtime_load_w is not None else None,
+            }
+        if overnight_allocation_map:
+            result["overnight_allocation"] = overnight_allocation_map
 
-        if not schedule_active:
-            result["action"] = {"type": "noop", "reason": "outside_pump_schedule"}
+        if not rule_enabled:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "rule_disabled"}
+            result["decision_reason"] = "rule_disabled"
+            status = "noop"
+        elif not auto_control_enabled:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "pool_pump_auto_control_disabled"}
+            result["decision_reason"] = "pool_pump_auto_control_disabled"
+            status = "noop"
+        elif not pump_available:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "pool_pump_unavailable"}
+            result["decision_reason"] = "pool_pump_unavailable"
+            status = "noop"
+        elif not schedule_active:
             result["decision"] = {"mode": "off"}
             result["decision_reason"] = "outside_pool_pump_schedule"
-            status = "noop"
-        elif remaining_runtime_seconds is None:
             if pump_enabled:
                 await _pool_pump_set_enabled(False)
-                result["action"] = {"type": "stop_pool_pump", "reason": "runtime_budget_unavailable"}
+                result["action"] = {"type": "stop_pool_pump", "reason": "outside_pump_schedule"}
                 status = "applied"
                 switch_action_applied = "stop_pool_pump"
-                switch_reason_applied = "runtime_budget_unavailable"
+                switch_reason_applied = "outside_pump_schedule"
             else:
-                result["action"] = {"type": "noop", "reason": "runtime_budget_unavailable"}
+                result["action"] = {"type": "noop", "reason": "already_stopped"}
                 status = "noop"
+        elif shared_available_power_w is None and not tesla_force_max_charge and not pool_pump_force_run:
             result["decision"] = {"mode": "off"}
-            result["decision_reason"] = "pool_pump_runtime_budget_unavailable"
-        elif remaining_runtime_seconds <= 0:
+            result["decision_reason"] = "overnight_shared_power_budget_unavailable"
             if pump_enabled:
                 await _pool_pump_set_enabled(False)
-                result["action"] = {"type": "stop_pool_pump", "reason": "runtime_budget_exhausted"}
+                result["action"] = {"type": "stop_pool_pump", "reason": "shared_power_budget_unavailable"}
                 status = "applied"
                 switch_action_applied = "stop_pool_pump"
-                switch_reason_applied = "runtime_budget_exhausted"
+                switch_reason_applied = "shared_power_budget_unavailable"
             else:
-                result["action"] = {"type": "noop", "reason": "runtime_budget_exhausted"}
+                result["action"] = {"type": "noop", "reason": "shared_power_budget_unavailable"}
                 status = "noop"
-            result["decision"] = {"mode": "off"}
-            result["decision_reason"] = "pool_pump_runtime_budget_exhausted"
-        else:
+        elif pool_pump_target_mode == "run":
+            result["decision"] = {
+                "mode": "run",
+                "allocated_power_w": round(pool_pump_allocated_power_w, 1),
+                "remaining_runtime_hours": (
+                    round(float(remaining_runtime_seconds) / 3600.0, 3)
+                    if remaining_runtime_seconds is not None
+                    else None
+                ),
+            }
+            if pool_pump_force_run:
+                result["decision_reason"] = "overnight_pool_pump_force_run_below_1h_24h"
+            else:
+                result["decision_reason"] = (
+                    "overnight_pool_pump_priority_allocated_shared_power"
+                    if allocation_order and allocation_order[0] == "pool_pump"
+                    else "overnight_remaining_shared_power_allocated_to_pool_pump"
+                )
             if pump_enabled:
-                result["decision"] = {
-                    "mode": "run",
-                    "remaining_runtime_hours": round(float(remaining_runtime_seconds) / 3600.0, 3),
+                result["action"] = {
+                    "type": "noop",
+                    "reason": "already_running_forced_min_runtime" if pool_pump_force_run else "already_running_with_allocated_power",
                 }
-                result["decision_reason"] = "pool_pump_runtime_budget_available"
-                result["action"] = {"type": "noop", "reason": "already_running_within_budget"}
                 status = "noop"
-            elif cooldown_active_for_restart:
+            elif cooldown_active_for_restart and not pool_pump_force_run:
                 result["decision"] = {
                     "mode": "off",
-                    "remaining_runtime_hours": round(float(remaining_runtime_seconds) / 3600.0, 3),
+                    "allocated_power_w": round(pool_pump_allocated_power_w, 1),
+                    "remaining_runtime_hours": (
+                        round(float(remaining_runtime_seconds) / 3600.0, 3)
+                        if remaining_runtime_seconds is not None
+                        else None
+                    ),
                 }
                 result["decision_reason"] = "pool_pump_recent_stop_cooldown_active"
                 result["action"] = {"type": "noop", "reason": "recent_stop_cooldown"}
                 status = "noop"
             else:
-                result["decision"] = {
-                    "mode": "run",
-                    "remaining_runtime_hours": round(float(remaining_runtime_seconds) / 3600.0, 3),
-                }
-                result["decision_reason"] = "pool_pump_runtime_budget_available"
                 await _pool_pump_set_enabled(True)
-                result["action"] = {"type": "start_pool_pump", "reason": "runtime_budget_available"}
+                result["action"] = {
+                    "type": "start_pool_pump",
+                    "reason": "force_min_runtime_24h" if pool_pump_force_run else "allocated_shared_power",
+                }
                 status = "applied"
                 switch_action_applied = "start_pool_pump"
-                switch_reason_applied = "runtime_budget_available"
+                switch_reason_applied = "force_min_runtime_24h" if pool_pump_force_run else "allocated_shared_power"
+        else:
+            result["decision"] = {
+                "mode": "off",
+                "allocated_power_w": round(pool_pump_allocated_power_w, 1),
+                "remaining_runtime_hours": (
+                    round(float(remaining_runtime_seconds) / 3600.0, 3)
+                    if remaining_runtime_seconds is not None
+                    else None
+                ),
+            }
+            result["decision_reason"] = (
+                "overnight_tesla_force_max_charge_blocks_pool_pump"
+                if tesla_force_max_charge
+                else (
+                    "overnight_shared_power_allocated_to_tesla_first"
+                    if tesla_target_mode == "charge" and allocation_order and allocation_order[0] == "tesla"
+                    else "overnight_shared_power_insufficient_for_pool_pump"
+                )
+            )
+            if pump_enabled:
+                await _pool_pump_set_enabled(False)
+                result["action"] = {"type": "stop_pool_pump", "reason": "not_allocated_shared_power"}
+                status = "applied"
+                switch_action_applied = "stop_pool_pump"
+                switch_reason_applied = "not_allocated_shared_power"
+            else:
+                result["action"] = {"type": "noop", "reason": "already_stopped"}
+                status = "noop"
 
         next_last_stop_at_utc = last_stop_at_utc or None
         next_last_stop_reason = last_stop_reason or None
@@ -6535,7 +7087,7 @@ async def _run_pool_pump_overnight_control_check(
                 "window_key": window_key,
                 "elapsed_runtime_seconds": round(elapsed_runtime_seconds, 1),
                 "target_runtime_seconds": target_runtime_seconds,
-                "last_enabled": bool(result.get("decision", {}).get("mode") == "run" and remaining_runtime_seconds and remaining_runtime_seconds > 0),
+                "last_enabled": bool((result.get("decision") or {}).get("mode") == "run"),
                 "last_evaluated_at_utc": requested_at_utc,
                 "last_stop_at_utc": next_last_stop_at_utc,
                 "last_stop_reason": next_last_stop_reason,
@@ -11337,6 +11889,7 @@ async def dashboard_notifications() -> dict[str, object]:
 @app.get("/api/time-window-rules")
 async def get_time_window_rules() -> dict[str, object]:
     rows = await asyncio.to_thread(list_time_window_rule_state_rows, storage_db_path)
+    tesla_auto_control_enabled = await _load_tesla_auto_control_enabled()
     state_by_code = {
         str(item.get("rule_code") or "").strip(): bool(item.get("enabled"))
         for item in rows
@@ -11350,9 +11903,14 @@ async def get_time_window_rules() -> dict[str, object]:
     items = [
         {
             "rule_code": code,
-            "enabled": bool(state_by_code.get(code, True)),
+            "enabled": (
+                tesla_auto_control_enabled
+                if _is_tesla_auto_control_rule(code)
+                else bool(state_by_code.get(code, True))
+            ),
             "kind": next((item["kind"] for item in TIME_WINDOW_RULE_DEFINITIONS if item["code"] == code), "notification"),
             "windows": list(TIME_WINDOW_RULE_WINDOWS_BY_CODE.get(code, ())),
+            "editable": _is_time_window_rule_editable(code),
             "updated_at_utc": updated_at_by_code.get(code) or None,
         }
         for code in TIME_WINDOW_RULE_CODES
@@ -11380,6 +11938,8 @@ async def put_time_window_rule(rule_code: str, payload: TimeWindowRuleStatePaylo
     normalized_code = str(rule_code or "").strip()
     if normalized_code not in TIME_WINDOW_RULE_CODES:
         raise HTTPException(status_code=404, detail="Unknown time window rule")
+    if not _is_time_window_rule_editable(normalized_code):
+        raise HTTPException(status_code=400, detail="This rule is managed only from Priority Scores")
     updated = await asyncio.to_thread(
         upsert_time_window_rule_state,
         storage_db_path,
@@ -11400,6 +11960,8 @@ async def put_time_window_priority_override(payload: TimeWindowPriorityOverrideP
     target = str(payload.target or "auto").strip().lower() or "auto"
     if target not in ("auto", "tesla", "pool_pump"):
         raise HTTPException(status_code=400, detail="target must be one of: auto, tesla, pool_pump")
+    if target == "tesla" and not await _load_tesla_auto_control_enabled():
+        raise HTTPException(status_code=400, detail="Tesla auto control is disabled")
     if target == "pool_pump" and not await _load_pool_pump_auto_control_enabled():
         raise HTTPException(status_code=400, detail="Pool pump auto control is disabled")
     stored = await _store_time_window_priority_override_state(target)
@@ -12021,6 +12583,28 @@ async def post_tesla_control_current(payload: TeslaChargeCurrentPayload) -> dict
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
+@app.put("/api/tesla/auto-control")
+async def put_tesla_auto_control(payload: DeviceTogglePayload) -> dict[str, object]:
+    enabled = await _store_tesla_auto_control_enabled(payload.enabled)
+    priority_override_target = await _load_time_window_priority_override_state()
+    if not enabled and priority_override_target == "tesla":
+        priority_override_target = await _store_time_window_priority_override_state("auto")
+    return {
+        "enabled": enabled,
+        "priority_override_target": priority_override_target,
+        "updated_at_utc": datetime.now(UTC).isoformat(),
+    }
+
+
+@app.put("/api/tesla/force-max-charge-threshold")
+async def put_tesla_force_max_charge_threshold(payload: TeslaForceChargeThresholdPayload) -> dict[str, object]:
+    threshold_percent = await _store_tesla_force_max_charge_threshold_soc_percent(payload.threshold_percent)
+    return {
+        "threshold_percent": threshold_percent,
+        "updated_at_utc": datetime.now(UTC).isoformat(),
+    }
+
+
 @app.get("/api/devices/pool-pump")
 async def get_pool_pump_device_state() -> dict[str, object]:
     _ensure_ha_configured()
@@ -12063,6 +12647,15 @@ async def put_pool_pump_auto_control(payload: DeviceTogglePayload) -> dict[str, 
     return {
         "enabled": enabled,
         "priority_override_target": priority_override_target,
+        "updated_at_utc": datetime.now(UTC).isoformat(),
+    }
+
+
+@app.put("/api/devices/pool-pump/force-min-runtime-hours")
+async def put_pool_pump_force_min_runtime_hours(payload: PoolPumpForceMinRuntimeThresholdPayload) -> dict[str, object]:
+    threshold_hours = await _store_pool_pump_force_min_runtime_hours(payload.threshold_hours)
+    return {
+        "threshold_hours": threshold_hours,
         "updated_at_utc": datetime.now(UTC).isoformat(),
     }
 

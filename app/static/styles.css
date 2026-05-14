@@ -5124,6 +5124,85 @@ td {
   color: #66785a;
 }
 
+.notification-priority-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #d7dfc2;
+  background: rgba(246, 249, 238, 0.95);
+}
+
+.notification-priority-setting.is-disabled {
+  border-color: #d8ded2;
+  background: rgba(241, 243, 238, 0.95);
+}
+
+.notification-priority-setting-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.notification-priority-setting-copy strong {
+  font-size: 12px;
+  color: #334022;
+}
+
+.notification-priority-setting-copy span {
+  font-size: 12px;
+  color: #556349;
+}
+
+.notification-priority-number-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #ced9b8;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.notification-priority-setting.is-disabled .notification-priority-setting-copy strong,
+.notification-priority-setting.is-disabled .notification-priority-number-field input {
+  color: #6f7a68;
+}
+
+.notification-priority-setting.is-disabled .notification-priority-setting-copy span,
+.notification-priority-setting.is-disabled .notification-priority-number-field span {
+  color: #88917f;
+}
+
+.notification-priority-setting.is-disabled .notification-priority-number-field {
+  border-color: #d8ded2;
+  background: rgba(245, 247, 243, 0.98);
+}
+
+.notification-priority-number-field input {
+  width: 68px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #334022;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.notification-priority-number-field input:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.notification-priority-number-field span {
+  font-size: 12px;
+  color: #556349;
+}
+
 .notification-priority-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5133,6 +5212,7 @@ td {
 .notification-priority-device {
   display: grid;
   gap: 8px;
+  align-content: start;
   padding: 12px;
   border-radius: 10px;
   border: 1px solid #d7dfc2;
@@ -5158,11 +5238,48 @@ td {
   color: #355b9d;
 }
 
+.notification-priority-stats {
+  display: grid;
+  gap: 8px;
+}
+
+.notification-priority-stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(248, 250, 242, 0.92);
+  border: 1px solid rgba(215, 223, 194, 0.9);
+}
+
+.notification-priority-stat span,
+.notification-priority-window-stat span,
+.notification-priority-window-header span {
+  font-size: 12px;
+  color: #556349;
+}
+
+.notification-priority-stat strong,
+.notification-priority-window-stat strong,
+.notification-priority-window-header strong {
+  font-size: 12px;
+  color: #334022;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
 .notification-priority-device-meta,
 .notification-priority-formula-label,
 .notification-priority-window-item span {
   font-size: 12px;
   color: #556349;
+}
+
+.notification-priority-formula-stack {
+  display: grid;
+  gap: 8px;
 }
 
 .notification-priority-formula {
@@ -5176,17 +5293,36 @@ td {
   overflow-wrap: anywhere;
 }
 
-.notification-priority-window-list {
+.notification-priority-window-panel {
   display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #d7dfc2;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.notification-priority-window-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.notification-priority-window-item {
+.notification-priority-window-stats {
   display: grid;
-  gap: 3px;
-  padding: 8px 9px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.notification-priority-window-stat {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
   border-radius: 8px;
   background: rgba(248, 250, 242, 0.92);
+  border: 1px solid rgba(215, 223, 194, 0.9);
 }
 
 .notification-window-panel.is-collapsed {
@@ -5676,6 +5812,19 @@ td {
 
   .notification-priority-grid {
     grid-template-columns: 1fr;
+  }
+
+  .notification-priority-setting {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .notification-priority-number-field {
+    align-self: flex-end;
+  }
+
+  .notification-priority-window-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

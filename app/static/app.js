@@ -126,15 +126,18 @@ const I18N = {
     dashboardTab: "Dashboard",
     notificationMatrixTab: "Time Window",
     notificationMatrixTitle: "Time Window",
-    notificationMatrixIntro: "Each panel groups rules by Operation and Notification so you can quickly distinguish automated actions from alerts. Pool pump auto control is managed only from Priority Scores, not from each time-window rule.",
+    notificationMatrixIntro: "Each panel groups rules by Operation and Notification so you can quickly distinguish automated actions from alerts. Tesla and pool pump auto control are managed only from Priority Scores, not from each time-window rule.",
     notificationMatrixPriorityTitle: "Priority Scores",
     notificationMatrixPrioritySummary: "Tesla uses a non-linear SOC score: below 80% it rises faster and below 50% it becomes high quickly. Pool pump priority is based on day/night runtime hours times weight.",
     notificationMatrixPriorityWinner: "Current winner: {winner}",
+    notificationMatrixPriorityWinnerNone: "No auto control",
     notificationMatrixPriorityBusinessDay: "Business day: {value}",
     notificationMatrixPriorityFormula: "Formula",
     notificationMatrixPriorityTeslaLabel: "Tesla",
     notificationMatrixPriorityPumpLabel: "Pool Pump",
     notificationMatrixPrioritySoc: "SOC",
+    notificationMatrixPriorityRollingRuntime: "24h runtime",
+    notificationMatrixPriorityModel: "Priority model",
     notificationMatrixPriorityWeightedRuntime: "Priority hours",
     notificationMatrixPriorityRawRuntime: "Raw runtime",
     notificationMatrixPriorityDayRuntime: "Day runtime",
@@ -150,10 +153,20 @@ const I18N = {
     notificationMatrixPriorityOverrideTesla: "Tesla",
     notificationMatrixPriorityOverridePump: "Pool Pump",
     notificationMatrixPriorityOverriddenScore: "{score} ({original})",
+    notificationMatrixPriorityTeslaAutoControlLabel: "Tesla auto control",
+    notificationMatrixPriorityTeslaAutoControlHint: "Checked: worker may start or stop Tesla charging automatically. Unchecked: Tesla stays manual only.",
+    notificationMatrixPriorityTeslaAutoControlEnabled: "Auto enabled",
+    notificationMatrixPriorityTeslaAutoControlDisabled: "Manual only",
+    notificationMatrixPriorityTeslaForceThresholdLabel: "Forced charge threshold",
+    notificationMatrixPriorityTeslaForceThresholdHint: "When Tesla SOC is below this percentage, overnight control skips the shared-power calculation and charges at max current.",
+    notificationMatrixPriorityTeslaForceThresholdInvalid: "Enter a whole-number threshold between 0 and 100.",
     notificationMatrixPriorityPumpAutoControlLabel: "Pool pump auto control",
     notificationMatrixPriorityPumpAutoControlHint: "Checked: worker may start or stop the pump automatically. Unchecked: the pump stays manual only.",
     notificationMatrixPriorityPumpAutoControlEnabled: "Auto enabled",
     notificationMatrixPriorityPumpAutoControlDisabled: "Manual only",
+    notificationMatrixPriorityPumpForceRuntimeLabel: "Forced runtime threshold",
+    notificationMatrixPriorityPumpForceRuntimeHint: "When the pool pump has run less than this many hours in the last 24 hours, overnight control force-runs it before shared-power allocation.",
+    notificationMatrixPriorityPumpForceRuntimeInvalid: "Enter a valid threshold between 0 and {maxHours} hours.",
     notificationMatrixLoadingTitle: "Loading Time Window",
     notificationMatrixLoadingBody: "Refreshing rules, priority scores, and live window state...",
     notificationMatrixPriorityExpand: "Expand priority",
@@ -652,7 +665,7 @@ const I18N = {
     samplingBatteryTimelineMeta: "{range} · SAJ + Solplanet SOC · {count} points",
     samplingBatteryTimelineNoData: "No battery timeline data yet for this range",
     samplingPumpStatusTitle: "Pool Pump Status",
-    samplingPumpStatusMeta: "{range} · Pool pump on/off · {count} points · Day on {dayHours}h · Night on {nightHours}h",
+    samplingPumpStatusMeta: "{range} · Pool pump on/off · {count} points · Total on {totalHours}h · Day on {dayHours}h · Night on {nightHours}h",
     samplingPumpStatusNoData: "No pool pump status data yet for this range",
     samplingPumpStatusOff: "Off",
     samplingPumpStatusOn: "On",
@@ -935,15 +948,18 @@ const I18N = {
     dashboardTab: "总览",
     notificationMatrixTab: "Time Window",
     notificationMatrixTitle: "Time Window",
-    notificationMatrixIntro: "每个面板会按 Operation 和 Notification 分组展示规则，这样你可以更快区分自动执行的动作和提醒通知。水泵自动控制只在 Priority Scores 里统一管理，不在各个 time window 规则里单独修改。",
+    notificationMatrixIntro: "每个面板会按 Operation 和 Notification 分组展示规则，这样你可以更快区分自动执行的动作和提醒通知。Tesla 和水泵的自动控制都只在 Priority Scores 里统一管理，不在各个 time window 规则里单独修改。",
     notificationMatrixPriorityTitle: "优先级分数",
     notificationMatrixPrioritySummary: "Tesla 改成非线性 SOC 分数：低于 80% 后上涨会越来越快，低于 50% 后会很快变高。水泵只看白天/晚上运行小时数乘权重。",
     notificationMatrixPriorityWinner: "当前优先者：{winner}",
+    notificationMatrixPriorityWinnerNone: "无自动控制",
     notificationMatrixPriorityBusinessDay: "业务日：{value}",
     notificationMatrixPriorityFormula: "公式",
     notificationMatrixPriorityTeslaLabel: "Tesla",
     notificationMatrixPriorityPumpLabel: "水泵",
     notificationMatrixPrioritySoc: "SOC",
+    notificationMatrixPriorityRollingRuntime: "24小时运行时长",
+    notificationMatrixPriorityModel: "优先级模型",
     notificationMatrixPriorityWeightedRuntime: "优先级小时数",
     notificationMatrixPriorityRawRuntime: "原始运行时长",
     notificationMatrixPriorityDayRuntime: "白天运行时长",
@@ -959,10 +975,20 @@ const I18N = {
     notificationMatrixPriorityOverrideTesla: "Tesla",
     notificationMatrixPriorityOverridePump: "水泵",
     notificationMatrixPriorityOverriddenScore: "{score}（原始 {original}）",
+    notificationMatrixPriorityTeslaAutoControlLabel: "Tesla 自动控制",
+    notificationMatrixPriorityTeslaAutoControlHint: "勾选后 worker 可以自动开始或停止 Tesla 充电；取消勾选后 Tesla 完全改为手动控制。",
+    notificationMatrixPriorityTeslaAutoControlEnabled: "允许自动控制",
+    notificationMatrixPriorityTeslaAutoControlDisabled: "仅手动",
+    notificationMatrixPriorityTeslaForceThresholdLabel: "强制充电阈值",
+    notificationMatrixPriorityTeslaForceThresholdHint: "当 Tesla SOC 低于这个百分比时，夜间控制会跳过共享余量计算，直接按最大电流充电。",
+    notificationMatrixPriorityTeslaForceThresholdInvalid: "请输入 0 到 100 之间的整数阈值。",
     notificationMatrixPriorityPumpAutoControlLabel: "水泵自动控制",
     notificationMatrixPriorityPumpAutoControlHint: "勾选后 worker 可以自动开关水泵；取消勾选后水泵完全改为手动控制。",
     notificationMatrixPriorityPumpAutoControlEnabled: "允许自动控制",
     notificationMatrixPriorityPumpAutoControlDisabled: "仅手动",
+    notificationMatrixPriorityPumpForceRuntimeLabel: "强制运行阈值",
+    notificationMatrixPriorityPumpForceRuntimeHint: "当水泵过去24小时运行低于这个小时数时，夜间控制会先强制运行，再进入共享余量分配。",
+    notificationMatrixPriorityPumpForceRuntimeInvalid: "请输入 0 到 {maxHours} 小时之间的有效阈值。",
     notificationMatrixLoadingTitle: "正在加载 Time Window",
     notificationMatrixLoadingBody: "正在刷新规则、优先级分数和当前窗口状态...",
     notificationMatrixPriorityExpand: "展开优先级",
@@ -1461,7 +1487,7 @@ const I18N = {
     samplingBatteryTimelineMeta: "{range} · SAJ + Solplanet SOC · {count} 个点",
     samplingBatteryTimelineNoData: "当前时间范围暂无电池时间线数据",
     samplingPumpStatusTitle: "水泵状态",
-    samplingPumpStatusMeta: "{range} · 水泵开关状态 · {count} 个点 · 白天开启 {dayHours}h · 晚上开启 {nightHours}h",
+    samplingPumpStatusMeta: "{range} · 水泵开关状态 · {count} 个点 · 总开启 {totalHours}h · 白天开启 {dayHours}h · 晚上开启 {nightHours}h",
     samplingPumpStatusNoData: "当前时间范围暂无水泵状态数据",
     samplingPumpStatusOff: "关",
     samplingPumpStatusOn: "开",
@@ -2029,7 +2055,10 @@ let teslaControlBusy = false;
 let teslaCurrentControlBusy = false;
 let solplanetPinModalBusy = false;
 let poolPumpControlBusy = false;
+let teslaAutoControlBusy = false;
+let teslaForceMaxChargeThresholdBusy = false;
 let poolPumpAutoControlBusy = false;
+let poolPumpForceMinRuntimeBusy = false;
 let timeWindowPriorityOverrideBusy = false;
 const TESLA_CONTROL_CONFIRM_POLL_MS = 1500;
 const TESLA_CONTROL_CONFIRM_TIMEOUT_MS = 15000;
@@ -6206,13 +6235,14 @@ function renderNotificationMatrixRuleItem(item, windowItem) {
   const level = String(item.level || "info").trim().toLowerCase();
   const kind = String(item.kind || "notification").trim().toLowerCase() === "operation" ? "operation" : "notification";
   const ruleCode = String(item.code || "").trim();
+  const editable = isTimeWindowRuleEditable(ruleCode);
   const enabled = isTimeWindowRuleEnabled(ruleCode);
-  const busy = timeWindowRuleBusy.has(ruleCode);
+  const busy = editable ? timeWindowRuleBusy.has(ruleCode) : teslaAutoControlBusy;
   const progress = getNotificationMatrixProgress(item, windowItem, stateCache.lastNotificationSummary, { enabled, busy });
   return `
     <article class="notification-rule-item kind-${escapeHtml(kind)} level-${escapeHtml(level)}${enabled ? "" : " is-disabled"}">
       <label class="notification-rule-check" aria-label="${escapeHtml(t(item.titleKey))}">
-        <input type="checkbox" ${enabled ? "checked" : ""} ${busy ? "disabled" : ""} data-rule-code="${escapeHtml(ruleCode)}" />
+        <input type="checkbox" ${enabled ? "checked" : ""} ${(busy || !editable) ? "disabled" : ""} data-rule-code="${escapeHtml(ruleCode)}" />
       </label>
       <div class="notification-rule-main">
         <div class="notification-rule-topline">
@@ -6281,10 +6311,22 @@ function getTimeWindowRuleEnabledMap() {
   return map;
 }
 
+function getTimeWindowRuleStateItem(ruleCode) {
+  const normalized = String(ruleCode || "").trim();
+  if (!normalized) return null;
+  const items = Array.isArray(stateCache.lastTimeWindowRules?.items) ? stateCache.lastTimeWindowRules.items : [];
+  return items.find((item) => String(item?.rule_code || "").trim() === normalized) || null;
+}
+
 function isTimeWindowRuleEnabled(ruleCode) {
   const normalized = String(ruleCode || "").trim();
   if (!normalized) return true;
   return getTimeWindowRuleEnabledMap()[normalized] !== false;
+}
+
+function isTimeWindowRuleEditable(ruleCode) {
+  const item = getTimeWindowRuleStateItem(ruleCode);
+  return item?.editable !== false;
 }
 
 function renderDashboardNotifications(payload) {
@@ -6348,11 +6390,13 @@ function renderNotificationMatrixPriorityCard() {
   const tesla = priority?.tesla || {};
   const pump = priority?.pool_pump || {};
   const override = priority?.override || {};
+  const teslaAutoControlEnabled = tesla?.auto_control_enabled !== false;
   const pumpAutoControlEnabled = pump?.auto_control_enabled !== false;
   const windows = Array.isArray(pump?.windows) ? pump.windows : [];
   const currentWindow = windows.find((item) => item?.id === "current") || {};
   const formatHours = (value) => (Number.isFinite(Number(value)) ? `${formatTrimmedDecimal(Number(value), 2)}h` : "-");
   const formatScore = (value) => (Number.isFinite(Number(value)) ? formatTrimmedDecimal(Number(value), 1) : "-");
+  const formatPercent = (value, digits = 1) => (Number.isFinite(Number(value)) ? `${formatTrimmedDecimal(Number(value), digits)}%` : "-");
   const formatScoreWithOverride = (effectiveValue, originalValue, isOverridden) => {
     if (!isOverridden) return formatScore(effectiveValue);
     return t("notificationMatrixPriorityOverriddenScore", {
@@ -6371,18 +6415,47 @@ function renderNotificationMatrixPriorityCard() {
       return `${label}${item?.range ? ` (${item.range})` : ""} × ${formatTrimmedDecimal(Number(item?.weight), 1)}`;
     })
     .join(" · ");
-  const teslaPriorityText = formatScoreWithOverride(tesla?.score, tesla?.original_score, String(override?.target || "") === "tesla");
+  const teslaPriorityText = teslaAutoControlEnabled
+    ? formatScoreWithOverride(tesla?.score, tesla?.original_score, String(override?.target || "") === "tesla")
+    : t("notificationMatrixPriorityTeslaAutoControlDisabled");
   const pumpPriorityText = pumpAutoControlEnabled
     ? formatScoreWithOverride(pump?.score, pump?.original_score, String(override?.target || "") === "pool_pump")
     : t("notificationMatrixPriorityPumpAutoControlDisabled");
+  const teslaAutoControlStateText = teslaAutoControlBusy
+    ? t("notificationMatrixProgressSaving")
+    : t(teslaAutoControlEnabled
+      ? "notificationMatrixPriorityTeslaAutoControlEnabled"
+      : "notificationMatrixPriorityTeslaAutoControlDisabled");
+  const teslaForceChargeThresholdSocPercent = Number(tesla?.force_max_charge_threshold_soc_percent);
+  const teslaForceChargeThresholdInputValue = Number.isFinite(teslaForceChargeThresholdSocPercent)
+    ? String(Math.round(teslaForceChargeThresholdSocPercent))
+    : "45";
+  const poolPumpForceMinRuntimeHours = Number(pump?.force_min_runtime_hours);
+  const poolPumpForceMinRuntimeWindowHours = Number(pump?.rolling_runtime_window_hours);
+  const poolPumpForceMinRuntimeLimit = Number.isFinite(poolPumpForceMinRuntimeWindowHours)
+    ? poolPumpForceMinRuntimeWindowHours
+    : 24;
+  const poolPumpForceMinRuntimeInputValue = Number.isFinite(poolPumpForceMinRuntimeHours)
+    ? formatTrimmedDecimal(poolPumpForceMinRuntimeHours, 1)
+    : "1";
+  const teslaSocText = formatPercent(tesla?.soc_percent, 1);
+  const teslaModelText = [
+    formatPercent(tesla?.target_soc_percent, 0),
+    formatPercent(tesla?.high_urgency_soc_percent, 0),
+    formatPercent(tesla?.critical_soc_percent, 0),
+  ].join(" · ");
+  const pumpRollingRuntimeText = formatHours(pump?.rolling_runtime_hours_24h);
   const pumpAutoControlStateText = poolPumpAutoControlBusy
     ? t("notificationMatrixProgressSaving")
     : t(pumpAutoControlEnabled
       ? "notificationMatrixPriorityPumpAutoControlEnabled"
       : "notificationMatrixPriorityPumpAutoControlDisabled");
-  const winnerLabel = String(priority?.winner || "tie").trim() === "pool_pump"
+  const winner = String(priority?.winner || "tie").trim();
+  const winnerLabel = winner === "pool_pump"
     ? t("notificationMatrixPriorityPumpLabel")
-    : t("notificationMatrixPriorityTeslaLabel");
+    : winner === "none"
+      ? t("notificationMatrixPriorityWinnerNone")
+      : t("notificationMatrixPriorityTeslaLabel");
   const isCollapsed = notificationMatrixPriorityCollapsed;
   return `
     <article class="notification-priority-card${isCollapsed ? " is-collapsed" : ""}">
@@ -6422,7 +6495,7 @@ function renderNotificationMatrixPriorityCard() {
           <span>${escapeHtml(t("notificationMatrixPriorityOverrideAuto"))}</span>
         </label>
         <label class="notification-priority-radio">
-          <input type="radio" name="time-window-priority-override" value="tesla" ${String(override?.target || "") === "tesla" ? "checked" : ""} ${timeWindowPriorityOverrideBusy ? "disabled" : ""} />
+          <input type="radio" name="time-window-priority-override" value="tesla" ${String(override?.target || "") === "tesla" ? "checked" : ""} ${(timeWindowPriorityOverrideBusy || !teslaAutoControlEnabled || teslaAutoControlBusy) ? "disabled" : ""} />
           <span>${escapeHtml(t("notificationMatrixPriorityOverrideTesla"))}</span>
         </label>
         <label class="notification-priority-radio">
@@ -6436,9 +6509,47 @@ function renderNotificationMatrixPriorityCard() {
             <span class="notification-priority-device-name">${escapeHtml(t("notificationMatrixPriorityTeslaLabel"))}</span>
             <strong class="notification-priority-score">${escapeHtml(teslaPriorityText)}</strong>
           </div>
-          <div class="notification-priority-device-meta">${escapeHtml(t("notificationMatrixPrioritySoc"))}: ${escapeHtml(Number.isFinite(Number(tesla?.soc_percent)) ? `${formatTrimmedDecimal(Number(tesla?.soc_percent), 1)}%` : "-")}</div>
+          <label class="notification-priority-checkbox">
+            <input type="checkbox" name="tesla-auto-control" ${teslaAutoControlEnabled ? "checked" : ""} ${teslaAutoControlBusy ? "disabled" : ""} />
+            <span class="notification-priority-checkbox-copy">
+              <strong>${escapeHtml(t("notificationMatrixPriorityTeslaAutoControlLabel"))}</strong>
+              <span>${escapeHtml(teslaAutoControlStateText)}</span>
+            </span>
+          </label>
+          <p class="notification-priority-checkbox-hint">${escapeHtml(t("notificationMatrixPriorityTeslaAutoControlHint"))}</p>
+          <label class="notification-priority-setting${!teslaAutoControlEnabled ? " is-disabled" : ""}">
+            <span class="notification-priority-setting-copy">
+              <strong>${escapeHtml(t("notificationMatrixPriorityTeslaForceThresholdLabel"))}</strong>
+              <span>${escapeHtml(t("notificationMatrixPriorityTeslaForceThresholdHint"))}</span>
+            </span>
+            <span class="notification-priority-number-field">
+              <input
+                type="number"
+                name="tesla-force-threshold"
+                min="0"
+                max="100"
+                step="1"
+                inputmode="numeric"
+                value="${escapeHtml(teslaForceChargeThresholdInputValue)}"
+                ${(!teslaAutoControlEnabled || teslaForceMaxChargeThresholdBusy || teslaAutoControlBusy) ? "disabled" : ""}
+              />
+              <span>%</span>
+            </span>
+          </label>
+          <div class="notification-priority-stats">
+            <div class="notification-priority-stat">
+              <span>${escapeHtml(t("notificationMatrixPrioritySoc"))}</span>
+              <strong>${escapeHtml(teslaSocText)}</strong>
+            </div>
+            <div class="notification-priority-stat">
+              <span>${escapeHtml(t("notificationMatrixPriorityModel"))}</span>
+              <strong>${escapeHtml(teslaModelText)}</strong>
+            </div>
+          </div>
           <div class="notification-priority-formula-label">${escapeHtml(t("notificationMatrixPriorityFormula"))}</div>
-          <code class="notification-priority-formula">${escapeHtml(String(tesla?.formula || "-"))}</code>
+          <div class="notification-priority-formula-stack">
+            <code class="notification-priority-formula">${escapeHtml(String(tesla?.formula || "-"))}</code>
+          </div>
         </section>
         <section class="notification-priority-device">
           <div class="notification-priority-device-topline">
@@ -6453,22 +6564,69 @@ function renderNotificationMatrixPriorityCard() {
             </span>
           </label>
           <p class="notification-priority-checkbox-hint">${escapeHtml(t("notificationMatrixPriorityPumpAutoControlHint"))}</p>
-          <div class="notification-priority-device-meta">${escapeHtml(t("notificationMatrixPriorityWeights"))}: ${escapeHtml(weightText || "-")}</div>
-          <div class="notification-priority-formula-label">${escapeHtml(t("notificationMatrixPriorityFormula"))}</div>
-          <code class="notification-priority-formula">${escapeHtml(String(pump?.formula || "-"))}</code>
-          <code class="notification-priority-formula">${escapeHtml(String(pump?.runtime_formula || "-"))}</code>
-          <div class="notification-priority-window-list">
-            <div class="notification-priority-window-item">
-              <strong>${escapeHtml(t("notificationMatrixPriorityCurrentWindow"))}</strong>
-              <span>${escapeHtml(t("notificationMatrixPriorityRawRuntime"))}: ${escapeHtml(formatHours(currentWindow?.raw_runtime_hours))}</span>
-              <span>${escapeHtml(t("notificationMatrixPriorityDayRuntime"))}: ${escapeHtml(formatHours(currentWindow?.day_runtime_hours))}</span>
-              <span>${escapeHtml(t("notificationMatrixPriorityNightRuntime"))}: ${escapeHtml(formatHours(currentWindow?.night_runtime_hours))}</span>
-              <span>${escapeHtml(t("notificationMatrixPriorityWeightedRuntime"))}: ${escapeHtml(formatHours(currentWindow?.weighted_runtime_hours))}</span>
-              <span>${escapeHtml(t("notificationMatrixPriorityDeficit"))}: ${escapeHtml(formatHours(currentWindow?.deficit_weighted_hours))}</span>
+          <label class="notification-priority-setting${!pumpAutoControlEnabled ? " is-disabled" : ""}">
+            <span class="notification-priority-setting-copy">
+              <strong>${escapeHtml(t("notificationMatrixPriorityPumpForceRuntimeLabel"))}</strong>
+              <span>${escapeHtml(t("notificationMatrixPriorityPumpForceRuntimeHint"))}</span>
+            </span>
+            <span class="notification-priority-number-field">
+              <input
+                type="number"
+                name="pool-pump-force-min-runtime-hours"
+                min="0"
+                max="${escapeHtml(String(poolPumpForceMinRuntimeLimit))}"
+                step="0.1"
+                inputmode="decimal"
+                value="${escapeHtml(poolPumpForceMinRuntimeInputValue)}"
+                ${(!pumpAutoControlEnabled || poolPumpForceMinRuntimeBusy || poolPumpAutoControlBusy) ? "disabled" : ""}
+              />
+              <span>h</span>
+            </span>
+          </label>
+          <div class="notification-priority-stats">
+            <div class="notification-priority-stat">
+              <span>${escapeHtml(t("notificationMatrixPriorityRollingRuntime"))}</span>
+              <strong>${escapeHtml(pumpRollingRuntimeText)}</strong>
             </div>
+            <div class="notification-priority-stat">
+              <span>${escapeHtml(t("notificationMatrixPriorityModel"))}</span>
+              <strong>${escapeHtml(weightText || "-")}</strong>
+            </div>
+          </div>
+          <div class="notification-priority-formula-label">${escapeHtml(t("notificationMatrixPriorityFormula"))}</div>
+          <div class="notification-priority-formula-stack">
+            <code class="notification-priority-formula">${escapeHtml(String(pump?.formula || "-"))}</code>
+            <code class="notification-priority-formula">${escapeHtml(String(pump?.runtime_formula || "-"))}</code>
           </div>
         </section>
       </div>
+      <section class="notification-priority-window-panel">
+        <div class="notification-priority-window-header">
+          <strong>${escapeHtml(`${t("notificationMatrixPriorityPumpLabel")} · ${t("notificationMatrixPriorityCurrentWindow")}`)}</strong>
+        </div>
+        <div class="notification-priority-window-stats">
+          <div class="notification-priority-window-stat">
+            <span>${escapeHtml(t("notificationMatrixPriorityRawRuntime"))}</span>
+            <strong>${escapeHtml(formatHours(currentWindow?.raw_runtime_hours))}</strong>
+          </div>
+          <div class="notification-priority-window-stat">
+            <span>${escapeHtml(t("notificationMatrixPriorityDayRuntime"))}</span>
+            <strong>${escapeHtml(formatHours(currentWindow?.day_runtime_hours))}</strong>
+          </div>
+          <div class="notification-priority-window-stat">
+            <span>${escapeHtml(t("notificationMatrixPriorityNightRuntime"))}</span>
+            <strong>${escapeHtml(formatHours(currentWindow?.night_runtime_hours))}</strong>
+          </div>
+          <div class="notification-priority-window-stat">
+            <span>${escapeHtml(t("notificationMatrixPriorityWeightedRuntime"))}</span>
+            <strong>${escapeHtml(formatHours(currentWindow?.weighted_runtime_hours))}</strong>
+          </div>
+          <div class="notification-priority-window-stat">
+            <span>${escapeHtml(t("notificationMatrixPriorityDeficit"))}</span>
+            <strong>${escapeHtml(formatHours(currentWindow?.deficit_weighted_hours))}</strong>
+          </div>
+        </div>
+      </section>
       `}
     </article>
   `;
@@ -6523,11 +6681,47 @@ function renderNotificationMatrix() {
       void updateTimeWindowPriorityOverride(target?.value || "auto");
     });
   }
+  const teslaAutoControlCheckbox = root.querySelector('input[name="tesla-auto-control"]');
+  if (teslaAutoControlCheckbox) {
+    teslaAutoControlCheckbox.addEventListener("change", (event) => {
+      const target = event.currentTarget;
+      void updateTeslaAutoControl(Boolean(target?.checked));
+    });
+  }
+  const teslaForceThresholdInput = root.querySelector('input[name="tesla-force-threshold"]');
+  if (teslaForceThresholdInput) {
+    teslaForceThresholdInput.addEventListener("change", (event) => {
+      const target = event.currentTarget;
+      const nextValue = Number(target?.value);
+      if (!Number.isFinite(nextValue) || !Number.isInteger(nextValue) || nextValue < 0 || nextValue > 100) {
+        window.alert(t("notificationMatrixPriorityTeslaForceThresholdInvalid"));
+        renderNotificationMatrix();
+        return;
+      }
+      void updateTeslaForceMaxChargeThreshold(nextValue);
+    });
+  }
   const pumpAutoControlCheckbox = root.querySelector('input[name="pool-pump-auto-control"]');
   if (pumpAutoControlCheckbox) {
     pumpAutoControlCheckbox.addEventListener("change", (event) => {
       const target = event.currentTarget;
       void updatePoolPumpAutoControl(Boolean(target?.checked));
+    });
+  }
+  const poolPumpForceMinRuntimeInput = root.querySelector('input[name="pool-pump-force-min-runtime-hours"]');
+  if (poolPumpForceMinRuntimeInput) {
+    poolPumpForceMinRuntimeInput.addEventListener("change", (event) => {
+      const target = event.currentTarget;
+      const nextValue = Number(target?.value);
+      const maxHours = Number(target?.max || 24);
+      if (!Number.isFinite(nextValue) || nextValue < 0 || nextValue > maxHours) {
+        window.alert(t("notificationMatrixPriorityPumpForceRuntimeInvalid", {
+          maxHours: formatTrimmedDecimal(maxHours, 1),
+        }));
+        renderNotificationMatrix();
+        return;
+      }
+      void updatePoolPumpForceMinRuntimeHours(nextValue);
     });
   }
   const currentWindowId = getCurrentNotificationMatrixWindowId(stateCache.lastNotificationSummary);
@@ -6616,7 +6810,7 @@ function renderNotificationMatrix() {
         toggleNotificationMatrixWindow(header.getAttribute("data-window-id"));
       });
     }
-    for (const checkbox of panel.querySelectorAll(".notification-rule-check input[data-rule-code]")) {
+    for (const checkbox of panel.querySelectorAll(".notification-rule-check input[data-rule-code]:not([disabled])")) {
       checkbox.addEventListener("click", (event) => {
         event.stopPropagation();
       });
@@ -7237,7 +7431,7 @@ async function dismissDashboardNotification(notificationKey) {
 
 async function updateTimeWindowRuleState(ruleCode, enabled) {
   const normalized = String(ruleCode || "").trim();
-  if (!normalized || timeWindowRuleBusy.has(normalized)) return;
+  if (!normalized || !isTimeWindowRuleEditable(normalized) || timeWindowRuleBusy.has(normalized)) return;
   timeWindowRuleBusy.add(normalized);
   renderNotificationMatrix();
   try {
@@ -7293,6 +7487,51 @@ async function updateTimeWindowPriorityOverride(target) {
   }
 }
 
+async function updateTeslaAutoControl(enabled) {
+  if (teslaAutoControlBusy) return;
+  teslaAutoControlBusy = true;
+  renderNotificationMatrix();
+  try {
+    await fetchJson("/api/tesla/auto-control", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: Boolean(enabled) }),
+      timeoutMs: 10000,
+    });
+    const refreshed = await fetchJson("/api/time-window-rules", { timeoutMs: 10000 });
+    stateCache.lastTimeWindowRules = refreshed;
+    renderNotificationMatrix();
+  } catch (err) {
+    window.alert(String(err));
+  } finally {
+    teslaAutoControlBusy = false;
+    renderNotificationMatrix();
+  }
+}
+
+async function updateTeslaForceMaxChargeThreshold(thresholdPercent) {
+  const normalized = Number(thresholdPercent);
+  if (teslaForceMaxChargeThresholdBusy || !Number.isFinite(normalized) || !Number.isInteger(normalized)) return;
+  teslaForceMaxChargeThresholdBusy = true;
+  renderNotificationMatrix();
+  try {
+    await fetchJson("/api/tesla/force-max-charge-threshold", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ threshold_percent: normalized }),
+      timeoutMs: 10000,
+    });
+    const refreshed = await fetchJson("/api/time-window-rules", { timeoutMs: 10000 });
+    stateCache.lastTimeWindowRules = refreshed;
+    renderNotificationMatrix();
+  } catch (err) {
+    window.alert(String(err));
+  } finally {
+    teslaForceMaxChargeThresholdBusy = false;
+    renderNotificationMatrix();
+  }
+}
+
 async function updatePoolPumpAutoControl(enabled) {
   if (poolPumpAutoControlBusy) return;
   poolPumpAutoControlBusy = true;
@@ -7311,6 +7550,29 @@ async function updatePoolPumpAutoControl(enabled) {
     window.alert(String(err));
   } finally {
     poolPumpAutoControlBusy = false;
+    renderNotificationMatrix();
+  }
+}
+
+async function updatePoolPumpForceMinRuntimeHours(thresholdHours) {
+  const normalized = Number(thresholdHours);
+  if (poolPumpForceMinRuntimeBusy || !Number.isFinite(normalized)) return;
+  poolPumpForceMinRuntimeBusy = true;
+  renderNotificationMatrix();
+  try {
+    await fetchJson("/api/devices/pool-pump/force-min-runtime-hours", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ threshold_hours: normalized }),
+      timeoutMs: 10000,
+    });
+    const refreshed = await fetchJson("/api/time-window-rules", { timeoutMs: 10000 });
+    stateCache.lastTimeWindowRules = refreshed;
+    renderNotificationMatrix();
+  } catch (err) {
+    window.alert(String(err));
+  } finally {
+    poolPumpForceMinRuntimeBusy = false;
     renderNotificationMatrix();
   }
 }
@@ -9095,6 +9357,7 @@ function buildPumpStatusTimelinePayload(combinedSeriesPayload, range) {
     start_at_utc: range.startUtc,
     end_at_utc: range.endUtc,
     data,
+    total_on_hours: (dayOnMs + nightOnMs) / 3600000,
     day_on_hours: dayOnMs / 3600000,
     night_on_hours: nightOnMs / 3600000,
   };
@@ -12608,6 +12871,7 @@ async function loadSampling() {
       t("samplingPumpStatusMeta", {
         range: range.label,
         count: pumpStatusPayload.count || 0,
+        totalHours: formatTrimmedDecimal(Number(pumpStatusPayload.total_on_hours || 0), 2),
         dayHours: formatTrimmedDecimal(Number(pumpStatusPayload.day_on_hours || 0), 2),
         nightHours: formatTrimmedDecimal(Number(pumpStatusPayload.night_on_hours || 0), 2),
       }),
@@ -12703,6 +12967,7 @@ function rerenderSamplingViewFromCache() {
       t("samplingPumpStatusMeta", {
         range: range.label,
         count: stateCache.lastSamplingPumpStatus.count || 0,
+        totalHours: formatTrimmedDecimal(Number(stateCache.lastSamplingPumpStatus.total_on_hours || 0), 2),
         dayHours: formatTrimmedDecimal(Number(stateCache.lastSamplingPumpStatus.day_on_hours || 0), 2),
         nightHours: formatTrimmedDecimal(Number(stateCache.lastSamplingPumpStatus.night_on_hours || 0), 2),
       }),

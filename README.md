@@ -85,10 +85,13 @@ curl -s "http://<wattimize-host>:18000/api/storage/series?system=saj&start_utc=2
 curl -s "http://<wattimize-host>:18000/api/storage/usage-range?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z" | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/charging -H 'Content-Type: application/json' -d '{"enabled":true}' | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/current -H 'Content-Type: application/json' -d '{"amps":16}' | jq
+curl -s -X PUT http://<wattimize-host>:18000/api/tesla/auto-control -H 'Content-Type: application/json' -d '{"enabled":false}' | jq
+curl -s -X PUT http://<wattimize-host>:18000/api/tesla/force-max-charge-threshold -H 'Content-Type: application/json' -d '{"threshold_percent":45}' | jq
 curl -s "http://<wattimize-host>:18000/api/operations/timeline?limit=50" | jq
 curl -s http://<wattimize-host>:18000/api/devices/pool-pump | jq
 curl -s -X POST http://<wattimize-host>:18000/api/devices/pool-pump/toggle -H 'Content-Type: application/json' -d '{"enabled":true}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/devices/pool-pump/auto-control -H 'Content-Type: application/json' -d '{"enabled":false}' | jq
+curl -s -X PUT http://<wattimize-host>:18000/api/devices/pool-pump/force-min-runtime-hours -H 'Content-Type: application/json' -d '{"threshold_hours":1.5}' | jq
 curl -s http://<wattimize-host>:18000/api/database/export.sqlite3 -o wattimize.sqlite3
 curl -s -X POST http://<wattimize-host>:18000/api/database/import.sqlite3 -F "file=@wattimize.sqlite3" | jq
 curl -s -X POST http://<wattimize-host>:18000/api/config/solplanet/discover -H 'Content-Type: application/json' -d '{"solplanet_dongle_host":"192.168.1.10"}' | jq
@@ -168,10 +171,15 @@ First-run configuration:
 
 - The `Time Window` tab shows rule switches for each automation window, covering both notifications and automated operations.
 - Rule state is stored in SQLite and exposed through `GET /api/time-window-rules` and `PUT /api/time-window-rules/{rule_code}`.
-- `GET /api/time-window-rules` now also returns a `priority` snapshot for Tesla and pool pump, and the dashboard lets you temporarily override the winning device through `PUT /api/time-window-priority-override` with `auto`, `tesla`, or `pool_pump`.
+- `GET /api/time-window-rules` now also returns a `priority` snapshot for Tesla and pool pump, including the active winner, Tesla auto-control state, Tesla forced-max-charge threshold, pool-pump auto-control state, and the pool pump's rolling 24-hour runtime / minimum-runtime requirement.
+- The dashboard lets you temporarily override the winning device through `PUT /api/time-window-priority-override` with `auto`, `tesla`, or `pool_pump`.
+- Tesla auto control is now managed only from the `Priority Scores` card through `PUT /api/tesla/auto-control`; when disabled, the worker stops issuing automatic Tesla charging actions and Tesla remains manual-only.
+- Tesla also exposes `PUT /api/tesla/force-max-charge-threshold`, which sets the SOC threshold below which overnight automation forces Tesla to charge at its maximum allowed current before sharing power with the pool pump.
 - Pool-pump automation is now managed only from the `Priority Scores` card through `PUT /api/devices/pool-pump/auto-control`; when disabled, the worker stops issuing automatic pool-pump actions and the pump remains manual-only.
-- SAJ profile automation and Tesla charge automation respect these rule switches before issuing control actions.
-- The overnight shoulder window (`23:00-11:00`) now starts Tesla charging only when the projected usable battery minus home load to `08:00` and remaining pool-pump load to `05:00` stays above the configured `1.0kWh` reserve, and stops once that budget is exhausted.
+- Pool pump runtime protection is configurable through `PUT /api/devices/pool-pump/force-min-runtime-hours`, which sets the minimum runtime that should be reached within the rolling 24-hour lookback used by overnight automation.
+- Tesla time-window operation rows remain visible in the dashboard, but they are now read-only snapshots that reflect the unified Tesla auto-control state instead of per-window switches.
+- SAJ profile automation still respects per-window rule switches before issuing control actions.
+- The overnight shoulder window (`23:00-11:00`) now computes a shared overnight battery budget after reserving projected home load, then allocates the remaining power between Tesla and the pool pump according to the live priority winner, the Tesla forced-charge threshold, and the pool pump's 24-hour minimum-runtime requirement.
 - Tesla manual start/stop now returns UI feedback states so the dashboard can show pending, success, and failure confirmation after `/api/tesla/control/charging`.
 - Tesla manual current control is available through `POST /api/tesla/control/current`, and the combined dashboard shows pending current-change state until Home Assistant confirms it.
 - The combined Tesla card now shows battery energy, live voltage, charge ETA, and an inline current-control trigger instead of only the raw charging power number.
@@ -183,7 +191,7 @@ First-run configuration:
 - That runtime budget now divides usable remaining battery by the current overnight runtime load, defined as current base home load plus pool-pump power, and also includes Tesla runtime power when Tesla is expected to stay active, so the dashboard formula matches the actual control calculation.
 - The free-energy window (`11:00-14:00`) now also includes `pool_pump_free_energy_control` and Tesla shared-capacity handling: the priority winner is evaluated first, its resource reservation is applied first, and the second device is then evaluated against the remaining grid budget (`15.0kW` cap), so both can continue when capacity is sufficient.
 - Worker check payloads now include explicit `execution_order`, `resource_reservation`, and `final_switch_states` (`tesla_enabled`, `pool_pump_enabled`) so the UI can show the final on/off result of each round directly.
-- The Time Window dashboard now includes a device-priority card with a non-linear Tesla SoC score (`80%+ => 0`, `60%-80% => 0..45`, `40%-60% => 45..100`, `<=40% => 100`) and pool-pump priority hours from the current `11:00 -> next 11:00` window (`day 11:00-23:00 ×1`, `night 23:00-11:00 ×2`), plus the currently selected winner before free-energy or overnight decisions are applied.
+- The Time Window dashboard now includes a device-priority card with a non-linear Tesla SoC score (`80%+ => 0`, `60%-80% => 0..45`, `40%-60% => 45..100`, `<=40% => 100`), pool-pump priority hours from the current `11:00 -> next 11:00` window (`day 11:00-23:00 ×1`, `night 23:00-11:00 ×2`), the pool pump's rolling 24-hour runtime, and inline controls for both the Tesla forced-charge threshold and the pool-pump minimum-runtime target.
 - Dashboard auto-refresh defaults to 30 seconds, keeps the last summary cached locally, and shows background refresh state while new data is loading.
 - The combined dashboard lets you click the Solplanet inverter node to read and update the live Solplanet `Pin` charging limit.
 - On phone-sized layouts, the dashboard now hides the weather/notification/reference panels and switches the combined flow card to a simplified mobile-first energy map with a central hub view that keeps load, remaining battery, live flow, pool pump, and Tesla state in view.
