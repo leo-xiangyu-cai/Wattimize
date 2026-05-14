@@ -2917,7 +2917,7 @@ function renderSystemLoadMeta(system) {
   const updatedId = flowId(system, "updatedAt");
   const spinnerId = flowId(system, "loadingSpinner");
   const updatedText = formatUpdatedAt(meta.updatedAt);
-  const combinedLate = system === "combined" && meta.phase === "done" && isIsoOlderThanSeconds(meta.updatedAt, 120);
+  const combinedLate = system === "combined" && meta.phase === "done" && isIsoOlderThanSeconds(meta.updatedAt, 300);
   let lineText = t("flowMetaIdle");
   if (meta.refreshing) {
     lineText = t("flowMetaRefreshing", { updated: updatedText });
@@ -2926,7 +2926,8 @@ function renderSystemLoadMeta(system) {
   } else if (meta.phase === "failed") {
     lineText = t("flowMetaFailed", { updated: updatedText });
   } else if (meta.phase === "done") {
-    if (meta.quality === "partial") lineText = t("flowMetaDonePartial", { count: meta.count, updated: updatedText });
+    if (combinedLate) lineText = t("flowMetaDoneStaleCombined", { count: meta.count, updated: updatedText });
+    else if (meta.quality === "partial") lineText = t("flowMetaDonePartial", { count: meta.count, updated: updatedText });
     else lineText = t("flowMetaDoneOk", { updated: updatedText });
   }
   setText(updatedId, lineText);
@@ -12346,33 +12347,6 @@ async function loadSummary() {
   const combinedRequest = fetchJson("/api/energy-flow/combined", { timeoutMs: 30000 });
   const poolPumpRequest = fetchJson("/api/devices/pool-pump", { timeoutMs: 10000 });
 
-  const baseResults = await Promise.allSettled([
-    fetchJson("/api/collector/status", { timeoutMs: 6000 }),
-    fetchJson("/api/saj/control/profile", { timeoutMs: 8000 }),
-    fetchJson("/api/dashboard/notifications", { timeoutMs: 8000 }),
-    fetchJson("/api/time-window-rules", { timeoutMs: 8000 }),
-    loadWeatherForecast(),
-  ]);
-  if (requestId !== summaryRequestId) return;
-
-  if (baseResults[0].status === "fulfilled") {
-    summary.collectorStatus = baseResults[0].value;
-    stateCache.lastCollectorStatus = baseResults[0].value;
-  }
-  if (baseResults[1].status === "fulfilled") {
-    stateCache.lastSajProfile = baseResults[1].value;
-    renderSajProfilePanel();
-  } else {
-    setText("sajProfileStatusText", t("sajProfileLoadFailed", { error: String(baseResults[1].reason) }));
-  }
-  if (baseResults[2].status === "fulfilled") {
-    stateCache.lastDashboardNotifications = baseResults[2].value;
-  }
-  if (baseResults[3].status === "fulfilled") {
-    stateCache.lastTimeWindowRules = baseResults[3].value;
-  }
-  renderSummary(summary);
-
   void combinedRequest
     .then((combinedFlow) => {
       if (requestId !== summaryRequestId) return;
@@ -12419,6 +12393,33 @@ async function loadSummary() {
       summary.poolPump = previousPoolPump;
       renderSummary(summary);
     });
+
+  const baseResults = await Promise.allSettled([
+    fetchJson("/api/collector/status", { timeoutMs: 6000 }),
+    fetchJson("/api/saj/control/profile", { timeoutMs: 8000 }),
+    fetchJson("/api/dashboard/notifications", { timeoutMs: 8000 }),
+    fetchJson("/api/time-window-rules", { timeoutMs: 8000 }),
+    loadWeatherForecast(),
+  ]);
+  if (requestId !== summaryRequestId) return;
+
+  if (baseResults[0].status === "fulfilled") {
+    summary.collectorStatus = baseResults[0].value;
+    stateCache.lastCollectorStatus = baseResults[0].value;
+  }
+  if (baseResults[1].status === "fulfilled") {
+    stateCache.lastSajProfile = baseResults[1].value;
+    renderSajProfilePanel();
+  } else {
+    setText("sajProfileStatusText", t("sajProfileLoadFailed", { error: String(baseResults[1].reason) }));
+  }
+  if (baseResults[2].status === "fulfilled") {
+    stateCache.lastDashboardNotifications = baseResults[2].value;
+  }
+  if (baseResults[3].status === "fulfilled") {
+    stateCache.lastTimeWindowRules = baseResults[3].value;
+  }
+  renderSummary(summary);
 }
 
 async function loadNotificationMatrix() {
@@ -13261,7 +13262,7 @@ bindChangeIfPresent("autoRefreshSelect", (event) => {
 });
 
 bindClickIfPresent("refreshBtn", () => {
-  forceRefreshCurrentView();
+  void loadCurrentTab();
 });
 bindClickIfPresent("combined-teslaChargingToggleBtn", () => {
   void toggleTeslaCharging();
