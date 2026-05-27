@@ -3690,6 +3690,22 @@ def _operation_reason_label(reason: object, *, lang: Literal["zh", "en"] = "zh")
     code = raw.lower()
     if not raw:
         return "-"
+    if code == "adjusted_amps_for_pool_pump_priority_under_grid_cap":
+        return "Tesla current reduced to keep pool-pump priority inside the grid cap" if lang == "en" else "为保证水泵优先级且不超过电网限额，下调了 Tesla 电流"
+    if code == "already_at_max_safe_current_under_grid_cap":
+        return "Tesla already at the maximum safe current under the grid cap" if lang == "en" else "Tesla 当前已经在电网限额下的最大安全电流"
+    if code == "already_charging":
+        return "Tesla was already charging" if lang == "en" else "Tesla 原本就在充电"
+    if code == "already_off":
+        return "Pool pump was already off" if lang == "en" else "水泵原本就是关闭的"
+    if code == "already_running":
+        return "Pool pump was already running" if lang == "en" else "水泵原本就在运行"
+    if code == "already_stopped":
+        return "The device was already stopped" if lang == "en" else "设备原本就是停止的"
+    if code == "charging_requested_but_not_active":
+        return "Charging had been requested but was not actually active, so a restart was issued" if lang == "en" else "已请求充电但实际未在充电，因此执行了重启"
+    if code == "keep_current_state":
+        return "Keep the current state unchanged" if lang == "en" else "保持当前状态不变"
     if code in (
         "supply_insufficient_for_pool_pump",
         "free_energy_supply_insufficient_for_pool_pump",
@@ -3754,6 +3770,8 @@ def _operation_reason_label(reason: object, *, lang: Literal["zh", "en"] = "zh")
         return "No minimum support demand during export window" if lang == "en" else "晚高峰卖电时段当前没有最低保障需求"
     if code == "already_holding_export_support_targets":
         return "Already holding export window support targets" if lang == "en" else "当前已维持晚高峰卖电时段目标"
+    if code == "export_window_exempt":
+        return "Export window exempts pool pump off-period guard" if lang == "en" else "晚高峰卖电时段豁免水泵禁用时段保护"
     if code == "outside_pool_pump_schedule":
         return "Outside pool pump overnight schedule" if lang == "en" else "不在水泵夜间运行时段"
     if code == "overnight_shared_power_budget_unavailable":
@@ -3788,6 +3806,44 @@ def _operation_reason_label(reason: object, *, lang: Literal["zh", "en"] = "zh")
         return "Outside current control window" if lang == "en" else "不在当前控制窗口"
     if code == "rule_disabled":
         return "This rule is disabled" if lang == "en" else "该规则已禁用"
+    if code == "after_free_shoulder_solplanet_soc_at_or_above_start_threshold":
+        return "Solplanet SOC reached the after-free shoulder start threshold" if lang == "en" else "Solplanet 电量达到免费后 shoulder 启动阈值"
+    if code == "after_free_shoulder_solplanet_soc_below_stop_threshold":
+        return "Solplanet SOC dropped below the after-free shoulder stop threshold" if lang == "en" else "Solplanet 电量低于免费后 shoulder 停止阈值"
+    if code == "after_free_shoulder_solplanet_soc_between_thresholds":
+        return "Solplanet SOC stayed inside the after-free shoulder hysteresis band" if lang == "en" else "Solplanet 电量位于免费后 shoulder 滞回区间内"
+    if code == "after_free_peak_solplanet_soc_at_or_above_start_threshold":
+        return "Solplanet SOC reached the after-free peak start threshold" if lang == "en" else "Solplanet 电量达到免费后 peak 启动阈值"
+    if code == "after_free_peak_solplanet_soc_below_stop_threshold":
+        return "Solplanet SOC dropped below the after-free peak stop threshold" if lang == "en" else "Solplanet 电量低于免费后 peak 停止阈值"
+    if code == "after_free_peak_solplanet_soc_between_thresholds":
+        return "Solplanet SOC stayed inside the after-free peak hysteresis band" if lang == "en" else "Solplanet 电量位于免费后 peak 滞回区间内"
+    if code == "soc_at_or_above_start_threshold":
+        return "The measured SOC was at or above the start threshold" if lang == "en" else "实测电量高于或等于启动阈值"
+    if code == "soc_below_stop_threshold":
+        return "The measured SOC was below the stop threshold" if lang == "en" else "实测电量低于停止阈值"
+    if code == "within_soc_hysteresis_band":
+        return "SOC remained inside the hysteresis band, so no switch was needed" if lang == "en" else "电量仍在滞回区间内，因此无需切换"
+    if code == "pool_pump_priority_higher":
+        return "Pool pump priority was higher than Tesla in this business window" if lang == "en" else "当前 business window 内水泵优先级高于 Tesla"
+    if code == "pool_pump_priority_higher_in_business_window":
+        return "Pool pump priority won in this business window" if lang == "en" else "当前 business window 内水泵优先级获胜"
+    if code == "pump_off_period_active":
+        return "Pool pump off-period guard is active" if lang == "en" else "水泵禁用时段保护正在生效"
+    if code == "outside_tesla_automation_windows":
+        return "Outside every Tesla automation window" if lang == "en" else "当前不在任何 Tesla 自动控制窗口内"
+    if code == "post_export_peak_pause_until_overnight_window":
+        return (
+            "Post-export-peak handoff paused Tesla until the overnight window"
+            if lang == "en"
+            else "卖电高峰后交接逻辑已暂停 Tesla，等待夜间窗口接手"
+        )
+    if code == "post_export_peak_notifications_only":
+        return "Post-export-peak window is notification-only" if lang == "en" else "卖电高峰后窗口当前只做通知，不做控制"
+    if code == "tesla_observation_unavailable":
+        return "Tesla live observation was unavailable" if lang == "en" else "Tesla 实时观测不可用"
+    if code == "watching_battery_full_soc":
+        return "Battery-full watcher is only observing SOC" if lang == "en" else "电池满电观察器当前只在观察 SOC"
     return raw
 
 
@@ -3963,6 +4019,447 @@ def _operation_reason_with_metrics(
     return base_reason
 
 
+def _operation_reason_fmt_w(value: object) -> str:
+    numeric = _to_number(value)
+    return f"{int(round(numeric))}W" if numeric is not None else "-"
+
+
+def _operation_reason_fmt_wh(value: object) -> str:
+    numeric = _to_number(value)
+    if numeric is None:
+        return "-"
+    if abs(numeric) >= 1000.0:
+        return f"{numeric / 1000.0:.3f}kWh"
+    return f"{numeric:.0f}Wh"
+
+
+def _operation_reason_fmt_hours(value: object) -> str:
+    numeric = _to_number(value)
+    return f"{numeric:.2f}h" if numeric is not None else "-"
+
+
+def _operation_reason_fmt_pct(value: object) -> str:
+    numeric = _to_number(value)
+    return f"{numeric:.1f}%" if numeric is not None else "-"
+
+
+def _operation_reason_fmt_amps(value: object) -> str:
+    numeric = _to_number(value)
+    return f"{int(round(numeric))}A" if numeric is not None else "-"
+
+
+def _operation_reason_line(label: str, text: str | None) -> str | None:
+    normalized = str(text or "").strip()
+    if not normalized or normalized == "-":
+        return None
+    return f"{label}: {normalized}"
+
+
+def _operation_reason_logic_summary(check: dict[str, object], *, lang: Literal["zh", "en"] = "zh") -> str | None:
+    check_name = str(check.get("check") or "").strip().lower()
+    window_mode = str(check.get("window_mode") or "").strip().lower()
+    target = str(check.get("target") or "").strip().lower()
+    schedule = str(check.get("service_window_schedule") or check.get("window_schedule") or "").strip()
+    base: str | None = None
+    if check_name == "midday_window_check":
+        if window_mode == "export_window":
+            base = "Export-window support rule" if lang == "en" else "晚高峰卖电支撑规则"
+        elif window_mode == "after_free_shoulder":
+            base = "After-free shoulder Tesla SOC rule" if lang == "en" else "免费后 shoulder 的 Tesla 电量规则"
+        elif window_mode == "after_free_peak":
+            base = "After-free peak Tesla SOC rule" if lang == "en" else "免费后 peak 的 Tesla 电量规则"
+        elif window_mode == "free_energy":
+            base = "Free-energy Tesla rule" if lang == "en" else "免费电时段 Tesla 规则"
+        elif window_mode == "post_export_peak":
+            base = "Post-export-peak handoff rule" if lang == "en" else "卖电高峰后交接规则"
+    elif check_name == "free_energy":
+        base = "Free-energy pool-pump rule" if lang == "en" else "免费电时段水泵规则"
+    elif check_name == "pool_pump" and window_mode == "pump_off_period":
+        base = "Pool-pump off-period guard" if lang == "en" else "水泵禁用时段保护"
+    elif check_name == "overnight_shoulder":
+        if target == "pool_pump":
+            base = "Overnight shared-power pool-pump rule" if lang == "en" else "夜间共享功率水泵规则"
+        else:
+            base = "Overnight shared-power Tesla rule" if lang == "en" else "夜间共享功率 Tesla 规则"
+    elif check_name == "battery_full_watch":
+        base = "Battery-full SOC watcher" if lang == "en" else "电池满电 SOC 观察器"
+    if not base:
+        return schedule or None
+    if schedule:
+        return f"{base} ({schedule})"
+    return base
+
+
+def _operation_reason_why_summary(
+    check: dict[str, object],
+    *,
+    action_code: str,
+    action_map: dict[str, object],
+    lang: Literal["zh", "en"] = "zh",
+) -> str | None:
+    check_name = str(check.get("check") or "").strip().lower()
+    window_mode = str(check.get("window_mode") or "").strip().lower()
+    target = str(check.get("target") or "").strip().lower()
+    action_type = str(action_code or "").strip().lower()
+    reason_code = str(action_map.get("reason") or "").strip().lower()
+    details_map = check.get("details") if isinstance(check.get("details"), dict) else {}
+
+    if check_name == "midday_window_check" and window_mode == "export_window":
+        export_map = details_map.get("export_window") if isinstance(details_map.get("export_window"), dict) else {}
+        pool_support = export_map.get("pool_pump_support") if isinstance(export_map.get("pool_pump_support"), dict) else {}
+        tesla_support = export_map.get("tesla_support") if isinstance(export_map.get("tesla_support"), dict) else {}
+        if action_type in ("start_pool_pump", "stop_pool_pump"):
+            runtime_24h = _operation_reason_fmt_hours(pool_support.get("rolling_runtime_24h_hours"))
+            min_runtime = _operation_reason_fmt_hours(pool_support.get("force_min_runtime_hours"))
+            if reason_code == "allocated_export_support":
+                if pool_support.get("force_support_needed"):
+                    return (
+                        f"Pool-pump 24h runtime {runtime_24h} was below the minimum {min_runtime}, so this export window pulled part of that load forward from overnight."
+                        if lang == "en"
+                        else f"水泵 24 小时运行时长 {runtime_24h} 低于最小要求 {min_runtime}，所以这段卖电窗口提前承接了一部分原本夜间的负载。"
+                    )
+                return (
+                    "The pool pump was selected as an interruptible support load for this export window."
+                    if lang == "en"
+                    else "水泵被选为这段卖电窗口里的可中断支撑负载。"
+                )
+            if reason_code == "not_allocated_export_support":
+                return (
+                    "Pool-pump support was no longer needed, or there was no longer enough zero-import headroom to keep it on."
+                    if lang == "en"
+                    else "当前已经不再需要水泵支撑，或者零购电余量已经不足以继续保持它开启。"
+                )
+            if reason_code in ("export_window_hard_guard", "export_window_hard_guard_triggered"):
+                return (
+                    "A live import / battery hard-limit event tripped the export-window safeguard, so interruptible support loads were shed immediately."
+                    if lang == "en"
+                    else "实时购电或电池硬上限事件触发了卖电窗口保护，因此可中断支撑负载被立刻切掉。"
+                )
+        if action_type in ("start_charging", "stop_charging", "restart_charging", "set_charge_current") or re.fullmatch(r"set_current_\d+a", action_type):
+            tesla_soc = _operation_reason_fmt_pct(tesla_support.get("tesla_soc_percent"))
+            threshold_soc = _operation_reason_fmt_pct(tesla_support.get("force_max_charge_threshold_soc_percent"))
+            if reason_code == "allocated_export_support":
+                if tesla_support.get("force_support_needed"):
+                    return (
+                        f"Tesla SOC {tesla_soc} was below the minimum support threshold {threshold_soc}, so charging was pulled forward into the export window."
+                        if lang == "en"
+                        else f"Tesla 电量 {tesla_soc} 低于最低保障阈值 {threshold_soc}，所以充电被前移到了卖电窗口内。"
+                    )
+                return (
+                    "Tesla was selected as the export-window support load under the zero-import guard."
+                    if lang == "en"
+                    else "在零购电保护下，Tesla 被选为卖电窗口里的支撑负载。"
+                )
+            if reason_code == "not_allocated_export_support":
+                return (
+                    "Tesla support was no longer needed, or there was no longer enough zero-import headroom to keep it charging."
+                    if lang == "en"
+                    else "当前已经不再需要 Tesla 支撑，或者零购电余量已经不足以继续保持它充电。"
+                )
+            if reason_code in ("export_window_hard_guard", "export_window_hard_guard_triggered"):
+                return (
+                    "A live import / battery hard-limit event tripped the export-window safeguard, so Tesla support charging was shed immediately."
+                    if lang == "en"
+                    else "实时购电或电池硬上限事件触发了卖电窗口保护，因此 Tesla 支撑充电被立刻切掉。"
+                )
+
+    if check_name == "midday_window_check" and window_mode == "post_export_peak":
+        next_window = _window_schedule_text("overnight_shoulder")
+        if action_type == "stop_charging":
+            return (
+                f"Once the export window ended, Tesla charging was paused immediately and handed back to the overnight rule at {next_window}."
+                if lang == "en"
+                else f"卖电窗口结束后，Tesla 充电会立刻暂停，等到 {next_window} 的夜间规则再重新接手。"
+            )
+        if action_type == "noop" and reason_code == "already_stopped":
+            return (
+                f"The post-export-peak handoff checked Tesla, but it was already stopped and will stay off until {next_window}."
+                if lang == "en"
+                else f"卖电高峰后交接规则检查了 Tesla，但它本来就是停的，会保持关闭直到 {next_window}。"
+            )
+
+    if check_name == "free_energy":
+        if action_type == "start_pool_pump":
+            return (
+                "After Tesla reservation and priority handling, the predicted grid draw with the pool pump still stayed inside the free-energy grid cap."
+                if lang == "en"
+                else "在先预留 Tesla 需求并处理优先级后，加入水泵后的预测并网功率仍然落在免费电时段的并网上限之内。"
+            )
+        if action_type == "stop_pool_pump":
+            return (
+                "Once Tesla reservation and current load were counted, keeping the pool pump on would have pushed the grid draw above the free-energy cap."
+                if lang == "en"
+                else "把 Tesla 预留和当前负载都算进去后，如果继续开水泵，就会把并网功率推到免费电时段上限之上。"
+            )
+
+    if check_name == "midday_window_check" and window_mode in ("after_free_shoulder", "after_free_peak"):
+        band = "after-free shoulder" if window_mode == "after_free_shoulder" else "after-free peak"
+        band_zh = "免费后 shoulder" if window_mode == "after_free_shoulder" else "免费后 peak"
+        if action_type in ("start_charging", "restart_charging"):
+            return (
+                f"Solplanet SOC crossed the {band} start threshold, so Tesla charging was enabled."
+                if lang == "en"
+                else f"Solplanet 电量跨过了{band_zh}启动阈值，因此开启了 Tesla 充电。"
+            )
+        if action_type == "stop_charging":
+            return (
+                f"Solplanet SOC fell below the {band} stop threshold, so Tesla charging was disabled."
+                if lang == "en"
+                else f"Solplanet 电量跌破了{band_zh}停止阈值，因此关闭了 Tesla 充电。"
+            )
+
+    if check_name == "overnight_shoulder" and target != "pool_pump":
+        overnight_map = details_map.get("overnight_allocation") if isinstance(details_map.get("overnight_allocation"), dict) else {}
+        tesla_map = overnight_map.get("tesla") if isinstance(overnight_map.get("tesla"), dict) else {}
+        tesla_soc = _operation_reason_fmt_pct(details_map.get("tesla_soc_percent"))
+        threshold_soc = _operation_reason_fmt_pct(details_map.get("tesla_force_max_charge_threshold_soc_percent"))
+        if action_type in ("start_charging", "restart_charging", "set_charge_current") or re.fullmatch(r"set_current_\d+a", action_type):
+            if tesla_map.get("force_max_charge"):
+                return (
+                    f"Tesla SOC {tesla_soc} was below the overnight force-charge threshold {threshold_soc}, so Tesla received forced charging first."
+                    if lang == "en"
+                    else f"Tesla 电量 {tesla_soc} 低于夜间强制充电阈值 {threshold_soc}，因此先给 Tesla 分配了强制充电。"
+                )
+            return (
+                "Tesla won, or inherited, the overnight shared-power allocation after priority ordering."
+                if lang == "en"
+                else "Tesla 在夜间共享功率排序后获胜，或承接到了剩余功率分配。"
+            )
+        if action_type == "stop_charging":
+            return (
+                "Tesla was not allocated overnight shared power after forced reservations and priority ordering, so charging was stopped."
+                if lang == "en"
+                else "在强制预留和优先级排序之后，Tesla 没有分配到夜间共享功率，因此被停止充电。"
+            )
+
+    if check_name == "overnight_shoulder" and target == "pool_pump":
+        runtime_24h = _operation_reason_fmt_hours(details_map.get("pool_pump_runtime_24h_hours"))
+        min_runtime = _operation_reason_fmt_hours(details_map.get("pool_pump_force_min_runtime_hours"))
+        overnight_map = details_map.get("overnight_allocation") if isinstance(details_map.get("overnight_allocation"), dict) else {}
+        pool_map = overnight_map.get("pool_pump") if isinstance(overnight_map.get("pool_pump"), dict) else {}
+        tesla_map = overnight_map.get("tesla") if isinstance(overnight_map.get("tesla"), dict) else {}
+        if action_type == "start_pool_pump":
+            if pool_map.get("force_run"):
+                return (
+                    f"Pool-pump runtime over the last 24h ({runtime_24h}) was below the minimum {min_runtime}, so an overnight catch-up run was forced."
+                    if lang == "en"
+                    else f"水泵过去 24 小时运行时长 {runtime_24h} 低于最小要求 {min_runtime}，因此夜间强制补跑。"
+                )
+            return (
+                "The pool pump received overnight shared power after the nightly allocation ordering."
+                if lang == "en"
+                else "在夜间分配排序之后，水泵拿到了共享功率。"
+            )
+        if action_type == "stop_pool_pump":
+            if tesla_map.get("force_max_charge"):
+                return (
+                    "Tesla force-max charging consumed the overnight shared-power budget first, so the pool pump was not kept on."
+                    if lang == "en"
+                    else "Tesla 的强制满功率充电优先占用了夜间共享功率，因此水泵没有继续运行。"
+                )
+            return (
+                "The pool pump was outside its overnight schedule or no longer had enough shared power budget to stay on."
+                if lang == "en"
+                else "水泵已经不在夜间运行计划内，或者已经没有足够的共享功率预算继续保持开启。"
+            )
+
+    if check_name == "pool_pump" and window_mode == "pump_off_period" and action_type == "stop_pool_pump":
+        return (
+            "This guard keeps the pool pump off during the blocked daytime periods unless another rule explicitly exempts it."
+            if lang == "en"
+            else "这个保护会在白天禁用时段把水泵保持关闭，除非有其他规则明确豁免它。"
+        )
+
+    return None
+
+
+def _operation_reason_math_summary(
+    check: dict[str, object],
+    *,
+    action_code: str,
+    lang: Literal["zh", "en"] = "zh",
+) -> str | None:
+    check_name = str(check.get("check") or "").strip().lower()
+    window_mode = str(check.get("window_mode") or "").strip().lower()
+    target = str(check.get("target") or "").strip().lower()
+    action_type = str(action_code or "").strip().lower()
+    details_map = check.get("details") if isinstance(check.get("details"), dict) else {}
+
+    if check_name == "midday_window_check" and window_mode == "export_window":
+        export_map = details_map.get("export_window") if isinstance(details_map.get("export_window"), dict) else {}
+        guard_map = export_map.get("support_guard") if isinstance(export_map.get("support_guard"), dict) else {}
+        zero_map = export_map.get("zero_hero_window") if isinstance(export_map.get("zero_hero_window"), dict) else {}
+        current_export = _operation_reason_fmt_w(details_map.get("current_grid_export_w"))
+        live_headroom = _operation_reason_fmt_w(guard_map.get("headroom_from_live_export_w"))
+        battery_ramp = _operation_reason_fmt_w(guard_map.get("headroom_from_battery_ramp_w"))
+        zero_headroom = _operation_reason_fmt_w(guard_map.get("zero_import_headroom_w"))
+        discharge = _operation_reason_fmt_w(guard_map.get("current_battery_discharge_w"))
+        soft_limit = _operation_reason_fmt_w(guard_map.get("soft_battery_discharge_target_w"))
+        hard_limit = _operation_reason_fmt_w(guard_map.get("hard_battery_discharge_limit_w"))
+        import_wh = _operation_reason_fmt_wh(zero_map.get("observed_grid_import_wh"))
+        export_wh = _operation_reason_fmt_wh(zero_map.get("observed_grid_export_wh"))
+        if lang == "en":
+            return (
+                f"live export {current_export}; headroom = export {live_headroom} + battery ramp {battery_ramp} = {zero_headroom}; "
+                f"battery discharge {discharge} (soft {soft_limit}, hard {hard_limit}); current 5-minute window import {import_wh}, export {export_wh}"
+            )
+        return (
+            f"当前外送 {current_export}；可用余量 = 外送 {live_headroom} + 电池抬升 {battery_ramp} = {zero_headroom}；"
+            f"电池放电 {discharge}（软目标 {soft_limit}，硬上限 {hard_limit}）；当前 5 分钟窗口购电 {import_wh}、卖电 {export_wh}"
+        )
+
+    if check_name == "midday_window_check" and window_mode == "post_export_peak":
+        post_peak_map = details_map.get("post_export_peak") if isinstance(details_map.get("post_export_peak"), dict) else {}
+        current_import = _operation_reason_fmt_w(details_map.get("current_grid_import_w"))
+        tariff = _to_number(post_peak_map.get("tariff_p_per_kwh"))
+        next_window = _window_schedule_text("overnight_shoulder")
+        if lang == "en":
+            tariff_text = f"{tariff:.2f} p/kWh" if tariff is not None else "-"
+            return f"current grid import {current_import}; post-export-peak tariff {tariff_text}; overnight resume window {next_window}"
+        tariff_text = f"{tariff:.2f} p/kWh" if tariff is not None else "-"
+        return f"当前购电 {current_import}；卖电高峰后电价 {tariff_text}；夜间恢复窗口 {next_window}"
+
+    if check_name == "free_energy":
+        predicted_tesla = _operation_reason_fmt_w(details_map.get("predicted_grid_with_tesla_w"))
+        predicted_pump = _operation_reason_fmt_w(details_map.get("predicted_grid_with_pump_w"))
+        cap_w = _operation_reason_fmt_w(details_map.get("target_grid_max_w"))
+        winner = str(details_map.get("priority_winner") or "-").strip()
+        tesla_score = _to_number(details_map.get("tesla_priority_score"))
+        pump_score = _to_number(details_map.get("pool_pump_priority_score"))
+        if lang == "en":
+            return (
+                f"predicted grid after Tesla reservation {predicted_tesla}; with pool pump {predicted_pump}; "
+                f"grid cap {cap_w}; priority winner {winner} (Tesla {tesla_score:.1f}, pool pump {pump_score:.1f})"
+                if tesla_score is not None and pump_score is not None
+                else f"predicted grid after Tesla reservation {predicted_tesla}; with pool pump {predicted_pump}; grid cap {cap_w}"
+            )
+        return (
+            f"Tesla 预留后预测并网 {predicted_tesla}；加入水泵后 {predicted_pump}；"
+            f"并网上限 {cap_w}；优先级获胜方 {winner}（Tesla {tesla_score:.1f}，水泵 {pump_score:.1f}）"
+            if tesla_score is not None and pump_score is not None
+            else f"Tesla 预留后预测并网 {predicted_tesla}；加入水泵后 {predicted_pump}；并网上限 {cap_w}"
+        )
+
+    if check_name == "midday_window_check" and window_mode in ("after_free_shoulder", "after_free_peak"):
+        band_key = "after_free_shoulder" if window_mode == "after_free_shoulder" else "after_free_peak"
+        band_map = details_map.get(band_key) if isinstance(details_map.get(band_key), dict) else {}
+        soc = _operation_reason_fmt_pct(band_map.get("solplanet_soc_percent"))
+        start_soc = _operation_reason_fmt_pct(band_map.get("start_soc_percent"))
+        stop_soc = _operation_reason_fmt_pct(band_map.get("stop_soc_percent"))
+        capacity = _to_number(band_map.get("solplanet_available_capacity_kwh"))
+        if lang == "en":
+            text = f"Solplanet SOC {soc}; start threshold {start_soc}; stop threshold {stop_soc}"
+            if capacity is not None:
+                text += f"; available capacity {capacity:.1f}kWh"
+            return text
+        text = f"Solplanet 电量 {soc}；启动阈值 {start_soc}；停止阈值 {stop_soc}"
+        if capacity is not None:
+            text += f"；可用容量 {capacity:.1f}kWh"
+        return text
+
+    if check_name == "overnight_shoulder" and target != "pool_pump":
+        overnight_map = details_map.get("overnight_allocation") if isinstance(details_map.get("overnight_allocation"), dict) else {}
+        tesla_map = overnight_map.get("tesla") if isinstance(overnight_map.get("tesla"), dict) else {}
+        shared_power = _operation_reason_fmt_w(overnight_map.get("available_device_power_w"))
+        tesla_power = _operation_reason_fmt_w(tesla_map.get("power_w"))
+        amps = _operation_reason_fmt_amps(tesla_map.get("charge_current_amps"))
+        remaining = _operation_reason_fmt_w(overnight_map.get("remaining_unallocated_power_w"))
+        tesla_soc = _operation_reason_fmt_pct(details_map.get("tesla_soc_percent"))
+        threshold = _operation_reason_fmt_pct(details_map.get("tesla_force_max_charge_threshold_soc_percent"))
+        if lang == "en":
+            return (
+                f"Tesla SOC {tesla_soc} vs force threshold {threshold}; shared available power {shared_power}; "
+                f"Tesla target {amps} / {tesla_power}; remaining unallocated {remaining}"
+            )
+        return (
+            f"Tesla 电量 {tesla_soc}，强制阈值 {threshold}；夜间可分配功率 {shared_power}；"
+            f"Tesla 目标 {amps} / {tesla_power}；剩余未分配 {remaining}"
+        )
+
+    if check_name == "overnight_shoulder" and target == "pool_pump":
+        runtime_budget = details_map.get("runtime_budget") if isinstance(details_map.get("runtime_budget"), dict) else {}
+        remaining_runtime = _operation_reason_fmt_hours(runtime_budget.get("remaining_runtime_hours"))
+        target_runtime = _operation_reason_fmt_hours(runtime_budget.get("target_runtime_hours"))
+        runtime_24h = _operation_reason_fmt_hours(details_map.get("pool_pump_runtime_24h_hours"))
+        min_runtime = _operation_reason_fmt_hours(details_map.get("pool_pump_force_min_runtime_hours"))
+        shared_power = _operation_reason_fmt_w(runtime_budget.get("shared_available_power_w"))
+        pump_alloc = _operation_reason_fmt_w(runtime_budget.get("pool_pump_allocated_power_w"))
+        if lang == "en":
+            return (
+                f"24h runtime {runtime_24h} vs minimum {min_runtime}; runtime budget remaining {remaining_runtime} of target {target_runtime}; "
+                f"shared available power {shared_power}; pool-pump allocation {pump_alloc}"
+            )
+        return (
+            f"24 小时运行时长 {runtime_24h}，最小要求 {min_runtime}；运行预算剩余 {remaining_runtime} / 目标 {target_runtime}；"
+            f"共享可用功率 {shared_power}；分配给水泵 {pump_alloc}"
+        )
+
+    if check_name == "pool_pump" and window_mode == "pump_off_period" and action_type == "stop_pool_pump":
+        state_before = details_map.get("pool_pump_state_before") if isinstance(details_map.get("pool_pump_state_before"), dict) else {}
+        control_map = state_before.get("control") if isinstance(state_before.get("control"), dict) else {}
+        pump_enabled = bool(control_map.get("enabled"))
+        rule_enabled = bool(details_map.get("pool_pump_rule_enabled"))
+        if lang == "en":
+            return f"off-period rule enabled={rule_enabled}; pool pump was {'on' if pump_enabled else 'off'} before this action"
+        return f"禁用时段规则 enabled={rule_enabled}；执行前水泵状态为{'开' if pump_enabled else '关'}"
+
+    return None
+
+
+def _operation_reason_detailed_text(
+    payload: dict[str, object],
+    *,
+    action_code: str,
+    action_map: dict[str, object],
+    fallback_reason: str,
+    lang: Literal["zh", "en"] = "zh",
+) -> str:
+    fallback_text = _operation_reason_with_metrics(
+        payload,
+        action_code=action_code,
+        action_map=action_map,
+        fallback_reason=fallback_reason,
+        lang=lang,
+    )
+    check = _operation_find_check_for_action(payload, action_code)
+    if not isinstance(check, dict):
+        check = _operation_find_check_for_action(payload, str(action_map.get("type") or ""))
+    if not isinstance(check, dict):
+        return fallback_text
+
+    reason_code = str(action_map.get("reason") or "").strip()
+    decision_code = str(check.get("decision_reason") or "").strip() or reason_code or str(fallback_reason or "").strip()
+    labels = {
+        "logic": "Logic" if lang == "en" else "规则",
+        "decision": "Decision" if lang == "en" else "决策",
+        "why": "Why" if lang == "en" else "原因",
+        "math": "Math" if lang == "en" else "计算",
+    }
+    lines = [
+        _operation_reason_line(labels["logic"], _operation_reason_logic_summary(check, lang=lang)),
+        _operation_reason_line(labels["decision"], _operation_reason_label(decision_code or "-", lang=lang)),
+        _operation_reason_line(
+            labels["why"],
+            _operation_reason_why_summary(
+                check,
+                action_code=action_code,
+                action_map=action_map,
+                lang=lang,
+            ),
+        ),
+        _operation_reason_line(
+            labels["math"],
+            _operation_reason_math_summary(
+                check,
+                action_code=action_code,
+                lang=lang,
+            ),
+        ),
+    ]
+    compact_lines = [line for line in lines if line]
+    return "\n".join(compact_lines) if compact_lines else fallback_text
+
+
 def _worker_has_operation(payload: dict[str, object]) -> bool:
     for action_map in _worker_action_list(payload):
         action_type = str(action_map.get("type") or "").strip().lower()
@@ -4097,7 +4594,7 @@ def _operation_timeline_worker_entries(
             steps = _worker_action_steps(action_map)
             if steps:
                 for step in steps:
-                    reason = _operation_reason_with_metrics(
+                    reason = _operation_reason_detailed_text(
                         payload,
                         action_code=step,
                         action_map=action_map,
@@ -4106,7 +4603,7 @@ def _operation_timeline_worker_entries(
                     )
                     _append_entry(_worker_operation_action_label(step, lang=lang), reason)
             else:
-                reason = _operation_reason_with_metrics(
+                reason = _operation_reason_detailed_text(
                     payload,
                     action_code=action_type,
                     action_map=action_map,
@@ -4115,7 +4612,7 @@ def _operation_timeline_worker_entries(
                 )
                 _append_entry(_worker_operation_action_label(action_type, lang=lang), reason)
             continue
-        reason = _operation_reason_with_metrics(
+        reason = _operation_reason_detailed_text(
             payload,
             action_code=action_type,
             action_map=action_map,
@@ -4142,10 +4639,16 @@ def _operation_timeline_manual_reason(run: dict[str, object], *, lang: Literal["
     status = str(run.get("status") or "").strip().lower()
     error_text = str(run.get("error_text") or "").strip()
     if status in (OPERATION_RUN_STATUS_FAILED, OPERATION_RUN_STATUS_TIMEOUT):
-        return error_text or ("Execution failed" if lang == "en" else "执行失败")
+        if error_text:
+            return (
+                f"Manual operation from UI. Result: {error_text}"
+                if lang == "en"
+                else f"这是 UI 手动触发的操作。结果：{error_text}"
+            )
+        return "Manual operation from UI. Result: failed" if lang == "en" else "这是 UI 手动触发的操作。结果：失败"
     if status == OPERATION_RUN_STATUS_PENDING:
-        return "Manually triggered, waiting for result" if lang == "en" else "手动触发，等待结果"
-    return "Manually triggered" if lang == "en" else "手动触发"
+        return "Manual operation from UI. Waiting for result." if lang == "en" else "这是 UI 手动触发的操作，正在等待结果。"
+    return "Manual operation from UI. No automation rule was involved." if lang == "en" else "这是 UI 手动触发的操作，不涉及自动规则。"
 
 
 def _operation_timeline_manual_text(run: dict[str, object], *, lang: Literal["zh", "en"] = "zh") -> str:
@@ -5527,6 +6030,7 @@ async def _run_midday_window_check(
                 "tariff_p_per_kwh": POST_EXPORT_PEAK_WINDOW_TARIFF_P_PER_KWH,
                 "solplanet_soc_percent": solplanet_soc_percent,
                 "low_battery_alarm_threshold_soc_percent": SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT,
+                "resume_window_schedule": _window_schedule_text("overnight_shoulder"),
             }
             if (
                 solplanet_soc_percent is not None
@@ -5566,14 +6070,33 @@ async def _run_midday_window_check(
                     ),
                 })
             combined_status["peak_price_grid_import_active"] = is_importing
+            active_or_requested = charging_enabled or charge_requested_enabled
+            if not tesla_auto_control_enabled:
+                result["decision"] = {
+                    "mode": "observe_only",
+                    "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
+                    "predicted_grid_w": round(float(grid_w), 1),
+                    "resume_window_schedule": _window_schedule_text("overnight_shoulder"),
+                }
+                result["decision_reason"] = "tesla_auto_control_disabled"
+                result["action"] = {"type": "noop", "reason": "tesla_auto_control_disabled"}
+                status = "noop"
+                return result
+
             result["decision"] = {
-                "mode": "observe_only",
-                "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
+                "mode": "off",
+                "charge_current_amps": 0,
                 "predicted_grid_w": round(float(grid_w), 1),
+                "resume_window_schedule": _window_schedule_text("overnight_shoulder"),
             }
-            result["decision_reason"] = "post_export_peak_notifications_only"
-            result["action"] = {"type": "noop", "reason": "post_export_peak_notifications_only"}
-            status = "noop"
+            result["decision_reason"] = "post_export_peak_pause_until_overnight_window"
+            if active_or_requested:
+                await _tesla_set_charging(False)
+                result["action"] = {"type": "stop_charging", "reason": "post_export_peak_pause_until_overnight_window"}
+                status = "applied"
+            else:
+                result["action"] = {"type": "noop", "reason": "already_stopped"}
+                status = "noop"
             return result
 
         if window_mode == "after_free_shoulder":
@@ -6938,10 +7461,13 @@ async def _run_pool_pump_off_period_check(
 ) -> dict[str, object]:
     requested_at_utc = str(requested_at_utc or "").strip() or datetime.now(UTC).isoformat()
     now_local, timezone_name = _tesla_grid_support_now_local()
+    midday_window_mode = _tesla_midday_window_mode(now_local)
     window_active = (
         _is_hour_in_window(now_local.hour, POOL_PUMP_OFF_PERIOD_MORNING_START_HOUR, POOL_PUMP_OFF_PERIOD_MORNING_END_HOUR)
         or _is_hour_in_window(now_local.hour, POOL_PUMP_OFF_PERIOD_AFTERNOON_START_HOUR, POOL_PUMP_OFF_PERIOD_AFTERNOON_END_HOUR)
     )
+    if midday_window_mode == "export_window":
+        window_active = False
     result: dict[str, object] = {
         "executed_at_utc": datetime.now(UTC).isoformat(),
         "evaluated_at_local": now_local.isoformat(),
@@ -6950,6 +7476,7 @@ async def _run_pool_pump_off_period_check(
         "window_mode": "pump_off_period" if window_active else "off",
         "window_schedule": _window_schedule_text("pump_off_period"),
         "target": "pool_pump",
+        "midday_window_mode": midday_window_mode,
     }
     status = "ok"
     ok = True
@@ -6957,7 +7484,12 @@ async def _run_pool_pump_off_period_check(
     try:
         if not window_active:
             result["decision"] = {"mode": "observe_only"}
-            result["action"] = {"type": "noop", "reason": "outside_window"}
+            result["action"] = {
+                "type": "noop",
+                "reason": "outside_window" if midday_window_mode != "export_window" else "export_window_exempt",
+            }
+            if midday_window_mode == "export_window":
+                result["decision_reason"] = "export_window_exempt"
             status = "outside_window"
             return result
 

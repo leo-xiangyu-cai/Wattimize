@@ -8789,8 +8789,8 @@ function renderOperationTimelineRows(items) {
     const timeText = formatDateTimeWithAgo(item?.time_utc || null);
     tr.innerHTML = `
       <td>${escapeHtml(timeText)}</td>
-      <td><pre class="worker-result-pre" title="${escapeHtml(operationText)}">${escapeHtml(operationText)}</pre></td>
-      <td><pre class="worker-result-pre" title="${escapeHtml(reasonText)}">${escapeHtml(reasonText)}</pre></td>
+      <td><pre class="worker-result-pre operation-timeline-pre" title="${escapeHtml(operationText)}">${escapeHtml(operationText)}</pre></td>
+      <td><pre class="worker-result-pre operation-timeline-pre" title="${escapeHtml(reasonText)}">${escapeHtml(reasonText)}</pre></td>
     `;
     body.appendChild(tr);
   }

@@ -1322,6 +1322,15 @@ td {
   font-size: 12px;
 }
 
+.operation-timeline-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 720px;
+  overflow: visible;
+  text-overflow: unset;
+  line-height: 1.45;
+}
+
 .worker-log-row {
   cursor: pointer;
 }
