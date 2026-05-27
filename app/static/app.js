@@ -658,6 +658,23 @@ const I18N = {
     samplingStorageMeta: "DB {sizeMb} MB · Rows {rows} · Interval {interval}s · Estimated/day {estMb} MB",
     samplingUsageMeta: "Range usage ({system}, {range}): Load {load} kWh · PV {pv} kWh · Grid import {gridImport} kWh · Grid export {gridExport} kWh",
     samplingUsageMetaNoData: "Range usage ({system}, {range}): not enough samples yet",
+    samplingZeroHeroTitle: "Current 5-Minute Zero Hero Window",
+    samplingZeroHeroMetaActive: "Live export-window observation from current state",
+    samplingZeroHeroMetaInactive: "Appears here during the 18:00-20:00 export window",
+    samplingZeroHeroStateEligible: "Zero Import",
+    samplingZeroHeroStateImportObserved: "Import Seen",
+    samplingZeroHeroStateLiveImport: "Importing",
+    samplingZeroHeroStateMonitoring: "Monitoring",
+    samplingZeroHeroStateInactive: "Idle",
+    samplingZeroHeroFieldWindow: "Window",
+    samplingZeroHeroFieldRemaining: "Remaining",
+    samplingZeroHeroFieldObservedImport: "Observed Import",
+    samplingZeroHeroFieldObservedExport: "Observed Export",
+    samplingZeroHeroFieldLiveImport: "Live Import",
+    samplingZeroHeroFieldLiveExport: "Live Export",
+    samplingZeroHeroFieldCoverage: "Coverage",
+    samplingZeroHeroAwaiting: "No live export-window observation yet.",
+    samplingZeroHeroCoverageText: "{samples}/{expected} samples · {coverage}%",
     samplingChartTitle: "Power Timeline",
     samplingChartMeta: "{system} · {range} · {count} points",
     samplingChartNoData: "No chart data yet for this range",
@@ -1480,6 +1497,23 @@ const I18N = {
     samplingStorageMeta: "数据库 {sizeMb} MB · 记录 {rows} 条 · 采样间隔 {interval}s · 预计每天 {estMb} MB",
     samplingUsageMeta: "区间统计 ({system}, {range}): 负载 {load} kWh · 光伏 {pv} kWh · 电网购电 {gridImport} kWh · 电网上网 {gridExport} kWh",
     samplingUsageMetaNoData: "区间统计 ({system}, {range}): 当前样本不足",
+    samplingZeroHeroTitle: "当前 5 分钟 Zero Hero 窗口",
+    samplingZeroHeroMetaActive: "基于当前状态的 export window 实时观测",
+    samplingZeroHeroMetaInactive: "会在 18:00-20:00 的 export window 期间显示",
+    samplingZeroHeroStateEligible: "零购电",
+    samplingZeroHeroStateImportObserved: "已观测购电",
+    samplingZeroHeroStateLiveImport: "正在购电",
+    samplingZeroHeroStateMonitoring: "监控中",
+    samplingZeroHeroStateInactive: "空闲",
+    samplingZeroHeroFieldWindow: "窗口",
+    samplingZeroHeroFieldRemaining: "剩余",
+    samplingZeroHeroFieldObservedImport: "已观测购电",
+    samplingZeroHeroFieldObservedExport: "已观测卖电",
+    samplingZeroHeroFieldLiveImport: "实时购电",
+    samplingZeroHeroFieldLiveExport: "实时卖电",
+    samplingZeroHeroFieldCoverage: "覆盖率",
+    samplingZeroHeroAwaiting: "当前还没有 export window 的实时观测。",
+    samplingZeroHeroCoverageText: "{samples}/{expected} 个样本 · {coverage}%",
     samplingChartTitle: "功率时间线",
     samplingChartMeta: "{system} · {range} · {count} 个点",
     samplingChartNoData: "当前时间范围暂无图表数据",
@@ -2365,6 +2399,12 @@ function t(key, params = {}) {
   return text;
 }
 
+function hasTranslation(key) {
+  if (!key) return false;
+  const table = I18N[currentLang] || I18N.en;
+  return Object.prototype.hasOwnProperty.call(table, key) || Object.prototype.hasOwnProperty.call(I18N.en, key);
+}
+
 function monthLabel(month) {
   const m = Number(month);
   if (currentLang === "zh") return `${m}月`;
@@ -2949,6 +2989,7 @@ function applyTranslations() {
   document.querySelectorAll("[data-i18n]").forEach((el) => {
     const key = el.getAttribute("data-i18n");
     if (!key) return;
+    if (!hasTranslation(key)) return;
     const text = t(key);
     if (el.tagName === "LABEL") {
       const control = el.querySelector("input, select, textarea");
@@ -2966,6 +3007,7 @@ function applyTranslations() {
   document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
     const key = el.getAttribute("data-i18n-placeholder");
     if (!key) return;
+    if (!hasTranslation(key)) return;
     el.setAttribute("placeholder", t(key));
   });
 
@@ -8825,6 +8867,117 @@ function renderSamplingStatus(status) {
   setText("samplingUpdatedAt", `${t("updatedAt")}: ${updatedAt}`);
 }
 
+function getSamplingZeroHeroObservationSource() {
+  const summaryCollectorStatus = stateCache.lastSummary?.collectorStatus || null;
+  const collectorStatus = stateCache.lastCollectorStatus || summaryCollectorStatus || null;
+  const combined = collectorStatus?.systems?.combined || summaryCollectorStatus?.systems?.combined || {};
+  const midday = combined?.last_midday_window_check || {};
+  const exportWindow = midday?.export_window && typeof midday.export_window === "object" ? midday.export_window : {};
+  const observation =
+    exportWindow?.zero_hero_window && typeof exportWindow.zero_hero_window === "object"
+      ? exportWindow.zero_hero_window
+      : null;
+  return { collectorStatus, midday, observation };
+}
+
+function formatSamplingZeroHeroWindowRange(observation) {
+  const start = observation?.window_start_local || observation?.window_start_utc;
+  const end = observation?.window_end_local || observation?.window_end_utc;
+  if (!start || !end) return "-";
+  return `${formatSamplingClock(start)} - ${formatSamplingClock(end)}`;
+}
+
+function formatSamplingRemainingSeconds(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  const minutes = Math.floor(total / 60);
+  const remainder = total % 60;
+  return `${minutes}m ${String(remainder).padStart(2, "0")}s`;
+}
+
+function formatSamplingZeroHeroEnergyWh(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "-";
+  if (Math.abs(numeric) >= 1000) return `${formatTrimmedDecimal(numeric / 1000, 3)} kWh`;
+  return `${formatTrimmedDecimal(numeric, 0)} Wh`;
+}
+
+function formatSamplingZeroHeroCoverage(observation) {
+  const samples = Math.max(0, Math.round(Number(observation?.samples || 0)));
+  const expected = Math.max(0, Math.round(Number(observation?.expected_samples || 0)));
+  const coverageRatio = Number(observation?.coverage_ratio);
+  if (Number.isFinite(coverageRatio) && expected > 0) {
+    return t("samplingZeroHeroCoverageText", {
+      samples,
+      expected,
+      coverage: formatTrimmedDecimal(coverageRatio * 100, 0),
+    });
+  }
+  if (expected > 0) return `${samples}/${expected}`;
+  if (samples > 0) return String(samples);
+  return "-";
+}
+
+function renderSamplingZeroHeroWindow() {
+  const badgeEl = document.getElementById("samplingZeroHeroBadge");
+  const bodyEl = document.getElementById("samplingZeroHeroBody");
+  if (!badgeEl || !bodyEl) return;
+
+  const { collectorStatus, midday, observation } = getSamplingZeroHeroObservationSource();
+  const windowMode = String(midday?.window_mode || "").trim();
+  const observationActive = windowMode === "export_window" && observation;
+  const updatedAt = midday?.executed_at_utc || collectorStatus?.updated_at || null;
+
+  let badgeTone = "";
+  let badgeText = t("samplingZeroHeroStateInactive");
+  if (observationActive) {
+    if (observation.live_import_active) {
+      badgeTone = "danger";
+      badgeText = t("samplingZeroHeroStateLiveImport");
+    } else if (observation.has_observed_grid_import) {
+      badgeTone = "warn";
+      badgeText = t("samplingZeroHeroStateImportObserved");
+    } else if (observation.estimated_zero_import_ok) {
+      badgeTone = "good";
+      badgeText = t("samplingZeroHeroStateEligible");
+    } else {
+      badgeText = t("samplingZeroHeroStateMonitoring");
+    }
+  }
+  badgeEl.className = `sampling-zero-hero-badge${badgeTone ? ` ${badgeTone}` : ""}`;
+  badgeEl.textContent = badgeText;
+
+  setText(
+    "samplingZeroHeroMeta",
+    `${t(observationActive ? "samplingZeroHeroMetaActive" : "samplingZeroHeroMetaInactive")} · ${formatUpdatedAt(updatedAt)}`,
+  );
+
+  if (!observationActive) {
+    bodyEl.innerHTML = `<div class="sampling-zero-hero-empty">${escapeHtml(t("samplingZeroHeroAwaiting"))}</div>`;
+    return;
+  }
+
+  const metrics = [
+    { label: t("samplingZeroHeroFieldWindow"), value: formatSamplingZeroHeroWindowRange(observation) },
+    { label: t("samplingZeroHeroFieldRemaining"), value: formatSamplingRemainingSeconds(observation?.remaining_seconds) },
+    { label: t("samplingZeroHeroFieldObservedImport"), value: formatSamplingZeroHeroEnergyWh(observation?.observed_grid_import_wh) },
+    { label: t("samplingZeroHeroFieldObservedExport"), value: formatSamplingZeroHeroEnergyWh(observation?.observed_grid_export_wh) },
+    { label: t("samplingZeroHeroFieldLiveImport"), value: formatPowerKwFromWatts(observation?.live_grid_import_w) },
+    { label: t("samplingZeroHeroFieldLiveExport"), value: formatPowerKwFromWatts(observation?.live_grid_export_w) },
+    { label: t("samplingZeroHeroFieldCoverage"), value: formatSamplingZeroHeroCoverage(observation) },
+  ];
+
+  bodyEl.innerHTML = metrics
+    .map(
+      (item) => `
+        <article class="sampling-zero-hero-metric">
+          <p class="sampling-zero-hero-metric-label">${escapeHtml(item.label)}</p>
+          <p class="sampling-zero-hero-metric-value">${escapeHtml(item.value)}</p>
+        </article>
+      `,
+    )
+    .join("");
+}
+
 function renderSamplingUsage(usage, rangeLabel) {
   const system = formatSamplingSystemLabel(usage?.system || "-");
   const energy = usage?.energy_kwh || {};
@@ -12720,6 +12873,7 @@ async function loadSampling() {
   const system = getSelectedSamplingSystem();
   const overallMode = system === "overall";
   const range = getSamplingRange();
+  renderSamplingZeroHeroWindow();
   setSamplingRangeControlsDisabled(true);
   setSamplingTotalsChartLoading(true);
   setSamplingChartLoading(true);
@@ -12759,7 +12913,8 @@ async function loadSampling() {
       `/api/storage/series?system=combined&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}&max_points=500`;
     const selectedSeriesUrl = overallMode ? combinedSeriesUrl : system === "solplanet" ? solplanetSeriesUrl : sajSeriesUrl;
 
-    const [statusResult, sajUsageResult, solplanetUsageResult, combinedUsageResult, samplesResult, seriesResult, overallSajSeriesResult, overallSolplanetSeriesResult, combinedPumpSeriesResult] = await Promise.allSettled([
+    const [collectorResult, statusResult, sajUsageResult, solplanetUsageResult, combinedUsageResult, samplesResult, seriesResult, overallSajSeriesResult, overallSolplanetSeriesResult, combinedPumpSeriesResult] = await Promise.allSettled([
+      fetchJson("/api/collector/status", { timeoutMs: 6000 }),
       fetchJson("/api/storage/status", { timeoutMs: 6000 }),
       fetchJson(sajUsageUrl, { timeoutMs: 6000 }),
       fetchJson(solplanetUsageUrl, { timeoutMs: 6000 }),
@@ -12770,6 +12925,14 @@ async function loadSampling() {
       overallMode ? fetchJson(solplanetSeriesUrl, { timeoutMs: 6000 }) : Promise.resolve(null),
       overallMode ? Promise.resolve(null) : fetchJson(combinedSeriesUrl, { timeoutMs: 6000 }),
     ]);
+
+    if (collectorResult.status === "fulfilled") {
+      stateCache.lastCollectorStatus = collectorResult.value;
+      if (stateCache.lastSummary && typeof stateCache.lastSummary === "object") {
+        stateCache.lastSummary.collectorStatus = collectorResult.value;
+      }
+    }
+    renderSamplingZeroHeroWindow();
 
     if (statusResult.status === "fulfilled") {
       stateCache.lastSamplingStatus = statusResult.value;
@@ -12926,6 +13089,7 @@ async function loadDatabase() {
 }
 
 function rerenderSamplingViewFromCache() {
+  renderSamplingZeroHeroWindow();
   if (stateCache.lastSamplingStatus) renderSamplingStatus(stateCache.lastSamplingStatus);
   if (stateCache.lastSamplingDaily) {
     const range = getSamplingRange();

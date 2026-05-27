@@ -163,7 +163,7 @@ First-run configuration:
 - When SQLite corruption is detected during runtime recovery flows, the backend attempts an automatic recovery into the recovery directory and reinitializes the runtime connection pool.
 - Daily usage endpoint integrates power snapshots into kWh (UTC day).
 - `system=combined` is available on range usage and trend series endpoints for the frontend overall view.
-- The `History` tab combines range selection with an energy breakdown card, a power timeline chart, split SOC mini-charts for SAJ/Solplanet/Tesla, a pool-pump on/off timeline, and compact date/week/month context for the selected window.
+- The `History` tab combines range selection with an energy breakdown card, a power timeline chart, split SOC mini-charts for SAJ/Solplanet/Tesla, a pool-pump on/off timeline, a live 5-minute Zero Hero export-window observation card, and compact date/week/month context for the selected window.
 - `GET /api/storage/samples?system=combined` now includes `tesla_charge_power_w` and `pool_pump_power_w` so frontend charts can separate home load from Tesla/pool-pump overlays.
 - The frontend can export and import the full SQLite database from the Database tab.
 
@@ -180,6 +180,8 @@ First-run configuration:
 - Tesla time-window operation rows remain visible in the dashboard, but they are now read-only snapshots that reflect the unified Tesla auto-control state instead of per-window switches.
 - SAJ profile automation still respects per-window rule switches before issuing control actions.
 - The overnight shoulder window (`23:00-11:00`) now computes a shared overnight battery budget after reserving projected home load, then allocates the remaining power between Tesla and the pool pump according to the live priority winner, the Tesla forced-charge threshold, and the pool pump's 24-hour minimum-runtime requirement.
+- The export window (`18:00-20:00`) can now temporarily pull forward Tesla charging and pool-pump runtime when either device is below its minimum support target, but only while auto control is enabled for that device and the live zero-import guard still has enough headroom.
+- During that export window support mode, any detected live grid import or Solplanet discharge above the `10kW` hard limit immediately sheds the interruptible auto-controlled loads again, and worker status now records the current 5-minute Zero Hero observation for review in the History tab.
 - Tesla manual start/stop now returns UI feedback states so the dashboard can show pending, success, and failure confirmation after `/api/tesla/control/charging`.
 - Tesla manual current control is available through `POST /api/tesla/control/current`, and the combined dashboard shows pending current-change state until Home Assistant confirms it.
 - The combined Tesla card now shows battery energy, live voltage, charge ETA, and an inline current-control trigger instead of only the raw charging power number.

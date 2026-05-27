@@ -198,6 +198,9 @@ POST_EXPORT_PEAK_WINDOW_START_HOUR = 20
 POST_EXPORT_PEAK_WINDOW_END_HOUR = 23
 OVERNIGHT_SHOULDER_WINDOW_START_HOUR = 23
 OVERNIGHT_SHOULDER_WINDOW_END_HOUR = 11
+EXPORT_WINDOW_BATTERY_SOFT_DISCHARGE_TARGET_W = 7_500.0
+EXPORT_WINDOW_BATTERY_HARD_DISCHARGE_LIMIT_W = 10_000.0
+ZERO_HERO_WINDOW_MINUTES = 5
 SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_HIGH_SOC_PERCENT = 50.0
 SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_LOW_SOC_PERCENT = 20.0
 POST_EXPORT_PEAK_WINDOW_TARIFF_P_PER_KWH = 53.0
@@ -3731,6 +3734,26 @@ def _operation_reason_label(reason: object, *, lang: Literal["zh", "en"] = "zh")
         return "Pool pump force minimum 24-hour runtime" if lang == "en" else "水泵补足24小时最小时长"
     if code == "already_running_forced_min_runtime":
         return "Pool pump already running for minimum 24-hour runtime" if lang == "en" else "水泵已在补足24小时最小时长"
+    if code == "allocated_export_support":
+        return "Allocated during export window support" if lang == "en" else "已分配到晚高峰卖电时段的前移负载"
+    if code == "not_allocated_export_support":
+        return "Not allocated during export window support" if lang == "en" else "未分配到晚高峰卖电时段的前移负载"
+    if code == "export_window_hard_guard":
+        return "Hard guard tripped during export window" if lang == "en" else "晚高峰卖电时段触发硬保护"
+    if code == "export_window_hard_guard_no_auto_loads":
+        return "Hard guard tripped but no auto-controlled interruptible load was active" if lang == "en" else "晚高峰卖电时段触发硬保护，但当前没有自动控制负载可切"
+    if code == "export_window_hard_guard_triggered":
+        return "Hard guard tripped during export window" if lang == "en" else "晚高峰卖电时段触发硬保护"
+    if code == "export_window_support_allocated_under_zero_import_guard":
+        return "Allocated support load under zero-import guard" if lang == "en" else "在零购电保护下分配前移负载"
+    if code == "export_window_no_live_export_headroom":
+        return "No live export headroom during export window" if lang == "en" else "晚高峰卖电时段当前没有外送余量"
+    if code == "export_window_insufficient_headroom_for_interruptible_loads":
+        return "Insufficient headroom for interruptible loads during export window" if lang == "en" else "晚高峰卖电时段前移负载余量不足"
+    if code == "export_window_no_minimum_support_needed":
+        return "No minimum support demand during export window" if lang == "en" else "晚高峰卖电时段当前没有最低保障需求"
+    if code == "already_holding_export_support_targets":
+        return "Already holding export window support targets" if lang == "en" else "当前已维持晚高峰卖电时段目标"
     if code == "outside_pool_pump_schedule":
         return "Outside pool pump overnight schedule" if lang == "en" else "不在水泵夜间运行时段"
     if code == "overnight_shared_power_budget_unavailable":
@@ -4827,6 +4850,66 @@ def _update_solar_surplus_export_energy_tracking(
     }
 
 
+def _current_zero_hero_window_bounds(now_local: datetime) -> tuple[datetime, datetime]:
+    minute_floor = (now_local.minute // ZERO_HERO_WINDOW_MINUTES) * ZERO_HERO_WINDOW_MINUTES
+    start_local = now_local.replace(minute=minute_floor, second=0, microsecond=0)
+    end_local = start_local + timedelta(minutes=ZERO_HERO_WINDOW_MINUTES)
+    return start_local, end_local
+
+
+async def _build_zero_hero_window_observation(
+    *,
+    now_local: datetime,
+    timezone_name: str,
+    current_grid_import_w: float,
+    current_grid_export_w: float,
+) -> dict[str, object]:
+    start_local, end_local = _current_zero_hero_window_bounds(now_local)
+    observed_end_local = min(now_local, end_local)
+    usage = await asyncio.to_thread(
+        compute_usage_between,
+        storage_db_path,
+        system="combined",
+        start_at_utc=start_local.astimezone(UTC),
+        end_at_utc=observed_end_local.astimezone(UTC),
+        sample_interval_seconds=_sample_interval_for_system("combined"),
+        local_timezone_name=timezone_name,
+    )
+    energy_map = usage.get("energy_kwh") if isinstance(usage, dict) else {}
+    breakdown_map = usage.get("breakdown_kwh") if isinstance(usage, dict) else {}
+    grid_import_breakdown = breakdown_map.get("grid_import") if isinstance(breakdown_map, dict) else {}
+    grid_export_breakdown = breakdown_map.get("grid_export") if isinstance(breakdown_map, dict) else {}
+    observed_grid_import_kwh = _to_number((energy_map or {}).get("grid_import")) or 0.0
+    observed_grid_export_kwh = _to_number((energy_map or {}).get("grid_export")) or 0.0
+    observed_grid_import_window_kwh = _to_number((grid_import_breakdown or {}).get("window")) or observed_grid_import_kwh
+    observed_grid_export_window_kwh = _to_number((grid_export_breakdown or {}).get("window")) or observed_grid_export_kwh
+    elapsed_seconds = max((observed_end_local - start_local).total_seconds(), 0.0)
+    remaining_seconds = max((end_local - observed_end_local).total_seconds(), 0.0)
+    live_import_active = current_grid_import_w > 0.0
+    return {
+        "window_minutes": ZERO_HERO_WINDOW_MINUTES,
+        "window_start_local": start_local.isoformat(),
+        "window_end_local": end_local.isoformat(),
+        "window_start_utc": start_local.astimezone(UTC).isoformat(),
+        "window_end_utc": end_local.astimezone(UTC).isoformat(),
+        "observed_end_local": observed_end_local.isoformat(),
+        "elapsed_seconds": round(elapsed_seconds, 1),
+        "remaining_seconds": round(remaining_seconds, 1),
+        "samples": int(usage.get("samples") or 0) if isinstance(usage, dict) else 0,
+        "expected_samples": int(usage.get("expected_samples") or 0) if isinstance(usage, dict) else 0,
+        "coverage_ratio": _to_number((usage or {}).get("coverage_ratio")) if isinstance(usage, dict) else None,
+        "observed_grid_import_kwh": round(observed_grid_import_kwh, 5),
+        "observed_grid_import_wh": round(observed_grid_import_window_kwh * 1000.0, 2),
+        "observed_grid_export_kwh": round(observed_grid_export_kwh, 5),
+        "observed_grid_export_wh": round(observed_grid_export_window_kwh * 1000.0, 2),
+        "live_grid_import_w": round(current_grid_import_w, 1),
+        "live_grid_export_w": round(current_grid_export_w, 1),
+        "live_import_active": live_import_active,
+        "has_observed_grid_import": observed_grid_import_window_kwh > 0.0,
+        "estimated_zero_import_ok": not live_import_active and observed_grid_import_window_kwh <= 0.0,
+    }
+
+
 def _tesla_grid_support_now_local() -> tuple[datetime, str]:
     configured_timezone = str(getattr(settings, "local_timezone", "") or "").strip()
     if configured_timezone:
@@ -5729,7 +5812,7 @@ async def _run_midday_window_check(
             result["current_grid_export_w"] = round(current_grid_export_w, 1)
             result["base_grid_without_tesla_w"] = round(base_grid_without_tesla_w, 1)
             result["base_export_without_tesla_w"] = round(export_without_tesla_w, 1)
-            result["export_window"] = {
+            export_window_map: dict[str, object] = {
                 "pv_w": pv_w,
                 "load_w": load_w,
                 "solar_excess_vs_load_w": round(solar_excess_vs_load_w, 1) if solar_excess_vs_load_w is not None else None,
@@ -5747,17 +5830,19 @@ async def _run_midday_window_check(
                     "battery2_soc_percent": "solplanet_battery_soc",
                 },
             }
+            result["export_window"] = export_window_map
             if (
                 solplanet_soc_percent < SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT
                 and _is_time_window_rule_enabled(enabled_map, "solplanet_low_battery")
             ):
                 _append_worker_notification(result, {
-                        "level": "warning",
-                        "code": "solplanet_low_battery",
-                        "target": "solplanet_battery",
+                    "level": "warning",
+                    "code": "solplanet_low_battery",
+                    "target": "solplanet_battery",
+                    "window": _window_schedule_text("export_window"),
                     "threshold_soc_percent": SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT,
                     "current_soc_percent": round(solplanet_soc_percent, 1),
-                        "message": (
+                    "message": (
                         "Solplanet battery SOC is below 20% during the export window; keep one reminder in worklog "
                         "until notification handling is implemented."
                     ),
@@ -5769,6 +5854,7 @@ async def _run_midday_window_check(
                     "level": "alarm",
                     "code": "grid_import_started",
                     "target": "grid",
+                    "window": _window_schedule_text("export_window"),
                     "current_grid_import_w": round(current_grid_import_w, 1),
                     "message": (
                         "Grid import started during the export window; add one alarm "
@@ -5812,14 +5898,303 @@ async def _run_midday_window_check(
                     threshold_notified_map[threshold_key] = True
             combined_status["solar_surplus_export_threshold_notified_map"] = threshold_notified_map
             combined_status["solar_surplus_export_threshold_notified"] = any(threshold_notified_map.values())
-            result["decision"] = {
-                "mode": "observe_only",
-                "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
-                "predicted_grid_w": round(float(grid_w), 1),
+            priority_snapshot = await _build_device_priority_snapshot(combined_flow, now_local=now_local)
+            result["priority_snapshot"] = priority_snapshot
+            tesla_priority_map = (
+                priority_snapshot.get("tesla") if isinstance(priority_snapshot.get("tesla"), dict) else {}
+            )
+            pool_pump_priority_map = (
+                priority_snapshot.get("pool_pump")
+                if isinstance(priority_snapshot.get("pool_pump"), dict)
+                else {}
+            )
+            tesla_auto_control_enabled = bool(tesla_priority_map.get("auto_control_enabled", tesla_auto_control_enabled))
+            pool_pump_auto_control_enabled = bool(pool_pump_priority_map.get("auto_control_enabled", True))
+            result["tesla_auto_control_enabled"] = tesla_auto_control_enabled
+            result["pool_pump_auto_control_enabled"] = pool_pump_auto_control_enabled
+
+            battery2_discharge_w = max(float(_to_number(metrics_map.get("battery2_w")) or 0.0), 0.0)
+            export_headroom_w = max(current_grid_export_w, 0.0)
+            battery_ramp_headroom_w = max(
+                EXPORT_WINDOW_BATTERY_HARD_DISCHARGE_LIMIT_W - battery2_discharge_w,
+                0.0,
+            )
+            zero_import_headroom_w = export_headroom_w + battery_ramp_headroom_w
+            zero_hero_window = await _build_zero_hero_window_observation(
+                now_local=now_local,
+                timezone_name=timezone_name,
+                current_grid_import_w=current_grid_import_w,
+                current_grid_export_w=current_grid_export_w,
+            )
+            export_window_map["zero_hero_window"] = zero_hero_window
+
+            tesla_force_threshold_soc_percent = (
+                _to_number(tesla_priority_map.get("force_max_charge_threshold_soc_percent"))
+                or TESLA_OVERNIGHT_FORCE_MAX_CHARGE_BELOW_SOC_PERCENT_DEFAULT
+            )
+            tesla_priority_score = _to_number(tesla_priority_map.get("score")) or 0.0
+            pool_pump_priority_score = _to_number(pool_pump_priority_map.get("score")) or 0.0
+            pool_pump_runtime_24h_hours = _to_number(pool_pump_priority_map.get("rolling_runtime_hours_24h"))
+            pool_pump_force_min_runtime_hours = (
+                _to_number(pool_pump_priority_map.get("force_min_runtime_hours"))
+                or POOL_PUMP_FORCE_MIN_RUNTIME_HOURS_DEFAULT
+            )
+
+            tesla_ready = (
+                connection_state != "unplugged"
+                and status_text not in ("disconnected", "unknown", "unavailable")
+            )
+            tesla_force_support_needed = bool(
+                tesla_auto_control_enabled
+                and tesla_ready
+                and solplanet_soc_percent is not None
+                and tesla_priority_map
+                and _to_number(tesla_priority_map.get("soc_percent")) is not None
+                and float(_to_number(tesla_priority_map.get("soc_percent")) or 0.0)
+                < float(tesla_force_threshold_soc_percent)
+            )
+
+            pool_pump_state_for_support: dict[str, object] | None = None
+            pump_available = False
+            pump_enabled = False
+            pool_pump_fetch_error: str | None = None
+            pump_power_w = _to_number(metrics_map.get("pool_pump_power_w")) or POOL_PUMP_ASSUMED_POWER_W
+            if pool_pump_auto_control_enabled or bool(metrics_map.get("pool_pump_enabled")):
+                try:
+                    pool_pump_state_for_support = _build_pool_pump_state(await _pool_pump_states_by_id())
+                except Exception as pool_pump_exc:  # noqa: BLE001
+                    pool_pump_fetch_error = f"{type(pool_pump_exc).__name__}: {pool_pump_exc}"
+            if isinstance(pool_pump_state_for_support, dict):
+                result["pool_pump_state_before"] = pool_pump_state_for_support
+                control_map = (
+                    pool_pump_state_for_support.get("control")
+                    if isinstance(pool_pump_state_for_support.get("control"), dict)
+                    else {}
+                )
+                metrics_map_pump = (
+                    pool_pump_state_for_support.get("metrics")
+                    if isinstance(pool_pump_state_for_support.get("metrics"), dict)
+                    else {}
+                )
+                pump_available = bool(control_map.get("available"))
+                pump_enabled = bool(control_map.get("enabled"))
+                pump_power_w = _to_number(metrics_map_pump.get("power_w")) or pump_power_w
+            if pool_pump_fetch_error:
+                result["pool_pump_fetch_error"] = pool_pump_fetch_error
+            pool_pump_force_support_needed = bool(
+                pool_pump_auto_control_enabled
+                and pump_available
+                and pool_pump_runtime_24h_hours is not None
+                and pool_pump_runtime_24h_hours < pool_pump_force_min_runtime_hours
+            )
+
+            export_window_map["support_guard"] = {
+                "soft_battery_discharge_target_w": EXPORT_WINDOW_BATTERY_SOFT_DISCHARGE_TARGET_W,
+                "hard_battery_discharge_limit_w": EXPORT_WINDOW_BATTERY_HARD_DISCHARGE_LIMIT_W,
+                "current_battery_discharge_w": round(battery2_discharge_w, 1),
+                "current_grid_import_w": round(current_grid_import_w, 1),
+                "current_grid_export_w": round(current_grid_export_w, 1),
+                "headroom_from_live_export_w": round(export_headroom_w, 1),
+                "headroom_from_battery_ramp_w": round(battery_ramp_headroom_w, 1),
+                "zero_import_headroom_w": round(zero_import_headroom_w, 1),
+                "battery_auto_ramp_observed": (
+                    battery2_discharge_w > EXPORT_WINDOW_BATTERY_SOFT_DISCHARGE_TARGET_W + BALANCE_TOLERANCE_W
+                    and current_grid_import_w <= 0.0
+                ),
+                "live_export_present": current_grid_export_w > 0.0,
             }
-            result["decision_reason"] = "export_window_notifications_only"
-            result["action"] = {"type": "noop", "reason": "export_window_notifications_only"}
-            status = "noop"
+            export_window_map["tesla_support"] = {
+                "auto_control_enabled": tesla_auto_control_enabled,
+                "ready": tesla_ready,
+                "priority_score": round(tesla_priority_score, 1),
+                "tesla_soc_percent": _to_number(tesla_priority_map.get("soc_percent")),
+                "force_max_charge_threshold_soc_percent": round(float(tesla_force_threshold_soc_percent), 1),
+                "force_support_needed": tesla_force_support_needed,
+                "configured_current_amps": current_configured_amps,
+                "actual_current_amps": current_actual_amps,
+                "charging_enabled": charging_enabled,
+                "charge_requested_enabled": charge_requested_enabled,
+            }
+            export_window_map["pool_pump_support"] = {
+                "auto_control_enabled": pool_pump_auto_control_enabled,
+                "available": pump_available,
+                "enabled": pump_enabled,
+                "priority_score": round(pool_pump_priority_score, 1),
+                "rolling_runtime_24h_hours": round(pool_pump_runtime_24h_hours, 3)
+                if pool_pump_runtime_24h_hours is not None
+                else None,
+                "force_min_runtime_hours": round(pool_pump_force_min_runtime_hours, 1),
+                "force_support_needed": pool_pump_force_support_needed,
+                "power_w": round(pump_power_w, 1),
+            }
+
+            hard_guard_reasons: list[str] = []
+            if current_grid_import_w > 0.0:
+                hard_guard_reasons.append("grid_import_started")
+            if battery2_discharge_w > EXPORT_WINDOW_BATTERY_HARD_DISCHARGE_LIMIT_W + BALANCE_TOLERANCE_W:
+                hard_guard_reasons.append("battery_discharge_limit_exceeded")
+            if hard_guard_reasons:
+                export_window_map["support_allocation"] = {
+                    "mode": "shed_interruptible_loads",
+                    "trigger_reasons": hard_guard_reasons,
+                }
+                result["decision"] = {
+                    "mode": "shed_interruptible_loads",
+                    "charge_current_amps": 0,
+                    "predicted_grid_w": round(float(grid_w), 1),
+                    "reasons": hard_guard_reasons,
+                }
+                result["decision_reason"] = "export_window_hard_guard_triggered"
+                if tesla_auto_control_enabled and (charging_enabled or charge_requested_enabled):
+                    await _tesla_set_charging(False)
+                    _append_worker_action(result, {"type": "stop_charging", "reason": "export_window_hard_guard"})
+                if pool_pump_auto_control_enabled and pump_enabled:
+                    await _pool_pump_set_enabled(False)
+                    _append_worker_action(result, {"type": "stop_pool_pump", "reason": "export_window_hard_guard"})
+                if _worker_action_list(result):
+                    status = "applied"
+                else:
+                    result["action"] = {"type": "noop", "reason": "export_window_hard_guard_no_auto_loads"}
+                    status = "noop"
+                return result
+
+            support_candidates: list[tuple[str, float]] = []
+            if tesla_force_support_needed:
+                support_candidates.append(("tesla", tesla_priority_score))
+            if pool_pump_force_support_needed:
+                support_candidates.append(("pool_pump", pool_pump_priority_score))
+            support_candidates.sort(key=lambda item: (-item[1], 0 if item[0] == "tesla" else 1))
+
+            remaining_headroom_w = zero_import_headroom_w if current_grid_export_w > 0.0 else 0.0
+            tesla_target = {"mode": "off", "charge_current_amps": 0, "tesla_power_w": 0.0}
+            pool_pump_target_mode = "off"
+            for device, _score in support_candidates:
+                if device == "pool_pump":
+                    if remaining_headroom_w >= pump_power_w:
+                        pool_pump_target_mode = "run"
+                        remaining_headroom_w = max(remaining_headroom_w - pump_power_w, 0.0)
+                    continue
+                candidate_target = _calculate_tesla_target_for_power_budget(charge_state, remaining_headroom_w)
+                if str(candidate_target.get("mode") or "").strip().lower() == "charge":
+                    tesla_target = candidate_target
+                    remaining_headroom_w = max(
+                        remaining_headroom_w - float(candidate_target.get("tesla_power_w") or 0.0),
+                        0.0,
+                    )
+
+            tesla_allocated = str(tesla_target.get("mode") or "").strip().lower() == "charge"
+            pool_pump_allocated = pool_pump_target_mode == "run"
+            export_window_map["support_allocation"] = {
+                "order": [device for device, _score in support_candidates],
+                "tesla": {
+                    "allocated": tesla_allocated,
+                    "target_mode": str(tesla_target.get("mode") or "off"),
+                    "charge_current_amps": int(tesla_target.get("charge_current_amps") or 0),
+                    "power_w": round(float(tesla_target.get("tesla_power_w") or 0.0), 1),
+                },
+                "pool_pump": {
+                    "allocated": pool_pump_allocated,
+                    "target_mode": pool_pump_target_mode,
+                    "power_w": round(pump_power_w if pool_pump_allocated else 0.0, 1),
+                },
+                "remaining_zero_import_headroom_w": round(remaining_headroom_w, 1),
+            }
+
+            if support_candidates and (tesla_allocated or pool_pump_allocated):
+                result["decision"] = {
+                    "mode": "support_interruptible_loads",
+                    "charge_current_amps": int(tesla_target.get("charge_current_amps") or 0),
+                    "predicted_grid_w": round(float(grid_w), 1),
+                }
+                result["decision_reason"] = "export_window_support_allocated_under_zero_import_guard"
+            elif support_candidates:
+                result["decision"] = {
+                    "mode": "observe_only",
+                    "charge_current_amps": 0,
+                    "predicted_grid_w": round(float(grid_w), 1),
+                }
+                result["decision_reason"] = (
+                    "export_window_no_live_export_headroom"
+                    if current_grid_export_w <= 0.0
+                    else "export_window_insufficient_headroom_for_interruptible_loads"
+                )
+            else:
+                result["decision"] = {
+                    "mode": "observe_only",
+                    "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
+                    "predicted_grid_w": round(float(grid_w), 1),
+                }
+                result["decision_reason"] = "export_window_no_minimum_support_needed"
+
+            if tesla_auto_control_enabled:
+                if tesla_allocated:
+                    desired_amps = int(tesla_target.get("charge_current_amps") or 0)
+                    configured_matches_desired = (
+                        current_configured_amps is not None
+                        and int(round(current_configured_amps)) == desired_amps
+                    )
+                    actual_matches_desired = (
+                        current_actual_amps is not None
+                        and int(round(current_actual_amps)) == desired_amps
+                    )
+                    if not configured_matches_desired:
+                        await _tesla_set_charge_current(desired_amps)
+                        _append_worker_action(result, {
+                            "type": "apply",
+                            "steps": [f"set_current_{desired_amps}a"],
+                            "reason": "allocated_export_support",
+                        })
+                    if not charging_enabled:
+                        if charge_requested_enabled:
+                            await _tesla_restart_charging()
+                            _append_worker_action(result, {
+                                "type": "restart_charging",
+                                "reason": "allocated_export_support",
+                            })
+                        else:
+                            await _tesla_set_charging(True)
+                            _append_worker_action(result, {
+                                "type": "start_charging",
+                                "reason": "allocated_export_support",
+                            })
+                    elif configured_matches_desired and (current_actual_amps is None or actual_matches_desired):
+                        export_window_map["tesla_support"]["holding_allocated_target"] = True
+                elif charging_enabled or charge_requested_enabled:
+                    await _tesla_set_charging(False)
+                    _append_worker_action(result, {
+                        "type": "stop_charging",
+                        "reason": "not_allocated_export_support",
+                    })
+
+            if pool_pump_auto_control_enabled:
+                if pool_pump_allocated:
+                    if not pump_enabled:
+                        await _pool_pump_set_enabled(True)
+                        _append_worker_action(result, {
+                            "type": "start_pool_pump",
+                            "reason": "allocated_export_support",
+                        })
+                    else:
+                        export_window_map["pool_pump_support"]["holding_allocated_target"] = True
+                elif pump_enabled:
+                    await _pool_pump_set_enabled(False)
+                    _append_worker_action(result, {
+                        "type": "stop_pool_pump",
+                        "reason": "not_allocated_export_support",
+                    })
+
+            if _worker_action_list(result):
+                status = "applied"
+            else:
+                result["action"] = {
+                    "type": "noop",
+                    "reason": (
+                        "already_holding_export_support_targets"
+                        if tesla_allocated or pool_pump_allocated
+                        else str(result.get("decision_reason") or "export_window_observe_only")
+                    ),
+                }
+                status = "noop"
             return result
 
         priority_snapshot = await _build_device_priority_snapshot(combined_flow, now_local=now_local)

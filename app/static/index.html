@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dashboard</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260527-zerohero-ui" />
   </head>
   <body>
     <main class="page">
@@ -367,6 +367,14 @@
               <div id="samplingPumpStatusCanvas" class="sampling-chart"></div>
             </div>
           </section>
+          <section class="sampling-chart-card sampling-zero-hero-card">
+            <div class="section-header">
+              <h3 data-i18n="samplingZeroHeroTitle">Current 5-Minute Zero Hero Window</h3>
+              <span id="samplingZeroHeroBadge" class="sampling-zero-hero-badge">-</span>
+            </div>
+            <p id="samplingZeroHeroMeta" class="muted">-</p>
+            <div id="samplingZeroHeroBody" class="sampling-zero-hero-grid"></div>
+          </section>
           <p id="samplingCount" class="muted">-</p>
           <div class="pager">
             <button id="samplingPrevPageBtn" class="btn secondary" type="button" data-i18n="prevBtn">Prev</button>
@@ -715,6 +723,6 @@
     <script src="/static/vendor/dagre.min.js"></script>
     <script src="/static/vendor/x6.min.js"></script>
     <script src="/static/energy-flow-diagram.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260527-zerohero-ui"></script>
   </body>
 </html>

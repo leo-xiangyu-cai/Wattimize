@@ -404,6 +404,88 @@ select {
   background: #f6faf4;
 }
 
+.sampling-zero-hero-card {
+  background:
+    linear-gradient(145deg, rgba(246, 250, 244, 0.98), rgba(232, 242, 235, 0.95));
+  border-color: rgba(31, 122, 82, 0.18);
+}
+
+.sampling-zero-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(49, 74, 62, 0.12);
+  background: rgba(255, 255, 255, 0.72);
+  color: #31504d;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.sampling-zero-hero-badge.good {
+  background: rgba(220, 247, 229, 0.92);
+  border-color: rgba(49, 153, 92, 0.2);
+  color: #1d6c43;
+}
+
+.sampling-zero-hero-badge.warn {
+  background: rgba(255, 240, 209, 0.96);
+  border-color: rgba(197, 139, 38, 0.24);
+  color: #8a5a00;
+}
+
+.sampling-zero-hero-badge.danger {
+  background: rgba(255, 226, 223, 0.96);
+  border-color: rgba(201, 87, 78, 0.24);
+  color: #9b2c20;
+}
+
+.sampling-zero-hero-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.sampling-zero-hero-metric {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(31, 122, 82, 0.12);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.sampling-zero-hero-metric-label {
+  margin: 0 0 6px;
+  color: #5c7266;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sampling-zero-hero-metric-value {
+  margin: 0;
+  color: #22342c;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.sampling-zero-hero-empty {
+  grid-column: 1 / -1;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px dashed rgba(31, 122, 82, 0.18);
+  background: rgba(255, 255, 255, 0.58);
+  color: #5c7266;
+}
+
 .sampling-overview-grid {
   display: grid;
   grid-template-columns: minmax(0, 5fr) minmax(320px, 2fr);
@@ -1130,6 +1212,10 @@ select {
 
   .sampling-battery-trio {
     grid-template-columns: 1fr;
+  }
+
+  .sampling-zero-hero-grid {
+    grid-template-columns: 1fr 1fr;
   }
 
   .sampling-overview-grid {
