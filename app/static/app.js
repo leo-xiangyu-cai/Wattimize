@@ -675,6 +675,27 @@ const I18N = {
     samplingZeroHeroFieldCoverage: "Coverage",
     samplingZeroHeroAwaiting: "No live export-window observation yet.",
     samplingZeroHeroCoverageText: "{samples}/{expected} samples · {coverage}%",
+    samplingZeroHeroHistoryTitle: "Selected 18:00-20:00 Windows",
+    samplingZeroHeroHistoryBadgeImport: "{count} import seen · {netCount} net import",
+    samplingZeroHeroHistoryBadgeMixed: "{count} import seen · net export",
+    samplingZeroHeroHistoryBadgeClean: "0 import",
+    samplingZeroHeroHistoryBadgeNoData: "{count} no data",
+    samplingZeroHeroHistoryMetaText: "{day} · {start}-{end} · {count} windows",
+    samplingZeroHeroHistoryAwaiting: "No 18:00-20:00 window history for the selected day yet.",
+    samplingZeroHeroHistoryStateImport: "Net Import",
+    samplingZeroHeroHistoryStateMixedExport: "Import Seen / Net Export",
+    samplingZeroHeroHistoryStateExport: "Pure Export",
+    samplingZeroHeroHistoryStateIdle: "Idle",
+    samplingZeroHeroHistoryStateNoData: "No data",
+    samplingZeroHeroHistoryStatePending: "Pending",
+    samplingZeroHeroHistoryToday: "Today",
+    samplingZeroHeroHistoryDaySummary:
+      "Net import {importCount} · Import seen / net export {mixedCount} · Pure export {exportCount} · Idle {idleCount} · No data {noDataCount} · Pending {pendingCount} · Partial {partialCount}",
+    samplingZeroHeroHistoryDayEnergy: "Buy {import} · Sell {export}",
+    samplingZeroHeroHistoryEnergyText: "Buy {import} · Sell {export}",
+    samplingZeroHeroHistoryCoverageText: "{samples}/{expected} samples",
+    samplingZeroHeroHistoryCoveragePartial: "Partial coverage",
+    samplingZeroHeroHistoryInProgress: "In progress",
     samplingChartTitle: "Power Timeline",
     samplingChartMeta: "{system} · {range} · {count} points",
     samplingChartNoData: "No chart data yet for this range",
@@ -1514,6 +1535,27 @@ const I18N = {
     samplingZeroHeroFieldCoverage: "覆盖率",
     samplingZeroHeroAwaiting: "当前还没有 export window 的实时观测。",
     samplingZeroHeroCoverageText: "{samples}/{expected} 个样本 · {coverage}%",
+    samplingZeroHeroHistoryTitle: "所选日期 18:00-20:00 窗口",
+    samplingZeroHeroHistoryBadgeImport: "购电 {count} 窗 · 净购电 {netCount} 窗",
+    samplingZeroHeroHistoryBadgeMixed: "购电 {count} 窗 · 净卖电",
+    samplingZeroHeroHistoryBadgeClean: "0 购电",
+    samplingZeroHeroHistoryBadgeNoData: "无样本 {count}",
+    samplingZeroHeroHistoryMetaText: "{day} · {start}-{end} · {count} 个窗口",
+    samplingZeroHeroHistoryAwaiting: "当前所选日期还没有 18:00-20:00 的窗口历史。",
+    samplingZeroHeroHistoryStateImport: "净购电",
+    samplingZeroHeroHistoryStateMixedExport: "有购电，净卖电",
+    samplingZeroHeroHistoryStateExport: "纯卖电",
+    samplingZeroHeroHistoryStateIdle: "平稳",
+    samplingZeroHeroHistoryStateNoData: "无样本",
+    samplingZeroHeroHistoryStatePending: "未到",
+    samplingZeroHeroHistoryToday: "今天",
+    samplingZeroHeroHistoryDaySummary:
+      "净购电 {importCount} · 有购电但净卖电 {mixedCount} · 纯卖电 {exportCount} · 平稳 {idleCount} · 无样本 {noDataCount} · 未到 {pendingCount} · 采样不足 {partialCount}",
+    samplingZeroHeroHistoryDayEnergy: "购 {import} · 卖 {export}",
+    samplingZeroHeroHistoryEnergyText: "购 {import} · 卖 {export}",
+    samplingZeroHeroHistoryCoverageText: "{samples}/{expected} 个样本",
+    samplingZeroHeroHistoryCoveragePartial: "采样不足",
+    samplingZeroHeroHistoryInProgress: "进行中",
     samplingChartTitle: "功率时间线",
     samplingChartMeta: "{system} · {range} · {count} 个点",
     samplingChartNoData: "当前时间范围暂无图表数据",
@@ -2064,6 +2106,7 @@ const stateCache = {
   lastSamplingSeries: null,
   lastSamplingBatteryTimeline: null,
   lastSamplingPumpStatus: null,
+  lastSamplingZeroHeroHistory: null,
   lastDatabaseTables: null,
   lastDatabasePage: null,
   lastWorkerLogsPage: null,
@@ -7957,6 +8000,36 @@ function getSamplingRange() {
   };
 }
 
+function getSamplingFocusLocalDay() {
+  const mode = document.getElementById("samplingRangeModeSelect")?.value || "day";
+  const today = getLocalDateText();
+  if (mode === "week") {
+    return getWeekInfo(samplingRangeState.week || today).anchor;
+  }
+  if (mode === "month") {
+    const info = getMonthInfo(samplingRangeState.month, samplingRangeState.monthYear);
+    const todayParts = localDateParts(today);
+    if (todayParts && todayParts.year === info.year && todayParts.monthIndex + 1 === info.month) {
+      return today;
+    }
+    return `${info.year}-${String(info.month).padStart(2, "0")}-01`;
+  }
+  if (mode === "relative") {
+    return today;
+  }
+  if (mode === "custom_date") {
+    const startDate = samplingRangeState.startDate || "";
+    const endDate = samplingRangeState.endDate || "";
+    const candidate = endDate || startDate || today;
+    return localDateParts(candidate) ? candidate : today;
+  }
+  if (mode === "custom_datetime") {
+    const candidate = String(samplingRangeState.endDateTime || samplingRangeState.startDateTime || "").split("T")[0];
+    return localDateParts(candidate) ? candidate : today;
+  }
+  return getDayInfo(samplingRangeState.day || today).day;
+}
+
 function buildSamplingRangeCurrentBadge(mode) {
   if (mode === "day") {
     const selected = samplingRangeState.day || getLocalDateText();
@@ -8975,6 +9048,177 @@ function renderSamplingZeroHeroWindow() {
         </article>
       `,
     )
+    .join("");
+}
+
+function formatSamplingZeroHeroHistoryDayLabel(dayItem) {
+  const parts = localDateParts(dayItem?.date_local);
+  if (!parts) return String(dayItem?.date_local || "-");
+  const dt = new Date(parts.year, parts.monthIndex, parts.day);
+  const locale = currentLang === "zh" ? "zh-CN" : "en-AU";
+  const weekday = dt.toLocaleDateString(locale, { weekday: "short" });
+  if (currentLang === "zh") {
+    return `${parts.monthIndex + 1}/${parts.day} ${weekday}${dayItem?.is_today ? ` · ${t("samplingZeroHeroHistoryToday")}` : ""}`;
+  }
+  return `${weekday}, ${shortMonthLabel(parts.monthIndex + 1)} ${parts.day}${dayItem?.is_today ? ` · ${t("samplingZeroHeroHistoryToday")}` : ""}`;
+}
+
+function formatSamplingZeroHeroHistoryWindowRange(windowItem) {
+  const start = windowItem?.window_start_local || windowItem?.window_start_utc;
+  const end = windowItem?.window_end_local || windowItem?.window_end_utc;
+  if (!start || !end) return "-";
+  return `${formatSamplingClock(start)} - ${formatSamplingClock(end)}`;
+}
+
+function formatSamplingZeroHeroHistoryState(windowItem) {
+  const state = String(windowItem?.state || "").trim();
+  if (state === "import") return t("samplingZeroHeroHistoryStateImport");
+  if (state === "mixed_export") return t("samplingZeroHeroHistoryStateMixedExport");
+  if (state === "export") return t("samplingZeroHeroHistoryStateExport");
+  if (state === "no_data") return t("samplingZeroHeroHistoryStateNoData");
+  if (state === "pending") return t("samplingZeroHeroHistoryStatePending");
+  return t("samplingZeroHeroHistoryStateIdle");
+}
+
+function formatSamplingZeroHeroHistoryCoverage(windowItem) {
+  if (windowItem?.is_future) return "-";
+  const samples = Math.max(0, Math.round(Number(windowItem?.samples || 0)));
+  const expected = Math.max(0, Math.round(Number(windowItem?.expected_samples || 0)));
+  const parts = [];
+  if (expected > 0) {
+    parts.push(t("samplingZeroHeroHistoryCoverageText", { samples, expected }));
+  } else if (samples > 0) {
+    parts.push(String(samples));
+  }
+  if (windowItem?.is_in_progress) {
+    parts.push(t("samplingZeroHeroHistoryInProgress"));
+  } else if (windowItem?.has_partial_coverage) {
+    parts.push(t("samplingZeroHeroHistoryCoveragePartial"));
+  }
+  return parts.join(" · ") || "-";
+}
+
+function renderSamplingZeroHeroHistory(payload = stateCache.lastSamplingZeroHeroHistory) {
+  const badgeEl = document.getElementById("samplingZeroHeroHistoryBadge");
+  const metaEl = document.getElementById("samplingZeroHeroHistoryMeta");
+  const bodyEl = document.getElementById("samplingZeroHeroHistoryBody");
+  if (!badgeEl || !metaEl || !bodyEl) return;
+
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const totalNetImportWindows = items.reduce(
+    (sum, item) => sum + Number(item?.summary?.import_windows || 0),
+    0,
+  );
+  const totalMixedExportWindows = items.reduce(
+    (sum, item) => sum + Number(item?.summary?.mixed_export_windows || 0),
+    0,
+  );
+  const totalImportObservedWindows = items.reduce(
+    (sum, item) => sum + Number(item?.summary?.import_observed_windows || 0),
+    0,
+  );
+  const totalNoDataWindows = items.reduce(
+    (sum, item) => sum + Number(item?.summary?.no_data_windows || 0),
+    0,
+  );
+
+  let badgeTone = "good";
+  let badgeText = t("samplingZeroHeroHistoryBadgeClean");
+  if (totalNetImportWindows > 0) {
+    badgeTone = "danger";
+    badgeText = t("samplingZeroHeroHistoryBadgeImport", {
+      count: totalImportObservedWindows,
+      netCount: totalNetImportWindows,
+    });
+  } else if (totalMixedExportWindows > 0) {
+    badgeTone = "warn";
+    badgeText = t("samplingZeroHeroHistoryBadgeMixed", { count: totalMixedExportWindows });
+  } else if (totalNoDataWindows > 0) {
+    badgeTone = "warn";
+    badgeText = t("samplingZeroHeroHistoryBadgeNoData", { count: totalNoDataWindows });
+  }
+  badgeEl.className = `sampling-zero-hero-badge${badgeTone ? ` ${badgeTone}` : ""}`;
+  badgeEl.textContent = badgeText;
+
+  const anchorDayLabel = formatSamplingZeroHeroHistoryDayLabel({
+    date_local: payload?.anchor_day_local || items[0]?.date_local || getSamplingFocusLocalDay(),
+    is_today: (payload?.anchor_day_local || items[0]?.date_local || "") === getLocalDateText(),
+  });
+  const startHour = String(Math.max(0, Math.min(23, Number(payload?.window_start_hour || 18)))).padStart(2, "0");
+  const endHour = String(Math.max(0, Math.min(23, Number(payload?.window_end_hour || 20)))).padStart(2, "0");
+  metaEl.textContent = `${t("samplingZeroHeroHistoryMetaText", {
+    day: anchorDayLabel,
+    start: `${startHour}:00`,
+    end: `${endHour}:00`,
+    count: Number(payload?.window_count_per_day || 0),
+  })} · ${formatUpdatedAt(payload?.updated_at || null)}`;
+
+  if (!items.length) {
+    bodyEl.innerHTML = `<div class="sampling-zero-hero-empty">${escapeHtml(t("samplingZeroHeroHistoryAwaiting"))}</div>`;
+    return;
+  }
+
+  bodyEl.innerHTML = items
+    .map((dayItem) => {
+      const summary = dayItem?.summary || {};
+      const windows = Array.isArray(dayItem?.windows) ? dayItem.windows : [];
+      return `
+        <section class="sampling-zero-hero-history-day">
+          <div class="sampling-zero-hero-history-day-head">
+            <div>
+              <p class="sampling-zero-hero-history-day-title">${escapeHtml(formatSamplingZeroHeroHistoryDayLabel(dayItem))}</p>
+              <p class="sampling-zero-hero-history-day-summary">${escapeHtml(
+                t("samplingZeroHeroHistoryDaySummary", {
+                  importCount: Number(summary.import_windows || 0),
+                  mixedCount: Number(summary.mixed_export_windows || 0),
+                  exportCount: Number(summary.export_windows || 0),
+                  idleCount: Number(summary.idle_windows || 0),
+                  noDataCount: Number(summary.no_data_windows || 0),
+                  pendingCount: Number(summary.pending_windows || 0),
+                  partialCount: Number(summary.partial_windows || 0),
+                }),
+              )}</p>
+            </div>
+            <p class="sampling-zero-hero-history-day-energy">${escapeHtml(
+              t("samplingZeroHeroHistoryDayEnergy", {
+                import: formatSamplingZeroHeroEnergyWh(summary.import_wh),
+                export: formatSamplingZeroHeroEnergyWh(summary.export_wh),
+              }),
+            )}</p>
+          </div>
+          <div class="sampling-zero-hero-history-grid">
+            ${windows
+              .map((windowItem) => {
+                const stateClass = `is-${String(windowItem?.state || "idle").replaceAll("_", "-")}`;
+                const partialClass = windowItem?.has_partial_coverage ? " is-partial" : "";
+                const energyText = windowItem?.is_future
+                  ? "-"
+                  : t("samplingZeroHeroHistoryEnergyText", {
+                      import: formatSamplingZeroHeroEnergyWh(windowItem?.grid_import_wh),
+                      export: formatSamplingZeroHeroEnergyWh(windowItem?.grid_export_wh),
+                    });
+                return `
+                  <article class="sampling-zero-hero-history-window ${stateClass}${partialClass}">
+                    <div class="sampling-zero-hero-history-window-head">
+                      <p class="sampling-zero-hero-history-window-time">${escapeHtml(
+                        formatSamplingZeroHeroHistoryWindowRange(windowItem),
+                      )}</p>
+                      <p class="sampling-zero-hero-history-window-state">${escapeHtml(
+                        formatSamplingZeroHeroHistoryState(windowItem),
+                      )}</p>
+                    </div>
+                    <p class="sampling-zero-hero-history-window-energy">${escapeHtml(energyText)}</p>
+                    <p class="sampling-zero-hero-history-window-coverage">${escapeHtml(
+                      formatSamplingZeroHeroHistoryCoverage(windowItem),
+                    )}</p>
+                  </article>
+                `;
+              })
+              .join("")}
+          </div>
+        </section>
+      `;
+    })
     .join("");
 }
 
@@ -12874,6 +13118,7 @@ async function loadSampling() {
   const overallMode = system === "overall";
   const range = getSamplingRange();
   renderSamplingZeroHeroWindow();
+  renderSamplingZeroHeroHistory();
   setSamplingRangeControlsDisabled(true);
   setSamplingTotalsChartLoading(true);
   setSamplingChartLoading(true);
@@ -12912,8 +13157,11 @@ async function loadSampling() {
     const combinedSeriesUrl =
       `/api/storage/series?system=combined&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}&max_points=500`;
     const selectedSeriesUrl = overallMode ? combinedSeriesUrl : system === "solplanet" ? solplanetSeriesUrl : sajSeriesUrl;
+    const zeroHeroHistoryDay = getSamplingFocusLocalDay();
+    const zeroHeroHistoryUrl =
+      `/api/storage/zero-hero-window-history?system=combined&days=1&day_local=${encodeURIComponent(zeroHeroHistoryDay)}`;
 
-    const [collectorResult, statusResult, sajUsageResult, solplanetUsageResult, combinedUsageResult, samplesResult, seriesResult, overallSajSeriesResult, overallSolplanetSeriesResult, combinedPumpSeriesResult] = await Promise.allSettled([
+    const [collectorResult, statusResult, sajUsageResult, solplanetUsageResult, combinedUsageResult, samplesResult, seriesResult, overallSajSeriesResult, overallSolplanetSeriesResult, combinedPumpSeriesResult, zeroHeroHistoryResult] = await Promise.allSettled([
       fetchJson("/api/collector/status", { timeoutMs: 6000 }),
       fetchJson("/api/storage/status", { timeoutMs: 6000 }),
       fetchJson(sajUsageUrl, { timeoutMs: 6000 }),
@@ -12924,6 +13172,7 @@ async function loadSampling() {
       overallMode ? fetchJson(sajSeriesUrl, { timeoutMs: 6000 }) : Promise.resolve(null),
       overallMode ? fetchJson(solplanetSeriesUrl, { timeoutMs: 6000 }) : Promise.resolve(null),
       overallMode ? Promise.resolve(null) : fetchJson(combinedSeriesUrl, { timeoutMs: 6000 }),
+      fetchJson(zeroHeroHistoryUrl, { timeoutMs: 12000 }),
     ]);
 
     if (collectorResult.status === "fulfilled") {
@@ -12933,6 +13182,24 @@ async function loadSampling() {
       }
     }
     renderSamplingZeroHeroWindow();
+    if (zeroHeroHistoryResult.status === "fulfilled") {
+      stateCache.lastSamplingZeroHeroHistory = zeroHeroHistoryResult.value;
+      renderSamplingZeroHeroHistory(zeroHeroHistoryResult.value);
+    } else {
+      stateCache.lastSamplingZeroHeroHistory = null;
+      const zeroHeroHistoryBadge = document.getElementById("samplingZeroHeroHistoryBadge");
+      if (zeroHeroHistoryBadge) {
+        zeroHeroHistoryBadge.className = "sampling-zero-hero-badge";
+        zeroHeroHistoryBadge.textContent = "-";
+      }
+      setText("samplingZeroHeroHistoryMeta", t("loadFailed", { error: String(zeroHeroHistoryResult.reason) }));
+      const zeroHeroHistoryBody = document.getElementById("samplingZeroHeroHistoryBody");
+      if (zeroHeroHistoryBody) {
+        zeroHeroHistoryBody.innerHTML = `<div class="sampling-zero-hero-empty">${escapeHtml(
+          t("loadFailed", { error: String(zeroHeroHistoryResult.reason) }),
+        )}</div>`;
+      }
+    }
 
     if (statusResult.status === "fulfilled") {
       stateCache.lastSamplingStatus = statusResult.value;
@@ -13090,6 +13357,7 @@ async function loadDatabase() {
 
 function rerenderSamplingViewFromCache() {
   renderSamplingZeroHeroWindow();
+  renderSamplingZeroHeroHistory();
   if (stateCache.lastSamplingStatus) renderSamplingStatus(stateCache.lastSamplingStatus);
   if (stateCache.lastSamplingDaily) {
     const range = getSamplingRange();

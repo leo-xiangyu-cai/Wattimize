@@ -410,6 +410,12 @@ select {
   border-color: rgba(31, 122, 82, 0.18);
 }
 
+.sampling-zero-hero-history-card {
+  background:
+    linear-gradient(145deg, rgba(248, 250, 252, 0.98), rgba(239, 246, 241, 0.94));
+  border-color: rgba(49, 74, 62, 0.14);
+}
+
 .sampling-zero-hero-badge {
   display: inline-flex;
   align-items: center;
@@ -484,6 +490,114 @@ select {
   border: 1px dashed rgba(31, 122, 82, 0.18);
   background: rgba(255, 255, 255, 0.58);
   color: #5c7266;
+}
+
+.sampling-zero-hero-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.sampling-zero-hero-history-day {
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(49, 74, 62, 0.1);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.sampling-zero-hero-history-day-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sampling-zero-hero-history-day-title {
+  margin: 0;
+  color: #22342c;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.sampling-zero-hero-history-day-summary,
+.sampling-zero-hero-history-day-energy {
+  margin: 4px 0 0;
+  color: #5c7266;
+  font-size: 12px;
+}
+
+.sampling-zero-hero-history-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sampling-zero-hero-history-window {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(49, 74, 62, 0.08);
+  background: #f6faf4;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.sampling-zero-hero-history-window.is-import {
+  border-color: rgba(195, 75, 67, 0.22);
+  background: linear-gradient(145deg, rgba(255, 239, 236, 0.98), rgba(255, 230, 225, 0.96));
+}
+
+.sampling-zero-hero-history-window.is-mixed-export {
+  border-color: rgba(197, 139, 38, 0.24);
+  background: linear-gradient(145deg, rgba(255, 246, 219, 0.98), rgba(255, 238, 192, 0.96));
+}
+
+.sampling-zero-hero-history-window.is-export {
+  border-color: rgba(42, 138, 86, 0.2);
+  background: linear-gradient(145deg, rgba(230, 247, 236, 0.98), rgba(216, 243, 227, 0.96));
+}
+
+.sampling-zero-hero-history-window.is-no-data,
+.sampling-zero-hero-history-window.is-pending {
+  border-style: dashed;
+  background: linear-gradient(145deg, rgba(247, 249, 250, 0.98), rgba(238, 242, 244, 0.96));
+}
+
+.sampling-zero-hero-history-window.is-partial {
+  box-shadow:
+    inset 0 0 0 1px rgba(201, 139, 38, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.sampling-zero-hero-history-window-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sampling-zero-hero-history-window-time {
+  margin: 0;
+  color: #22342c;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sampling-zero-hero-history-window-state {
+  margin: 0;
+  color: #5c7266;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.sampling-zero-hero-history-window-energy,
+.sampling-zero-hero-history-window-coverage {
+  margin: 6px 0 0;
+  color: #41584d;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .sampling-overview-grid {
@@ -1215,6 +1329,10 @@ select {
   }
 
   .sampling-zero-hero-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .sampling-zero-hero-history-grid {
     grid-template-columns: 1fr 1fr;
   }
 

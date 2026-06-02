@@ -83,6 +83,7 @@ curl -s "http://<wattimize-host>:18000/api/storage/daily-usage?system=saj" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/samples?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z&page=1&page_size=20" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/series?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z&max_points=500" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/usage-range?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z" | jq
+curl -s "http://<wattimize-host>:18000/api/storage/zero-hero-window-history?system=combined&days=1&day_local=2026-03-03" | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/charging -H 'Content-Type: application/json' -d '{"enabled":true}' | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/current -H 'Content-Type: application/json' -d '{"amps":16}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/tesla/auto-control -H 'Content-Type: application/json' -d '{"enabled":false}' | jq
@@ -163,7 +164,7 @@ First-run configuration:
 - When SQLite corruption is detected during runtime recovery flows, the backend attempts an automatic recovery into the recovery directory and reinitializes the runtime connection pool.
 - Daily usage endpoint integrates power snapshots into kWh (UTC day).
 - `system=combined` is available on range usage and trend series endpoints for the frontend overall view.
-- The `History` tab combines range selection with an energy breakdown card, a power timeline chart, split SOC mini-charts for SAJ/Solplanet/Tesla, a pool-pump on/off timeline, a live 5-minute Zero Hero export-window observation card, and compact date/week/month context for the selected window.
+- The `History` tab combines range selection with an energy breakdown card, a power timeline chart, split SOC mini-charts for SAJ/Solplanet/Tesla, a pool-pump on/off timeline, a live 5-minute Zero Hero export-window observation card, and a selected-day `18:00-20:00` matrix of all 24 five-minute export windows, color-coded for net import, mixed import/net export, and pure export.
 - `GET /api/storage/samples?system=combined` now includes `tesla_charge_power_w` and `pool_pump_power_w` so frontend charts can separate home load from Tesla/pool-pump overlays.
 - The frontend can export and import the full SQLite database from the Database tab.
 

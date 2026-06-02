@@ -40,6 +40,7 @@ Status values:
 - `GET /api/storage/samples`
 - `GET /api/storage/series`
 - `GET /api/storage/usage-range`
+- `GET /api/storage/zero-hero-window-history`
 - `GET /api/database/tables`
 - `GET /api/database/tables/{table_name}/rows`
 - `GET /api/database/export.sqlite3`

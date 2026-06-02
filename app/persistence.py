@@ -2473,3 +2473,221 @@ def compute_usage_between(
         exclude_tesla_load=exclude_tesla_load,
         exclude_pool_pump_load=exclude_pool_pump_load,
     )
+
+
+def list_zero_hero_window_history(
+    db_path: DatabaseTarget,
+    *,
+    system: str,
+    days: int,
+    sample_interval_seconds: float,
+    local_timezone_name: str | None = None,
+    recent_day_anchor_local: date | None = None,
+    now_utc: datetime | None = None,
+    window_start_hour: int = 18,
+    window_end_hour: int = 20,
+    window_minutes: int = 5,
+) -> dict[str, object]:
+    safe_days = max(1, min(31, int(days)))
+    safe_window_minutes = max(1, min(60, int(window_minutes)))
+    if window_start_hour == window_end_hour:
+        total_window_minutes = 24 * 60
+    elif window_end_hour > window_start_hour:
+        total_window_minutes = (window_end_hour - window_start_hour) * 60
+    else:
+        total_window_minutes = ((24 - window_start_hour) + window_end_hour) * 60
+    window_count_per_day = max(1, total_window_minutes // safe_window_minutes)
+
+    try:
+        local_tz = ZoneInfo(local_timezone_name) if local_timezone_name else datetime.now().astimezone().tzinfo
+    except ZoneInfoNotFoundError:
+        local_tz = datetime.now().astimezone().tzinfo
+    if local_tz is None:
+        local_tz = UTC
+
+    effective_now_utc = now_utc.astimezone(UTC) if now_utc is not None else datetime.now(UTC)
+    now_local = effective_now_utc.astimezone(local_tz)
+    anchor_day = recent_day_anchor_local or now_local.date()
+
+    def _window_start(day_local: date, index: int) -> datetime:
+        start_minutes = window_start_hour * 60 + index * safe_window_minutes
+        start_day = day_local + timedelta(days=start_minutes // (24 * 60))
+        minute_of_day = start_minutes % (24 * 60)
+        return datetime.combine(
+            start_day,
+            time(hour=minute_of_day // 60, minute=minute_of_day % 60),
+            tzinfo=local_tz,
+        )
+
+    def _empty_window_payload(
+        *,
+        index: int,
+        start_local: datetime,
+        end_local: datetime,
+        state: str,
+        is_future: bool,
+    ) -> dict[str, object]:
+        window_seconds = max(0.0, (end_local - start_local).total_seconds())
+        expected_samples = int(round(window_seconds / sample_interval_seconds)) if sample_interval_seconds > 0 else 0
+        return {
+            "index": index,
+            "state": state,
+            "is_future": is_future,
+            "is_in_progress": False,
+            "is_complete": False,
+            "window_minutes": safe_window_minutes,
+            "window_start_local": start_local.isoformat(),
+            "window_end_local": end_local.isoformat(),
+            "window_start_utc": start_local.astimezone(UTC).isoformat(),
+            "window_end_utc": end_local.astimezone(UTC).isoformat(),
+            "observed_end_local": None,
+            "samples": 0,
+            "expected_samples": expected_samples,
+            "coverage_ratio": 0.0 if expected_samples > 0 else None,
+            "grid_import_kwh": 0.0,
+            "grid_import_wh": 0.0,
+            "grid_export_kwh": 0.0,
+            "grid_export_wh": 0.0,
+            "has_import": False,
+            "has_export": False,
+            "breaks_zero_import": False,
+            "has_partial_coverage": False,
+        }
+
+    items: list[dict[str, object]] = []
+    for day_offset in range(safe_days):
+        day_local = anchor_day - timedelta(days=day_offset)
+        windows: list[dict[str, object]] = []
+        summary = {
+            "import_windows": 0,
+            "mixed_export_windows": 0,
+            "import_observed_windows": 0,
+            "export_windows": 0,
+            "idle_windows": 0,
+            "no_data_windows": 0,
+            "pending_windows": 0,
+            "partial_windows": 0,
+            "import_wh": 0.0,
+            "export_wh": 0.0,
+        }
+
+        for window_index in range(window_count_per_day):
+            start_local = _window_start(day_local, window_index)
+            end_local = start_local + timedelta(minutes=safe_window_minutes)
+            if now_local <= start_local:
+                payload = _empty_window_payload(
+                    index=window_index + 1,
+                    start_local=start_local,
+                    end_local=end_local,
+                    state="pending",
+                    is_future=True,
+                )
+                summary["pending_windows"] += 1
+                windows.append(payload)
+                continue
+
+            observed_end_local = min(end_local, now_local)
+            usage = compute_usage_between(
+                db_path,
+                system=system,
+                start_at_utc=start_local.astimezone(UTC),
+                end_at_utc=observed_end_local.astimezone(UTC),
+                sample_interval_seconds=sample_interval_seconds,
+                local_timezone_name=local_timezone_name,
+            )
+            energy_map = usage.get("energy_kwh") if isinstance(usage, dict) else {}
+            observed_grid_import_kwh = float((energy_map or {}).get("grid_import") or 0.0)
+            observed_grid_export_kwh = float((energy_map or {}).get("grid_export") or 0.0)
+            samples = int(usage.get("samples") or 0) if isinstance(usage, dict) else 0
+            expected_samples = int(usage.get("expected_samples") or 0) if isinstance(usage, dict) else 0
+            coverage_ratio = float(usage.get("coverage_ratio") or 0.0) if isinstance(usage, dict) else 0.0
+            has_import = observed_grid_import_kwh > 0.00001
+            has_export = observed_grid_export_kwh > 0.00001
+            net_import = observed_grid_import_kwh - observed_grid_export_kwh
+            is_in_progress = observed_end_local < end_local
+            is_complete = observed_end_local >= end_local
+            has_partial_coverage = expected_samples > 0 and samples < expected_samples
+
+            if samples < 2:
+                state = "no_data"
+                summary["no_data_windows"] += 1
+            elif has_import and net_import > 0.00001:
+                state = "import"
+                summary["import_observed_windows"] += 1
+                summary["import_windows"] += 1
+            elif has_import:
+                state = "mixed_export"
+                summary["import_observed_windows"] += 1
+                summary["mixed_export_windows"] += 1
+            elif has_export:
+                state = "export"
+                summary["export_windows"] += 1
+            else:
+                state = "idle"
+                summary["idle_windows"] += 1
+
+            if has_partial_coverage:
+                summary["partial_windows"] += 1
+            summary["import_wh"] += observed_grid_import_kwh * 1000.0
+            summary["export_wh"] += observed_grid_export_kwh * 1000.0
+
+            windows.append(
+                {
+                    "index": window_index + 1,
+                    "state": state,
+                    "is_future": False,
+                    "is_in_progress": is_in_progress,
+                    "is_complete": is_complete,
+                    "window_minutes": safe_window_minutes,
+                    "window_start_local": start_local.isoformat(),
+                    "window_end_local": end_local.isoformat(),
+                    "window_start_utc": start_local.astimezone(UTC).isoformat(),
+                    "window_end_utc": end_local.astimezone(UTC).isoformat(),
+                    "observed_end_local": observed_end_local.isoformat(),
+                    "samples": samples,
+                    "expected_samples": expected_samples,
+                    "coverage_ratio": round(coverage_ratio, 4) if expected_samples > 0 else None,
+                    "grid_import_kwh": round(observed_grid_import_kwh, 5),
+                    "grid_import_wh": round(observed_grid_import_kwh * 1000.0, 2),
+                    "grid_export_kwh": round(observed_grid_export_kwh, 5),
+                    "grid_export_wh": round(observed_grid_export_kwh * 1000.0, 2),
+                    "has_import": has_import,
+                    "has_export": has_export,
+                    "breaks_zero_import": has_import,
+                    "has_partial_coverage": has_partial_coverage,
+                }
+            )
+
+        items.append(
+            {
+                "date_local": day_local.isoformat(),
+                "is_today": day_local == anchor_day,
+                "window_count": window_count_per_day,
+                "summary": {
+                    "import_windows": int(summary["import_windows"]),
+                    "mixed_export_windows": int(summary["mixed_export_windows"]),
+                    "import_observed_windows": int(summary["import_observed_windows"]),
+                    "export_windows": int(summary["export_windows"]),
+                    "idle_windows": int(summary["idle_windows"]),
+                    "no_data_windows": int(summary["no_data_windows"]),
+                    "pending_windows": int(summary["pending_windows"]),
+                    "partial_windows": int(summary["partial_windows"]),
+                    "import_wh": round(summary["import_wh"], 2),
+                    "export_wh": round(summary["export_wh"], 2),
+                },
+                "windows": windows,
+            }
+        )
+
+    return {
+        "system": system,
+        "timezone": getattr(local_tz, "key", None) or str(local_tz),
+        "days": safe_days,
+        "window_start_hour": int(window_start_hour),
+        "window_end_hour": int(window_end_hour),
+        "window_minutes": safe_window_minutes,
+        "window_count_per_day": window_count_per_day,
+        "anchor_day_local": anchor_day.isoformat(),
+        "updated_at": effective_now_utc.isoformat(),
+        "items": items,
+    }

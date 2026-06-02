@@ -70,6 +70,7 @@ from app.persistence import (
     list_active_notification_entries,
     list_database_table_rows,
     list_database_tables,
+    list_zero_hero_window_history,
     list_time_window_rule_state_rows,
     list_realtime_kv_rows,
     list_samples,
@@ -12523,6 +12524,35 @@ async def storage_samples(
         end_at_utc=end_at,
         page=page,
         page_size=page_size,
+    )
+
+
+@app.get("/api/storage/zero-hero-window-history")
+async def storage_zero_hero_window_history(
+    system: str = Query(default="combined", description="saj, solplanet, or combined"),
+    days: int = Query(default=7, ge=1, le=14),
+    day_local: str | None = Query(default=None, description="Local day in YYYY-MM-DD"),
+) -> dict[str, object]:
+    normalized = _normalize_system_name(system)
+    now_local, timezone_name = _tesla_grid_support_now_local()
+    anchor_day_local = now_local.date()
+    if day_local:
+        try:
+            anchor_day_local = date.fromisoformat(day_local)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid day_local format, expected YYYY-MM-DD") from exc
+    return await asyncio.to_thread(
+        list_zero_hero_window_history,
+        storage_db_path,
+        system=normalized,
+        days=days,
+        sample_interval_seconds=_sample_interval_for_system(normalized),
+        local_timezone_name=timezone_name,
+        recent_day_anchor_local=anchor_day_local,
+        now_utc=datetime.now(UTC),
+        window_start_hour=EXPORT_WINDOW_START_HOUR,
+        window_end_hour=EXPORT_WINDOW_END_HOUR,
+        window_minutes=ZERO_HERO_WINDOW_MINUTES,
     )
 
 
