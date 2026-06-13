@@ -2087,7 +2087,6 @@ const SOLPLANET_DASHBOARD_FIELD_MAP = {
 };
 const stateCache = {
   lastSummary: readCachedDashboardSummary(),
-  lastDashboardNotifications: null,
   lastTimeWindowRules: null,
   lastCollectorStatus: null,
   lastNotificationSummary: null,
@@ -2361,7 +2360,6 @@ let autoRefreshTimerId = null;
 let autoRefreshSeconds = getAutoRefreshSeconds();
 let sajControlLastEditAt = 0;
 let solplanetControlBusy = false;
-const dashboardNotificationDismissBusy = new Set();
 let summaryRequestId = 0;
 let configReady = false;
 let samplingChart = null;
@@ -5350,19 +5348,6 @@ function formatEnergyReferenceValue(value) {
   return `${formatTrimmedDecimal(numeric, 1)} kWh`;
 }
 
-function formatPowerReferenceValue(value) {
-  const numeric = toFiniteNumber(value);
-  if (numeric === null) return t("overnightEnergyReferenceUnavailable");
-  return `${formatTrimmedDecimal(numeric, 0)} W`;
-}
-
-function formatEnergyReferenceTarget(target) {
-  if (!target) return "-";
-  const dt = new Date(target);
-  if (Number.isNaN(dt.getTime())) return "-";
-  return dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
 function getMobileFlowDirectionState(kind, value) {
   const numeric = toFiniteNumber(value);
   if (numeric === null) return { text: t("mobileDashboardFlowDirectionOffline"), tone: "" };
@@ -5404,68 +5389,6 @@ function renderMobileFlowStep({ title, valueHtml, stateText, stateTone = "", row
     `</summary>` +
     `<div class="mobile-flow-step-body">${rows.join("")}</div>` +
     `</details>`
-  );
-}
-
-function renderOvernightEnergyReference(combinedFlow) {
-  const reference = overnightEnergyReferenceFromCombinedFlow(combinedFlow);
-  const usableBatteryKwh = toFiniteNumber(reference?.usable_battery_total_kwh);
-  const updatedAtText = formatDateTimeWithAgo(reference?.updated_at_local || combinedFlow?.updated_at);
-  setText("overnightEnergyReferenceUpdatedAt", `${t("updatedAt")}: ${updatedAtText}`);
-  setText("overnightEnergyReferenceUsableBatteryValue", formatEnergyReferenceValue(usableBatteryKwh));
-
-  const projections = reference?.projections || {};
-  const projectionEntries = [
-    ["next8", projections?.next_8am || null],
-    ["next11", projections?.next_11am || null],
-  ];
-  for (const [prefix, projection] of projectionEntries) {
-    const targetLabel = projection?.target_at_local
-      ? t("overnightEnergyReferenceTargetLabel", { time: formatEnergyReferenceTarget(projection.target_at_local) })
-      : t("overnightEnergyReferenceUnavailable");
-    setText(`overnightEnergyReference${prefix}Title`, targetLabel);
-    setText(
-      `overnightEnergyReference${prefix}Badge`,
-      projection?.reference_only ? t("overnightEnergyReferenceReferenceOnly") : "",
-    );
-    setText(
-      `overnightEnergyReference${prefix}Avg3d`,
-      formatEnergyReferenceValue(projection?.averages?.days_3?.average_home_load_kwh),
-    );
-    setText(
-      `overnightEnergyReference${prefix}Avg7d`,
-      formatEnergyReferenceValue(projection?.averages?.days_7?.average_home_load_kwh),
-    );
-    setText(
-      `overnightEnergyReference${prefix}Left3d`,
-      formatEnergyReferenceValue(projection?.estimated_remaining_battery_kwh?.days_3),
-    );
-    setText(
-      `overnightEnergyReference${prefix}Left7d`,
-      formatEnergyReferenceValue(projection?.estimated_remaining_battery_kwh?.days_7),
-    );
-  }
-
-  const pumpScenario = reference?.pool_pump_scenarios?.night_11pm_to_5am || null;
-  setText(
-    "overnightEnergyReferencePumpScenarioBadge",
-    pumpScenario?.using_assumed_power ? t("overnightEnergyReferenceAssumedPower") : "",
-  );
-  setText(
-    "overnightEnergyReferencePumpPowerValue",
-    formatPowerReferenceValue(pumpScenario?.pool_pump_power_w),
-  );
-  setText(
-    "overnightEnergyReferencePumpEnergyValue",
-    formatEnergyReferenceValue(pumpScenario?.pool_pump_energy_kwh),
-  );
-  setText(
-    "overnightEnergyReferencePumpLeft3d",
-    formatEnergyReferenceValue(pumpScenario?.averages?.days_3?.estimated_remaining_battery_kwh),
-  );
-  setText(
-    "overnightEnergyReferencePumpLeft7d",
-    formatEnergyReferenceValue(pumpScenario?.averages?.days_7?.estimated_remaining_battery_kwh),
   );
 }
 
@@ -6295,20 +6218,13 @@ function renderSummary(payload) {
     quality: getFlowQuality(combinedFlow, Number(combinedCount) || 0),
     count: Number(combinedCount) || 0,
   });
-  renderDashboardNotifications(stateCache.lastDashboardNotifications);
   renderCombinedEnergyFlow(combinedFlow, tesla, poolPump);
-  renderOvernightEnergyReference(combinedFlow);
 }
 
 function dashboardNotificationLevelText(level) {
   if (level === "alarm") return t("dashboardNotificationLevelAlarm");
   if (level === "warning") return t("dashboardNotificationLevelWarning");
   return t("dashboardNotificationLevelInfo");
-}
-
-function dashboardNotificationStateText(state) {
-  if (state === "dismissed") return t("dashboardNotificationStateDismissed");
-  return t("dashboardNotificationStateNotified");
 }
 
 function notificationMatrixRuleKindText(kind) {
@@ -6413,61 +6329,6 @@ function isTimeWindowRuleEnabled(ruleCode) {
 function isTimeWindowRuleEditable(ruleCode) {
   const item = getTimeWindowRuleStateItem(ruleCode);
   return item?.editable !== false;
-}
-
-function renderDashboardNotifications(payload) {
-  const section = document.getElementById("dashboardNotificationsSection");
-  const list = document.getElementById("dashboardNotificationsList");
-  if (!section || !list) return;
-  if (isMobileDashboardLayout()) {
-    section.classList.add("hidden");
-    list.innerHTML = "";
-    return;
-  }
-  const items = Array.isArray(payload?.items) ? payload.items : [];
-  section.classList.toggle("hidden", items.length === 0);
-  setText("dashboardNotificationsUpdatedAt", formatUpdatedAt(payload?.updated_at || null));
-  list.innerHTML = "";
-  for (const item of items) {
-    const article = document.createElement("article");
-    const level = String(item?.level || "info").trim().toLowerCase();
-    const notificationKey = String(item?.notification_key || "");
-    article.className = `dashboard-notification-item level-${escapeHtml(level)}`;
-    const dismissBusy = dashboardNotificationDismissBusy.has(notificationKey);
-    article.innerHTML = `
-      <div class="dashboard-notification-main">
-        <div class="dashboard-notification-topline">
-          <span class="dashboard-notification-state">${escapeHtml(dashboardNotificationStateText(String(item?.state || "active").trim().toLowerCase()))}</span>
-          <span class="dashboard-notification-level">${escapeHtml(dashboardNotificationLevelText(level))}</span>
-        </div>
-        <p class="dashboard-notification-message">${escapeHtml(String(item?.message || "-"))}</p>
-        <div class="dashboard-notification-meta">
-          ${escapeHtml(
-            t("dashboardNotificationMeta", {
-              window: String(item?.window || "-"),
-              trigger: String(item?.trigger_text || "-"),
-              time: formatDateTimeWithAgo(item?.requested_at_utc || null),
-            }),
-          )}
-        </div>
-      </div>
-      <button
-        class="dashboard-notification-dismiss"
-        type="button"
-        aria-label="${escapeHtml(t("dashboardNotificationDismiss"))}"
-        title="${escapeHtml(t("dashboardNotificationDismiss"))}"
-        ${dismissBusy ? "disabled" : ""}
-      >&times;</button>
-    `;
-    const dismissButton = article.querySelector(".dashboard-notification-dismiss");
-    if (dismissButton) {
-      dismissButton.addEventListener("click", (event) => {
-        event.stopPropagation();
-        void dismissDashboardNotification(notificationKey);
-      });
-    }
-    list.appendChild(article);
-  }
 }
 
 function renderNotificationMatrixPriorityCard() {
@@ -7487,32 +7348,6 @@ function formatNotificationDelta(current, threshold, kind) {
   if (!Number.isFinite(Number(current)) || !Number.isFinite(Number(threshold))) return "";
   const diff = Math.abs(Number(threshold) - Number(current));
   return formatNotificationValue(kind, diff);
-}
-
-async function dismissDashboardNotification(notificationKey) {
-  const normalizedKey = String(notificationKey || "").trim();
-  if (!normalizedKey || dashboardNotificationDismissBusy.has(normalizedKey)) return;
-  dashboardNotificationDismissBusy.add(normalizedKey);
-  renderDashboardNotifications(stateCache.lastDashboardNotifications);
-  try {
-    await fetchJson("/api/dashboard/notifications/dismiss", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ notification_key: normalizedKey }),
-      timeoutMs: 8000,
-    });
-    const current = stateCache.lastDashboardNotifications || { items: [], updated_at: null };
-    stateCache.lastDashboardNotifications = {
-      ...current,
-      items: (Array.isArray(current.items) ? current.items : []).filter((item) => item?.notification_key !== normalizedKey),
-      updated_at: new Date().toISOString(),
-    };
-  } catch (err) {
-    window.alert(String(err));
-  } finally {
-    dashboardNotificationDismissBusy.delete(normalizedKey);
-    renderDashboardNotifications(stateCache.lastDashboardNotifications);
-  }
 }
 
 async function updateTimeWindowRuleState(ruleCode, enabled) {
@@ -12794,7 +12629,6 @@ async function loadSummary() {
   const baseResults = await Promise.allSettled([
     fetchJson("/api/collector/status", { timeoutMs: 6000 }),
     fetchJson("/api/saj/control/profile", { timeoutMs: 8000 }),
-    fetchJson("/api/dashboard/notifications", { timeoutMs: 8000 }),
     fetchJson("/api/time-window-rules", { timeoutMs: 8000 }),
     loadWeatherForecast(),
   ]);
@@ -12811,10 +12645,7 @@ async function loadSummary() {
     setText("sajProfileStatusText", t("sajProfileLoadFailed", { error: String(baseResults[1].reason) }));
   }
   if (baseResults[2].status === "fulfilled") {
-    stateCache.lastDashboardNotifications = baseResults[2].value;
-  }
-  if (baseResults[3].status === "fulfilled") {
-    stateCache.lastTimeWindowRules = baseResults[3].value;
+    stateCache.lastTimeWindowRules = baseResults[2].value;
   }
   renderSummary(summary);
 }
