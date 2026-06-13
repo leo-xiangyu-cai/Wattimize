@@ -447,6 +447,7 @@ solplanet_context_cache: dict[str, object] = {"payload": None, "at_monotonic": 0
 solplanet_context_lock = asyncio.Lock()
 runtime_lock = asyncio.Lock()
 db_recovery_lock = asyncio.Lock()
+window_control_lock = asyncio.Lock()
 db_recovery_state: dict[str, object] = {
     "in_progress": False,
     "last_attempt_at": None,
@@ -457,6 +458,8 @@ db_recovery_state: dict[str, object] = {
 }
 collector_task: asyncio.Task[None] | None = None
 collector_stop_event = asyncio.Event()
+export_window_fast_guard_task: asyncio.Task[None] | None = None
+export_window_fast_guard_stop_event = asyncio.Event()
 worker_log_cleanup_task: asyncio.Task[None] | None = None
 worker_log_cleanup_stop_event = asyncio.Event()
 storage_db_path = Path(os.getenv("WATTIMIZE_DB_PATH", "").strip() or DEFAULT_DB_PATH)
@@ -470,6 +473,8 @@ request_round_started_at_ctx: ContextVar[str | None] = ContextVar("request_round
 sample_interval_seconds = float(settings.saj_sample_interval_seconds)
 solplanet_sample_interval_seconds = float(settings.solplanet_sample_interval_seconds)
 COLLECTOR_ROUND_SLEEP_SECONDS = 60.0
+EXPORT_WINDOW_FAST_GUARD_INTERVAL_SECONDS = 5.0
+EXPORT_WINDOW_FAST_GUARD_IDLE_SLEEP_SECONDS = COLLECTOR_ROUND_SLEEP_SECONDS
 ENDPOINT_BACKOFF_MAX_SKIP_ROUNDS = 8
 SOLPLANET_ENDPOINTS: tuple[str, ...] = (
     "getdevdata_device_2",
@@ -479,6 +484,15 @@ SOLPLANET_ENDPOINTS: tuple[str, ...] = (
 SAJ_ENDPOINTS: tuple[str, ...] = ("home_assistant_all_states",)
 collector_round_number = 0
 collector_next_due_monotonic: dict[str, float] = {system: 0.0 for system in POLLED_SYSTEMS}
+export_window_fast_guard_state: dict[str, object] = {
+    "blocked": False,
+    "reasons": [],
+    "signal": None,
+    "updated_at_utc": None,
+    "blocked_at_utc": None,
+    "released_at_utc": None,
+    "source": "solplanet_home_assistant_fast_guard",
+}
 collector_status: dict[str, dict[str, object]] = {
     "saj": {
         "in_progress": False,
@@ -5864,6 +5878,235 @@ def _tesla_observation_charge_state(observation: dict[str, object]) -> dict[str,
     }
 
 
+def _export_window_fast_guard_snapshot() -> dict[str, object]:
+    snapshot = dict(export_window_fast_guard_state)
+    reasons = snapshot.get("reasons")
+    snapshot["reasons"] = list(reasons) if isinstance(reasons, list) else []
+    signal = snapshot.get("signal")
+    snapshot["signal"] = dict(signal) if isinstance(signal, dict) else None
+    return snapshot
+
+
+def _set_export_window_fast_guard_block(
+    blocked: bool,
+    *,
+    reasons: list[str] | None = None,
+    signal: dict[str, object] | None = None,
+) -> dict[str, object]:
+    now_utc = datetime.now(UTC).isoformat()
+    normalized_reasons = [
+        str(reason).strip()
+        for reason in (reasons or [])
+        if str(reason).strip()
+    ]
+    was_blocked = bool(export_window_fast_guard_state.get("blocked"))
+    export_window_fast_guard_state["blocked"] = blocked
+    export_window_fast_guard_state["reasons"] = normalized_reasons if blocked else []
+    export_window_fast_guard_state["signal"] = dict(signal) if isinstance(signal, dict) else None
+    export_window_fast_guard_state["updated_at_utc"] = now_utc
+    if blocked:
+        if not was_blocked:
+            export_window_fast_guard_state["blocked_at_utc"] = now_utc
+    elif was_blocked:
+        export_window_fast_guard_state["released_at_utc"] = now_utc
+    return _export_window_fast_guard_snapshot()
+
+
+async def _run_midday_window_check_serialized(
+    combined_flow: dict[str, object] | None,
+    tesla_observation_result: dict[str, object] | None,
+    *,
+    round_id: str | None = None,
+    requested_at_utc: str | None = None,
+) -> dict[str, object]:
+    async with window_control_lock:
+        return await _run_midday_window_check(
+            combined_flow,
+            tesla_observation_result,
+            round_id=round_id,
+            requested_at_utc=requested_at_utc,
+        )
+
+
+def _export_window_fast_guard_sleep_seconds() -> float:
+    now_local, _ = _tesla_grid_support_now_local()
+    if _tesla_midday_window_mode(now_local) == "export_window":
+        return EXPORT_WINDOW_FAST_GUARD_INTERVAL_SECONDS
+    return EXPORT_WINDOW_FAST_GUARD_IDLE_SLEEP_SECONDS
+
+
+async def _run_export_window_fast_guard(
+    *,
+    requested_at_utc: str | None = None,
+) -> dict[str, object]:
+    requested_at_utc = str(requested_at_utc or "").strip() or datetime.now(UTC).isoformat()
+    started_monotonic = monotonic()
+    now_local, timezone_name = _tesla_grid_support_now_local()
+    window_mode = _tesla_midday_window_mode(now_local)
+    result: dict[str, object] = {
+        "executed_at_utc": datetime.now(UTC).isoformat(),
+        "requested_at_utc": requested_at_utc,
+        "evaluated_at_local": now_local.isoformat(),
+        "timezone": timezone_name,
+        "window_mode": window_mode,
+        "window_active": window_mode != "off",
+        "export_window_active": window_mode == "export_window",
+        "interval_seconds": EXPORT_WINDOW_FAST_GUARD_INTERVAL_SECONDS,
+        "source": {
+            "type": "solplanet_home_assistant_fast_guard",
+            "saj_assumption": (
+                "export_window_saj_fixed_discharge_target_"
+                f"{int(round(EXPORT_WINDOW_BATTERY_SOFT_DISCHARGE_TARGET_W))}w"
+            ),
+            "solplanet_signal_source": "home_assistant",
+        },
+    }
+    status = "noop"
+
+    if window_mode != "export_window":
+        result["fast_guard_state"] = _set_export_window_fast_guard_block(False)
+        result["status"] = "outside_window"
+        result["action"] = {"type": "noop", "reason": "outside_export_window"}
+        result["decision_reason"] = "outside_export_window"
+        result["duration_ms"] = round((monotonic() - started_monotonic) * 1000, 1)
+        return result
+
+    _ensure_ha_configured()
+    tesla_auto_control_enabled, pool_pump_auto_control_enabled = await asyncio.gather(
+        _load_tesla_auto_control_enabled(),
+        _load_pool_pump_auto_control_enabled(),
+    )
+    result["tesla_auto_control_enabled"] = tesla_auto_control_enabled
+    result["pool_pump_auto_control_enabled"] = pool_pump_auto_control_enabled
+
+    states = await ha_client.all_states()
+    solplanet_flow = _build_energy_flow_payload("solplanet", states)
+    tesla_observation = _build_tesla_observation_payload(states)
+    charge_state = _tesla_observation_charge_state(tesla_observation)
+    result["tesla_state_before"] = charge_state
+
+    metrics = solplanet_flow.get("metrics")
+    metrics_map = metrics if isinstance(metrics, dict) else {}
+    grid_w = _to_number(metrics_map.get("grid_w"))
+    battery_w = _to_number(metrics_map.get("battery_w"))
+    battery_soc_percent = _to_number(metrics_map.get("battery_soc_percent"))
+    current_grid_import_w = max(float(grid_w), 0.0) if grid_w is not None else None
+    current_grid_export_w = max(-float(grid_w), 0.0) if grid_w is not None else None
+    battery_discharge_w = max(float(battery_w), 0.0) if battery_w is not None else None
+    export_signal_active = bool(
+        current_grid_export_w is not None
+        and current_grid_export_w >= TESLA_SOLAR_SURPLUS_MIN_EXPORT_W
+    )
+    fast_guard_signal = {
+        "solplanet_updated_at": solplanet_flow.get("updated_at"),
+        "grid_w": round(float(grid_w), 1) if grid_w is not None else None,
+        "grid_import_w": round(current_grid_import_w, 1) if current_grid_import_w is not None else None,
+        "grid_export_w": round(current_grid_export_w, 1) if current_grid_export_w is not None else None,
+        "battery_w": round(float(battery_w), 1) if battery_w is not None else None,
+        "battery_discharge_w": round(battery_discharge_w, 1) if battery_discharge_w is not None else None,
+        "battery_soc_percent": battery_soc_percent,
+        "min_export_signal_w": TESLA_SOLAR_SURPLUS_MIN_EXPORT_W,
+        "export_signal_active": export_signal_active,
+        "grid_source": metrics_map.get("grid_source"),
+        "battery_source": metrics_map.get("battery_source"),
+    }
+    result["solplanet_fast_guard"] = fast_guard_signal
+
+    hard_guard_reasons: list[str] = []
+    if grid_w is None:
+        hard_guard_reasons.append("solplanet_grid_unavailable")
+    elif float(grid_w) > 0.0:
+        hard_guard_reasons.append("solplanet_grid_import_started")
+    elif not export_signal_active:
+        hard_guard_reasons.append("solplanet_export_signal_lost")
+    if (
+        battery_discharge_w is not None
+        and battery_discharge_w > EXPORT_WINDOW_BATTERY_HARD_DISCHARGE_LIMIT_W + BALANCE_TOLERANCE_W
+    ):
+        hard_guard_reasons.append("solplanet_battery_discharge_limit_exceeded")
+
+    async with window_control_lock:
+        if not hard_guard_reasons:
+            result["fast_guard_state"] = _set_export_window_fast_guard_block(
+                False,
+                signal=fast_guard_signal,
+            )
+            result["status"] = "noop"
+            result["decision_reason"] = "solplanet_export_signal_healthy"
+            result["action"] = {"type": "noop", "reason": "solplanet_export_signal_healthy"}
+            result["duration_ms"] = round((monotonic() - started_monotonic) * 1000, 1)
+            return result
+
+        result["fast_guard_state"] = _set_export_window_fast_guard_block(
+            True,
+            reasons=hard_guard_reasons,
+            signal=fast_guard_signal,
+        )
+        result["decision"] = {
+            "mode": "shed_interruptible_loads",
+            "charge_current_amps": 0,
+            "predicted_grid_w": round(float(grid_w), 1) if grid_w is not None else None,
+            "reasons": hard_guard_reasons,
+        }
+        result["decision_reason"] = "export_window_fast_guard_triggered"
+
+        charging_enabled = bool(charge_state.get("enabled"))
+        charge_requested_enabled = bool(charge_state.get("requested_enabled"))
+        if tesla_auto_control_enabled and (charging_enabled or charge_requested_enabled):
+            await _tesla_set_charging(False)
+            _append_worker_action(result, {"type": "stop_charging", "reason": "export_window_fast_guard"})
+
+        if pool_pump_auto_control_enabled:
+            pool_pump_state = _build_pool_pump_state(await _pool_pump_states_by_id())
+            result["pool_pump_state_before"] = pool_pump_state
+            control_map = (
+                pool_pump_state.get("control")
+                if isinstance(pool_pump_state.get("control"), dict)
+                else {}
+            )
+            if bool(control_map.get("enabled")):
+                await _pool_pump_set_enabled(False)
+                _append_worker_action(result, {"type": "stop_pool_pump", "reason": "export_window_fast_guard"})
+
+    if _worker_action_list(result):
+        status = "applied"
+    else:
+        result["action"] = {"type": "noop", "reason": "export_window_fast_guard_no_auto_loads"}
+    result["status"] = status
+    result["duration_ms"] = round((monotonic() - started_monotonic) * 1000, 1)
+    return result
+
+
+async def _export_window_fast_guard_loop() -> None:
+    combined_status = collector_status.setdefault("combined", {})
+    combined_status["export_window_fast_guard_interval_seconds"] = EXPORT_WINDOW_FAST_GUARD_INTERVAL_SECONDS
+    while not export_window_fast_guard_stop_event.is_set():
+        combined_status["export_window_fast_guard_in_progress"] = True
+        try:
+            fast_guard_result = await _run_export_window_fast_guard()
+            combined_status["last_export_window_fast_guard"] = fast_guard_result
+            combined_status["last_export_window_fast_guard_success_at"] = datetime.now(UTC).isoformat()
+        except Exception as fast_guard_exc:  # noqa: BLE001
+            _append_worker_failure_log(
+                "combined",
+                stage="export_window_fast_guard",
+                error=fast_guard_exc,
+            )
+            combined_status["last_export_window_fast_guard"] = {
+                "error": f"{type(fast_guard_exc).__name__}: {fast_guard_exc}",
+                "executed_at_utc": datetime.now(UTC).isoformat(),
+            }
+            combined_status["last_export_window_fast_guard_error_at"] = datetime.now(UTC).isoformat()
+        finally:
+            combined_status["export_window_fast_guard_in_progress"] = False
+        try:
+            await asyncio.wait_for(
+                export_window_fast_guard_stop_event.wait(),
+                timeout=_export_window_fast_guard_sleep_seconds(),
+            )
+        except asyncio.TimeoutError:
+            continue
+
 
 async def _run_midday_window_check(
     combined_flow: dict[str, object] | None,
@@ -6552,7 +6795,16 @@ async def _run_midday_window_check(
                 "power_w": round(pump_power_w, 1),
             }
 
+            fast_guard_state = _export_window_fast_guard_snapshot()
+            export_window_map["fast_guard"] = fast_guard_state
             hard_guard_reasons: list[str] = []
+            fast_guard_reasons = fast_guard_state.get("reasons")
+            if bool(fast_guard_state.get("blocked")) and isinstance(fast_guard_reasons, list):
+                hard_guard_reasons.extend(
+                    str(reason).strip()
+                    for reason in fast_guard_reasons
+                    if str(reason).strip()
+                )
             if current_grid_import_w > 0.0:
                 hard_guard_reasons.append("grid_import_started")
             if battery2_discharge_w > EXPORT_WINDOW_BATTERY_HARD_DISCHARGE_LIMIT_W + BALANCE_TOLERANCE_W:
@@ -11978,7 +12230,7 @@ async def _collector_loop() -> None:
             saj_battery_watch_result: dict[str, object] | None = None
             pool_pump_overnight_result: dict[str, object] | None = None
             battery_full_notification_result: dict[str, object] | None = None
-            midday_window_result = await _run_midday_window_check(
+            midday_window_result = await _run_midday_window_check_serialized(
                 round_results.get("combined", {}).get("flow") if isinstance(round_results.get("combined"), dict) else None,
                 tesla_observation_result,
                 round_id=round_id,
@@ -12167,11 +12419,13 @@ async def _start_collector() -> None:
         collector_next_due_monotonic[system] = 0.0
     collector_stop_event.clear()
     collector_task = asyncio.create_task(_collector_loop())
+    await _start_export_window_fast_guard()
 
 
 async def _stop_collector() -> None:
     global collector_task  # noqa: PLW0603
     collector_stop_event.set()
+    await _stop_export_window_fast_guard()
     if collector_task:
         collector_task.cancel()
         try:
@@ -12182,6 +12436,26 @@ async def _stop_collector() -> None:
     for system in SUPPORTED_SYSTEMS:
         status = collector_status.setdefault(system, {})
         status["in_progress"] = False
+
+
+async def _start_export_window_fast_guard() -> None:
+    global export_window_fast_guard_task  # noqa: PLW0603
+    if export_window_fast_guard_task and not export_window_fast_guard_task.done():
+        return
+    export_window_fast_guard_stop_event.clear()
+    export_window_fast_guard_task = asyncio.create_task(_export_window_fast_guard_loop())
+
+
+async def _stop_export_window_fast_guard() -> None:
+    global export_window_fast_guard_task  # noqa: PLW0603
+    export_window_fast_guard_stop_event.set()
+    if export_window_fast_guard_task:
+        export_window_fast_guard_task.cancel()
+        try:
+            await export_window_fast_guard_task
+        except asyncio.CancelledError:
+            pass
+        export_window_fast_guard_task = None
 
 
 async def _prune_worker_api_logs_once() -> int:
