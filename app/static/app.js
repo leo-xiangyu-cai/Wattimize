@@ -189,7 +189,7 @@ const I18N = {
     notificationMatrixConditionTeslaOvernightReserve: "Solplanet SOC > 10% overnight reserve",
     notificationMatrixConditionTeslaOvernightBudget: "Available for Tesla",
     notificationMatrixConditionTeslaOvernightBatteryTotal: "Usable battery (both)",
-    notificationMatrixConditionTeslaOvernightHomeLoad: "Home load to 8am",
+    notificationMatrixConditionTeslaOvernightHomeLoad: "Home load to 11am",
     notificationMatrixConditionTeslaOvernightPumpLoad: "Pool pump to 5am",
     notificationMatrixConditionTeslaOvernightChargeState: "Charging state",
     notificationMatrixConditionTeslaOvernightLastAction: "Last adjustment",
@@ -248,7 +248,7 @@ const I18N = {
     notificationRuleTeslaAfterFreePeakTitle: "Tesla charging keeps following Solplanet SOC during Climb Window",
     notificationRuleTeslaAfterFreePeakTrigger: "Start when Solplanet SOC reaches 95%, stop when it falls below 90%, otherwise hold the current state.",
     notificationRuleTeslaOvernightShoulderTitle: "Tesla charging follows Fuel Window energy budget",
-    notificationRuleTeslaOvernightShoulderTrigger: "During 23:00-11:00, start Tesla charging when projected battery minus home load to 8am minus pool pump to 5am is above 1.0 kWh; stop when that budget is exhausted.",
+    notificationRuleTeslaOvernightShoulderTrigger: "During 23:00-11:00, start Tesla charging when projected battery minus home load to 11am minus pool pump to 5am is above 1.0 kWh; stop when that budget is exhausted.",
     notificationRulePoolPumpOvernightTitle: "Pool pump uses Fuel Window battery budget",
     notificationRulePoolPumpOvernightTrigger: "During 23:00-05:00, estimate how long the pump can run from the overnight battery forecast, then use only 80% of that available runtime.",
     notificationRuleTeslaExportWindowTitle: "Tesla charging uses solar surplus during Hero Window",
@@ -1049,7 +1049,7 @@ const I18N = {
     notificationMatrixConditionTeslaOvernightReserve: "Solplanet SOC 高于 10% 夜间保底",
     notificationMatrixConditionTeslaOvernightBudget: "特斯拉可用电量",
     notificationMatrixConditionTeslaOvernightBatteryTotal: "两块电池总可用",
-    notificationMatrixConditionTeslaOvernightHomeLoad: "家庭负载到早上8点",
+    notificationMatrixConditionTeslaOvernightHomeLoad: "家庭负载到早上11点",
     notificationMatrixConditionTeslaOvernightPumpLoad: "水泵到早上5点",
     notificationMatrixConditionTeslaOvernightChargeState: "充电状态",
     notificationMatrixConditionTeslaOvernightLastAction: "上次调节",
@@ -1108,7 +1108,7 @@ const I18N = {
     notificationRuleTeslaAfterFreePeakTitle: "Climb 时段 Tesla 继续跟随 Solplanet SOC 规则",
     notificationRuleTeslaAfterFreePeakTrigger: "Solplanet SOC 到 95% 开始充，低于 90% 停止，区间内维持当前状态。",
     notificationRuleTeslaOvernightShoulderTitle: "Fuel 时段 Tesla 跟随电池预算规则",
-    notificationRuleTeslaOvernightShoulderTrigger: "23:00-次日11:00 期间，当两块电池总可用电量扣除到早上8点的家庭负载和到早上5点的水泵用电后仍超过 1.0 kWh 时允许 Tesla 充电；预算耗尽时停止。",
+    notificationRuleTeslaOvernightShoulderTrigger: "23:00-次日11:00 期间，当两块电池总可用电量扣除到早上11点的家庭负载和到早上5点的水泵用电后仍超过 1.0 kWh 时允许 Tesla 充电；预算耗尽时停止。",
     notificationRulePoolPumpOvernightTitle: "Fuel 时段按电池预算运行水泵",
     notificationRulePoolPumpOvernightTrigger: "23:00-05:00 期间，根据夜间电池预测算出水泵可运行时长，再只运行其中的 80%。",
     notificationRuleTeslaExportWindowTitle: "Hero 时段 Tesla 按太阳能富余充电",
@@ -7089,8 +7089,12 @@ function getNotificationMatrixTeslaOperationProgress(code, windowItem, currentWi
     const budget = source?.overnight_shoulder_tesla?.energy_budget;
     const availableKwh = Number(budget?.available_for_tesla_kwh);
     const batteryKwh = Number(budget?.usable_battery_total_kwh);
-    const homeLoadKwh = Number(budget?.projected_home_load_to_8am_kwh);
-    const homeHours = Number(budget?.home_load_hours_to_8am);
+    const homeLoadKwh = Number(
+      budget?.projected_home_load_to_target_kwh ?? budget?.projected_home_load_to_8am_kwh
+    );
+    const homeHours = Number(
+      budget?.home_load_hours_to_target ?? budget?.home_load_hours_to_8am
+    );
     const pumpKwh = Number(budget?.pool_pump_remaining_kwh);
     const pumpHours = Number(budget?.pool_pump_remaining_hours);
     const pumpPowerW = Number(budget?.pool_pump_power_w);

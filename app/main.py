@@ -199,6 +199,7 @@ POST_EXPORT_PEAK_WINDOW_START_HOUR = 20
 POST_EXPORT_PEAK_WINDOW_END_HOUR = 23
 OVERNIGHT_SHOULDER_WINDOW_START_HOUR = 23
 OVERNIGHT_SHOULDER_WINDOW_END_HOUR = 11
+OVERNIGHT_BUDGET_TARGET_HOUR = OVERNIGHT_SHOULDER_WINDOW_END_HOUR
 EXPORT_WINDOW_BATTERY_SOFT_DISCHARGE_TARGET_W = 7_500.0
 EXPORT_WINDOW_BATTERY_HARD_DISCHARGE_LIMIT_W = 10_000.0
 ZERO_HERO_WINDOW_MINUTES = 5
@@ -2440,6 +2441,13 @@ def _next_projection_target_local(now_local: datetime, target_hour: int) -> date
     return candidate
 
 
+def _projection_key_for_target_hour(target_hour: int) -> str:
+    normalized_hour = int(target_hour) % 24
+    suffix = "am" if normalized_hour < 12 else "pm"
+    hour_12 = normalized_hour % 12 or 12
+    return f"next_{hour_12}{suffix}"
+
+
 def _build_overnight_home_load_reference(
     *,
     now_local: datetime,
@@ -2673,6 +2681,9 @@ def _build_overnight_energy_reference(metrics: dict[str, object]) -> dict[str, o
             "days_7": _remaining_kwh(days_7 if isinstance(days_7, dict) else None),
         }
 
+    projection_key_8 = _projection_key_for_target_hour(8)
+    projection_key_11 = _projection_key_for_target_hour(11)
+    primary_projection_key = _projection_key_for_target_hour(OVERNIGHT_BUDGET_TARGET_HOUR)
     return {
         "usable_battery_total_kwh": usable_battery_total_kwh,
         "usable_battery_by_system_kwh": {
@@ -2682,13 +2693,13 @@ def _build_overnight_energy_reference(metrics: dict[str, object]) -> dict[str, o
         "updated_at_local": now_local.isoformat(),
         "timezone": timezone_name,
         "projections": {
-            "next_8am": {
+            projection_key_8: {
                 **(projection_to_8 or {}),
-                "reference_only": False,
+                "reference_only": projection_key_8 != primary_projection_key,
             },
-            "next_11am": {
+            projection_key_11: {
                 **(projection_to_11 or {}),
-                "reference_only": True,
+                "reference_only": projection_key_11 != primary_projection_key,
             },
         },
         "pool_pump_scenarios": {
@@ -7321,15 +7332,20 @@ async def _run_saj_battery_watch_check(
         energy_ref = _build_overnight_energy_reference(metrics_map)
         available_for_tesla_kwh: float | None = None
         shared_remaining_energy_kwh: float | None = None
-        shared_hours_to_8am: float | None = None
+        shared_hours_to_target: float | None = None
         shared_available_power_w: float | None = None
         if energy_ref is not None:
             usable_battery_total_kwh = _to_number(energy_ref.get("usable_battery_total_kwh"))
-            proj_8am = (energy_ref.get("projections") or {}).get("next_8am") or {}
-            averages_8am = proj_8am.get("averages") or {}
-            days_3_avg = averages_8am.get("days_3") or {}
-            days_7_avg = averages_8am.get("days_7") or {}
-            home_load_kwh = _to_number(days_3_avg.get("average_home_load_kwh")) or _to_number(days_7_avg.get("average_home_load_kwh"))
+            budget_projection_key = _projection_key_for_target_hour(OVERNIGHT_BUDGET_TARGET_HOUR)
+            projections_map = energy_ref.get("projections") or {}
+            proj_target = projections_map.get(budget_projection_key) or {}
+            averages_target = proj_target.get("averages") or {}
+            days_3_avg = averages_target.get("days_3") or {}
+            days_7_avg = averages_target.get("days_7") or {}
+            home_load_kwh = (
+                _to_number(days_3_avg.get("average_home_load_kwh"))
+                or _to_number(days_7_avg.get("average_home_load_kwh"))
+            )
             pump_scenario = (energy_ref.get("pool_pump_scenarios") or {}).get("night_11pm_to_5am") or {}
             pump_power_w = _to_number(pump_scenario.get("pool_pump_power_w")) or POOL_PUMP_ASSUMED_POWER_W
             pump_end_local = datetime.combine(now_local.date(), time(hour=POOL_PUMP_OVERNIGHT_TARGET_END_HOUR), tzinfo=now_local.tzinfo)
@@ -7345,34 +7361,39 @@ async def _run_saj_battery_watch_check(
             pool_pump_remaining_kwh = round((pump_power_w * pump_remaining_hours) / 1000.0, 4)
             if usable_battery_total_kwh is not None and home_load_kwh is not None:
                 available_for_tesla_kwh = round(usable_battery_total_kwh - home_load_kwh - pool_pump_remaining_kwh, 4)
-            home_load_hours_to_8am = _to_number(proj_8am.get("hours_from_now"))
+            home_load_hours_to_target = _to_number(proj_target.get("hours_from_now"))
             remaining_candidates = [
                 value
                 for value in (
-                    _to_number((proj_8am.get("estimated_remaining_battery_kwh") or {}).get("days_3"))
-                    if isinstance(proj_8am.get("estimated_remaining_battery_kwh"), dict)
+                    _to_number((proj_target.get("estimated_remaining_battery_kwh") or {}).get("days_3"))
+                    if isinstance(proj_target.get("estimated_remaining_battery_kwh"), dict)
                     else None,
-                    _to_number((proj_8am.get("estimated_remaining_battery_kwh") or {}).get("days_7"))
-                    if isinstance(proj_8am.get("estimated_remaining_battery_kwh"), dict)
+                    _to_number((proj_target.get("estimated_remaining_battery_kwh") or {}).get("days_7"))
+                    if isinstance(proj_target.get("estimated_remaining_battery_kwh"), dict)
                     else None,
                 )
                 if value is not None
             ]
             shared_remaining_energy_kwh = min(remaining_candidates) if remaining_candidates else None
-            shared_hours_to_8am = home_load_hours_to_8am
+            shared_hours_to_target = home_load_hours_to_target
             if (
                 shared_remaining_energy_kwh is not None
-                and shared_hours_to_8am is not None
-                and shared_hours_to_8am > 0
+                and shared_hours_to_target is not None
+                and shared_hours_to_target > 0
             ):
                 shared_available_power_w = max(
-                    (shared_remaining_energy_kwh / shared_hours_to_8am) * 1000.0,
+                    (shared_remaining_energy_kwh / shared_hours_to_target) * 1000.0,
                     0.0,
                 )
             result["overnight_shoulder_tesla"]["energy_budget"] = {
+                "projection_target_hour": OVERNIGHT_BUDGET_TARGET_HOUR,
                 "usable_battery_total_kwh": usable_battery_total_kwh,
-                "projected_home_load_to_8am_kwh": home_load_kwh,
-                "home_load_hours_to_8am": round(home_load_hours_to_8am, 2) if home_load_hours_to_8am is not None else None,
+                "projected_home_load_to_target_kwh": home_load_kwh,
+                "home_load_hours_to_target": (
+                    round(home_load_hours_to_target, 2)
+                    if home_load_hours_to_target is not None
+                    else None
+                ),
                 "pool_pump_power_w": pump_power_w,
                 "pool_pump_remaining_hours": round(pump_remaining_hours, 2),
                 "pool_pump_remaining_kwh": pool_pump_remaining_kwh,
@@ -7541,7 +7562,8 @@ async def _run_saj_battery_watch_check(
         }
         result["overnight_allocation"] = {
             "available_device_energy_kwh": round(shared_remaining_energy_kwh, 4) if shared_remaining_energy_kwh is not None else None,
-            "hours_to_8am": round(shared_hours_to_8am, 2) if shared_hours_to_8am is not None else None,
+            "target_hour": OVERNIGHT_BUDGET_TARGET_HOUR,
+            "hours_to_target": round(shared_hours_to_target, 2) if shared_hours_to_target is not None else None,
             "available_device_power_w": round(shared_available_power_w, 1) if shared_available_power_w is not None else None,
             "remaining_unallocated_power_w": round(remaining_alloc_power_w, 1),
             "order": allocation_order,
@@ -7902,7 +7924,7 @@ async def _run_pool_pump_overnight_control_check(
         )
         scenario_map = scenario if isinstance(scenario, dict) else {}
         base_projection = (
-            (reference or {}).get("projections", {}).get("next_8am")
+            (reference or {}).get("projections", {}).get(_projection_key_for_target_hour(OVERNIGHT_BUDGET_TARGET_HOUR))
             if isinstance((reference or {}).get("projections"), dict)
             else None
         )
