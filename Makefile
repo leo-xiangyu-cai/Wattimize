@@ -1,4 +1,7 @@
-.PHONY: help docker docker-load inspect status dev dev-stop dev-logs dev-down nas-stop nas-deploy
+.PHONY: help docker docker-load inspect status dev dev-stop dev-logs dev-down nas-stop nas-deploy test-tnas
+
+TEST_SIZE_MB ?= 64
+PING_COUNT ?= 10
 
 IMAGE = wattimize
 TAG = amd64-latest
@@ -21,6 +24,7 @@ help:
 	@echo "  make dev-down    Stop local docker compose services"
 	@echo "  make nas-stop    Stop the NAS container without touching local services"
 	@echo "  make nas-deploy  Build and deploy to TerraMaster NAS over SSH"
+	@echo "  make test-tnas   Test NAS latency, packet loss, upload speed, and download speed"
 
 docker:
 	@mkdir -p $(OUTPUT_DIR)
@@ -69,3 +73,6 @@ nas-stop:
 
 nas-deploy:
 	bash ./scripts/deploy-nas.sh
+
+test-tnas:
+	TNAS_TEST_SIZE_MB="$(TEST_SIZE_MB)" TNAS_PING_COUNT="$(PING_COUNT)" bash ./scripts/test-tnas.sh

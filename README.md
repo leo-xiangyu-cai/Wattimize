@@ -145,6 +145,26 @@ Supported overrides for `make nas-deploy`:
 - `NAS_DATA_DIR`, `HOST_PORT`, `CONTAINER_PORT`, `TZ_VALUE`
 - `DOCKER_BIN`, `RETENTION_DAYS`
 
+Test the actual SSH and NAS storage path used by deployments:
+
+```bash
+make test-tnas
+```
+
+The test displays live ping replies and transfer progress, then prints a summary
+of packet loss, latency, jitter, upload speed, and download speed. It uploads and
+downloads a random 64 MiB temporary file through the same SSH and NAS storage path
+used by deployment. The round trip is SHA-256 verified, and both local and NAS
+temporary files are removed automatically. Increase the sample size or ping count
+when investigating intermittent performance:
+
+```bash
+make test-tnas TEST_SIZE_MB=256 PING_COUNT=30
+```
+
+The same `NAS_HOST`, `NAS_PORT`, `NAS_USER`, `SSH_KEY`, and `NAS_DATA_DIR`
+overrides supported by NAS deployment are also supported by this test.
+
 First-run configuration:
 - Open `http://NAS_IP:18000/`.
 - If config is missing, the page shows a config dialog.
