@@ -5666,6 +5666,13 @@ async def _run_pool_pump_free_energy_control_check(
         switch_action_applied: str | None = None
         switch_reason_applied: str | None = None
 
+        if not rule_enabled:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "rule_disabled"}
+            result["decision_reason"] = "rule_disabled"
+            status = "noop"
+            return result
+
         if not auto_control_enabled:
             result["decision"] = {"mode": "observe_only"}
             result["action"] = {"type": "noop", "reason": "pool_pump_auto_control_disabled"}
@@ -7770,12 +7777,20 @@ async def _run_pool_pump_off_period_check(
             return result
 
         enabled_map = await _load_time_window_rule_enabled_map()
+        result["rule_enabled_map"] = enabled_map
         rule_code = "pool_pump_off_period_control"
         rule_enabled = _is_time_window_rule_enabled(enabled_map, rule_code)
         result["pool_pump_rule_code"] = rule_code
         result["pool_pump_rule_enabled"] = rule_enabled
         auto_control_enabled = await _load_pool_pump_auto_control_enabled()
         result["pool_pump_auto_control_enabled"] = auto_control_enabled
+
+        if not rule_enabled:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "rule_disabled"}
+            result["decision_reason"] = "rule_disabled"
+            status = "noop"
+            return result
 
         if not auto_control_enabled:
             result["decision"] = {"mode": "observe_only"}
