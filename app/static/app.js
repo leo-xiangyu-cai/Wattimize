@@ -13321,6 +13321,7 @@ async function loadCurrentTab(fromAutoRefresh = false) {
 async function loadTabWithGuard(tab, fromAutoRefresh = false) {
   if (!configReady) return false;
   const tabKey = ALL_TABS.includes(tab) ? tab : "dashboard";
+  if (tabKey === "notificationMatrix" && fromAutoRefresh) return false;
   const slot = tabLoadState[tabKey];
   if (slot?.inFlight) return false;
   if (slot) slot.inFlight = true;
