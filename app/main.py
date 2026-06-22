@@ -62,6 +62,7 @@ from app.persistence import (
     get_metric_rows,
     get_series_samples,
     get_storage_status,
+    inspect_sqlite_database,
     insert_worker_api_log,
     import_database_bytes,
     init_db,

@@ -40,7 +40,7 @@ WORKER_LOG_LEGACY_STATUS_MAP: dict[str, str] = {
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "wattimize.sqlite3"
 DEFAULT_SAMPLE_INTERVAL_SECONDS = 5.0
 SQLITE_BUSY_TIMEOUT_SECONDS = 10.0
-SQLITE_INTEGRITY_CHECK_TIMEOUT_SECONDS = 120.0
+SQLITE_INTEGRITY_CHECK_TIMEOUT_SECONDS = 600.0
 CSV_HEADERS: tuple[str, ...] = (
     "system",
     "sampled_at_utc",
@@ -643,18 +643,43 @@ def recover_sqlite_database(db_path: DatabaseTarget, *, recovery_dir: Path | Non
         if recover_dump.returncode != 0:
             raise RuntimeError((recover_dump.stderr or "sqlite3 .recover failed").strip())
 
-        with sql_dump_path.open("r", encoding="utf-8") as sql_input:
-            rebuild = subprocess.run(
-                ["sqlite3", str(recovered_path)],
-                stdin=sql_input,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=SQLITE_INTEGRITY_CHECK_TIMEOUT_SECONDS,
-                check=False,
-            )
+        rebuild = subprocess.Popen(
+            ["sqlite3", str(recovered_path)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert rebuild.stdin is not None
+        try:
+            with sql_dump_path.open("rb") as sql_input:
+                for line in sql_input:
+                    if line.startswith(b"CREATE TABLE sqlite_sequence"):
+                        continue
+                    rebuild.stdin.write(line)
+            rebuild.stdin.close()
+            rebuild.stdin = None
+            stdout_bytes, stderr_bytes = rebuild.communicate(timeout=SQLITE_INTEGRITY_CHECK_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            rebuild.kill()
+            stdout_bytes, stderr_bytes = rebuild.communicate()
+            stdout_text = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+            stderr_text = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+            raise RuntimeError(f"sqlite3 rebuild timed out: {stderr_text or stdout_text or exc}") from exc
+        except BrokenPipeError as exc:
+            if rebuild.stdin is not None:
+                try:
+                    rebuild.stdin.close()
+                except OSError:
+                    pass
+                rebuild.stdin = None
+            stdout_bytes, stderr_bytes = rebuild.communicate()
+            stdout_text = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+            stderr_text = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+            raise RuntimeError((stderr_text or stdout_text or "sqlite3 rebuild failed").strip()) from exc
+        stdout_text = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+        stderr_text = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
         if rebuild.returncode != 0:
-            raise RuntimeError((rebuild.stderr or "sqlite3 rebuild failed").strip())
+            raise RuntimeError((stderr_text or stdout_text or "sqlite3 rebuild failed").strip())
 
         recovered_status = inspect_sqlite_database(recovered_path)
         if not bool(recovered_status.get("ok")):
