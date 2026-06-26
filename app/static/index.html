@@ -37,6 +37,9 @@
         <button id="tabReport" class="tab-btn" type="button" data-tab="report" data-i18n="reportTab" role="tab" aria-selected="false" aria-controls="samplingView" tabindex="-1">
           Report
         </button>
+        <button id="tabMonthlyReport" class="tab-btn" type="button" data-tab="monthlyReport" data-i18n="monthlyReportTab" role="tab" aria-selected="false" aria-controls="monthlyReportView" tabindex="-1">
+          Monthly
+        </button>
         <button id="tabNotificationMatrix" class="tab-btn" type="button" data-tab="notificationMatrix" data-i18n="notificationMatrixTab" role="tab" aria-selected="false" aria-controls="notificationMatrixView" tabindex="-1">
           Time Window
         </button>
@@ -336,6 +339,95 @@
         </section>
       </section>
 
+      <section id="monthlyReportView" class="view hidden">
+        <section class="card monthly-report-card">
+          <div class="section-header monthly-report-header">
+            <div>
+              <h2 data-i18n="monthlyReportTitle">Monthly Report</h2>
+              <p id="monthlyReportSubtitle" class="muted">-</p>
+            </div>
+            <span id="monthlyReportUpdatedAt" class="muted">-</span>
+          </div>
+          <div class="monthly-report-controls">
+            <button id="monthlyReportPrevBtn" type="button" class="btn secondary" data-i18n="monthlyReportPrev">Previous Month</button>
+            <label class="monthly-report-month-field">
+              <span data-i18n="monthlyReportMonthLabel">Month</span>
+              <input id="monthlyReportMonthInput" type="month" />
+            </label>
+            <button id="monthlyReportNextBtn" type="button" class="btn secondary" data-i18n="monthlyReportNext">Next Month</button>
+          </div>
+          <p id="monthlyReportStatus" class="monthly-report-status muted">-</p>
+
+          <div id="monthlyReportKpiGrid" class="monthly-report-kpi-grid"></div>
+
+          <div class="monthly-report-section-grid">
+            <section class="monthly-report-panel">
+              <div class="section-header">
+                <h3 data-i18n="monthlyReportProjectionTitle">Month-End Estimate</h3>
+              </div>
+              <div id="monthlyReportProjectionBody" class="monthly-report-metric-list"></div>
+            </section>
+            <section class="monthly-report-panel">
+              <div class="section-header">
+                <h3 data-i18n="monthlyReportComparisonTitle">Comparison</h3>
+              </div>
+              <div id="monthlyReportComparisonBody" class="monthly-report-metric-list"></div>
+            </section>
+            <section class="monthly-report-panel">
+              <div class="section-header">
+                <h3 data-i18n="monthlyReportHeroTitle">Hero Window</h3>
+              </div>
+              <div id="monthlyReportHeroBody" class="monthly-report-metric-list"></div>
+            </section>
+          </div>
+
+          <section class="monthly-report-panel monthly-report-recommendations-panel">
+            <div class="section-header">
+              <h3 data-i18n="monthlyReportRecommendationsTitle">Recommendations</h3>
+              <span id="monthlyReportRecommendationCount" class="monthly-report-pill">-</span>
+            </div>
+            <div id="monthlyReportRecommendations" class="monthly-report-recommendations"></div>
+          </section>
+
+          <section class="monthly-report-panel">
+            <div class="section-header">
+              <h3 data-i18n="monthlyReportDailyTrendTitle">Daily Trend</h3>
+            </div>
+            <div id="monthlyReportDailyBars" class="monthly-report-daily-bars"></div>
+          </section>
+
+          <div class="monthly-report-section-grid monthly-report-anomaly-grid">
+            <section class="monthly-report-panel">
+              <div class="section-header">
+                <h3 data-i18n="monthlyReportAnomaliesTitle">Anomalies</h3>
+              </div>
+              <div id="monthlyReportAnomalies" class="monthly-report-anomaly-list"></div>
+            </section>
+            <section class="monthly-report-panel">
+              <div class="section-header">
+                <h3 data-i18n="monthlyReportDailyTableTitle">Daily Detail</h3>
+              </div>
+              <div class="table-wrap monthly-report-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th data-i18n="monthlyReportTableDay">Day</th>
+                      <th data-i18n="monthlyReportTableLoad">Load</th>
+                      <th data-i18n="monthlyReportTableSolar">Solar</th>
+                      <th data-i18n="monthlyReportTableImport">Import</th>
+                      <th data-i18n="monthlyReportTableExport">Export</th>
+                      <th data-i18n="monthlyReportTableHero">Hero</th>
+                      <th data-i18n="monthlyReportTableAction">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="monthlyReportDailyBody"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+      </section>
+
       <section id="workerLogsView" class="view hidden">
         <section class="card">
           <div class="section-header">
@@ -609,6 +701,16 @@
               <option value="300" data-i18n="interval5m">5m</option>
             </select>
           </label>
+          <label data-i18n="configDetailRetentionLabel">
+            详细数据保留期
+            <select id="cfgDetailRetentionMonths">
+              <option value="1" data-i18n="retention1Month">1 个月</option>
+              <option value="2" data-i18n="retention2Months">2 个月</option>
+              <option value="3" data-i18n="retention3Months">3 个月</option>
+              <option value="6" data-i18n="retention6Months">6 个月</option>
+              <option value="12" data-i18n="retention12Months">12 个月</option>
+            </select>
+          </label>
           <label data-i18n="configWeatherLatLabel">
             Weather Latitude
             <input id="cfgWeatherLat" type="number" step="0.0001" placeholder="-33.8688" data-i18n-placeholder="configWeatherLatPlaceholder" />
@@ -619,6 +721,7 @@
           </label>
           <div class="config-actions">
             <button id="configAutoDiscoverBtn" type="button" class="btn secondary" data-i18n="configAutoDiscoverBtn">自动获取 Inverter / Battery SN</button>
+            <button id="configPruneRetentionBtn" type="button" class="btn secondary" data-i18n="configPruneRetentionBtn">立即清理过期详细数据</button>
             <button id="configCloseBtn" type="button" class="btn secondary" data-i18n="configCloseBtn">关闭</button>
             <button id="configSaveBtn" type="submit" class="btn" data-i18n="configSaveBtn">保存配置</button>
             <span id="configSaveMsg" class="muted">-</span>

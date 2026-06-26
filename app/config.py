@@ -33,8 +33,10 @@ CONST_SOLPLANET_VERIFY_SSL = False
 CONST_SOLPLANET_CACHE_SECONDS = 3.0
 CONST_SOLPLANET_REQUEST_TIMEOUT_SECONDS = 30.0
 ALLOWED_SAMPLE_INTERVAL_SECONDS: tuple[int, ...] = (5, 10, 30, 60, 300)
+ALLOWED_DETAIL_RETENTION_MONTHS: tuple[int, ...] = (1, 2, 3, 6, 12)
 CONST_SAJ_SAMPLE_INTERVAL_SECONDS = 5
 CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS = 60
+CONST_DETAIL_RETENTION_MONTHS = 2
 CONST_WEATHER_LAT = -33.8688  # Default: Sydney, NSW, Australia
 CONST_WEATHER_LON = 151.2093
 CONFIG_TABLE_NAME = "app_config"
@@ -60,6 +62,7 @@ class Settings:
     solplanet_request_timeout_seconds: float
     saj_sample_interval_seconds: int
     solplanet_sample_interval_seconds: int
+    detail_retention_months: int
     weather_lat: float
     weather_lon: float
 
@@ -80,6 +83,16 @@ def normalize_sample_interval_seconds(value: object, default: int) -> int:
     except (TypeError, ValueError):
         return default
     if parsed in ALLOWED_SAMPLE_INTERVAL_SECONDS:
+        return parsed
+    return default
+
+
+def normalize_detail_retention_months(value: object, default: int) -> int:
+    try:
+        parsed = int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return default
+    if parsed in ALLOWED_DETAIL_RETENTION_MONTHS:
         return parsed
     return default
 
@@ -174,6 +187,7 @@ def _env_values() -> dict[str, object]:
         "solplanet_battery_sn": os.getenv("SOLPLANET_BATTERY_SN", "").strip(),
         "saj_sample_interval_seconds": os.getenv("WATTIMIZE_SAMPLE_INTERVAL_SECONDS", "").strip(),
         "solplanet_sample_interval_seconds": os.getenv("WATTIMIZE_SOLPLANET_SAMPLE_INTERVAL_SECONDS", "").strip(),
+        "detail_retention_months": os.getenv("WATTIMIZE_DETAIL_RETENTION_MONTHS", "").strip(),
         "weather_lat": os.getenv("WATTIMIZE_WEATHER_LAT", "").strip(),
         "weather_lon": os.getenv("WATTIMIZE_WEATHER_LON", "").strip(),
     }
@@ -203,6 +217,10 @@ def _build_settings(raw: dict[str, object]) -> Settings:
             raw.get("solplanet_sample_interval_seconds"),
             CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS,
         ),
+        detail_retention_months=normalize_detail_retention_months(
+            raw.get("detail_retention_months"),
+            CONST_DETAIL_RETENTION_MONTHS,
+        ),
         weather_lat=_parse_float(raw.get("weather_lat"), CONST_WEATHER_LAT),
         weather_lon=_parse_float(raw.get("weather_lon"), CONST_WEATHER_LON),
     )
@@ -231,6 +249,7 @@ def settings_to_dict(settings: Settings) -> dict[str, object]:
         "solplanet_battery_sn": settings.solplanet_battery_sn,
         "saj_sample_interval_seconds": settings.saj_sample_interval_seconds,
         "solplanet_sample_interval_seconds": settings.solplanet_sample_interval_seconds,
+        "detail_retention_months": settings.detail_retention_months,
         "weather_lat": settings.weather_lat,
         "weather_lon": settings.weather_lon,
     }

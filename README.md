@@ -23,6 +23,8 @@ Use the web config page:
 - Optional field: `SOLPLANET_DONGLE_HOST`.
 - The config dialog can auto-discover `SOLPLANET_INVERTER_SN` and `SOLPLANET_BATTERY_SN` from the dongle CGI API.
 - Adjustable sampling fields: `SAJ_SAMPLE_INTERVAL_SECONDS`, `SOLPLANET_SAMPLE_INTERVAL_SECONDS` (choices: `5/10/30/60/300`).
+- Detailed history retention: `1/2/3/6/12` months, default `2`. Older raw samples and per-point daily/monthly history are removed; report summaries and recommendations remain available.
+- The Monthly tab provides month-to-date estimates, comparison baselines, Hero Window analysis, anomalies, and load-shifting recommendations. Completed months are persisted automatically and can also be generated through the API.
 
 Config storage:
 - Stored in SQLite table `app_config`
@@ -34,6 +36,7 @@ Persistence config (optional):
 - `WATTIMIZE_DB_PATH` (default: `data/wattimize.sqlite3`)
 - `WATTIMIZE_SAMPLE_INTERVAL_SECONDS` (default: `5`, choices: `5/10/30/60/300`)
 - `WATTIMIZE_SOLPLANET_SAMPLE_INTERVAL_SECONDS` (default: `60`, choices: `5/10/30/60/300`)
+- `WATTIMIZE_DETAIL_RETENTION_MONTHS` (default: `2`, choices: `1/2/3/6/12`)
 
 ## 3) Run
 
@@ -87,6 +90,8 @@ curl -s "http://<wattimize-host>:18000/api/storage/zero-hero-window-history?syst
 curl -s "http://<wattimize-host>:18000/api/reports/daily?day_local=2026-03-03&page=1&page_size=100" | jq
 curl -s "http://<wattimize-host>:18000/api/reports/daily/index" | jq
 curl -s -X POST "http://<wattimize-host>:18000/api/reports/daily/generate?day_local=2026-03-03" | jq
+curl -s "http://<wattimize-host>:18000/api/reports/monthly?month=2026-03" | jq
+curl -s -X POST "http://<wattimize-host>:18000/api/reports/monthly/generate?month=2026-03" | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/charging -H 'Content-Type: application/json' -d '{"enabled":true}' | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/current -H 'Content-Type: application/json' -d '{"amps":16}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/tesla/auto-control -H 'Content-Type: application/json' -d '{"enabled":false}' | jq

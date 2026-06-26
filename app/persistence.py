@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import statistics
 import subprocess
 import tempfile
@@ -41,6 +42,7 @@ DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "wattimize.s
 DEFAULT_SAMPLE_INTERVAL_SECONDS = 5.0
 SQLITE_BUSY_TIMEOUT_SECONDS = 10.0
 SQLITE_INTEGRITY_CHECK_TIMEOUT_SECONDS = 600.0
+SQLITE_VACUUM_MIN_RECLAIM_BYTES = 16 * 1024 * 1024
 CSV_HEADERS: tuple[str, ...] = (
     "system",
     "sampled_at_utc",
@@ -117,6 +119,7 @@ class Base(DeclarativeBase):
 
 class AssembledFlowSnapshotRow(Base):
     __tablename__ = "assembled_flow_snapshots"
+    __table_args__ = (Index("ix_assembled_flow_snapshots_system_epoch", "system", "assembled_at_epoch"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     round_id = Column(String, nullable=False)
@@ -149,6 +152,21 @@ class DailyReportRow(Base):
     usage_json = Column(String, nullable=False)
     series_json = Column(String, nullable=False)
     zero_hero_json = Column(String, nullable=False)
+
+
+class MonthlyReportRow(Base):
+    __tablename__ = "monthly_reports"
+
+    report_month_local = Column(String, primary_key=True)
+    timezone_name = Column(String, nullable=False)
+    period_start_utc = Column(String, nullable=False)
+    period_start_epoch = Column(Float, nullable=False, index=True)
+    period_end_utc = Column(String, nullable=False)
+    period_end_epoch = Column(Float, nullable=False, index=True)
+    generated_at_utc = Column(String, nullable=False)
+    generated_at_epoch = Column(Float, nullable=False, index=True)
+    observed_day_count = Column(Integer, nullable=False, default=0)
+    payload_json = Column(String, nullable=False)
 
 
 class DailyReportSampleRow(Base):
@@ -585,6 +603,12 @@ def init_db(db_path: DatabaseTarget) -> None:
             conn.execute(text("DROP TABLE IF EXISTS energy_samples"))
             conn.execute(text("DROP TABLE IF EXISTS raw_request_results"))
             conn.execute(text("PRAGMA journal_mode=WAL;"))
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_assembled_flow_snapshots_system_epoch "
+                    "ON assembled_flow_snapshots (system, assembled_at_epoch)"
+                )
+            )
 
 
 def export_database_bytes(db_path: DatabaseTarget) -> bytes:
@@ -1872,6 +1896,123 @@ def get_storage_status(db_path: DatabaseTarget, sample_interval_seconds: float) 
     }
 
 
+def prune_detailed_data_older_than(
+    db_path: DatabaseTarget,
+    *,
+    older_than_epoch: float,
+    older_than_day_local: date | None = None,
+) -> dict[str, object]:
+    """Remove high-frequency history while retaining daily and monthly summaries."""
+    cutoff = float(older_than_epoch)
+    result = {
+        "cutoff_epoch": cutoff,
+        "raw_snapshot_rows_deleted": 0,
+        "daily_sample_rows_deleted": 0,
+        "daily_reports_compacted": 0,
+        "monthly_reports_compacted": 0,
+    }
+    if not _db_exists(db_path):
+        return result
+
+    try:
+        with _session_scope(db_path) as session:
+            raw_deleted = session.execute(
+                delete(AssembledFlowSnapshotRow).where(AssembledFlowSnapshotRow.assembled_at_epoch < cutoff)
+            )
+            daily_samples_deleted = session.execute(
+                delete(DailyReportSampleRow).where(DailyReportSampleRow.sampled_at_epoch < cutoff)
+            )
+            result["raw_snapshot_rows_deleted"] = max(0, int(raw_deleted.rowcount or 0))
+            result["daily_sample_rows_deleted"] = max(0, int(daily_samples_deleted.rowcount or 0))
+
+            old_daily_reports = session.scalars(
+                select(DailyReportRow).where(DailyReportRow.period_end_epoch <= cutoff)
+            ).all()
+            for report in old_daily_reports:
+                if report.series_json == "{}" and report.zero_hero_json == "{}" and int(report.sample_count or 0) == 0:
+                    continue
+                report.series_json = "{}"
+                report.zero_hero_json = "{}"
+                report.sample_count = 0
+                result["daily_reports_compacted"] = int(result["daily_reports_compacted"]) + 1
+
+            monthly_reports = session.scalars(select(MonthlyReportRow)).all()
+            for report in monthly_reports:
+                payload = _json_loads(report.payload_json, default={})
+                if not isinstance(payload, dict):
+                    continue
+                zero_hero = payload.get("zero_hero")
+                history = zero_hero.get("history") if isinstance(zero_hero, dict) else None
+                items = history.get("items") if isinstance(history, dict) else None
+                if not isinstance(items, list) or not items:
+                    continue
+                retained_items = items
+                if older_than_day_local is not None:
+                    cutoff_day_text = older_than_day_local.isoformat()
+                    retained_items = [
+                        item
+                        for item in items
+                        if isinstance(item, dict) and str(item.get("date_local") or "") >= cutoff_day_text
+                    ]
+                elif float(report.period_end_epoch or 0.0) <= cutoff:
+                    retained_items = []
+                if len(retained_items) == len(items):
+                    continue
+                compact_history = dict(history)
+                compact_history["items"] = retained_items
+                compact_history["days"] = len(retained_items)
+                compact_history["detail_retained"] = bool(retained_items)
+                compact_history["detail_pruned_before_epoch"] = cutoff
+                compact_history["detail_pruned_before_day_local"] = older_than_day_local.isoformat() if older_than_day_local else None
+                compact_zero_hero = dict(zero_hero)
+                compact_zero_hero["history"] = compact_history
+                payload["zero_hero"] = compact_zero_hero
+                report.payload_json = _json_dumps_full(payload) or "{}"
+                result["monthly_reports_compacted"] = int(result["monthly_reports_compacted"]) + 1
+    except SQLAlchemyError:
+        return result
+    return result
+
+
+def vacuum_sqlite_database(db_path: DatabaseTarget) -> dict[str, object]:
+    """Reclaim unused SQLite pages after a deliberate retention cleanup."""
+    sqlite_path = _sqlite_file_path(db_path)
+    if sqlite_path is None:
+        raise ValueError("Database compaction only supports local SQLite files")
+    if not sqlite_path.exists():
+        return {"before_bytes": 0, "after_bytes": 0, "reclaimed_bytes": 0}
+
+    def storage_bytes() -> int:
+        paths = (sqlite_path, sqlite_path.with_name(f"{sqlite_path.name}-wal"))
+        return sum(path.stat().st_size for path in paths if path.exists())
+
+    dispose_db_connections(db_path)
+    before_bytes = storage_bytes()
+    with sqlite3.connect(str(sqlite_path), timeout=SQLITE_BUSY_TIMEOUT_SECONDS) as conn:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
+        free_pages = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+        reclaimable_bytes_estimate = free_pages * page_size
+        if reclaimable_bytes_estimate < SQLITE_VACUUM_MIN_RECLAIM_BYTES:
+            after_bytes = storage_bytes()
+            return {
+                "before_bytes": before_bytes,
+                "after_bytes": after_bytes,
+                "reclaimed_bytes": max(0, before_bytes - after_bytes),
+                "reclaimable_bytes_estimate": reclaimable_bytes_estimate,
+                "skipped": True,
+            }
+        conn.execute("VACUUM")
+    after_bytes = storage_bytes()
+    return {
+        "before_bytes": before_bytes,
+        "after_bytes": after_bytes,
+        "reclaimed_bytes": max(0, before_bytes - after_bytes),
+        "reclaimable_bytes_estimate": reclaimable_bytes_estimate,
+        "skipped": False,
+    }
+
+
 def _load_power_rows(
     db_path: DatabaseTarget,
     *,
@@ -2548,6 +2689,904 @@ def list_daily_reports(
             "timezone_name": str(row.timezone_name),
             "generated_at_utc": str(row.generated_at_utc),
             "sample_count": int(row.sample_count or 0),
+        }
+        for row in rows
+    ]
+
+
+MONTHLY_REPORT_ENERGY_KEYS: tuple[str, ...] = (
+    "home_load",
+    "other_home_load",
+    "tesla_load",
+    "pool_pump_load",
+    "solar_generation",
+    "grid_import",
+    "grid_export",
+    "battery_charge",
+    "battery_discharge",
+)
+
+
+def _add_months(month_start: date, offset: int) -> date:
+    month_index = (month_start.year * 12) + (month_start.month - 1) + offset
+    return date(month_index // 12, (month_index % 12) + 1, 1)
+
+
+def _monthly_report_local_datetime(day: date, local_tz: ZoneInfo) -> datetime:
+    return datetime.combine(day, time.min, tzinfo=local_tz)
+
+
+def _monthly_report_round_kwh(value: object, digits: int = 4) -> float:
+    try:
+        number = float(value or 0.0)
+    except (TypeError, ValueError):
+        number = 0.0
+    return round(number, digits)
+
+
+def _monthly_report_number(value: object, default: float = 0.0) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return number if number == number else default
+
+
+def _monthly_report_empty_usage(system: str = "combined") -> dict[str, object]:
+    return {
+        "system": system,
+        "samples": 0,
+        "expected_samples": 0,
+        "coverage_ratio": 0.0,
+        "energy_kwh": {key: 0.0 for key in MONTHLY_REPORT_ENERGY_KEYS},
+        "breakdown_kwh": {
+            "home_load": {"total": 0.0, "tesla": 0.0, "pool_pump": 0.0, "other": 0.0},
+            "grid_import": {"window": 0.0, "other": 0.0},
+            "grid_export": {"window": 0.0, "other": 0.0},
+        },
+        "quality": {"note": "No samples available for this period."},
+    }
+
+
+def _monthly_report_sum_usages(usages: list[dict[str, object]], system: str = "combined") -> dict[str, object]:
+    aggregate = _monthly_report_empty_usage(system)
+    energy = aggregate["energy_kwh"]
+    breakdown = aggregate["breakdown_kwh"]
+    samples = 0
+    expected_samples = 0
+
+    for usage in usages:
+        if not isinstance(usage, dict):
+            continue
+        samples += int(_monthly_report_number(usage.get("samples"), 0.0))
+        expected_samples += int(_monthly_report_number(usage.get("expected_samples"), 0.0))
+        usage_energy = usage.get("energy_kwh") if isinstance(usage.get("energy_kwh"), dict) else {}
+        for key in MONTHLY_REPORT_ENERGY_KEYS:
+            energy[key] = _monthly_report_round_kwh(_monthly_report_number(energy.get(key)) + _monthly_report_number(usage_energy.get(key)))
+        usage_breakdown = usage.get("breakdown_kwh") if isinstance(usage.get("breakdown_kwh"), dict) else {}
+        home_breakdown = usage_breakdown.get("home_load") if isinstance(usage_breakdown.get("home_load"), dict) else {}
+        for key in ("total", "tesla", "pool_pump", "other"):
+            breakdown["home_load"][key] = _monthly_report_round_kwh(
+                _monthly_report_number(breakdown["home_load"].get(key)) + _monthly_report_number(home_breakdown.get(key))
+            )
+        import_breakdown = usage_breakdown.get("grid_import") if isinstance(usage_breakdown.get("grid_import"), dict) else {}
+        export_breakdown = usage_breakdown.get("grid_export") if isinstance(usage_breakdown.get("grid_export"), dict) else {}
+        for key in ("window", "other"):
+            breakdown["grid_import"][key] = _monthly_report_round_kwh(
+                _monthly_report_number(breakdown["grid_import"].get(key)) + _monthly_report_number(import_breakdown.get(key))
+            )
+            breakdown["grid_export"][key] = _monthly_report_round_kwh(
+                _monthly_report_number(breakdown["grid_export"].get(key)) + _monthly_report_number(export_breakdown.get(key))
+            )
+
+    aggregate["samples"] = samples
+    aggregate["expected_samples"] = expected_samples
+    aggregate["coverage_ratio"] = round(samples / expected_samples, 4) if expected_samples > 0 else 0.0
+    aggregate["quality"] = {
+        "aggregation": "daily-sum",
+        "source_days": len([usage for usage in usages if isinstance(usage, dict)]),
+    }
+    return aggregate
+
+
+def _monthly_report_scale_usage(usage: dict[str, object], scale: float, system: str = "combined") -> dict[str, object]:
+    safe_scale = max(0.0, float(scale or 0.0))
+    scaled = _monthly_report_empty_usage(system)
+    source_energy = usage.get("energy_kwh") if isinstance(usage.get("energy_kwh"), dict) else {}
+    scaled_energy = scaled["energy_kwh"]
+    for key in MONTHLY_REPORT_ENERGY_KEYS:
+        scaled_energy[key] = _monthly_report_round_kwh(_monthly_report_number(source_energy.get(key)) * safe_scale)
+    source_breakdown = usage.get("breakdown_kwh") if isinstance(usage.get("breakdown_kwh"), dict) else {}
+    scaled_breakdown = scaled["breakdown_kwh"]
+    for group, keys in (("home_load", ("total", "tesla", "pool_pump", "other")), ("grid_import", ("window", "other")), ("grid_export", ("window", "other"))):
+        source_group = source_breakdown.get(group) if isinstance(source_breakdown.get(group), dict) else {}
+        for key in keys:
+            scaled_breakdown[group][key] = _monthly_report_round_kwh(_monthly_report_number(source_group.get(key)) * safe_scale)
+    scaled["samples"] = int(round(_monthly_report_number(usage.get("samples")) * safe_scale))
+    scaled["expected_samples"] = int(round(_monthly_report_number(usage.get("expected_samples")) * safe_scale))
+    scaled["coverage_ratio"] = usage.get("coverage_ratio") if usage.get("coverage_ratio") is not None else 0.0
+    scaled["quality"] = {"projection_scale": safe_scale}
+    return scaled
+
+
+def _monthly_report_energy_comparison(current: dict[str, object], baseline: dict[str, object]) -> dict[str, object]:
+    current_energy = current.get("energy_kwh") if isinstance(current.get("energy_kwh"), dict) else {}
+    baseline_energy = baseline.get("energy_kwh") if isinstance(baseline.get("energy_kwh"), dict) else {}
+    energy_delta: dict[str, object] = {}
+    for key in MONTHLY_REPORT_ENERGY_KEYS:
+        cur = _monthly_report_number(current_energy.get(key))
+        base = _monthly_report_number(baseline_energy.get(key))
+        delta = cur - base
+        energy_delta[key] = {
+            "current": round(cur, 4),
+            "baseline": round(base, 4),
+            "delta": round(delta, 4),
+            "percent_delta": round(delta / base * 100.0, 2) if abs(base) > 0.00001 else None,
+        }
+    return {
+        "energy_kwh": energy_delta,
+        "coverage_delta": round(
+            _monthly_report_number(current.get("coverage_ratio")) - _monthly_report_number(baseline.get("coverage_ratio")),
+            4,
+        ),
+    }
+
+
+def _monthly_report_localized(en: str, zh: str) -> dict[str, str]:
+    return {"en": en, "zh": zh}
+
+
+def _monthly_report_kwh_text(value: object) -> str:
+    return f"{_monthly_report_round_kwh(value, 2)} kWh"
+
+
+def _monthly_report_percent_text(value: object) -> str:
+    number = _monthly_report_number(value)
+    return f"{round(number * 100.0, 1)}%"
+
+
+def _load_monthly_daily_report_payloads(
+    db_path: DatabaseTarget,
+    *,
+    start_day_local: date,
+    end_day_local: date,
+) -> dict[str, dict[str, object]]:
+    if not _db_exists(db_path):
+        return {}
+    try:
+        with _session_scope(db_path) as session:
+            rows = session.scalars(
+                select(DailyReportRow).where(
+                    DailyReportRow.report_day_local >= start_day_local.isoformat(),
+                    DailyReportRow.report_day_local < end_day_local.isoformat(),
+                )
+            ).all()
+    except SQLAlchemyError:
+        return {}
+
+    payloads: dict[str, dict[str, object]] = {}
+    for row in rows:
+        usage_by_system = _json_loads(row.usage_json, default={})
+        phase_battery = None
+        if isinstance(usage_by_system, dict):
+            usage_by_system = dict(usage_by_system)
+            phase_battery = usage_by_system.pop("_phase_battery", None)
+        payloads[str(row.report_day_local)] = {
+            "usage_by_system": usage_by_system if isinstance(usage_by_system, dict) else {},
+            "phase_battery": phase_battery if isinstance(phase_battery, dict) else {},
+            "sample_count": int(row.sample_count or 0),
+            "generated_at_utc": str(row.generated_at_utc),
+        }
+    return payloads
+
+
+def _monthly_report_usage_for_period(
+    db_path: DatabaseTarget,
+    *,
+    system: str,
+    start_local: datetime,
+    end_local: datetime,
+    sample_intervals_by_system: dict[str, float],
+    grid_import_window_start_hour: int | None,
+    grid_import_window_end_hour: int | None,
+    grid_export_window_start_hour: int | None,
+    grid_export_window_end_hour: int | None,
+    local_timezone_name: str,
+) -> dict[str, object]:
+    if end_local <= start_local:
+        return _monthly_report_empty_usage(system)
+    return compute_usage_between(
+        db_path,
+        system=system,
+        start_at_utc=start_local.astimezone(UTC),
+        end_at_utc=end_local.astimezone(UTC),
+        sample_interval_seconds=float(sample_intervals_by_system.get(system) or DEFAULT_SAMPLE_INTERVAL_SECONDS),
+        local_timezone_name=local_timezone_name,
+        grid_import_window_start_hour=grid_import_window_start_hour,
+        grid_import_window_end_hour=grid_import_window_end_hour,
+        grid_export_window_start_hour=grid_export_window_start_hour,
+        grid_export_window_end_hour=grid_export_window_end_hour,
+    )
+
+
+def _monthly_report_phase_item(day_payload: dict[str, object] | None, stage_id: str) -> dict[str, object] | None:
+    phase = day_payload.get("phase_battery") if isinstance(day_payload, dict) else None
+    items = phase.get("items") if isinstance(phase, dict) else None
+    if not isinstance(items, list):
+        return None
+    for item in items:
+        if isinstance(item, dict) and item.get("id") == stage_id:
+            return item
+    return None
+
+
+def _monthly_report_build_recommendations(
+    *,
+    summary_usage: dict[str, object],
+    daily_rows: list[dict[str, object]],
+    zero_hero_totals: dict[str, object],
+    days_in_month: int,
+    observed_days: float,
+) -> list[dict[str, object]]:
+    recommendations: list[dict[str, object]] = []
+
+    def add(
+        rec_id: str,
+        *,
+        severity: str,
+        confidence: str,
+        title_en: str,
+        title_zh: str,
+        finding_en: str,
+        finding_zh: str,
+        action_en: str,
+        action_zh: str,
+        impact_en: str,
+        impact_zh: str,
+        evidence: list[dict[str, object]],
+    ) -> None:
+        recommendations.append(
+            {
+                "id": rec_id,
+                "severity": severity,
+                "confidence": confidence,
+                "title": _monthly_report_localized(title_en, title_zh),
+                "finding": _monthly_report_localized(finding_en, finding_zh),
+                "action": _monthly_report_localized(action_en, action_zh),
+                "impact": _monthly_report_localized(impact_en, impact_zh),
+                "evidence": evidence,
+            }
+        )
+
+    energy = summary_usage.get("energy_kwh") if isinstance(summary_usage.get("energy_kwh"), dict) else {}
+    breakdown = summary_usage.get("breakdown_kwh") if isinstance(summary_usage.get("breakdown_kwh"), dict) else {}
+    import_breakdown = breakdown.get("grid_import") if isinstance(breakdown.get("grid_import"), dict) else {}
+    export_breakdown = breakdown.get("grid_export") if isinstance(breakdown.get("grid_export"), dict) else {}
+    home_breakdown = breakdown.get("home_load") if isinstance(breakdown.get("home_load"), dict) else {}
+
+    total_load = _monthly_report_number(energy.get("home_load"))
+    solar = _monthly_report_number(energy.get("solar_generation"))
+    grid_import = _monthly_report_number(energy.get("grid_import"))
+    grid_export = _monthly_report_number(energy.get("grid_export"))
+    paid_import = _monthly_report_number(import_breakdown.get("other"))
+    free_import = _monthly_report_number(import_breakdown.get("window"))
+    export_other = _monthly_report_number(export_breakdown.get("other"))
+    tesla_load = _monthly_report_number(home_breakdown.get("tesla"))
+    pool_pump_load = _monthly_report_number(home_breakdown.get("pool_pump"))
+    flexible_load = tesla_load + pool_pump_load
+    coverage_ratio = _monthly_report_number(summary_usage.get("coverage_ratio"))
+
+    import_observed_windows = int(_monthly_report_number(zero_hero_totals.get("import_observed_windows")))
+    net_import_windows = int(_monthly_report_number(zero_hero_totals.get("import_windows")))
+    mixed_export_windows = int(_monthly_report_number(zero_hero_totals.get("mixed_export_windows")))
+    hero_import_kwh = _monthly_report_number(zero_hero_totals.get("import_wh")) / 1000.0
+    no_data_windows = int(_monthly_report_number(zero_hero_totals.get("no_data_windows")))
+
+    if import_observed_windows > 0:
+        add(
+            "hero_window_import",
+            severity="high" if net_import_windows > 0 or hero_import_kwh >= 0.5 else "medium",
+            confidence="high" if coverage_ratio >= 0.8 else "medium",
+            title_en="Hero Window import needs attention",
+            title_zh="Hero Window 购电需要处理",
+            finding_en=(
+                f"This month has {import_observed_windows} Hero Window 5-minute windows with grid import, "
+                f"including {net_import_windows} net-import windows."
+            ),
+            finding_zh=(
+                f"本月 Hero Window 有 {import_observed_windows} 个 5 分钟窗口出现电网购电，"
+                f"其中 {net_import_windows} 个是净购电窗口。"
+            ),
+            action_en="Keep more usable battery before 18:00, and avoid Tesla or pool-pump load between 17:00 and 20:00 unless export headroom is already secure.",
+            action_zh="建议 18:00 前保留更多可用电池，并避免 17:00-20:00 安排 Tesla 或水泵运行，除非上网余量已经很充足。",
+            impact_en=f"Estimated avoidable Hero Window import/loss: about {_monthly_report_kwh_text(hero_import_kwh)} before tariff pricing.",
+            impact_zh=f"估算可减少的 Hero Window 购电/损失约 {_monthly_report_kwh_text(hero_import_kwh)}，后续接入电价后可换算金额。",
+            evidence=[
+                {"label": _monthly_report_localized("Import-observed windows", "出现购电窗口"), "value": import_observed_windows},
+                {"label": _monthly_report_localized("Net-import windows", "净购电窗口"), "value": net_import_windows},
+                {"label": _monthly_report_localized("Mixed export windows", "有购电但净上网窗口"), "value": mixed_export_windows},
+                {"label": _monthly_report_localized("Hero import energy", "Hero 窗口购电量"), "value": _monthly_report_kwh_text(hero_import_kwh)},
+            ],
+        )
+
+    if paid_import >= 5.0 and flexible_load >= 2.0:
+        shiftable_kwh = min(paid_import, max(flexible_load * 0.35, min(flexible_load, paid_import) * 0.5))
+        add(
+            "move_flexible_load",
+            severity="medium",
+            confidence="medium",
+            title_en="Move flexible load into free or solar-rich hours",
+            title_zh="把可调负载搬到免费电或光伏强的时段",
+            finding_en=(
+                f"Paid-window grid import is {_monthly_report_kwh_text(paid_import)}, while Tesla and pool pump together used "
+                f"{_monthly_report_kwh_text(flexible_load)}."
+            ),
+            finding_zh=(
+                f"收费时段购电约 {_monthly_report_kwh_text(paid_import)}，Tesla 和水泵合计用电 "
+                f"{_monthly_report_kwh_text(flexible_load)}。"
+            ),
+            action_en="Prefer 11:00-14:00 for pool pump and opportunistic Tesla charging, then use solar-surplus hours before drawing paid grid energy.",
+            action_zh="优先把水泵和可机会充电的 Tesla 放到 11:00-14:00，其次使用光伏富余时段，减少收费时段购电。",
+            impact_en=f"Potentially shift roughly {_monthly_report_kwh_text(shiftable_kwh)} away from paid import windows.",
+            impact_zh=f"粗略估算可把约 {_monthly_report_kwh_text(shiftable_kwh)} 从收费购电时段迁走。",
+            evidence=[
+                {"label": _monthly_report_localized("Free-window import", "免费窗口购电"), "value": _monthly_report_kwh_text(free_import)},
+                {"label": _monthly_report_localized("Paid-window import", "收费窗口购电"), "value": _monthly_report_kwh_text(paid_import)},
+                {"label": _monthly_report_localized("Tesla + pool pump", "Tesla + 水泵"), "value": _monthly_report_kwh_text(flexible_load)},
+            ],
+        )
+
+    usable_other_rows = [
+        row
+        for row in daily_rows
+        if row.get("has_data") and _monthly_report_number(row.get("coverage_ratio")) >= 0.5
+    ]
+    other_values = [
+        _monthly_report_number(((row.get("breakdown_kwh") or {}).get("home_load") or {}).get("other"))
+        for row in usable_other_rows
+    ]
+    if len(other_values) >= 5:
+        median_other = statistics.median(other_values)
+        high_other_rows = [
+            row
+            for row in usable_other_rows
+            if _monthly_report_number(((row.get("breakdown_kwh") or {}).get("home_load") or {}).get("other")) >= max(median_other * 1.35, median_other + 3.0)
+        ]
+        if high_other_rows:
+            excess = sum(
+                max(
+                    0.0,
+                    _monthly_report_number(((row.get("breakdown_kwh") or {}).get("home_load") or {}).get("other")) - median_other,
+                )
+                for row in high_other_rows
+            )
+            dates = ", ".join(str(row.get("date_local")) for row in high_other_rows[:4])
+            add(
+                "base_load_anomaly",
+                severity="medium",
+                confidence="medium",
+                title_en="Base home load has abnormal high days",
+                title_zh="家庭基础负载有异常偏高日期",
+                finding_en=f"{len(high_other_rows)} days are well above the month's median non-Tesla/non-pump home load.",
+                finding_zh=f"有 {len(high_other_rows)} 天的非 Tesla / 非水泵家庭基础用电明显高于本月中位数。",
+                action_en="Check whether HVAC, hot water, dehumidifier, or always-on appliances were left running on those days.",
+                action_zh="建议检查这些日期是否有空调、热水、除湿机或常开设备持续运行。",
+                impact_en=f"Excess base load above the monthly median is about {_monthly_report_kwh_text(excess)}.",
+                impact_zh=f"相对本月中位数的额外基础用电约 {_monthly_report_kwh_text(excess)}。",
+                evidence=[
+                    {"label": _monthly_report_localized("Median base load/day", "基础用电日中位数"), "value": _monthly_report_kwh_text(median_other)},
+                    {"label": _monthly_report_localized("High days", "偏高日期"), "value": dates},
+                    {"label": _monthly_report_localized("Estimated excess", "估算额外用电"), "value": _monthly_report_kwh_text(excess)},
+                ],
+            )
+
+    weak_battery_days: list[dict[str, object]] = []
+    for row in daily_rows:
+        zero_summary = row.get("zero_hero_summary") if isinstance(row.get("zero_hero_summary"), dict) else {}
+        phase_item = row.get("pre_hero_battery") if isinstance(row.get("pre_hero_battery"), dict) else None
+        pre_hero_kwh = _monthly_report_number(phase_item.get("total_kwh"), -1.0) if phase_item else -1.0
+        if pre_hero_kwh >= 0 and pre_hero_kwh < 6.0 and _monthly_report_number(zero_summary.get("import_observed_windows")) > 0:
+            weak_battery_days.append(row)
+    if weak_battery_days:
+        weak_import_kwh = sum(
+            _monthly_report_number(((row.get("zero_hero_summary") or {}).get("import_wh"))) / 1000.0
+            for row in weak_battery_days
+        )
+        add(
+            "pre_hero_battery_reserve",
+            severity="high" if weak_import_kwh >= 0.5 else "medium",
+            confidence="medium",
+            title_en="Pre-Hero battery reserve is too low on import days",
+            title_zh="出现购电的日期里，Hero 前电池余量偏低",
+            finding_en=f"{len(weak_battery_days)} import-affected days had less than 6 kWh usable battery around 18:00.",
+            finding_zh=f"有 {len(weak_battery_days)} 个受购电影响的日期在 18:00 左右可用电池低于 6 kWh。",
+            action_en="Raise the pre-Hero reserve target or stop flexible loads earlier on days where the 18:00 usable battery forecast is below 6 kWh.",
+            action_zh="建议在 18:00 预测可用电量低于 6 kWh 时，提高 Hero 前保电目标，或更早停止可调负载。",
+            impact_en=f"Those low-reserve days account for about {_monthly_report_kwh_text(weak_import_kwh)} Hero import.",
+            impact_zh=f"这些低余量日期对应的 Hero 购电约 {_monthly_report_kwh_text(weak_import_kwh)}。",
+            evidence=[
+                {"label": _monthly_report_localized("Low-reserve import days", "低余量且购电日期"), "value": len(weak_battery_days)},
+                {"label": _monthly_report_localized("Reserve threshold", "余量阈值"), "value": "6 kWh"},
+                {"label": _monthly_report_localized("Hero import on these days", "这些日期 Hero 购电"), "value": _monthly_report_kwh_text(weak_import_kwh)},
+            ],
+        )
+
+    if solar >= 10.0 and export_other >= 10.0 and paid_import >= 5.0:
+        shift_opportunity = min(export_other, paid_import) * 0.3
+        self_consumption_ratio = max(0.0, min(1.0, (solar - grid_export) / solar)) if solar > 0 else 0.0
+        add(
+            "solar_self_consumption",
+            severity="medium",
+            confidence="medium",
+            title_en="Solar surplus and paid import coexist",
+            title_zh="光伏富余和收费购电同时存在",
+            finding_en=(
+                f"The month exported {_monthly_report_kwh_text(grid_export)} while still importing "
+                f"{_monthly_report_kwh_text(paid_import)} outside the free window."
+            ),
+            finding_zh=(
+                f"本月上网 {_monthly_report_kwh_text(grid_export)}，但免费窗口外仍购电 "
+                f"{_monthly_report_kwh_text(paid_import)}。"
+            ),
+            action_en="Move discretionary load earlier into solar-rich hours before adding more battery cycling or paid import.",
+            action_zh="建议先把可自由安排的负载前移到光伏强的时段，再考虑额外电池循环或收费购电。",
+            impact_en=f"Practical shift opportunity is roughly {_monthly_report_kwh_text(shift_opportunity)} this month.",
+            impact_zh=f"本月可实际迁移的用电机会粗估约 {_monthly_report_kwh_text(shift_opportunity)}。",
+            evidence=[
+                {"label": _monthly_report_localized("Solar self-consumption", "光伏自用率"), "value": _monthly_report_percent_text(self_consumption_ratio)},
+                {"label": _monthly_report_localized("Export outside Hero window", "非 Hero 上网"), "value": _monthly_report_kwh_text(export_other)},
+                {"label": _monthly_report_localized("Paid import", "收费购电"), "value": _monthly_report_kwh_text(paid_import)},
+            ],
+        )
+
+    if coverage_ratio < 0.85 or no_data_windows >= 5:
+        add(
+            "data_quality",
+            severity="medium" if coverage_ratio < 0.7 else "low",
+            confidence="high",
+            title_en="Data coverage limits recommendation accuracy",
+            title_zh="数据覆盖率会影响建议准确性",
+            finding_en=f"Energy coverage is {_monthly_report_percent_text(coverage_ratio)} and Hero Window no-data windows total {no_data_windows}.",
+            finding_zh=f"电量统计覆盖率为 {_monthly_report_percent_text(coverage_ratio)}，Hero Window 无数据窗口共 {no_data_windows} 个。",
+            action_en="Check collector uptime and inverter/API connectivity before tuning control thresholds from this report.",
+            action_zh="在根据本报告调整控制阈值前，建议先检查采集器运行和逆变器/API 连接稳定性。",
+            impact_en="Better coverage improves the confidence of cost and load-shifting estimates.",
+            impact_zh="提高覆盖率后，电费估算和负载迁移建议会更可靠。",
+            evidence=[
+                {"label": _monthly_report_localized("Coverage", "覆盖率"), "value": _monthly_report_percent_text(coverage_ratio)},
+                {"label": _monthly_report_localized("No-data Hero windows", "Hero 无数据窗口"), "value": no_data_windows},
+            ],
+        )
+
+    if not recommendations and observed_days > 0:
+        add(
+            "monthly_stable",
+            severity="info",
+            confidence="medium",
+            title_en="No major monthly issue detected",
+            title_zh="本月暂未发现明显问题",
+            finding_en="Hero Window import, paid import, base load anomalies, and data quality are within the current rule thresholds.",
+            finding_zh="Hero Window 购电、收费购电、基础负载异常和数据质量都在当前规则阈值内。",
+            action_en="Keep the current automation strategy and revisit after more data or tariff pricing is configured.",
+            action_zh="可以先保持当前自动化策略，等数据更多或接入电价后再进一步优化。",
+            impact_en="No immediate change is recommended.",
+            impact_zh="当前没有必须立即调整的项目。",
+            evidence=[
+                {"label": _monthly_report_localized("Observed days", "已统计天数"), "value": round(observed_days, 1)},
+                {"label": _monthly_report_localized("Month days", "本月天数"), "value": days_in_month},
+            ],
+        )
+
+    severity_rank = {"high": 0, "medium": 1, "low": 2, "info": 3}
+    return sorted(recommendations, key=lambda item: severity_rank.get(str(item.get("severity")), 9))
+
+
+def build_monthly_report_analysis(
+    db_path: DatabaseTarget,
+    *,
+    report_month_local: date,
+    local_timezone_name: str,
+    sample_intervals_by_system: dict[str, float],
+    now_utc: datetime | None = None,
+    grid_import_window_start_hour: int | None = None,
+    grid_import_window_end_hour: int | None = None,
+    grid_export_window_start_hour: int | None = None,
+    grid_export_window_end_hour: int | None = None,
+    zero_hero_window_minutes: int = 5,
+) -> dict[str, object]:
+    """Build a live monthly analysis report with comparisons, estimates, and rule-based advice."""
+    try:
+        local_tz = ZoneInfo(local_timezone_name) if local_timezone_name else datetime.now().astimezone().tzinfo
+    except ZoneInfoNotFoundError:
+        local_tz = datetime.now().astimezone().tzinfo
+    if local_tz is None:
+        local_tz = UTC
+
+    month_start = date(report_month_local.year, report_month_local.month, 1)
+    next_month_start = _add_months(month_start, 1)
+    previous_month_start = _add_months(month_start, -1)
+    month_start_local = _monthly_report_local_datetime(month_start, local_tz)
+    next_month_start_local = _monthly_report_local_datetime(next_month_start, local_tz)
+    previous_month_start_local = _monthly_report_local_datetime(previous_month_start, local_tz)
+
+    effective_now_utc = now_utc.astimezone(UTC) if now_utc is not None else datetime.now(UTC)
+    now_local = effective_now_utc.astimezone(local_tz)
+    is_current_month = month_start <= now_local.date() < next_month_start
+    is_future_month = month_start > now_local.date()
+    period_end_local = month_start_local if is_future_month else min(next_month_start_local, now_local) if is_current_month else next_month_start_local
+    generated_at = datetime.now(UTC)
+    days_in_month = (next_month_start - month_start).days
+    observed_seconds = max(0.0, (period_end_local - month_start_local).total_seconds())
+    observed_days = round(observed_seconds / 86400.0, 4)
+
+    report_payloads = _load_monthly_daily_report_payloads(
+        db_path,
+        start_day_local=month_start,
+        end_day_local=next_month_start,
+    )
+
+    zero_days = 0
+    if period_end_local > month_start_local:
+        zero_anchor_day = (period_end_local - timedelta(microseconds=1)).date()
+        zero_days = max(1, min(31, (zero_anchor_day - month_start).days + 1))
+        zero_hero_history = list_zero_hero_window_history(
+            db_path,
+            system="combined",
+            days=zero_days,
+            sample_interval_seconds=float(sample_intervals_by_system.get("combined") or DEFAULT_SAMPLE_INTERVAL_SECONDS),
+            local_timezone_name=local_timezone_name,
+            recent_day_anchor_local=zero_anchor_day,
+            now_utc=effective_now_utc if is_current_month else period_end_local.astimezone(UTC),
+            window_start_hour=int(grid_export_window_start_hour or 18),
+            window_end_hour=int(grid_export_window_end_hour or 20),
+            window_minutes=zero_hero_window_minutes,
+        )
+    else:
+        zero_hero_history = {
+            "system": "combined",
+            "timezone": str(local_tz),
+            "days": 0,
+            "window_start_hour": int(grid_export_window_start_hour or 18),
+            "window_end_hour": int(grid_export_window_end_hour or 20),
+            "window_minutes": zero_hero_window_minutes,
+            "window_count_per_day": 0,
+            "anchor_day_local": month_start.isoformat(),
+            "items": [],
+            "updated_at": generated_at.isoformat(),
+        }
+    zero_items = [item for item in zero_hero_history.get("items", []) if isinstance(item, dict)]
+    zero_by_day = {str(item.get("date_local")): item for item in zero_items if item.get("date_local")}
+
+    included_days: list[date] = []
+    cursor = month_start
+    while cursor < next_month_start:
+        if _monthly_report_local_datetime(cursor, local_tz) >= period_end_local:
+            break
+        included_days.append(cursor)
+        cursor += timedelta(days=1)
+
+    daily_rows: list[dict[str, object]] = []
+    daily_usages: list[dict[str, object]] = []
+    for day_local in included_days:
+        day_start_local = _monthly_report_local_datetime(day_local, local_tz)
+        day_end_local = min(_monthly_report_local_datetime(day_local + timedelta(days=1), local_tz), period_end_local)
+        day_text = day_local.isoformat()
+        report_payload = report_payloads.get(day_text)
+        reported_usage = None
+        if day_end_local >= _monthly_report_local_datetime(day_local + timedelta(days=1), local_tz):
+            usage_map = report_payload.get("usage_by_system") if isinstance(report_payload, dict) else None
+            reported_usage = usage_map.get("combined") if isinstance(usage_map, dict) else None
+        usage = reported_usage if isinstance(reported_usage, dict) else _monthly_report_usage_for_period(
+            db_path,
+            system="combined",
+            start_local=day_start_local,
+            end_local=day_end_local,
+            sample_intervals_by_system=sample_intervals_by_system,
+            grid_import_window_start_hour=grid_import_window_start_hour,
+            grid_import_window_end_hour=grid_import_window_end_hour,
+            grid_export_window_start_hour=grid_export_window_start_hour,
+            grid_export_window_end_hour=grid_export_window_end_hour,
+            local_timezone_name=local_timezone_name,
+        )
+        daily_usages.append(usage)
+        zero_item = zero_by_day.get(day_text, {})
+        zero_summary = zero_item.get("summary") if isinstance(zero_item.get("summary"), dict) else {}
+        pre_hero_battery = _monthly_report_phase_item(report_payload, "after_free_shoulder")
+        daily_rows.append(
+            {
+                "date_local": day_text,
+                "is_partial": day_end_local < _monthly_report_local_datetime(day_local + timedelta(days=1), local_tz),
+                "has_data": int(_monthly_report_number(usage.get("samples"))) >= 2,
+                "samples": int(_monthly_report_number(usage.get("samples"))),
+                "expected_samples": int(_monthly_report_number(usage.get("expected_samples"))),
+                "coverage_ratio": usage.get("coverage_ratio"),
+                "energy_kwh": usage.get("energy_kwh") if isinstance(usage.get("energy_kwh"), dict) else {},
+                "breakdown_kwh": usage.get("breakdown_kwh") if isinstance(usage.get("breakdown_kwh"), dict) else {},
+                "zero_hero_summary": zero_summary,
+                "pre_hero_battery": pre_hero_battery or {},
+                "source": "daily_report" if isinstance(reported_usage, dict) else "raw",
+            }
+        )
+
+    summary_usage = _monthly_report_sum_usages(daily_usages, "combined")
+    energy = summary_usage.get("energy_kwh") if isinstance(summary_usage.get("energy_kwh"), dict) else {}
+    solar = _monthly_report_number(energy.get("solar_generation"))
+    grid_import = _monthly_report_number(energy.get("grid_import"))
+    grid_export = _monthly_report_number(energy.get("grid_export"))
+    load = _monthly_report_number(energy.get("home_load"))
+    self_consumption_ratio = max(0.0, min(1.0, (solar - grid_export) / solar)) if solar > 0 else None
+    grid_dependence_ratio = max(0.0, grid_import / load) if load > 0 else None
+    net_grid_kwh = grid_import - grid_export
+
+    period_duration = period_end_local - month_start_local
+    if period_duration.total_seconds() > 0:
+        previous_period_end_local = min(previous_month_start_local + period_duration, month_start_local)
+    else:
+        previous_period_end_local = previous_month_start_local
+    previous_usage = _monthly_report_usage_for_period(
+        db_path,
+        system="combined",
+        start_local=previous_month_start_local,
+        end_local=previous_period_end_local,
+        sample_intervals_by_system=sample_intervals_by_system,
+        grid_import_window_start_hour=grid_import_window_start_hour,
+        grid_import_window_end_hour=grid_import_window_end_hour,
+        grid_export_window_start_hour=grid_export_window_start_hour,
+        grid_export_window_end_hour=grid_export_window_end_hour,
+        local_timezone_name=local_timezone_name,
+    )
+    trailing_start_local = month_start_local - timedelta(days=28)
+    trailing_usage = _monthly_report_usage_for_period(
+        db_path,
+        system="combined",
+        start_local=trailing_start_local,
+        end_local=month_start_local,
+        sample_intervals_by_system=sample_intervals_by_system,
+        grid_import_window_start_hour=grid_import_window_start_hour,
+        grid_import_window_end_hour=grid_import_window_end_hour,
+        grid_export_window_start_hour=grid_export_window_start_hour,
+        grid_export_window_end_hour=grid_export_window_end_hour,
+        local_timezone_name=local_timezone_name,
+    )
+    trailing_days = max(1.0, (month_start_local - trailing_start_local).total_seconds() / 86400.0)
+    trailing_scaled = _monthly_report_scale_usage(trailing_usage, observed_days / trailing_days if observed_days > 0 else 0.0)
+
+    scale_factor = (days_in_month / observed_days) if observed_days > 0 else 0.0
+    projected_usage = _monthly_report_scale_usage(summary_usage, scale_factor if is_current_month else 1.0)
+
+    zero_totals = {
+        "import_windows": 0,
+        "mixed_export_windows": 0,
+        "import_observed_windows": 0,
+        "export_windows": 0,
+        "idle_windows": 0,
+        "no_data_windows": 0,
+        "pending_windows": 0,
+        "partial_windows": 0,
+        "import_wh": 0.0,
+        "export_wh": 0.0,
+    }
+    for item in zero_items:
+        summary = item.get("summary") if isinstance(item.get("summary"), dict) else {}
+        for key in zero_totals:
+            zero_totals[key] = _monthly_report_number(zero_totals.get(key)) + _monthly_report_number(summary.get(key))
+    zero_totals = {
+        key: round(value, 2) if key.endswith("_wh") else int(round(value))
+        for key, value in zero_totals.items()
+    }
+
+    def top_rows(key_getter, limit: int = 5, *, positive_only: bool = True) -> list[dict[str, object]]:
+        ranked = []
+        for row in daily_rows:
+            value = _monthly_report_number(key_getter(row))
+            if positive_only and value <= 0:
+                continue
+            ranked.append((value, row))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return [
+            {
+                "date_local": row.get("date_local"),
+                "value": round(value, 4),
+                "coverage_ratio": row.get("coverage_ratio"),
+            }
+            for value, row in ranked[:limit]
+        ]
+
+    solar_values = [
+        _monthly_report_number((row.get("energy_kwh") or {}).get("solar_generation"))
+        for row in daily_rows
+        if row.get("has_data") and _monthly_report_number(row.get("coverage_ratio")) >= 0.5
+    ]
+    solar_median = statistics.median(solar_values) if solar_values else 0.0
+    weak_solar_days = [
+        {
+            "date_local": row.get("date_local"),
+            "value": _monthly_report_round_kwh((row.get("energy_kwh") or {}).get("solar_generation")),
+            "baseline": _monthly_report_round_kwh(solar_median),
+            "coverage_ratio": row.get("coverage_ratio"),
+        }
+        for row in daily_rows
+        if solar_median > 0
+        and row.get("has_data")
+        and _monthly_report_number(row.get("coverage_ratio")) >= 0.5
+        and _monthly_report_number((row.get("energy_kwh") or {}).get("solar_generation")) < solar_median * 0.65
+    ][:5]
+    hero_issue_days = [
+        {
+            "date_local": row.get("date_local"),
+            "import_observed_windows": int(_monthly_report_number((row.get("zero_hero_summary") or {}).get("import_observed_windows"))),
+            "import_wh": _monthly_report_round_kwh(_monthly_report_number((row.get("zero_hero_summary") or {}).get("import_wh")) / 1000.0),
+            "pre_hero_battery_kwh": (row.get("pre_hero_battery") or {}).get("total_kwh"),
+        }
+        for row in daily_rows
+        if _monthly_report_number((row.get("zero_hero_summary") or {}).get("import_observed_windows")) > 0
+    ][:8]
+
+    recommendations = _monthly_report_build_recommendations(
+        summary_usage=summary_usage,
+        daily_rows=daily_rows,
+        zero_hero_totals=zero_totals,
+        days_in_month=days_in_month,
+        observed_days=observed_days,
+    )
+
+    return {
+        "report_month_local": f"{month_start.year:04d}-{month_start.month:02d}",
+        "timezone_name": local_timezone_name,
+        "period_start_local": month_start_local.isoformat(),
+        "period_end_local": period_end_local.isoformat(),
+        "period_start_utc": month_start_local.astimezone(UTC).isoformat(),
+        "period_end_utc": period_end_local.astimezone(UTC).isoformat(),
+        "generated_at_utc": generated_at.isoformat(),
+        "is_current_month": is_current_month,
+        "is_complete_month": period_end_local >= next_month_start_local,
+        "is_future_month": is_future_month,
+        "days_in_month": days_in_month,
+        "observed_days": observed_days,
+        "observed_day_count": len(included_days),
+        "summary": {
+            "usage": summary_usage,
+            "self_consumption_ratio": round(self_consumption_ratio, 4) if self_consumption_ratio is not None else None,
+            "grid_dependence_ratio": round(grid_dependence_ratio, 4) if grid_dependence_ratio is not None else None,
+            "net_grid_kwh": round(net_grid_kwh, 4),
+            "source": "daily-report-plus-raw",
+        },
+        "projections": {
+            "scale_factor": round(scale_factor if is_current_month else 1.0, 4),
+            "month_end_estimate": projected_usage,
+            "is_projection": is_current_month and observed_days > 0 and period_end_local < next_month_start_local,
+        },
+        "comparisons": {
+            "previous_period": {
+                "label": previous_month_start.strftime("%Y-%m"),
+                "period_start_local": previous_month_start_local.isoformat(),
+                "period_end_local": previous_period_end_local.isoformat(),
+                "usage": previous_usage,
+                "delta": _monthly_report_energy_comparison(summary_usage, previous_usage),
+            },
+            "trailing_4_week_average": {
+                "period_start_local": trailing_start_local.isoformat(),
+                "period_end_local": month_start_local.isoformat(),
+                "usage": trailing_scaled,
+                "delta": _monthly_report_energy_comparison(summary_usage, trailing_scaled),
+            },
+        },
+        "zero_hero": {
+            "history": zero_hero_history,
+            "totals": zero_totals,
+        },
+        "daily": {
+            "items": daily_rows,
+        },
+        "anomalies": {
+            "top_import_days": top_rows(lambda row: (row.get("energy_kwh") or {}).get("grid_import")),
+            "top_other_load_days": top_rows(lambda row: ((row.get("breakdown_kwh") or {}).get("home_load") or {}).get("other")),
+            "weak_solar_days": weak_solar_days,
+            "hero_issue_days": hero_issue_days,
+        },
+        "recommendations": recommendations,
+    }
+
+
+def save_monthly_report(
+    db_path: DatabaseTarget,
+    *,
+    payload: dict[str, object],
+    generated_at_utc: datetime | None = None,
+) -> dict[str, object]:
+    month_text = str(payload.get("report_month_local") or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}", month_text):
+        raise ValueError("payload.report_month_local must be YYYY-MM")
+    try:
+        period_start = _parse_iso_to_utc(str(payload.get("period_start_utc") or ""))
+        period_end = _parse_iso_to_utc(str(payload.get("period_end_utc") or ""))
+    except ValueError as exc:
+        raise ValueError("payload period_start_utc and period_end_utc are required") from exc
+    if period_start >= period_end:
+        raise ValueError("monthly report period_start_utc must be earlier than period_end_utc")
+    generated_at = (generated_at_utc or datetime.now(UTC)).astimezone(UTC)
+    stored_payload = dict(payload)
+    stored_payload["generated_at_utc"] = generated_at.isoformat()
+    stored_payload["saved_report"] = True
+    stored_payload["source"] = "stored"
+    observed_day_count = int(_monthly_report_number(stored_payload.get("observed_day_count"), 0.0))
+
+    with _session_scope(db_path) as session:
+        report = session.get(MonthlyReportRow, month_text)
+        if report is None:
+            report = MonthlyReportRow(report_month_local=month_text)
+            session.add(report)
+        report.timezone_name = str(stored_payload.get("timezone_name") or "")
+        report.period_start_utc = period_start.isoformat()
+        report.period_start_epoch = period_start.timestamp()
+        report.period_end_utc = period_end.isoformat()
+        report.period_end_epoch = period_end.timestamp()
+        report.generated_at_utc = generated_at.isoformat()
+        report.generated_at_epoch = generated_at.timestamp()
+        report.observed_day_count = observed_day_count
+        report.payload_json = _json_dumps_full(stored_payload) or "{}"
+
+    return {
+        "report_month_local": month_text,
+        "generated_at_utc": generated_at.isoformat(),
+        "observed_day_count": observed_day_count,
+    }
+
+
+def get_monthly_report(
+    db_path: DatabaseTarget,
+    *,
+    report_month_local: date,
+) -> dict[str, object] | None:
+    if not _db_exists(db_path):
+        return None
+    month_text = f"{report_month_local.year:04d}-{report_month_local.month:02d}"
+    try:
+        with _session_scope(db_path) as session:
+            report = session.get(MonthlyReportRow, month_text)
+            if report is None:
+                return None
+            payload = _json_loads(report.payload_json, default={})
+            metadata = {
+                "report_month_local": report.report_month_local,
+                "timezone_name": report.timezone_name,
+                "period_start_utc": report.period_start_utc,
+                "period_end_utc": report.period_end_utc,
+                "generated_at_utc": report.generated_at_utc,
+                "observed_day_count": int(report.observed_day_count or 0),
+            }
+    except SQLAlchemyError:
+        return None
+
+    if not isinstance(payload, dict):
+        payload = {}
+    payload = {**metadata, **payload}
+    payload["saved_report"] = True
+    payload["source"] = "stored"
+    return payload
+
+
+def list_monthly_reports(
+    db_path: DatabaseTarget,
+    *,
+    limit: int = 120,
+) -> list[dict[str, object]]:
+    if not _db_exists(db_path):
+        return []
+    safe_limit = max(1, min(1200, int(limit)))
+    try:
+        with _session_scope(db_path) as session:
+            rows = session.scalars(
+                select(MonthlyReportRow).order_by(desc(MonthlyReportRow.report_month_local)).limit(safe_limit)
+            ).all()
+    except SQLAlchemyError:
+        return []
+    return [
+        {
+            "report_month_local": str(row.report_month_local),
+            "timezone_name": str(row.timezone_name),
+            "generated_at_utc": str(row.generated_at_utc),
+            "observed_day_count": int(row.observed_day_count or 0),
         }
         for row in rows
     ]

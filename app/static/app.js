@@ -91,6 +91,17 @@ const I18N = {
     configBatterySnLabel: "Solplanet Battery SN",
     configSajSampleIntervalLabel: "SAJ Sampling Interval",
     configSolplanetSampleIntervalLabel: "Solplanet Sampling Interval",
+    configDetailRetentionLabel: "Detailed History Retention",
+    retention1Month: "1 month",
+    retention2Months: "2 months",
+    retention3Months: "3 months",
+    retention6Months: "6 months",
+    retention12Months: "12 months",
+    configPruneRetentionBtn: "Clean Expired Detail",
+    configPruneRetentionConfirm: "Delete detailed samples older than the selected retention period and compact the database?",
+    configPruningRetention: "Cleaning detailed history...",
+    configPruneRetentionDone: "Detailed history cleaned. Reclaimed {size}.",
+    configPruneRetentionFailed: "Detailed history cleanup failed: {error}",
     configWeatherLatLabel: "Weather Latitude",
     configWeatherLonLabel: "Weather Longitude",
     configWeatherLatPlaceholder: "e.g. -33.8688 (Sydney)",
@@ -653,6 +664,66 @@ const I18N = {
     reportWeekdayFri: "Fri",
     reportWeekdaySat: "Sat",
     reportWeekdaySun: "Sun",
+    monthlyReportTab: "Monthly",
+    monthlyReportTitle: "Monthly Report",
+    monthlyReportSubtitle: "{month} · {days}/{total} days observed · {mode}",
+    monthlyReportModeProjection: "month-to-date with projection",
+    monthlyReportModeComplete: "complete month",
+    monthlyReportModeSaved: "saved month",
+    monthlyReportModeFuture: "future month",
+    monthlyReportPrev: "Previous Month",
+    monthlyReportNext: "Next Month",
+    monthlyReportMonthLabel: "Month",
+    monthlyReportLoading: "Loading monthly analysis...",
+    monthlyReportUnavailable: "No monthly data available for this month yet.",
+    monthlyReportGenerated: "Generated {time}",
+    monthlyReportRecommendationsTitle: "Recommendations",
+    monthlyReportRecommendationsCount: "{count} items",
+    monthlyReportProjectionTitle: "Month-End Estimate",
+    monthlyReportComparisonTitle: "Comparison",
+    monthlyReportHeroTitle: "Hero Window",
+    monthlyReportDailyTrendTitle: "Daily Trend",
+    monthlyReportAnomaliesTitle: "Anomalies",
+    monthlyReportDailyTableTitle: "Daily Detail",
+    monthlyReportTableDay: "Day",
+    monthlyReportTableLoad: "Load",
+    monthlyReportTableSolar: "Solar",
+    monthlyReportTableImport: "Import",
+    monthlyReportTableExport: "Export",
+    monthlyReportTableHero: "Hero",
+    monthlyReportTableAction: "Action",
+    monthlyReportOpenDaily: "Open Daily",
+    monthlyReportKpiLoad: "Home load",
+    monthlyReportKpiSolar: "Solar generation",
+    monthlyReportKpiImport: "Grid import",
+    monthlyReportKpiExport: "Grid export",
+    monthlyReportKpiNetGrid: "Net grid",
+    monthlyReportKpiSelfUse: "Solar self-use",
+    monthlyReportKpiGridDependence: "Grid dependence",
+    monthlyReportKpiCoverage: "Data coverage",
+    monthlyReportMetricProjectedLoad: "Projected load",
+    monthlyReportMetricProjectedImport: "Projected import",
+    monthlyReportMetricProjectedExport: "Projected export",
+    monthlyReportMetricScale: "Projection scale",
+    monthlyReportMetricPrevLoadDelta: "Load vs previous period",
+    monthlyReportMetricPrevImportDelta: "Import vs previous period",
+    monthlyReportMetricPrevSolarDelta: "Solar vs previous period",
+    monthlyReportMetricAvgImportDelta: "Import vs 4-week norm",
+    monthlyReportMetricHeroImportWindows: "Import-observed windows",
+    monthlyReportMetricHeroNetImportWindows: "Net-import windows",
+    monthlyReportMetricHeroImportEnergy: "Hero import energy",
+    monthlyReportMetricHeroNoData: "No-data windows",
+    monthlyReportAnomalyTopImport: "Highest import days",
+    monthlyReportAnomalyTopBaseLoad: "Highest base-load days",
+    monthlyReportAnomalyWeakSolar: "Weak solar days",
+    monthlyReportAnomalyHeroIssue: "Hero Window issue days",
+    monthlyReportNoItems: "No items for this section.",
+    monthlyReportConfidence: "Confidence {value}",
+    monthlyReportSeverityHigh: "High",
+    monthlyReportSeverityMedium: "Medium",
+    monthlyReportSeverityLow: "Low",
+    monthlyReportSeverityInfo: "Info",
+    monthlyReportLegend: "Load / Solar / Import / Export",
     samplingSystemLabel: "System",
     samplingSystemOverall: "Overall",
     samplingRangeModeLabel: "Range",
@@ -1002,6 +1073,17 @@ const I18N = {
     configBatterySnLabel: "Solplanet Battery SN",
     configSajSampleIntervalLabel: "SAJ 采样频率",
     configSolplanetSampleIntervalLabel: "Solplanet 采样频率",
+    configDetailRetentionLabel: "详细数据保留期",
+    retention1Month: "1 个月",
+    retention2Months: "2 个月",
+    retention3Months: "3 个月",
+    retention6Months: "6 个月",
+    retention12Months: "12 个月",
+    configPruneRetentionBtn: "立即清理过期详细数据",
+    configPruneRetentionConfirm: "将删除超过当前保留期的详细采样并压缩数据库，是否继续？",
+    configPruningRetention: "正在清理详细数据...",
+    configPruneRetentionDone: "详细数据已清理，释放 {size}。",
+    configPruneRetentionFailed: "详细数据清理失败: {error}",
     configWeatherLatLabel: "天气纬度",
     configWeatherLonLabel: "天气经度",
     configWeatherLatPlaceholder: "例如 -33.8688（悉尼）",
@@ -1564,6 +1646,66 @@ const I18N = {
     reportWeekdayFri: "五",
     reportWeekdaySat: "六",
     reportWeekdaySun: "日",
+    monthlyReportTab: "月报",
+    monthlyReportTitle: "月度报告",
+    monthlyReportSubtitle: "{month} · 已统计 {days}/{total} 天 · {mode}",
+    monthlyReportModeProjection: "本月至今并预测月底",
+    monthlyReportModeComplete: "完整月份",
+    monthlyReportModeSaved: "已保存月报",
+    monthlyReportModeFuture: "未来月份",
+    monthlyReportPrev: "上个月",
+    monthlyReportNext: "下个月",
+    monthlyReportMonthLabel: "月份",
+    monthlyReportLoading: "正在加载月度分析...",
+    monthlyReportUnavailable: "这个月份暂时没有可分析的数据。",
+    monthlyReportGenerated: "生成于 {time}",
+    monthlyReportRecommendationsTitle: "优化建议",
+    monthlyReportRecommendationsCount: "{count} 条",
+    monthlyReportProjectionTitle: "月底估算",
+    monthlyReportComparisonTitle: "对比",
+    monthlyReportHeroTitle: "Hero Window",
+    monthlyReportDailyTrendTitle: "每日趋势",
+    monthlyReportAnomaliesTitle: "异常项",
+    monthlyReportDailyTableTitle: "每日明细",
+    monthlyReportTableDay: "日期",
+    monthlyReportTableLoad: "负载",
+    monthlyReportTableSolar: "光伏",
+    monthlyReportTableImport: "购电",
+    monthlyReportTableExport: "上网",
+    monthlyReportTableHero: "Hero",
+    monthlyReportTableAction: "操作",
+    monthlyReportOpenDaily: "打开日报",
+    monthlyReportKpiLoad: "家庭用电",
+    monthlyReportKpiSolar: "光伏发电",
+    monthlyReportKpiImport: "电网购电",
+    monthlyReportKpiExport: "电网上网",
+    monthlyReportKpiNetGrid: "电网净值",
+    monthlyReportKpiSelfUse: "光伏自用率",
+    monthlyReportKpiGridDependence: "电网依赖度",
+    monthlyReportKpiCoverage: "数据覆盖率",
+    monthlyReportMetricProjectedLoad: "预计家庭用电",
+    monthlyReportMetricProjectedImport: "预计电网购电",
+    monthlyReportMetricProjectedExport: "预计电网上网",
+    monthlyReportMetricScale: "预测倍率",
+    monthlyReportMetricPrevLoadDelta: "用电 vs 上期",
+    monthlyReportMetricPrevImportDelta: "购电 vs 上期",
+    monthlyReportMetricPrevSolarDelta: "光伏 vs 上期",
+    monthlyReportMetricAvgImportDelta: "购电 vs 近 4 周常态",
+    monthlyReportMetricHeroImportWindows: "出现购电窗口",
+    monthlyReportMetricHeroNetImportWindows: "净购电窗口",
+    monthlyReportMetricHeroImportEnergy: "Hero 购电量",
+    monthlyReportMetricHeroNoData: "无数据窗口",
+    monthlyReportAnomalyTopImport: "购电最高日期",
+    monthlyReportAnomalyTopBaseLoad: "基础负载最高日期",
+    monthlyReportAnomalyWeakSolar: "光伏偏弱日期",
+    monthlyReportAnomalyHeroIssue: "Hero Window 异常日期",
+    monthlyReportNoItems: "这个区块暂无条目。",
+    monthlyReportConfidence: "可信度 {value}",
+    monthlyReportSeverityHigh: "高",
+    monthlyReportSeverityMedium: "中",
+    monthlyReportSeverityLow: "低",
+    monthlyReportSeverityInfo: "信息",
+    monthlyReportLegend: "负载 / 光伏 / 购电 / 上网",
     samplingSystemLabel: "系统",
     samplingSystemOverall: "综合",
     samplingRangeModeLabel: "范围",
@@ -1993,6 +2135,7 @@ const DASHBOARD_SUMMARY_CACHE_KEY = "dashboardSummaryCache";
 const AUTO_REFRESH_OPTIONS = [0, 30, 60];
 const SAJ_CONTROL_EDIT_GRACE_MS = 15000;
 const CONFIG_SAMPLE_INTERVAL_OPTIONS = [5, 10, 30, 60, 300];
+const CONFIG_DETAIL_RETENTION_OPTIONS = [1, 2, 3, 6, 12];
 const BALANCE_TOLERANCE_W = 100;
 const SAMPLING_GRID_IMPORT_WINDOW = { startHour: 11, endHour: 14, label: "11:00-14:00" };
 const SAMPLING_GRID_EXPORT_WINDOW = { startHour: 18, endHour: 20, label: "18:00-20:00" };
@@ -2483,7 +2626,7 @@ function getLang() {
 
 let currentLang = getLang();
 const _hashTab = location.hash.slice(1);
-const ALL_TABS = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "report", "database", "workerLogs", "operationTimeline", "workerFailureLog"];
+const ALL_TABS = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "report", "monthlyReport", "database", "workerLogs", "operationTimeline", "workerFailureLog"];
 function normalizeAppTab(tab) {
   const normalized = String(tab || "").trim();
   if (normalized === "sampling") return "report";
@@ -2535,6 +2678,7 @@ const tabLoadState = {
   solplanetControl: { inFlight: false },
   sampling: { inFlight: false },
   report: { inFlight: false },
+  monthlyReport: { inFlight: false },
   database: { inFlight: false },
   workerLogs: { inFlight: false },
   operationTimeline: { inFlight: false },
@@ -2561,6 +2705,13 @@ const reportCalendarState = {
   loadedMonths: new Set(),
   loadingIndex: false,
   loadingDay: "",
+  statusText: "",
+};
+const monthlyReportState = {
+  month: initialReportDayParts ? initialReportDayParts.monthIndex + 1 : new Date().getMonth() + 1,
+  monthYear: initialReportDayParts ? initialReportDayParts.year : new Date().getFullYear(),
+  loading: false,
+  payload: null,
   statusText: "",
 };
 
@@ -3290,6 +3441,10 @@ function fillConfigForm(payload = {}) {
   document.getElementById("cfgSolplanetSampleIntervalSeconds").value = String(
     CONFIG_SAMPLE_INTERVAL_OPTIONS.includes(solplanetInterval) ? solplanetInterval : 60
   );
+  const detailRetentionMonths = Number(payload.detail_retention_months);
+  document.getElementById("cfgDetailRetentionMonths").value = String(
+    CONFIG_DETAIL_RETENTION_OPTIONS.includes(detailRetentionMonths) ? detailRetentionMonths : 2
+  );
   if (payload.weather_lat != null) document.getElementById("cfgWeatherLat").value = payload.weather_lat;
   if (payload.weather_lon != null) document.getElementById("cfgWeatherLon").value = payload.weather_lon;
 }
@@ -3308,6 +3463,7 @@ function isConfigComplete(payload = {}) {
 function buildConfigPayloadFromForm() {
   const sajInterval = Number(document.getElementById("cfgSajSampleIntervalSeconds").value);
   const solplanetInterval = Number(document.getElementById("cfgSolplanetSampleIntervalSeconds").value);
+  const detailRetentionMonths = Number(document.getElementById("cfgDetailRetentionMonths").value);
   return {
     ha_url: document.getElementById("cfgHaUrl").value.trim(),
     ha_token: document.getElementById("cfgHaToken").value.trim(),
@@ -3316,6 +3472,7 @@ function buildConfigPayloadFromForm() {
     solplanet_sample_interval_seconds: CONFIG_SAMPLE_INTERVAL_OPTIONS.includes(solplanetInterval)
       ? solplanetInterval
       : 60,
+    detail_retention_months: CONFIG_DETAIL_RETENTION_OPTIONS.includes(detailRetentionMonths) ? detailRetentionMonths : 2,
     weather_lat: parseFloat(document.getElementById("cfgWeatherLat").value) || null,
     weather_lon: parseFloat(document.getElementById("cfgWeatherLon").value) || null,
   };
@@ -7943,6 +8100,388 @@ function getReportMonthCompletedDayCount(info = getReportMonthInfo()) {
     if (dayText < today) count += 1;
   }
   return count;
+}
+
+function getMonthlyReportMonthInfo() {
+  return getMonthInfo(monthlyReportState.month, monthlyReportState.monthYear);
+}
+
+function setMonthlyReportMonthFromKey(monthKey) {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(monthKey || ""));
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isInteger(year) || month < 1 || month > 12) return false;
+  monthlyReportState.monthYear = year;
+  monthlyReportState.month = month;
+  return true;
+}
+
+function shiftMonthlyReportMonth(offset) {
+  const info = getMonthlyReportMonthInfo();
+  const current = new Date(info.year, info.month - 1, 1, 0, 0, 0, 0);
+  current.setMonth(current.getMonth() + offset);
+  monthlyReportState.monthYear = current.getFullYear();
+  monthlyReportState.month = current.getMonth() + 1;
+}
+
+function localizedReportText(value) {
+  if (value && typeof value === "object") return String(value[currentLang] || value.en || value.zh || "");
+  return String(value ?? "");
+}
+
+function monthlyUsageEnergy(payload, key) {
+  return Number(payload?.summary?.usage?.energy_kwh?.[key] || 0);
+}
+
+function monthlyUsageBreakdown(payload, group, key) {
+  return Number(payload?.summary?.usage?.breakdown_kwh?.[group]?.[key] || 0);
+}
+
+function monthlyProjectedEnergy(payload, key) {
+  return Number(payload?.projections?.month_end_estimate?.energy_kwh?.[key] || 0);
+}
+
+function monthlyComparisonDelta(payload, comparisonKey, energyKey) {
+  return payload?.comparisons?.[comparisonKey]?.delta?.energy_kwh?.[energyKey] || {};
+}
+
+function formatMonthlyPercent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${formatTrimmedDecimal(n * 100, 1)}%`;
+}
+
+function formatMonthlySignedKwh(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${formatTrimmedDecimal(n, 2)} kWh`;
+}
+
+function formatMonthlySignedPercent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "";
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${formatTrimmedDecimal(n, 1)}%`;
+}
+
+function formatMonthlyDelta(delta) {
+  const amount = formatMonthlySignedKwh(delta?.delta);
+  const percent = delta?.percent_delta === null || delta?.percent_delta === undefined ? "" : ` (${formatMonthlySignedPercent(delta.percent_delta)})`;
+  return `${amount}${percent}`;
+}
+
+function renderMonthlyMetricList(id, items) {
+  const html = (items || [])
+    .map(
+      (item) => `
+        <div class="monthly-report-metric">
+          <span class="monthly-report-metric-label">${escapeHtml(item.label)}</span>
+          <span class="monthly-report-metric-value">${escapeHtml(item.value)}</span>
+        </div>
+      `,
+    )
+    .join("");
+  setHtml(id, html || `<div class="monthly-report-empty">${escapeHtml(t("monthlyReportNoItems"))}</div>`);
+}
+
+function renderMonthlyReportLoading() {
+  setText("monthlyReportStatus", monthlyReportState.statusText || t("monthlyReportLoading"));
+  setText("monthlyReportUpdatedAt", "-");
+  setText("monthlyReportSubtitle", "-");
+  setHtml("monthlyReportKpiGrid", `<div class="monthly-report-empty">${escapeHtml(t("monthlyReportLoading"))}</div>`);
+  renderMonthlyMetricList("monthlyReportProjectionBody", []);
+  renderMonthlyMetricList("monthlyReportComparisonBody", []);
+  renderMonthlyMetricList("monthlyReportHeroBody", []);
+  setText("monthlyReportRecommendationCount", "-");
+  setHtml("monthlyReportRecommendations", `<div class="monthly-report-empty">${escapeHtml(t("monthlyReportLoading"))}</div>`);
+  setHtml("monthlyReportDailyBars", "");
+  setHtml("monthlyReportAnomalies", "");
+  setHtml("monthlyReportDailyBody", "");
+}
+
+function renderMonthlyReportEmpty(message = t("monthlyReportUnavailable")) {
+  setText("monthlyReportStatus", message);
+  setText("monthlyReportUpdatedAt", "-");
+  setText("monthlyReportSubtitle", "-");
+  setHtml("monthlyReportKpiGrid", `<div class="monthly-report-empty">${escapeHtml(message)}</div>`);
+  renderMonthlyMetricList("monthlyReportProjectionBody", []);
+  renderMonthlyMetricList("monthlyReportComparisonBody", []);
+  renderMonthlyMetricList("monthlyReportHeroBody", []);
+  setText("monthlyReportRecommendationCount", t("monthlyReportRecommendationsCount", { count: 0 }));
+  setHtml("monthlyReportRecommendations", `<div class="monthly-report-empty">${escapeHtml(message)}</div>`);
+  setHtml("monthlyReportDailyBars", `<div class="monthly-report-empty">${escapeHtml(message)}</div>`);
+  setHtml("monthlyReportAnomalies", `<div class="monthly-report-empty">${escapeHtml(message)}</div>`);
+  setHtml("monthlyReportDailyBody", "");
+}
+
+function renderMonthlyKpis(payload) {
+  const netGrid = Number(payload?.summary?.net_grid_kwh || 0);
+  const items = [
+    { label: t("monthlyReportKpiLoad"), value: formatEnergyKwhText(monthlyUsageEnergy(payload, "home_load")), sub: t("monthlyReportLegend") },
+    { label: t("monthlyReportKpiSolar"), value: formatEnergyKwhText(monthlyUsageEnergy(payload, "solar_generation")), sub: `${t("monthlyReportKpiSelfUse")}: ${formatMonthlyPercent(payload?.summary?.self_consumption_ratio)}` },
+    { label: t("monthlyReportKpiImport"), value: formatEnergyKwhText(monthlyUsageEnergy(payload, "grid_import")), sub: `${t("samplingTotalsWindowFree")} ${formatEnergyKwhText(monthlyUsageBreakdown(payload, "grid_import", "window"))}` },
+    { label: t("monthlyReportKpiExport"), value: formatEnergyKwhText(monthlyUsageEnergy(payload, "grid_export")), sub: `${t("samplingTotalsWindowOther")} ${formatEnergyKwhText(monthlyUsageBreakdown(payload, "grid_export", "other"))}` },
+    { label: t("monthlyReportKpiNetGrid"), value: formatMonthlySignedKwh(netGrid), sub: netGrid > 0 ? t("monthlyReportKpiImport") : t("monthlyReportKpiExport") },
+    { label: t("monthlyReportKpiGridDependence"), value: formatMonthlyPercent(payload?.summary?.grid_dependence_ratio), sub: `${t("monthlyReportKpiCoverage")}: ${formatMonthlyPercent(payload?.summary?.usage?.coverage_ratio)}` },
+    { label: "Tesla", value: formatEnergyKwhText(monthlyUsageBreakdown(payload, "home_load", "tesla")), sub: `${t("samplingTotalsScopeHomeLoad")}` },
+    { label: t("samplingPumpStatusTitle"), value: formatEnergyKwhText(monthlyUsageBreakdown(payload, "home_load", "pool_pump")), sub: `${t("samplingTotalsScopeHomeLoad")}` },
+  ];
+  setHtml(
+    "monthlyReportKpiGrid",
+    items
+      .map(
+        (item) => `
+          <article class="monthly-report-kpi">
+            <p class="monthly-report-kpi-label">${escapeHtml(item.label)}</p>
+            <p class="monthly-report-kpi-value">${escapeHtml(item.value)}</p>
+            <p class="monthly-report-kpi-sub">${escapeHtml(item.sub || "")}</p>
+          </article>
+        `,
+      )
+      .join(""),
+  );
+}
+
+function renderMonthlyReportSections(payload) {
+  renderMonthlyMetricList("monthlyReportProjectionBody", [
+    { label: t("monthlyReportMetricProjectedLoad"), value: formatEnergyKwhText(monthlyProjectedEnergy(payload, "home_load")) },
+    { label: t("monthlyReportMetricProjectedImport"), value: formatEnergyKwhText(monthlyProjectedEnergy(payload, "grid_import")) },
+    { label: t("monthlyReportMetricProjectedExport"), value: formatEnergyKwhText(monthlyProjectedEnergy(payload, "grid_export")) },
+    { label: t("monthlyReportMetricScale"), value: `${formatTrimmedDecimal(Number(payload?.projections?.scale_factor || 0), 2)}x` },
+  ]);
+  renderMonthlyMetricList("monthlyReportComparisonBody", [
+    { label: t("monthlyReportMetricPrevLoadDelta"), value: formatMonthlyDelta(monthlyComparisonDelta(payload, "previous_period", "home_load")) },
+    { label: t("monthlyReportMetricPrevImportDelta"), value: formatMonthlyDelta(monthlyComparisonDelta(payload, "previous_period", "grid_import")) },
+    { label: t("monthlyReportMetricPrevSolarDelta"), value: formatMonthlyDelta(monthlyComparisonDelta(payload, "previous_period", "solar_generation")) },
+    { label: t("monthlyReportMetricAvgImportDelta"), value: formatMonthlyDelta(monthlyComparisonDelta(payload, "trailing_4_week_average", "grid_import")) },
+  ]);
+  const hero = payload?.zero_hero?.totals || {};
+  renderMonthlyMetricList("monthlyReportHeroBody", [
+    { label: t("monthlyReportMetricHeroImportWindows"), value: String(Number(hero.import_observed_windows || 0)) },
+    { label: t("monthlyReportMetricHeroNetImportWindows"), value: String(Number(hero.import_windows || 0)) },
+    { label: t("monthlyReportMetricHeroImportEnergy"), value: formatEnergyKwhText(Number(hero.import_wh || 0) / 1000) },
+    { label: t("monthlyReportMetricHeroNoData"), value: String(Number(hero.no_data_windows || 0)) },
+  ]);
+}
+
+function renderMonthlyRecommendations(payload) {
+  const recommendations = Array.isArray(payload?.recommendations) ? payload.recommendations : [];
+  setText("monthlyReportRecommendationCount", t("monthlyReportRecommendationsCount", { count: recommendations.length }));
+  if (!recommendations.length) {
+    setHtml("monthlyReportRecommendations", `<div class="monthly-report-empty">${escapeHtml(t("monthlyReportNoItems"))}</div>`);
+    return;
+  }
+  setHtml(
+    "monthlyReportRecommendations",
+    recommendations
+      .map((rec) => {
+        const severity = String(rec?.severity || "info");
+        const severityKey = `monthlyReportSeverity${severity.charAt(0).toUpperCase()}${severity.slice(1)}`;
+        const evidence = Array.isArray(rec?.evidence) ? rec.evidence : [];
+        return `
+          <article class="monthly-report-rec severity-${escapeHtml(severity)}">
+            <div class="monthly-report-rec-head">
+              <h4 class="monthly-report-rec-title">${escapeHtml(localizedReportText(rec?.title))}</h4>
+              <span class="monthly-report-rec-badge">${escapeHtml(t(severityKey))}</span>
+            </div>
+            <p class="monthly-report-rec-text">${escapeHtml(localizedReportText(rec?.finding))}</p>
+            <p class="monthly-report-rec-text">${escapeHtml(localizedReportText(rec?.action))}</p>
+            <p class="monthly-report-rec-impact">${escapeHtml(localizedReportText(rec?.impact))}</p>
+            <p class="monthly-report-rec-text">${escapeHtml(t("monthlyReportConfidence", { value: rec?.confidence || "-" }))}</p>
+            <div class="monthly-report-rec-evidence">
+              ${evidence
+                .map(
+                  (item) => `
+                    <div class="monthly-report-rec-evidence-item">
+                      <span class="monthly-report-rec-evidence-label">${escapeHtml(localizedReportText(item?.label))}</span>
+                      <span class="monthly-report-rec-evidence-value">${escapeHtml(item?.value ?? "-")}</span>
+                    </div>
+                  `,
+                )
+                .join("")}
+            </div>
+          </article>
+        `;
+      })
+      .join(""),
+  );
+}
+
+function renderMonthlyDailyTrend(payload) {
+  const items = Array.isArray(payload?.daily?.items) ? payload.daily.items : [];
+  if (!items.length) {
+    setHtml("monthlyReportDailyBars", `<div class="monthly-report-empty">${escapeHtml(t("monthlyReportNoItems"))}</div>`);
+    return;
+  }
+  const maxTotal = Math.max(
+    1,
+    ...items.map((item) => {
+      const energy = item?.energy_kwh || {};
+      return Number(energy.home_load || 0) + Number(energy.solar_generation || 0) + Number(energy.grid_import || 0) + Number(energy.grid_export || 0);
+    }),
+  );
+  setHtml(
+    "monthlyReportDailyBars",
+    items
+      .map((item) => {
+        const energy = item?.energy_kwh || {};
+        const load = Math.max(0, Number(energy.home_load || 0));
+        const solar = Math.max(0, Number(energy.solar_generation || 0));
+        const imp = Math.max(0, Number(energy.grid_import || 0));
+        const exp = Math.max(0, Number(energy.grid_export || 0));
+        const total = load + solar + imp + exp;
+        const loadFr = Math.max(0.02, load / maxTotal);
+        const solarFr = Math.max(0.02, solar / maxTotal);
+        const impFr = Math.max(0.02, imp / maxTotal);
+        const expFr = Math.max(0.02, exp / maxTotal);
+        return `
+          <div class="monthly-report-daily-row" title="${escapeHtml(item?.date_local || "")}">
+            <span class="monthly-report-daily-label">${escapeHtml(formatSamplingMiniDate(item?.date_local || ""))}</span>
+            <div class="monthly-report-daily-stack" style="--load:${loadFr}fr;--solar:${solarFr}fr;--import:${impFr}fr;--export:${expFr}fr">
+              <span class="monthly-report-daily-seg load" title="${escapeHtml(`${t("monthlyReportTableLoad")}: ${formatEnergyKwhText(load)}`)}"></span>
+              <span class="monthly-report-daily-seg solar" title="${escapeHtml(`${t("monthlyReportTableSolar")}: ${formatEnergyKwhText(solar)}`)}"></span>
+              <span class="monthly-report-daily-seg import" title="${escapeHtml(`${t("monthlyReportTableImport")}: ${formatEnergyKwhText(imp)}`)}"></span>
+              <span class="monthly-report-daily-seg export" title="${escapeHtml(`${t("monthlyReportTableExport")}: ${formatEnergyKwhText(exp)}`)}"></span>
+            </div>
+            <span class="monthly-report-daily-total">${escapeHtml(formatEnergyKwhText(total))}</span>
+          </div>
+        `;
+      })
+      .join(""),
+  );
+}
+
+function renderMonthlyAnomalies(payload) {
+  const anomalies = payload?.anomalies || {};
+  const groups = [
+    { key: "top_import_days", title: t("monthlyReportAnomalyTopImport"), format: (item) => formatEnergyKwhText(item?.value) },
+    { key: "top_other_load_days", title: t("monthlyReportAnomalyTopBaseLoad"), format: (item) => formatEnergyKwhText(item?.value) },
+    { key: "weak_solar_days", title: t("monthlyReportAnomalyWeakSolar"), format: (item) => `${formatEnergyKwhText(item?.value)} / ${formatEnergyKwhText(item?.baseline)}` },
+    { key: "hero_issue_days", title: t("monthlyReportAnomalyHeroIssue"), format: (item) => `${Number(item?.import_observed_windows || 0)} · ${formatEnergyKwhText(item?.import_wh)}` },
+  ];
+  setHtml(
+    "monthlyReportAnomalies",
+    groups
+      .map((group) => {
+        const items = Array.isArray(anomalies[group.key]) ? anomalies[group.key] : [];
+        return `
+          <div class="monthly-report-anomaly-group">
+            <p class="monthly-report-anomaly-title">${escapeHtml(group.title)}</p>
+            ${
+              items.length
+                ? items
+                    .map(
+                      (item) => `
+                        <div class="monthly-report-anomaly-item">
+                          <span>${escapeHtml(item?.date_local || "-")}</span>
+                          <strong>${escapeHtml(group.format(item))}</strong>
+                        </div>
+                      `,
+                    )
+                    .join("")
+                : `<div class="monthly-report-empty">${escapeHtml(t("monthlyReportNoItems"))}</div>`
+            }
+          </div>
+        `;
+      })
+      .join(""),
+  );
+}
+
+function renderMonthlyDailyTable(payload) {
+  const items = Array.isArray(payload?.daily?.items) ? payload.daily.items : [];
+  const html = items
+    .map((item) => {
+      const energy = item?.energy_kwh || {};
+      const hero = item?.zero_hero_summary || {};
+      const heroText = `${Number(hero.import_observed_windows || 0)} / ${formatEnergyKwhText(Number(hero.import_wh || 0) / 1000)}`;
+      return `
+        <tr>
+          <td>${escapeHtml(item?.date_local || "-")}${item?.is_partial ? " *" : ""}</td>
+          <td>${escapeHtml(formatEnergyKwhText(energy.home_load))}</td>
+          <td>${escapeHtml(formatEnergyKwhText(energy.solar_generation))}</td>
+          <td>${escapeHtml(formatEnergyKwhText(energy.grid_import))}</td>
+          <td>${escapeHtml(formatEnergyKwhText(energy.grid_export))}</td>
+          <td>${escapeHtml(heroText)}</td>
+          <td><button type="button" class="btn secondary monthly-report-day-btn" data-monthly-report-day="${escapeHtml(item?.date_local || "")}">${escapeHtml(t("monthlyReportOpenDaily"))}</button></td>
+        </tr>
+      `;
+    })
+    .join("");
+  setHtml("monthlyReportDailyBody", html || `<tr><td colspan="7">${escapeHtml(t("monthlyReportNoItems"))}</td></tr>`);
+}
+
+function syncMonthlyReportControls() {
+  const info = getMonthlyReportMonthInfo();
+  const input = document.getElementById("monthlyReportMonthInput");
+  if (input) input.value = info.label;
+  const nextBtn = document.getElementById("monthlyReportNextBtn");
+  if (nextBtn) {
+    const now = new Date();
+    const nextMonth = new Date(info.year, info.month, 1, 0, 0, 0, 0);
+    const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    nextBtn.disabled = monthlyReportState.loading || nextMonth > currentMonth;
+  }
+  const prevBtn = document.getElementById("monthlyReportPrevBtn");
+  if (prevBtn) prevBtn.disabled = monthlyReportState.loading;
+}
+
+function renderMonthlyReport(payload = monthlyReportState.payload) {
+  syncMonthlyReportControls();
+  if (monthlyReportState.loading) {
+    renderMonthlyReportLoading();
+    return;
+  }
+  if (!payload || payload?.is_future_month) {
+    renderMonthlyReportEmpty(payload?.is_future_month ? t("monthlyReportUnavailable") : monthlyReportState.statusText || t("monthlyReportUnavailable"));
+    return;
+  }
+  const mode = payload.saved_report
+    ? t("monthlyReportModeSaved")
+    : payload.is_current_month && payload?.projections?.is_projection
+    ? t("monthlyReportModeProjection")
+    : payload.is_complete_month
+      ? t("monthlyReportModeComplete")
+      : t("monthlyReportModeProjection");
+  setText(
+    "monthlyReportSubtitle",
+    t("monthlyReportSubtitle", {
+      month: payload.report_month_local || getMonthlyReportMonthInfo().label,
+      days: formatTrimmedDecimal(Number(payload.observed_days || 0), 1),
+      total: payload.days_in_month || "-",
+      mode,
+    }),
+  );
+  setText("monthlyReportUpdatedAt", t("monthlyReportGenerated", { time: formatSamplingDateTime(payload.generated_at_utc) }));
+  setText("monthlyReportStatus", monthlyReportState.statusText || "");
+  renderMonthlyKpis(payload);
+  renderMonthlyReportSections(payload);
+  renderMonthlyRecommendations(payload);
+  renderMonthlyDailyTrend(payload);
+  renderMonthlyAnomalies(payload);
+  renderMonthlyDailyTable(payload);
+}
+
+async function loadMonthlyReport() {
+  if (monthlyReportState.loading) return;
+  monthlyReportState.loading = true;
+  monthlyReportState.statusText = t("monthlyReportLoading");
+  renderMonthlyReport();
+  const info = getMonthlyReportMonthInfo();
+  try {
+    const payload = await fetchJson(`/api/reports/monthly?month=${encodeURIComponent(info.label)}`, { timeoutMs: 60000 });
+    monthlyReportState.payload = payload;
+    monthlyReportState.statusText = "";
+    if (payload?.report_month_local) setMonthlyReportMonthFromKey(payload.report_month_local);
+  } catch (err) {
+    monthlyReportState.payload = null;
+    monthlyReportState.statusText = t("loadFailed", { error: String(err) });
+  } finally {
+    monthlyReportState.loading = false;
+    renderMonthlyReport();
+  }
 }
 
 function setReportCalendarVisible(visible) {
@@ -14255,6 +14794,10 @@ async function loadTabWithGuard(tab, fromAutoRefresh = false) {
       await loadReportView({ generateIfMissing: !fromAutoRefresh });
       return true;
     }
+    if (tabKey === "monthlyReport") {
+      await loadMonthlyReport();
+      return true;
+    }
     if (tabKey === "database") {
       await loadDatabase();
       return true;
@@ -14312,6 +14855,8 @@ function forceRefreshCurrentView() {
   refreshMobileCombinedFlowDiagram();
   if (currentTab === "sampling" || currentTab === "report") {
     scheduleSamplingChartsHoverReset({ resize: true });
+  } else if (currentTab === "monthlyReport") {
+    renderMonthlyReport();
   }
 }
 
@@ -14330,6 +14875,7 @@ function setActiveTab(tab, load = true) {
   const rawDataView = document.getElementById("rawDataView");
   const solplanetControlView = document.getElementById("solplanetControlView");
   const samplingView = document.getElementById("samplingView");
+  const monthlyReportView = document.getElementById("monthlyReportView");
   const databaseView = document.getElementById("databaseView");
   const workerLogsView = document.getElementById("workerLogsView");
   const operationTimelineView = document.getElementById("operationTimelineView");
@@ -14339,6 +14885,7 @@ function setActiveTab(tab, load = true) {
   const tabRawData = document.getElementById("tabRawData");
   const tabSolplanetControl = document.getElementById("tabSolplanetControl");
   const tabReport = document.getElementById("tabReport");
+  const tabMonthlyReport = document.getElementById("tabMonthlyReport");
   const tabDatabase = document.getElementById("tabDatabase");
   const tabWorkerLogs = document.getElementById("tabWorkerLogs");
   const tabOperationTimeline = document.getElementById("tabOperationTimeline");
@@ -14350,6 +14897,7 @@ function setActiveTab(tab, load = true) {
   const solplanetControlActive = currentTab === "solplanetControl";
   const samplingActive = currentTab === "sampling" || currentTab === "report";
   const reportActive = currentTab === "report";
+  const monthlyReportActive = currentTab === "monthlyReport";
   const databaseActive = currentTab === "database";
   const workerLogsActive = currentTab === "workerLogs";
   const operationTimelineActive = currentTab === "operationTimeline";
@@ -14359,6 +14907,7 @@ function setActiveTab(tab, load = true) {
   if (rawDataView) rawDataView.classList.toggle("hidden", !rawDataActive);
   if (solplanetControlView) solplanetControlView.classList.toggle("hidden", !solplanetControlActive);
   if (samplingView) samplingView.classList.toggle("hidden", !samplingActive);
+  if (monthlyReportView) monthlyReportView.classList.toggle("hidden", !monthlyReportActive);
   if (databaseView) databaseView.classList.toggle("hidden", !databaseActive);
   if (workerLogsView) workerLogsView.classList.toggle("hidden", !workerLogsActive);
   if (operationTimelineView) operationTimelineView.classList.toggle("hidden", !operationTimelineActive);
@@ -14368,6 +14917,7 @@ function setActiveTab(tab, load = true) {
   if (tabRawData) tabRawData.classList.toggle("active", rawDataActive);
   if (tabSolplanetControl) tabSolplanetControl.classList.toggle("active", solplanetControlActive);
   if (tabReport) tabReport.classList.toggle("active", reportActive);
+  if (tabMonthlyReport) tabMonthlyReport.classList.toggle("active", monthlyReportActive);
   if (tabDatabase) tabDatabase.classList.toggle("active", databaseActive);
   if (tabWorkerLogs) tabWorkerLogs.classList.toggle("active", workerLogsActive);
   if (tabOperationTimeline) tabOperationTimeline.classList.toggle("active", operationTimelineActive);
@@ -14378,6 +14928,7 @@ function setActiveTab(tab, load = true) {
     [tabRawData, rawDataActive],
     [tabSolplanetControl, solplanetControlActive],
     [tabReport, reportActive],
+    [tabMonthlyReport, monthlyReportActive],
     [tabDatabase, databaseActive],
     [tabWorkerLogs, workerLogsActive],
     [tabOperationTimeline, operationTimelineActive],
@@ -14403,6 +14954,8 @@ function setActiveTab(tab, load = true) {
     renderSamplingRangeInputContainer();
   } else if (currentTab === "report") {
     renderReportCalendar();
+  } else if (currentTab === "monthlyReport") {
+    renderMonthlyReport();
   }
   if (dashboardActive) {
     window.requestAnimationFrame(() => {
@@ -14430,6 +14983,7 @@ bindChangeIfPresent("langSelect", (event) => {
   applyTranslations();
   refreshFlowDiagrams();
   if (currentTab === "report") renderReportCalendar();
+  else if (currentTab === "monthlyReport") renderMonthlyReport();
   else renderSamplingRangeInputContainer();
   syncWorkerLogsFilters();
   if (stateCache.lastWorkerLogsPage) renderWorkerLogsPage(stateCache.lastWorkerLogsPage);
@@ -14477,6 +15031,9 @@ bindClickIfPresent("tabSolplanetControl", () => {
 
 bindClickIfPresent("tabReport", () => {
   setActiveTab("report");
+});
+bindClickIfPresent("tabMonthlyReport", () => {
+  setActiveTab("monthlyReport");
 });
 bindClickIfPresent("tabDatabase", () => {
   setActiveTab("database");
@@ -14544,6 +15101,39 @@ bindClickIfPresent("samplingRangeJumpBtn", async () => {
   samplingPager.page = 1;
   await loadSampling();
 });
+
+bindClickIfPresent("monthlyReportPrevBtn", async () => {
+  shiftMonthlyReportMonth(-1);
+  monthlyReportState.payload = null;
+  await loadMonthlyReport();
+});
+bindClickIfPresent("monthlyReportNextBtn", async () => {
+  shiftMonthlyReportMonth(1);
+  monthlyReportState.payload = null;
+  await loadMonthlyReport();
+});
+bindChangeIfPresent("monthlyReportMonthInput", async (event) => {
+  if (!setMonthlyReportMonthFromKey(event.target.value)) {
+    syncMonthlyReportControls();
+    return;
+  }
+  monthlyReportState.payload = null;
+  await loadMonthlyReport();
+});
+{
+  const view = document.getElementById("monthlyReportView");
+  if (view) {
+    view.addEventListener("click", (event) => {
+      const button = event.target?.closest?.("[data-monthly-report-day]");
+      if (!button) return;
+      const day = button.getAttribute("data-monthly-report-day") || "";
+      if (!localDateParts(day)) return;
+      reportCalendarState.selectedDay = day;
+      setReportCalendarMonthFromDay(day);
+      setActiveTab("report");
+    });
+  }
+}
 
 bindChangeIfPresent("samplingSmoothModeSelect", () => {
   if (samplingChartLastPayload) renderSamplingChart(samplingChartLastPayload);
@@ -14928,6 +15518,35 @@ bindClickIfPresent("configAutoDiscoverBtn", async () => {
   } catch (err) {
     configReady = false;
     if (saveMsg) saveMsg.textContent = t("configAutoDiscoverFailed", { error: String(err) });
+  }
+});
+
+bindClickIfPresent("configPruneRetentionBtn", async () => {
+  if (!window.confirm(t("configPruneRetentionConfirm"))) return;
+  const saveMsg = document.getElementById("configSaveMsg");
+  const button = document.getElementById("configPruneRetentionBtn");
+  if (button) button.disabled = true;
+  if (saveMsg) saveMsg.textContent = t("configPruningRetention");
+  try {
+    const savedConfig = await fetchJson("/api/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildConfigPayloadFromForm()),
+      timeoutMs: 10000,
+    });
+    fillConfigForm(savedConfig);
+    configReady = isConfigComplete(savedConfig);
+    const result = await fetchJson("/api/storage/retention/prune", {
+      method: "POST",
+      timeoutMs: 180000,
+    });
+    const reclaimed = Number(result?.retention?.storage_compaction?.reclaimed_bytes || 0);
+    if (saveMsg) saveMsg.textContent = t("configPruneRetentionDone", { size: formatBinarySize(reclaimed) });
+    await loadCurrentTab();
+  } catch (err) {
+    if (saveMsg) saveMsg.textContent = t("configPruneRetentionFailed", { error: String(err) });
+  } finally {
+    if (button) button.disabled = false;
   }
 });
 

@@ -24,13 +24,16 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 
 from app.config import (
+    ALLOWED_DETAIL_RETENTION_MONTHS,
     ALLOWED_SAMPLE_INTERVAL_SECONDS,
+    CONST_DETAIL_RETENTION_MONTHS,
     CONST_SAJ_SAMPLE_INTERVAL_SECONDS,
     CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS,
     Settings,
     get_config_path,
     get_missing_required_fields_from_payload,
     load_settings,
+    normalize_detail_retention_months,
     normalize_sample_interval_seconds,
     save_settings,
     settings_to_dict,
@@ -47,6 +50,7 @@ from app.persistence import (
     count_pending_worker_api_logs,
     backfill_notification_entries_from_worker_logs,
     build_daily_report_phase_battery,
+    build_monthly_report_analysis,
     compute_daily_usage,
     compute_usage_between,
     delete_worker_api_logs_older_than,
@@ -61,6 +65,7 @@ from app.persistence import (
     get_realtime_kv_by_prefix,
     get_latest_sample,
     get_daily_report,
+    get_monthly_report,
     get_metric_rows,
     get_series_samples,
     get_storage_status,
@@ -74,6 +79,7 @@ from app.persistence import (
     list_database_table_rows,
     list_database_tables,
     list_daily_reports,
+    list_monthly_reports,
     list_zero_hero_window_history,
     list_time_window_rule_state_rows,
     list_realtime_kv_rows,
@@ -82,6 +88,9 @@ from app.persistence import (
     insert_operation_run,
     recover_sqlite_database,
     save_daily_report,
+    save_monthly_report,
+    prune_detailed_data_older_than,
+    vacuum_sqlite_database,
     upsert_time_window_rule_state,
     upsert_operation_definitions,
     upsert_notification_entries,
@@ -459,6 +468,8 @@ runtime_lock = asyncio.Lock()
 db_recovery_lock = asyncio.Lock()
 window_control_lock = asyncio.Lock()
 daily_report_generation_lock = asyncio.Lock()
+monthly_report_generation_lock = asyncio.Lock()
+detailed_data_maintenance_lock = asyncio.Lock()
 db_recovery_state: dict[str, object] = {
     "in_progress": False,
     "last_attempt_at": None,
@@ -1340,6 +1351,7 @@ class ConfigPayload(BaseModel):
     solplanet_dongle_host: str = Field(default="")
     saj_sample_interval_seconds: int = Field(default=CONST_SAJ_SAMPLE_INTERVAL_SECONDS)
     solplanet_sample_interval_seconds: int = Field(default=CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS)
+    detail_retention_months: int = Field(default=CONST_DETAIL_RETENTION_MONTHS)
     weather_lat: float | None = Field(default=None)
     weather_lon: float | None = Field(default=None)
 
@@ -12575,6 +12587,56 @@ async def _stop_worker_log_cleanup() -> None:
         worker_log_cleanup_task = None
 
 
+def _detail_retention_cutoff_local(now_local: datetime, retention_months: int) -> date:
+    source_day = now_local.date()
+    month_index = (source_day.year * 12) + (source_day.month - 1) - retention_months
+    year = month_index // 12
+    month = (month_index % 12) + 1
+    target_month_start = date(year, month, 1)
+    if month == 12:
+        target_month_end = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        target_month_end = date(year, month + 1, 1) - timedelta(days=1)
+    return date(year, month, min(source_day.day, target_month_end.day))
+
+
+async def _prune_detailed_data_once(*, reclaim_space: bool = False) -> dict[str, object]:
+    now_local, _ = _tesla_grid_support_now_local()
+    retention_months = int(settings.detail_retention_months)
+    cutoff_day_local = _detail_retention_cutoff_local(now_local, retention_months)
+    cutoff_local = datetime.combine(cutoff_day_local, time.min, tzinfo=now_local.tzinfo or UTC)
+    result = await asyncio.to_thread(
+        prune_detailed_data_older_than,
+        storage_db_path,
+        older_than_epoch=cutoff_local.astimezone(UTC).timestamp(),
+        older_than_day_local=cutoff_day_local,
+    )
+    result["retention_months"] = retention_months
+    result["cutoff_day_local"] = cutoff_day_local.isoformat()
+    result["cutoff_utc"] = cutoff_local.astimezone(UTC).isoformat()
+    rows_changed = sum(
+        int(result.get(key) or 0)
+        for key in (
+            "raw_snapshot_rows_deleted",
+            "daily_sample_rows_deleted",
+            "daily_reports_compacted",
+            "monthly_reports_compacted",
+        )
+    )
+    if reclaim_space:
+        result["storage_compaction"] = await asyncio.to_thread(vacuum_sqlite_database, storage_db_path)
+    if rows_changed:
+        logger.info(
+            "Pruned detailed data before %s: raw=%s daily_samples=%s daily_reports=%s monthly_reports=%s",
+            cutoff_day_local.isoformat(),
+            result.get("raw_snapshot_rows_deleted"),
+            result.get("daily_sample_rows_deleted"),
+            result.get("daily_reports_compacted"),
+            result.get("monthly_reports_compacted"),
+        )
+    return result
+
+
 def _daily_report_local_period(report_day_local: date) -> tuple[datetime, datetime, str]:
     now_local, timezone_name = _tesla_grid_support_now_local()
     local_tz = now_local.tzinfo or UTC
@@ -12669,9 +12731,68 @@ async def _generate_daily_report(report_day_local: date) -> dict[str, object]:
         return saved
 
 
+def _month_start(day: date) -> date:
+    return date(day.year, day.month, 1)
+
+
+def _next_month_start(month_start: date) -> date:
+    if month_start.month == 12:
+        return date(month_start.year + 1, 1, 1)
+    return date(month_start.year, month_start.month + 1, 1)
+
+
+async def _build_monthly_report_payload(report_month_local: date) -> dict[str, object]:
+    now_local, timezone_name = _tesla_grid_support_now_local()
+    month_start = _month_start(report_month_local)
+    payload = await asyncio.to_thread(
+        build_monthly_report_analysis,
+        storage_db_path,
+        report_month_local=month_start,
+        local_timezone_name=timezone_name,
+        sample_intervals_by_system={
+            "saj": _sample_interval_for_system("saj"),
+            "solplanet": _sample_interval_for_system("solplanet"),
+            "combined": _sample_interval_for_system("combined"),
+        },
+        now_utc=datetime.now(UTC),
+        grid_import_window_start_hour=FREE_ENERGY_WINDOW_START_HOUR,
+        grid_import_window_end_hour=FREE_ENERGY_WINDOW_END_HOUR,
+        grid_export_window_start_hour=EXPORT_WINDOW_START_HOUR,
+        grid_export_window_end_hour=EXPORT_WINDOW_END_HOUR,
+        zero_hero_window_minutes=ZERO_HERO_WINDOW_MINUTES,
+    )
+    payload["saved_report"] = False
+    payload["source"] = "live"
+    payload["is_complete_month"] = bool(_next_month_start(month_start) <= now_local.date())
+    return payload
+
+
+async def _generate_monthly_report(report_month_local: date, *, save: bool) -> dict[str, object]:
+    async with monthly_report_generation_lock:
+        month_start = _month_start(report_month_local)
+        logger.info("Generating monthly report for %s (save=%s)", month_start.strftime("%Y-%m"), save)
+        payload = await _build_monthly_report_payload(month_start)
+        if save:
+            saved = await asyncio.to_thread(save_monthly_report, storage_db_path, payload=payload, generated_at_utc=datetime.now(UTC))
+            logger.info(
+                "Generated monthly report for %s with %s observed days",
+                saved.get("report_month_local"),
+                saved.get("observed_day_count"),
+            )
+            stored = await asyncio.to_thread(get_monthly_report, storage_db_path, report_month_local=month_start)
+            if stored is not None:
+                return stored
+        return payload
+
+
 async def _daily_report_loop() -> None:
     while not daily_report_stop_event.is_set():
         now_local, _ = _tesla_grid_support_now_local()
+        try:
+            async with detailed_data_maintenance_lock:
+                await _prune_detailed_data_once()
+        except Exception:  # noqa: BLE001
+            logger.exception("Detailed data retention cleanup failed")
         yesterday = now_local.date() - timedelta(days=1)
         existing = await asyncio.to_thread(list_daily_reports, storage_db_path, limit=2)
         if not any(item.get("report_day_local") == yesterday.isoformat() for item in existing):
@@ -12684,6 +12805,21 @@ async def _daily_report_loop() -> None:
                 except asyncio.TimeoutError:
                     pass
                 continue
+
+        previous_month = _month_start(yesterday)
+        if previous_month.month == now_local.month and previous_month.year == now_local.year:
+            previous_month = _month_start(previous_month - timedelta(days=1))
+        existing_months = await asyncio.to_thread(list_monthly_reports, storage_db_path, limit=2)
+        previous_month_text = previous_month.strftime("%Y-%m")
+        if not any(item.get("report_month_local") == previous_month_text for item in existing_months):
+            try:
+                await _generate_monthly_report(previous_month, save=True)
+            except Exception:  # noqa: BLE001
+                logger.exception("Monthly report backfill failed for %s", previous_month_text)
+                try:
+                    await asyncio.wait_for(daily_report_stop_event.wait(), timeout=300.0)
+                except asyncio.TimeoutError:
+                    pass
 
         now_local, _ = _tesla_grid_support_now_local()
         report_day = now_local.date()
@@ -12954,7 +13090,26 @@ async def storage_status() -> dict[str, object]:
     status = await asyncio.to_thread(get_storage_status, storage_db_path, sample_interval_seconds)
     status["saj_sample_interval_seconds"] = sample_interval_seconds
     status["solplanet_sample_interval_seconds"] = solplanet_sample_interval_seconds
+    status["detail_retention_months"] = settings.detail_retention_months
     return status
+
+
+@app.post("/api/storage/retention/prune")
+async def prune_storage_retention() -> dict[str, object]:
+    async with detailed_data_maintenance_lock, runtime_lock, daily_report_generation_lock, monthly_report_generation_lock:
+        collector_was_running = bool(collector_task and not collector_task.done())
+        await _stop_collector()
+        try:
+            result = await _prune_detailed_data_once(reclaim_space=True)
+        finally:
+            if collector_was_running:
+                await _start_collector()
+
+    status = await asyncio.to_thread(get_storage_status, storage_db_path, sample_interval_seconds)
+    status["saj_sample_interval_seconds"] = sample_interval_seconds
+    status["solplanet_sample_interval_seconds"] = solplanet_sample_interval_seconds
+    status["detail_retention_months"] = settings.detail_retention_months
+    return {"ok": True, "retention": result, "storage_status": status}
 
 
 @app.get("/api/storage/daily-usage")
@@ -13122,6 +13277,52 @@ async def generate_daily_report(
     if target_day >= now_local.date():
         raise HTTPException(status_code=400, detail="Daily reports can only be generated for completed local days")
     return await _generate_daily_report(target_day)
+
+
+@app.get("/api/reports/monthly")
+async def monthly_report(
+    month: str | None = Query(default=None, description="Local month in YYYY-MM, default=current local month"),
+) -> dict[str, object]:
+    now_local, timezone_name = _tesla_grid_support_now_local()
+    target_month = date(now_local.year, now_local.month, 1)
+    if month:
+        try:
+            year_text, month_text = month.split("-", 1)
+            year = int(year_text)
+            month_number = int(month_text)
+            if month_number < 1 or month_number > 12:
+                raise ValueError
+            target_month = date(year, month_number, 1)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid month format, expected YYYY-MM") from exc
+    if _next_month_start(target_month) <= now_local.date():
+        stored = await asyncio.to_thread(get_monthly_report, storage_db_path, report_month_local=target_month)
+        if stored is not None:
+            return stored
+        return await _generate_monthly_report(target_month, save=True)
+    return await _build_monthly_report_payload(target_month)
+
+
+@app.post("/api/reports/monthly/generate")
+async def generate_monthly_report(
+    month: str | None = Query(default=None, description="Completed local month in YYYY-MM, default=previous month"),
+) -> dict[str, object]:
+    now_local, _ = _tesla_grid_support_now_local()
+    previous_month = _month_start(_month_start(now_local.date()) - timedelta(days=1))
+    target_month = previous_month
+    if month:
+        try:
+            year_text, month_text = month.split("-", 1)
+            year = int(year_text)
+            month_number = int(month_text)
+            if month_number < 1 or month_number > 12:
+                raise ValueError
+            target_month = date(year, month_number, 1)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid month format, expected YYYY-MM") from exc
+    if _next_month_start(target_month) > now_local.date():
+        raise HTTPException(status_code=400, detail="Monthly reports can only be persisted for completed local months")
+    return await _generate_monthly_report(target_month, save=True)
 
 
 @app.get("/api/database/tables")
@@ -13584,8 +13785,10 @@ async def config_status() -> dict[str, object]:
         "missing_required": missing,
         "config_path": str(get_config_path()),
         "allowed_sample_interval_seconds": list(ALLOWED_SAMPLE_INTERVAL_SECONDS),
+        "allowed_detail_retention_months": list(ALLOWED_DETAIL_RETENTION_MONTHS),
         "saj_sample_interval_seconds": sample_interval_seconds,
         "solplanet_sample_interval_seconds": solplanet_sample_interval_seconds,
+        "detail_retention_months": settings.detail_retention_months,
     }
 
 
@@ -13607,6 +13810,10 @@ async def put_config(payload: ConfigPayload) -> dict[str, object]:
         payload.solplanet_sample_interval_seconds,
         CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS,
     )
+    detail_retention_months = normalize_detail_retention_months(
+        payload.detail_retention_months,
+        CONST_DETAIL_RETENTION_MONTHS,
+    )
     _validate_interval_choice("saj_sample_interval_seconds", saj_interval)
     _validate_interval_choice("solplanet_sample_interval_seconds", solplanet_interval)
     persisted = save_settings(
@@ -13614,6 +13821,7 @@ async def put_config(payload: ConfigPayload) -> dict[str, object]:
             **payload.model_dump(),
             "saj_sample_interval_seconds": saj_interval,
             "solplanet_sample_interval_seconds": solplanet_interval,
+            "detail_retention_months": detail_retention_months,
         }
     )
     await _replace_runtime(persisted)
@@ -15082,6 +15290,11 @@ async def on_startup() -> None:
         active_statuses=(WORKER_LOG_STATUS_SEND, "notification", "notified", "alarmed"),
     )
     await _prune_worker_api_logs_once()
+    try:
+        async with detailed_data_maintenance_lock:
+            await _prune_detailed_data_once()
+    except Exception:  # noqa: BLE001
+        logger.exception("Detailed data retention startup cleanup failed")
     await _start_worker_log_cleanup()
     await _start_daily_reports()
     await _start_collector()
