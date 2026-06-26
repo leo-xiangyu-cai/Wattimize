@@ -814,7 +814,7 @@ const I18N = {
     samplingLegendSeriesCharge: "Charge",
     samplingLegendSeriesDischarge: "Discharge",
     samplingBatteryTimelineTitle: "Battery timeline",
-    samplingBatteryTimelineMeta: "{range} · SAJ + Solplanet SOC · {count} points",
+    samplingBatteryTimelineMeta: "{range} · SAJ + Solplanet SOC and usable battery remaining · {count} points",
     samplingBatteryTimelineNoData: "No battery timeline data yet for this range",
     samplingPumpStatusTitle: "Pool Pump Status",
     samplingPumpStatusMeta: "{range} · Pool pump on/off · {count} points · Total on {totalHours}h · Day on {dayHours}h · Night on {nightHours}h",
@@ -823,6 +823,8 @@ const I18N = {
     samplingPumpStatusOn: "On",
     samplingBatteryTimelineSeriesSaj: "SAJ Battery",
     samplingBatteryTimelineSeriesSolplanet: "Solplanet Battery",
+    samplingBatteryTimelineSeriesCombined: "SAJ + Solplanet Batteries",
+    samplingBatteryTimelineSeriesTotalRemaining: "Total Battery Remaining",
     samplingBatteryTimelineSeriesTesla: "Tesla Battery",
     samplingTotalsTitle: "Energy Breakdown",
     samplingTotalsMeta: "{system} · {range} · directional energy totals",
@@ -1796,7 +1798,7 @@ const I18N = {
     samplingLegendSeriesCharge: "充电",
     samplingLegendSeriesDischarge: "放电",
     samplingBatteryTimelineTitle: "电池时间线",
-    samplingBatteryTimelineMeta: "{range} · SAJ + Solplanet SOC · {count} 个点",
+    samplingBatteryTimelineMeta: "{range} · SAJ + Solplanet SOC 与可用剩余电量 · {count} 个点",
     samplingBatteryTimelineNoData: "当前时间范围暂无电池时间线数据",
     samplingPumpStatusTitle: "水泵状态",
     samplingPumpStatusMeta: "{range} · 水泵开关状态 · {count} 个点 · 总开启 {totalHours}h · 白天开启 {dayHours}h · 晚上开启 {nightHours}h",
@@ -1805,6 +1807,8 @@ const I18N = {
     samplingPumpStatusOn: "开",
     samplingBatteryTimelineSeriesSaj: "SAJ 电池",
     samplingBatteryTimelineSeriesSolplanet: "Solplanet 电池",
+    samplingBatteryTimelineSeriesCombined: "SAJ + Solplanet 电池",
+    samplingBatteryTimelineSeriesTotalRemaining: "总剩余可用电量",
     samplingBatteryTimelineSeriesTesla: "Tesla 电池",
     samplingTotalsTitle: "电量分布",
     samplingTotalsMeta: "{system} · {range} · 分方向累计电量",
@@ -2177,6 +2181,7 @@ const SAMPLING_OVERALL_SERIES = [
 const SAMPLING_BATTERY_TIMELINE_SERIES = [
   { key: "saj_battery_soc_percent", labelKey: "samplingBatteryTimelineSeriesSaj", color: "#22c55e" },
   { key: "solplanet_battery_soc_percent", labelKey: "samplingBatteryTimelineSeriesSolplanet", color: "#7c3aed" },
+  { key: "total_battery_usable_kwh", labelKey: "samplingBatteryTimelineSeriesTotalRemaining", color: "#0f766e" },
   { key: "tesla_battery_soc_percent", labelKey: "samplingBatteryTimelineSeriesTesla", color: "#dc2626" },
 ];
 
@@ -2647,8 +2652,8 @@ let samplingChartFocusSeries = null;
 let samplingChartLastPayload = null;
 let samplingChartHandlersBound = false;
 let samplingBatteryTimelineCharts = {
-  saj: null,
-  solplanet: null,
+  combined: null,
+  remaining: null,
   tesla: null,
 };
 let samplingBatteryTimelineLastPayload = null;
@@ -10508,7 +10513,7 @@ function buildBatteryTimelinePayload(seriesBySystem, range) {
       labelKey: "samplingBatteryTimelineSeriesTesla",
     },
   ];
-  const series = systems.map((meta) => {
+  const batterySocSeries = systems.map((meta) => {
     const payload = seriesBySystem?.[meta.source];
     const items = Array.isArray(payload?.items) ? payload.items : [];
     const data = items
@@ -10521,8 +10526,22 @@ function buildBatteryTimelinePayload(seriesBySystem, range) {
       data,
     };
   });
+  const seriesByKey = Object.fromEntries(batterySocSeries.map((item) => [item.key, item]));
+  const totalBatteryUsableData = buildTotalBatteryUsableData(
+    seriesByKey.saj_battery_soc_percent?.data,
+    seriesByKey.solplanet_battery_soc_percent?.data,
+  );
+  const series = [
+    ...batterySocSeries,
+    {
+      key: "total_battery_usable_kwh",
+      labelKey: "samplingBatteryTimelineSeriesTotalRemaining",
+      color: getSamplingSeriesColor("total_battery_usable_kwh"),
+      data: totalBatteryUsableData,
+    },
+  ];
   return {
-    count: series.reduce((sum, item) => sum + item.data.length, 0),
+    count: batterySocSeries.reduce((sum, item) => sum + item.data.length, 0),
     start_at_utc: range.startUtc,
     end_at_utc: range.endUtc,
     series,
@@ -10536,6 +10555,42 @@ function getBatteryUsableKwhValue(system, socPercent) {
   if (!Number.isFinite(capacityKwh) || !Number.isFinite(soc)) return null;
   const usableSoc = Math.max(0, Math.min(100, soc) - minDischargeSoc);
   return (capacityKwh * usableSoc) / 100;
+}
+
+function buildTotalBatteryUsableData(sajData, solplanetData) {
+  const normalize = (data) =>
+    (Array.isArray(data) ? data : [])
+      .map(([ts, soc]) => ({ ts: Number(ts), soc: Number(soc) }))
+      .filter((item) => Number.isFinite(item.ts) && Number.isFinite(item.soc))
+      .sort((a, b) => a.ts - b.ts);
+  const sajItems = normalize(sajData);
+  const solplanetItems = normalize(solplanetData);
+  const timestamps = Array.from(new Set([...sajItems.map((item) => item.ts), ...solplanetItems.map((item) => item.ts)])).sort(
+    (a, b) => a - b,
+  );
+  const sajGapMs = deriveOverallSeriesGapMs(sajItems, 5);
+  const solplanetGapMs = deriveOverallSeriesGapMs(solplanetItems, 60);
+  let sajIndex = 0;
+  let solplanetIndex = 0;
+  let latestSaj = null;
+  let latestSolplanet = null;
+  const data = [];
+
+  for (const ts of timestamps) {
+    while (sajIndex < sajItems.length && sajItems[sajIndex].ts <= ts) {
+      latestSaj = sajItems[sajIndex];
+      sajIndex += 1;
+    }
+    while (solplanetIndex < solplanetItems.length && solplanetItems[solplanetIndex].ts <= ts) {
+      latestSolplanet = solplanetItems[solplanetIndex];
+      solplanetIndex += 1;
+    }
+    if (!latestSaj || !latestSolplanet || ts - latestSaj.ts > sajGapMs || ts - latestSolplanet.ts > solplanetGapMs) continue;
+    const sajKwh = getBatteryUsableKwhValue("saj", latestSaj.soc);
+    const solplanetKwh = getBatteryUsableKwhValue("solplanet", latestSolplanet.soc);
+    if (Number.isFinite(sajKwh) && Number.isFinite(solplanetKwh)) data.push([ts, sajKwh + solplanetKwh]);
+  }
+  return data;
 }
 
 function findNearestSeriesSampleAt(seriesPayload, targetMs, toleranceMs = SAMPLING_PHASE_BATTERY_SAMPLE_TOLERANCE_MS) {
@@ -10820,8 +10875,8 @@ function ensureSamplingChart() {
 function ensureSamplingBatteryTimelineChart(key) {
   if (samplingBatteryTimelineCharts[key]) return samplingBatteryTimelineCharts[key];
   const idMap = {
-    saj: "samplingBatteryTimelineSajCanvas",
-    solplanet: "samplingBatteryTimelineSolplanetCanvas",
+    combined: "samplingBatteryTimelineCombinedCanvas",
+    remaining: "samplingBatteryTimelineRemainingCanvas",
     tesla: "samplingBatteryTimelineTeslaCanvas",
   };
   const canvas = document.getElementById(idMap[key] || "");
@@ -10856,7 +10911,7 @@ function setSamplingChartLoading(loading) {
 }
 
 function setSamplingBatteryTimelineLoading(loading) {
-  for (const key of ["saj", "solplanet", "tesla"]) {
+  for (const key of ["combined", "remaining", "tesla"]) {
     const chart = ensureSamplingBatteryTimelineChart(key);
     if (!chart) continue;
     if (loading) {
@@ -11256,17 +11311,24 @@ function renderSamplingBatteryTimeline(payload) {
     }
     return best ? best.value : null;
   };
-  const renderOneBatteryChart = (chartKey, seriesKey) => {
+  const renderBatteryChart = ({ chartKey, seriesKeys, unit, yAxisMax, legend = false }) => {
     const chart = ensureSamplingBatteryTimelineChart(chartKey);
     if (!chart) return;
     chart.hideLoading();
-    const source = seriesByKey[seriesKey] || null;
-    const sampledData = downsampleByBucket(Array.isArray(source?.data) ? source.data : [], 220);
-    const smoothedData = movingAverage(movingAverage(sampledData, 5), 5);
-    const color = source?.color || getSamplingSeriesColor(seriesKey, "#6b7f72");
-    const series = smoothedData.length
-      ? [{
-          name: seriesKey,
+    const sources = seriesKeys.map((seriesKey) => {
+      const source = seriesByKey[seriesKey] || null;
+      const sampledData = downsampleByBucket(Array.isArray(source?.data) ? source.data : [], 220);
+      return {
+        seriesKey,
+        source,
+        smoothedData: movingAverage(movingAverage(sampledData, 5), 5),
+        color: source?.color || getSamplingSeriesColor(seriesKey, "#6b7f72"),
+      };
+    });
+    const series = sources
+      .filter(({ smoothedData }) => smoothedData.length)
+      .map(({ seriesKey, source, smoothedData, color }) => ({
+          name: source ? t(source.labelKey) : seriesKey,
           type: "line",
           smooth: 0.55,
           showSymbol: false,
@@ -11276,12 +11338,20 @@ function renderSamplingBatteryTimeline(payload) {
           itemStyle: { color },
           emphasis: { focus: "series" },
           animation: false,
-        }]
-      : [];
+        }));
     chart.setOption(
       {
         animation: false,
-        grid: { left: 46, right: 12, top: 18, bottom: 36 },
+        grid: { left: unit === "kwh" ? 52 : 46, right: 12, top: legend ? 34 : 18, bottom: 36 },
+        legend: legend
+          ? {
+              top: 6,
+              left: "center",
+              itemWidth: 10,
+              itemHeight: 8,
+              textStyle: { color: "#52695d", fontSize: 11 },
+            }
+          : undefined,
         tooltip: {
           trigger: "axis",
           triggerOn: "mousemove",
@@ -11296,11 +11366,14 @@ function renderSamplingBatteryTimeline(payload) {
           formatter: (params) => {
             if (!Array.isArray(params) || !params.length) return "";
             const hoveredTs = Number(params[0].axisValue);
-            const value = pickBatteryTimelineValueAt(smoothedData, hoveredTs);
-            return [
-              formatSamplingClock(hoveredTs, true),
-              `${source ? t(source.labelKey) : seriesKey}: ${Number.isFinite(value) ? `${formatTrimmedDecimal(value, 1)}%` : "-"}`,
-            ].join("<br/>");
+            const values = sources.map(({ seriesKey, source, smoothedData }) => {
+              const value = pickBatteryTimelineValueAt(smoothedData, hoveredTs);
+              const formattedValue = Number.isFinite(value)
+                ? `${formatTrimmedDecimal(value, 1)}${unit === "kwh" ? " kWh" : "%"}`
+                : "-";
+              return `${source ? t(source.labelKey) : seriesKey}: ${formattedValue}`;
+            });
+            return [formatSamplingClock(hoveredTs, true), ...values].join("<br/>");
           },
         },
         xAxis: {
@@ -11315,10 +11388,13 @@ function renderSamplingBatteryTimeline(payload) {
         yAxis: {
           type: "value",
           min: 0,
-          max: 100,
+          max: yAxisMax,
           axisLine: { lineStyle: { color: "#adc2b5" } },
           splitLine: { lineStyle: { color: "#dbe7df", type: "dashed" } },
-          axisLabel: { color: "#6b7f72", formatter: (v) => `${Number(v).toFixed(0)}%` },
+          axisLabel: {
+            color: "#6b7f72",
+            formatter: (v) => (unit === "kwh" ? `${Number(v).toFixed(0)} kWh` : `${Number(v).toFixed(0)}%`),
+          },
         },
         series,
         graphic: series.length
@@ -11336,9 +11412,20 @@ function renderSamplingBatteryTimeline(payload) {
     );
     chart.resize();
   };
-  renderOneBatteryChart("saj", "saj_battery_soc_percent");
-  renderOneBatteryChart("solplanet", "solplanet_battery_soc_percent");
-  renderOneBatteryChart("tesla", "tesla_battery_soc_percent");
+  renderBatteryChart({
+    chartKey: "combined",
+    seriesKeys: ["saj_battery_soc_percent", "solplanet_battery_soc_percent"],
+    unit: "percent",
+    yAxisMax: 100,
+    legend: true,
+  });
+  renderBatteryChart({
+    chartKey: "remaining",
+    seriesKeys: ["total_battery_usable_kwh"],
+    unit: "kwh",
+    yAxisMax: 60,
+  });
+  renderBatteryChart({ chartKey: "tesla", seriesKeys: ["tesla_battery_soc_percent"], unit: "percent", yAxisMax: 100 });
 }
 
 function ensureSamplingTotalsChart() {
