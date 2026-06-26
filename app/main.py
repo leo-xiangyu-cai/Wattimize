@@ -13279,6 +13279,25 @@ async def generate_daily_report(
     return await _generate_daily_report(target_day)
 
 
+@app.get("/api/reports/monthly/index")
+async def monthly_report_index(
+    year: int | None = Query(default=None, ge=2000, le=9999),
+    limit: int = Query(default=24, ge=1, le=1200),
+) -> dict[str, object]:
+    now_local, _ = _tesla_grid_support_now_local()
+    target_year = year or now_local.year
+    start_month_local = date(target_year, 1, 1)
+    end_month_local = date(target_year + 1, 1, 1)
+    items = await asyncio.to_thread(
+        list_monthly_reports,
+        storage_db_path,
+        limit=limit,
+        start_month_local=start_month_local,
+        end_month_local=end_month_local,
+    )
+    return {"count": len(items), "items": items, "updated_at": datetime.now(UTC).isoformat()}
+
+
 @app.get("/api/reports/monthly")
 async def monthly_report(
     month: str | None = Query(default=None, description="Local month in YYYY-MM, default=current local month"),

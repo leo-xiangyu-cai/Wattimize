@@ -91,6 +91,10 @@ DAILY_REPORT_PHASE_BATTERY_STAGES: tuple[dict[str, object], ...] = (
     {"id": "post_export_peak", "titleKey": "notificationMatrixWindowPostExportPeakTitle", "endHour": 23},
 )
 DAILY_REPORT_PHASE_BATTERY_SAMPLE_TOLERANCE_SECONDS = 15 * 60
+DAILY_REPORT_STATUS_SAVED = "saved"
+DAILY_REPORT_STATUS_NO_DATA = "no_data"
+MONTHLY_REPORT_STATUS_SAVED = "saved"
+MONTHLY_REPORT_STATUS_NO_DATA = "no_data"
 
 
 @dataclass(frozen=True)
@@ -152,6 +156,26 @@ class DailyReportRow(Base):
     usage_json = Column(String, nullable=False)
     series_json = Column(String, nullable=False)
     zero_hero_json = Column(String, nullable=False)
+
+
+def _daily_report_status(sample_count: int) -> str:
+    """Return the display status for a persisted daily report."""
+    return DAILY_REPORT_STATUS_SAVED if sample_count > 0 else DAILY_REPORT_STATUS_NO_DATA
+
+
+def _monthly_report_data_day_count(payload: object) -> int:
+    """Count days with usable samples in a persisted monthly report payload."""
+    if not isinstance(payload, dict):
+        return 0
+    daily = payload.get("daily")
+    items = daily.get("items") if isinstance(daily, dict) else None
+    if not isinstance(items, list):
+        return 0
+    return sum(1 for item in items if isinstance(item, dict) and bool(item.get("has_data")))
+
+
+def _monthly_report_status(payload: object) -> str:
+    return MONTHLY_REPORT_STATUS_SAVED if _monthly_report_data_day_count(payload) > 0 else MONTHLY_REPORT_STATUS_NO_DATA
 
 
 class MonthlyReportRow(Base):
@@ -2564,6 +2588,7 @@ def save_daily_report(
         "report_day_local": day_text,
         "generated_at_utc": generated_at.isoformat(),
         "sample_count": sample_count,
+        "report_status": _daily_report_status(sample_count),
     }
 
 
@@ -2600,6 +2625,7 @@ def get_daily_report(
                 "period_start_utc": report.period_start_utc,
                 "period_end_utc": report.period_end_utc,
                 "generated_at_utc": report.generated_at_utc,
+                "report_status": _daily_report_status(total),
             }
     except SQLAlchemyError:
         return None
@@ -2689,6 +2715,7 @@ def list_daily_reports(
             "timezone_name": str(row.timezone_name),
             "generated_at_utc": str(row.generated_at_utc),
             "sample_count": int(row.sample_count or 0),
+            "report_status": _daily_report_status(int(row.sample_count or 0)),
         }
         for row in rows
     ]
@@ -3510,6 +3537,10 @@ def save_monthly_report(
     stored_payload["saved_report"] = True
     stored_payload["source"] = "stored"
     observed_day_count = int(_monthly_report_number(stored_payload.get("observed_day_count"), 0.0))
+    data_day_count = _monthly_report_data_day_count(stored_payload)
+    report_status = _monthly_report_status(stored_payload)
+    stored_payload["data_day_count"] = data_day_count
+    stored_payload["report_status"] = report_status
 
     with _session_scope(db_path) as session:
         report = session.get(MonthlyReportRow, month_text)
@@ -3530,6 +3561,8 @@ def save_monthly_report(
         "report_month_local": month_text,
         "generated_at_utc": generated_at.isoformat(),
         "observed_day_count": observed_day_count,
+        "data_day_count": data_day_count,
+        "report_status": report_status,
     }
 
 
@@ -3561,6 +3594,8 @@ def get_monthly_report(
     if not isinstance(payload, dict):
         payload = {}
     payload = {**metadata, **payload}
+    payload["data_day_count"] = _monthly_report_data_day_count(payload)
+    payload["report_status"] = _monthly_report_status(payload)
     payload["saved_report"] = True
     payload["source"] = "stored"
     return payload
@@ -3570,26 +3605,36 @@ def list_monthly_reports(
     db_path: DatabaseTarget,
     *,
     limit: int = 120,
+    start_month_local: date | None = None,
+    end_month_local: date | None = None,
 ) -> list[dict[str, object]]:
     if not _db_exists(db_path):
         return []
     safe_limit = max(1, min(1200, int(limit)))
     try:
         with _session_scope(db_path) as session:
-            rows = session.scalars(
-                select(MonthlyReportRow).order_by(desc(MonthlyReportRow.report_month_local)).limit(safe_limit)
-            ).all()
+            stmt = select(MonthlyReportRow)
+            if start_month_local is not None:
+                stmt = stmt.where(MonthlyReportRow.report_month_local >= start_month_local.strftime("%Y-%m"))
+            if end_month_local is not None:
+                stmt = stmt.where(MonthlyReportRow.report_month_local < end_month_local.strftime("%Y-%m"))
+            rows = session.scalars(stmt.order_by(desc(MonthlyReportRow.report_month_local)).limit(safe_limit)).all()
     except SQLAlchemyError:
         return []
-    return [
-        {
-            "report_month_local": str(row.report_month_local),
-            "timezone_name": str(row.timezone_name),
-            "generated_at_utc": str(row.generated_at_utc),
-            "observed_day_count": int(row.observed_day_count or 0),
-        }
-        for row in rows
-    ]
+    items: list[dict[str, object]] = []
+    for row in rows:
+        payload = _json_loads(row.payload_json, default={})
+        items.append(
+            {
+                "report_month_local": str(row.report_month_local),
+                "timezone_name": str(row.timezone_name),
+                "generated_at_utc": str(row.generated_at_utc),
+                "observed_day_count": int(row.observed_day_count or 0),
+                "data_day_count": _monthly_report_data_day_count(payload),
+                "report_status": _monthly_report_status(payload),
+            }
+        )
+    return items
 
 
 def get_latest_sample(db_path: DatabaseTarget, *, system: str) -> dict[str, object] | None:

@@ -349,12 +349,12 @@
             <span id="monthlyReportUpdatedAt" class="muted">-</span>
           </div>
           <div class="monthly-report-controls">
-            <button id="monthlyReportPrevBtn" type="button" class="btn secondary" data-i18n="monthlyReportPrev">Previous Month</button>
-            <label class="monthly-report-month-field">
-              <span data-i18n="monthlyReportMonthLabel">Month</span>
-              <input id="monthlyReportMonthInput" type="month" />
-            </label>
-            <button id="monthlyReportNextBtn" type="button" class="btn secondary" data-i18n="monthlyReportNext">Next Month</button>
+            <button id="monthlyReportPrevBtn" type="button" class="btn secondary" data-i18n="monthlyReportPrev">Previous Year</button>
+            <div class="monthly-report-month-picker">
+              <p id="monthlyReportPickerYear" class="monthly-report-picker-year">-</p>
+              <div id="monthlyReportMonthGrid" class="monthly-report-month-grid" role="list" aria-label="Monthly report picker"></div>
+            </div>
+            <button id="monthlyReportNextBtn" type="button" class="btn secondary" data-i18n="monthlyReportNext">Next Year</button>
           </div>
           <p id="monthlyReportStatus" class="monthly-report-status muted">-</p>
 
@@ -393,38 +393,15 @@
             <div class="section-header">
               <h3 data-i18n="monthlyReportDailyTrendTitle">Daily Trend</h3>
             </div>
-            <div id="monthlyReportDailyBars" class="monthly-report-daily-bars"></div>
+            <div id="monthlyReportDailyTrendChart" class="monthly-report-daily-trend-chart" aria-label="Monthly daily energy trend chart"></div>
           </section>
 
-          <div class="monthly-report-section-grid monthly-report-anomaly-grid">
-            <section class="monthly-report-panel">
-              <div class="section-header">
-                <h3 data-i18n="monthlyReportAnomaliesTitle">Anomalies</h3>
-              </div>
-              <div id="monthlyReportAnomalies" class="monthly-report-anomaly-list"></div>
-            </section>
-            <section class="monthly-report-panel">
-              <div class="section-header">
-                <h3 data-i18n="monthlyReportDailyTableTitle">Daily Detail</h3>
-              </div>
-              <div class="table-wrap monthly-report-table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th data-i18n="monthlyReportTableDay">Day</th>
-                      <th data-i18n="monthlyReportTableLoad">Load</th>
-                      <th data-i18n="monthlyReportTableSolar">Solar</th>
-                      <th data-i18n="monthlyReportTableImport">Import</th>
-                      <th data-i18n="monthlyReportTableExport">Export</th>
-                      <th data-i18n="monthlyReportTableHero">Hero</th>
-                      <th data-i18n="monthlyReportTableAction">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody id="monthlyReportDailyBody"></tbody>
-                </table>
-              </div>
-            </section>
-          </div>
+          <section class="monthly-report-panel monthly-report-anomalies-panel">
+            <div class="section-header">
+              <h3 data-i18n="monthlyReportAnomaliesTitle">Anomalies</h3>
+            </div>
+            <div id="monthlyReportAnomalies" class="monthly-report-anomaly-calendar"></div>
+          </section>
         </section>
       </section>
 

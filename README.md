@@ -24,7 +24,8 @@ Use the web config page:
 - The config dialog can auto-discover `SOLPLANET_INVERTER_SN` and `SOLPLANET_BATTERY_SN` from the dongle CGI API.
 - Adjustable sampling fields: `SAJ_SAMPLE_INTERVAL_SECONDS`, `SOLPLANET_SAMPLE_INTERVAL_SECONDS` (choices: `5/10/30/60/300`).
 - Detailed history retention: `1/2/3/6/12` months, default `2`. Older raw samples and per-point daily/monthly history are removed; report summaries and recommendations remain available.
-- The Monthly tab provides month-to-date estimates, comparison baselines, Hero Window analysis, anomalies, and load-shifting recommendations. Completed months are persisted automatically and can also be generated through the API.
+- The Monthly tab provides month-to-date estimates, comparison baselines, Hero Window analysis, anomalies, and load-shifting recommendations. Its year picker shows whether each month is saved, has no data, is ready to generate, or is live; completed months are persisted automatically and can also be generated through the API.
+- Saved daily and monthly reports expose a `report_status` of `saved` or `no_data`. Persisted monthly snapshots remain available after detailed-history cleanup.
 
 Config storage:
 - Stored in SQLite table `app_config`
@@ -90,6 +91,7 @@ curl -s "http://<wattimize-host>:18000/api/storage/zero-hero-window-history?syst
 curl -s "http://<wattimize-host>:18000/api/reports/daily?day_local=2026-03-03&page=1&page_size=100" | jq
 curl -s "http://<wattimize-host>:18000/api/reports/daily/index" | jq
 curl -s -X POST "http://<wattimize-host>:18000/api/reports/daily/generate?day_local=2026-03-03" | jq
+curl -s "http://<wattimize-host>:18000/api/reports/monthly/index?year=2026" | jq
 curl -s "http://<wattimize-host>:18000/api/reports/monthly?month=2026-03" | jq
 curl -s -X POST "http://<wattimize-host>:18000/api/reports/monthly/generate?month=2026-03" | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/charging -H 'Content-Type: application/json' -d '{"enabled":true}' | jq
