@@ -2,6 +2,10 @@
 
 TEST_SIZE_MB ?= 64
 PING_COUNT ?= 10
+SKIP_DB_PULL ?= 0
+NO_DB_PULL ?= $(SKIP_DB_PULL)
+SKIP_DB_PUSH ?= 0
+NO_DB_PUSH ?= $(SKIP_DB_PUSH)
 
 IMAGE = wattimize
 TAG = amd64-latest
@@ -19,11 +23,13 @@ help:
 	@echo "  make inspect     Inspect image architecture/os"
 	@echo "  make status      Show local and NAS runtime/database status"
 	@echo "  make dev         Switch to local dev mode and sync DB from NAS when needed"
+	@echo "                  Use SKIP_DB_PULL=1 to preserve the local SQLite database"
 	@echo "  make dev-stop    Stop local docker compose services without removing them"
 	@echo "  make dev-logs    Follow logs for wattimize-api"
 	@echo "  make dev-down    Stop local docker compose services"
 	@echo "  make nas-stop    Stop the NAS container without touching local services"
 	@echo "  make nas-deploy  Build and deploy to TerraMaster NAS over SSH"
+	@echo "                  Use SKIP_DB_PUSH=1 to deploy without pushing the local SQLite database"
 	@echo "  make test-tnas   Test NAS latency, packet loss, upload speed, and download speed"
 
 docker:
@@ -57,7 +63,7 @@ status:
 	bash ./scripts/status.sh
 
 dev:
-	bash ./scripts/dev-local.sh
+	SKIP_DB_PULL="$(SKIP_DB_PULL)" NO_DB_PULL="$(NO_DB_PULL)" bash ./scripts/dev-local.sh
 
 dev-stop:
 	docker compose stop
@@ -72,7 +78,7 @@ nas-stop:
 	bash ./scripts/stop-nas.sh
 
 nas-deploy:
-	bash ./scripts/deploy-nas.sh
+	SKIP_DB_PUSH="$(SKIP_DB_PUSH)" NO_DB_PUSH="$(NO_DB_PUSH)" bash ./scripts/deploy-nas.sh
 
 test-tnas:
 	TNAS_TEST_SIZE_MB="$(TEST_SIZE_MB)" TNAS_PING_COUNT="$(PING_COUNT)" bash ./scripts/test-tnas.sh

@@ -34,8 +34,8 @@
         <button id="tabDashboard" class="tab-btn active" type="button" data-tab="dashboard" data-i18n="dashboardTab" role="tab" aria-selected="true" aria-controls="dashboardView">
           Dashboard
         </button>
-        <button id="tabSampling" class="tab-btn" type="button" data-tab="sampling" data-i18n="samplingTab" role="tab" aria-selected="false" aria-controls="samplingView" tabindex="-1">
-          History
+        <button id="tabReport" class="tab-btn" type="button" data-tab="report" data-i18n="reportTab" role="tab" aria-selected="false" aria-controls="samplingView" tabindex="-1">
+          Report
         </button>
         <button id="tabNotificationMatrix" class="tab-btn" type="button" data-tab="notificationMatrix" data-i18n="notificationMatrixTab" role="tab" aria-selected="false" aria-controls="notificationMatrixView" tabindex="-1">
           Time Window
@@ -187,7 +187,7 @@
       <section id="samplingView" class="view hidden">
         <section class="card">
           <div class="section-header">
-            <h2 data-i18n="samplingTitle">Sampling Records</h2>
+            <h2 id="samplingTitle" data-i18n="samplingTitle">Sampling Records</h2>
             <span id="samplingUpdatedAt" class="muted">-</span>
           </div>
           <p id="samplingStorageMeta" class="muted hidden" hidden aria-hidden="true">-</p>
@@ -200,6 +200,13 @@
               <p id="samplingTotalsMeta" class="muted">-</p>
               <div class="sampling-totals-chart-wrap">
                 <div id="samplingTotalsChartCanvas" class="sampling-totals-chart"></div>
+              </div>
+              <div class="sampling-phase-battery">
+                <div class="sampling-phase-battery-head">
+                  <h4 data-i18n="samplingPhaseBatteryTitle">Stage-End Battery Remaining</h4>
+                  <span id="samplingPhaseBatteryMeta" class="muted">-</span>
+                </div>
+                <div id="samplingPhaseBatteryBody" class="sampling-phase-battery-grid"></div>
               </div>
             </section>
             <div id="samplingFilterBar" class="sampling-top-filters">
@@ -219,6 +226,19 @@
               </label>
               <div id="samplingRangeInputContainer"></div>
             </div>
+            <div id="reportCalendarPanel" class="report-calendar-panel hidden" hidden aria-live="polite">
+              <div class="report-calendar-head">
+                <button id="reportCalendarPrevBtn" type="button" class="btn secondary" aria-label="Previous month">&#x2039;</button>
+                <div>
+                  <p id="reportCalendarTitle" class="report-calendar-title">-</p>
+                  <p id="reportCalendarMeta" class="report-calendar-meta muted">-</p>
+                </div>
+                <button id="reportCalendarNextBtn" type="button" class="btn secondary" aria-label="Next month">&#x203A;</button>
+              </div>
+              <div id="reportCalendarWeekdays" class="report-calendar-weekdays"></div>
+              <div id="reportCalendarGrid" class="report-calendar-grid"></div>
+              <p id="reportCalendarStatus" class="report-calendar-status muted">-</p>
+            </div>
           </div>
           <section class="sampling-chart-card sampling-power-card">
             <div class="section-header">
@@ -232,7 +252,7 @@
               </label>
             </div>
             <p id="samplingChartMeta" class="muted">-</p>
-            <div class="sampling-chart-wrap">
+            <div class="sampling-chart-wrap sampling-power-timeline-wrap">
               <div id="samplingChartCanvas" class="sampling-chart"></div>
             </div>
           </section>
@@ -262,16 +282,26 @@
               </div>
             </div>
           </section>
-          <section class="sampling-chart-card sampling-power-card">
-            <div class="section-header">
-              <h3 data-i18n="samplingPumpStatusTitle">Pool Pump Status</h3>
-            </div>
-            <p id="samplingPumpStatusMeta" class="muted">-</p>
-            <div class="sampling-chart-wrap">
-              <div id="samplingPumpStatusCanvas" class="sampling-chart"></div>
-            </div>
-          </section>
-          <section class="sampling-chart-card sampling-zero-hero-card">
+          <div class="sampling-status-grid">
+            <section class="sampling-chart-card sampling-power-card sampling-pump-status-card">
+              <div class="section-header">
+                <h3 data-i18n="samplingPumpStatusTitle">Pool Pump Status</h3>
+              </div>
+              <p id="samplingPumpStatusMeta" class="muted">-</p>
+              <div class="sampling-chart-wrap sampling-pump-status-wrap">
+                <div id="samplingPumpStatusCanvas" class="sampling-chart"></div>
+              </div>
+            </section>
+            <section class="sampling-chart-card sampling-zero-hero-history-card">
+              <div class="section-header">
+                <h3 data-i18n="samplingZeroHeroHistoryTitle">18:00-20:00 Export Window Review</h3>
+                <span id="samplingZeroHeroHistoryBadge" class="sampling-zero-hero-badge">-</span>
+              </div>
+              <p id="samplingZeroHeroHistoryMeta" class="muted">-</p>
+              <div id="samplingZeroHeroHistoryBody" class="sampling-zero-hero-history-list"></div>
+            </section>
+          </div>
+          <section id="samplingZeroHeroCurrentCard" class="sampling-chart-card sampling-zero-hero-card">
             <div class="section-header">
               <h3 data-i18n="samplingZeroHeroTitle">Current 5-Minute Zero Hero Window</h3>
               <span id="samplingZeroHeroBadge" class="sampling-zero-hero-badge">-</span>
@@ -279,21 +309,13 @@
             <p id="samplingZeroHeroMeta" class="muted">-</p>
             <div id="samplingZeroHeroBody" class="sampling-zero-hero-grid"></div>
           </section>
-          <section class="sampling-chart-card sampling-zero-hero-history-card">
-            <div class="section-header">
-              <h3 data-i18n="samplingZeroHeroHistoryTitle">Selected 18:00-20:00 Windows</h3>
-              <span id="samplingZeroHeroHistoryBadge" class="sampling-zero-hero-badge">-</span>
-            </div>
-            <p id="samplingZeroHeroHistoryMeta" class="muted">-</p>
-            <div id="samplingZeroHeroHistoryBody" class="sampling-zero-hero-history-list"></div>
-          </section>
           <p id="samplingCount" class="muted">-</p>
-          <div class="pager">
+          <div id="samplingPager" class="pager">
             <button id="samplingPrevPageBtn" class="btn secondary" type="button" data-i18n="prevBtn">Prev</button>
             <span id="samplingPageInfo" class="muted">Page -</span>
             <button id="samplingNextPageBtn" class="btn secondary" type="button" data-i18n="nextBtn">Next</button>
           </div>
-          <div class="table-wrap">
+          <div id="samplingTableWrap" class="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -448,6 +470,16 @@
         </section>
       </section>
     </main>
+
+    <div id="reportLoadingModal" class="modal report-loading-modal hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="reportLoadingTitle">
+      <div class="modal-card report-loading-card" aria-live="polite" aria-busy="true">
+        <span class="loading-spinner report-loading-spinner" aria-hidden="true"></span>
+        <div>
+          <h2 id="reportLoadingTitle" data-i18n="reportLoadingModalTitle">Loading Daily Report</h2>
+          <p id="reportLoadingBody" class="muted" data-i18n="reportLoadingModalBody">Preparing saved report data...</p>
+        </div>
+      </div>
+    </div>
 
     <div id="solplanetPinModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="solplanetPinModalTitle">
       <div class="modal-card">

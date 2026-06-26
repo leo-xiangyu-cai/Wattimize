@@ -8,6 +8,18 @@ HEALTHCHECK_URL="${HEALTHCHECK_URL:-http://${NAS_HOST}:${HOST_PORT}/api/health}"
 HEALTHCHECK_ATTEMPTS="${HEALTHCHECK_ATTEMPTS:-30}"
 HEALTHCHECK_SLEEP_SECONDS="${HEALTHCHECK_SLEEP_SECONDS:-2}"
 
+is_truthy() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+skip_db_push=0
+if is_truthy "${SKIP_DB_PUSH:-}" || is_truthy "${NO_DB_PUSH:-}"; then
+  skip_db_push=1
+fi
+
 cleanup_remote_temp() {
   remote_exec "
     set -euo pipefail
@@ -23,6 +35,8 @@ stop_local_compose
 
 if remote_container_running; then
   echo "NAS container is already running; skipping database push and treating this as a code-only refresh."
+elif [[ "${skip_db_push}" -eq 1 ]]; then
+  echo "Database push disabled by SKIP_DB_PUSH/NO_DB_PUSH; preserving NAS database."
 else
   bash "${SCRIPT_DIR}/push-db-to-nas.sh"
 fi

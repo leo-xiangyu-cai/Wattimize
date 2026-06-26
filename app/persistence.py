@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import Column, Float, Integer, String, create_engine, desc, func, inspect, select, text
+from sqlalchemy import Column, Float, Index, Integer, String, create_engine, delete, desc, func, insert, inspect, literal, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -73,6 +73,22 @@ OPERATION_RUN_STATUS_SUCCEEDED = "succeeded"
 OPERATION_RUN_STATUS_FAILED = "failed"
 OPERATION_RUN_STATUS_TIMEOUT = "timeout"
 POOL_PUMP_POWER_STALE_SECONDS = 30 * 60
+DAILY_REPORT_BATTERY_CAPACITY_KWH = {
+    "saj": 15.0,
+    "solplanet": 50.0,
+}
+DAILY_REPORT_BATTERY_MIN_DISCHARGE_SOC_PERCENT = {
+    "saj": 20.0,
+    "solplanet": 10.0,
+}
+DAILY_REPORT_PHASE_BATTERY_STAGES: tuple[dict[str, object], ...] = (
+    {"id": "overnight_shoulder", "titleKey": "notificationMatrixWindowOvernightTitle", "endHour": 11},
+    {"id": "free_energy", "titleKey": "notificationMatrixWindowFreeEnergyTitle", "endHour": 14},
+    {"id": "after_free_shoulder", "titleKey": "notificationMatrixWindowAfterFreeShoulderTitle", "endHour": 18},
+    {"id": "export_window", "titleKey": "notificationMatrixWindowExportTitle", "endHour": 20},
+    {"id": "post_export_peak", "titleKey": "notificationMatrixWindowPostExportPeakTitle", "endHour": 23},
+)
+DAILY_REPORT_PHASE_BATTERY_SAMPLE_TOLERANCE_SECONDS = 15 * 60
 
 
 @dataclass(frozen=True)
@@ -116,6 +132,43 @@ class AssembledFlowSnapshotRow(Base):
     inverter_status = Column(String)
     balance_w = Column(Float)
     flow_json = Column(String, nullable=False)
+
+
+class DailyReportRow(Base):
+    __tablename__ = "daily_reports"
+
+    report_day_local = Column(String, primary_key=True)
+    timezone_name = Column(String, nullable=False)
+    period_start_utc = Column(String, nullable=False)
+    period_start_epoch = Column(Float, nullable=False, index=True)
+    period_end_utc = Column(String, nullable=False)
+    period_end_epoch = Column(Float, nullable=False, index=True)
+    generated_at_utc = Column(String, nullable=False)
+    generated_at_epoch = Column(Float, nullable=False, index=True)
+    sample_count = Column(Integer, nullable=False, default=0)
+    usage_json = Column(String, nullable=False)
+    series_json = Column(String, nullable=False)
+    zero_hero_json = Column(String, nullable=False)
+
+
+class DailyReportSampleRow(Base):
+    __tablename__ = "daily_report_samples"
+    __table_args__ = (Index("ix_daily_report_samples_day_epoch", "report_day_local", "sampled_at_epoch"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    report_day_local = Column(String, nullable=False)
+    source_snapshot_id = Column(Integer, nullable=False)
+    system = Column(String, nullable=False, index=True)
+    sampled_at_utc = Column(String, nullable=False)
+    sampled_at_epoch = Column(Float, nullable=False)
+    source = Column(String, nullable=False)
+    pv_w = Column(Float)
+    grid_w = Column(Float)
+    battery_w = Column(Float)
+    load_w = Column(Float)
+    battery_soc_percent = Column(Float)
+    inverter_status = Column(String)
+    balance_w = Column(Float)
 
 
 class RealtimeKvRow(Base):
@@ -395,6 +448,12 @@ def _json_dumps(value: object | None) -> str | None:
     if value is None:
         return None
     return _truncate_payload_text(json.dumps(value, ensure_ascii=False, default=str))
+
+
+def _json_dumps_full(value: object | None) -> str | None:
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False, default=str)
 
 
 def _normalize_worker_log_status(status: str | None) -> str | None:
@@ -2158,6 +2217,342 @@ def list_samples(
     }
 
 
+def _phase_battery_local_timezone(local_timezone_name: str):
+    try:
+        return ZoneInfo(str(local_timezone_name or "").strip())
+    except (ZoneInfoNotFoundError, ValueError):
+        return UTC
+
+
+def _phase_battery_usable_kwh(system: str, soc_percent: object) -> float | None:
+    capacity_kwh = DAILY_REPORT_BATTERY_CAPACITY_KWH.get(system)
+    if capacity_kwh is None:
+        return None
+    try:
+        soc = float(soc_percent)
+    except (TypeError, ValueError):
+        return None
+    min_discharge_soc = DAILY_REPORT_BATTERY_MIN_DISCHARGE_SOC_PERCENT.get(system, 0.0)
+    usable_soc = max(0.0, min(100.0, soc) - min_discharge_soc)
+    return round((capacity_kwh * usable_soc) / 100.0, 4)
+
+
+def _nearest_phase_battery_sample(
+    session: Session,
+    *,
+    system: str,
+    target_epoch: float,
+    tolerance_seconds: float,
+) -> dict[str, object] | None:
+    row = session.execute(
+        select(
+            AssembledFlowSnapshotRow.assembled_at_utc,
+            AssembledFlowSnapshotRow.assembled_at_epoch,
+            AssembledFlowSnapshotRow.battery_soc_percent,
+        )
+        .where(
+            AssembledFlowSnapshotRow.system == system,
+            AssembledFlowSnapshotRow.assembled_at_epoch >= target_epoch - tolerance_seconds,
+            AssembledFlowSnapshotRow.assembled_at_epoch <= target_epoch + tolerance_seconds,
+        )
+        .order_by(func.abs(AssembledFlowSnapshotRow.assembled_at_epoch - target_epoch).asc())
+        .limit(1)
+    ).first()
+    if row is None:
+        return None
+    return {
+        "sampled_at_utc": row[0],
+        "sampled_at_epoch": row[1],
+        "battery_soc_percent": row[2],
+    }
+
+
+def build_daily_report_phase_battery(
+    db_path: DatabaseTarget,
+    *,
+    report_day_local: date,
+    local_timezone_name: str,
+    tolerance_seconds: float = DAILY_REPORT_PHASE_BATTERY_SAMPLE_TOLERANCE_SECONDS,
+) -> dict[str, object]:
+    """Capture usable SAJ + Solplanet battery at each report stage end."""
+    day_text = report_day_local.isoformat()
+    local_tz = _phase_battery_local_timezone(local_timezone_name)
+    safe_tolerance = max(0.0, float(tolerance_seconds))
+    items: list[dict[str, object]] = []
+
+    with _session_scope(db_path) as session:
+        for stage in DAILY_REPORT_PHASE_BATTERY_STAGES:
+            end_hour = int(stage["endHour"])
+            target_local = datetime.combine(report_day_local, time(hour=end_hour), tzinfo=local_tz)
+            target_utc = target_local.astimezone(UTC)
+            target_epoch = target_utc.timestamp()
+            saj_sample = _nearest_phase_battery_sample(
+                session,
+                system="saj",
+                target_epoch=target_epoch,
+                tolerance_seconds=safe_tolerance,
+            )
+            solplanet_sample = _nearest_phase_battery_sample(
+                session,
+                system="solplanet",
+                target_epoch=target_epoch,
+                tolerance_seconds=safe_tolerance,
+            )
+            saj_kwh = _phase_battery_usable_kwh("saj", saj_sample.get("battery_soc_percent") if saj_sample else None)
+            solplanet_kwh = _phase_battery_usable_kwh(
+                "solplanet",
+                solplanet_sample.get("battery_soc_percent") if solplanet_sample else None,
+            )
+            values = [value for value in (saj_kwh, solplanet_kwh) if value is not None]
+            items.append(
+                {
+                    "id": stage["id"],
+                    "titleKey": stage["titleKey"],
+                    "endHour": end_hour,
+                    "endTime": f"{end_hour:02d}:00",
+                    "target_at_local": target_local.isoformat(),
+                    "target_at_utc": target_utc.isoformat(),
+                    "total_kwh": round(sum(values), 4) if values else None,
+                    "saj_kwh": saj_kwh,
+                    "solplanet_kwh": solplanet_kwh,
+                    "saj_soc_percent": saj_sample.get("battery_soc_percent") if saj_sample else None,
+                    "solplanet_soc_percent": solplanet_sample.get("battery_soc_percent") if solplanet_sample else None,
+                    "saj_sampled_at_utc": saj_sample.get("sampled_at_utc") if saj_sample else None,
+                    "solplanet_sampled_at_utc": solplanet_sample.get("sampled_at_utc") if solplanet_sample else None,
+                }
+            )
+
+    return {
+        "day": day_text,
+        "timezone_name": str(local_timezone_name or ""),
+        "tolerance_seconds": safe_tolerance,
+        "items": items,
+    }
+
+
+def save_daily_report(
+    db_path: DatabaseTarget,
+    *,
+    report_day_local: date,
+    timezone_name: str,
+    period_start_utc: datetime,
+    period_end_utc: datetime,
+    generated_at_utc: datetime,
+    usage_by_system: dict[str, object],
+    series_by_system: dict[str, object],
+    zero_hero_history: dict[str, object],
+    phase_battery: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Replace one immutable daily report and its paginable sample snapshot."""
+    day_text = report_day_local.isoformat()
+    start_at = period_start_utc.astimezone(UTC)
+    end_at = period_end_utc.astimezone(UTC)
+    generated_at = generated_at_utc.astimezone(UTC)
+    if start_at >= end_at:
+        raise ValueError("period_start_utc must be earlier than period_end_utc")
+
+    with _session_scope(db_path) as session:
+        report = session.get(DailyReportRow, day_text)
+        if report is None:
+            report = DailyReportRow(report_day_local=day_text)
+            session.add(report)
+        report.timezone_name = str(timezone_name)
+        report.period_start_utc = start_at.isoformat()
+        report.period_start_epoch = start_at.timestamp()
+        report.period_end_utc = end_at.isoformat()
+        report.period_end_epoch = end_at.timestamp()
+        report.generated_at_utc = generated_at.isoformat()
+        report.generated_at_epoch = generated_at.timestamp()
+        usage_payload = dict(usage_by_system or {})
+        if phase_battery is not None:
+            usage_payload["_phase_battery"] = phase_battery
+        report.usage_json = _json_dumps_full(usage_payload) or "{}"
+        report.series_json = _json_dumps_full(series_by_system) or "{}"
+        report.zero_hero_json = _json_dumps_full(zero_hero_history) or "{}"
+
+        session.execute(delete(DailyReportSampleRow).where(DailyReportSampleRow.report_day_local == day_text))
+        source_rows = select(
+            literal(day_text),
+            AssembledFlowSnapshotRow.id,
+            AssembledFlowSnapshotRow.system,
+            AssembledFlowSnapshotRow.assembled_at_utc,
+            AssembledFlowSnapshotRow.assembled_at_epoch,
+            AssembledFlowSnapshotRow.source,
+            AssembledFlowSnapshotRow.pv_w,
+            AssembledFlowSnapshotRow.grid_w,
+            AssembledFlowSnapshotRow.battery_w,
+            AssembledFlowSnapshotRow.load_w,
+            AssembledFlowSnapshotRow.battery_soc_percent,
+            AssembledFlowSnapshotRow.inverter_status,
+            AssembledFlowSnapshotRow.balance_w,
+        ).where(
+            AssembledFlowSnapshotRow.assembled_at_epoch >= start_at.timestamp(),
+            AssembledFlowSnapshotRow.assembled_at_epoch < end_at.timestamp(),
+        )
+        session.execute(
+            insert(DailyReportSampleRow).from_select(
+                [
+                    "report_day_local",
+                    "source_snapshot_id",
+                    "system",
+                    "sampled_at_utc",
+                    "sampled_at_epoch",
+                    "source",
+                    "pv_w",
+                    "grid_w",
+                    "battery_w",
+                    "load_w",
+                    "battery_soc_percent",
+                    "inverter_status",
+                    "balance_w",
+                ],
+                source_rows,
+            )
+        )
+        report.sample_count = int(
+            session.scalar(
+                select(func.count()).select_from(DailyReportSampleRow).where(
+                    DailyReportSampleRow.report_day_local == day_text
+                )
+            )
+            or 0
+        )
+        sample_count = int(report.sample_count)
+
+    return {
+        "report_day_local": day_text,
+        "generated_at_utc": generated_at.isoformat(),
+        "sample_count": sample_count,
+    }
+
+
+def get_daily_report(
+    db_path: DatabaseTarget,
+    *,
+    report_day_local: date,
+    page: int,
+    page_size: int,
+) -> dict[str, object] | None:
+    safe_page, safe_page_size = _paginate(page, page_size)
+    if not _db_exists(db_path):
+        return None
+    day_text = report_day_local.isoformat()
+    try:
+        with _session_scope(db_path) as session:
+            report = session.get(DailyReportRow, day_text)
+            if report is None:
+                return None
+            total = int(report.sample_count or 0)
+            rows = session.scalars(
+                select(DailyReportSampleRow)
+                .where(DailyReportSampleRow.report_day_local == day_text)
+                .order_by(desc(DailyReportSampleRow.sampled_at_epoch))
+                .offset((safe_page - 1) * safe_page_size)
+                .limit(safe_page_size)
+            ).all()
+            usage_by_system = _json_loads(report.usage_json, default={})
+            series_by_system = _json_loads(report.series_json, default={})
+            zero_hero_history = _json_loads(report.zero_hero_json, default={})
+            metadata = {
+                "report_day_local": report.report_day_local,
+                "timezone_name": report.timezone_name,
+                "period_start_utc": report.period_start_utc,
+                "period_end_utc": report.period_end_utc,
+                "generated_at_utc": report.generated_at_utc,
+            }
+    except SQLAlchemyError:
+        return None
+
+    phase_battery = None
+    if isinstance(usage_by_system, dict):
+        usage_by_system = dict(usage_by_system)
+        phase_battery = usage_by_system.pop("_phase_battery", None)
+
+    if not isinstance(series_by_system, dict) or not series_by_system:
+        try:
+            period_start = _parse_iso_to_utc(str(metadata.get("period_start_utc") or ""))
+            period_end = _parse_iso_to_utc(str(metadata.get("period_end_utc") or ""))
+        except ValueError:
+            series_by_system = {}
+        else:
+            series_by_system = {
+                system: get_series_samples(
+                    db_path,
+                    system=system,
+                    hours=24,
+                    max_points=500,
+                    start_at_utc=period_start,
+                    end_at_utc=period_end,
+                )
+                for system in ("saj", "solplanet", "combined")
+            }
+
+    items = [
+        {
+            "id": int(row.source_snapshot_id),
+            "system": str(row.system),
+            "sampled_at_utc": row.sampled_at_utc,
+            "source": str(row.source),
+            "pv_w": row.pv_w,
+            "grid_w": row.grid_w,
+            "battery_w": row.battery_w,
+            "load_w": row.load_w,
+            "battery_soc_percent": row.battery_soc_percent,
+            "inverter_status": row.inverter_status,
+            "balance_w": row.balance_w,
+        }
+        for row in rows
+    ]
+    end = safe_page * safe_page_size
+    return {
+        **metadata,
+        "usage_by_system": usage_by_system if isinstance(usage_by_system, dict) else {},
+        "series_by_system": series_by_system if isinstance(series_by_system, dict) else {},
+        "zero_hero_history": zero_hero_history if isinstance(zero_hero_history, dict) else {},
+        "phase_battery": phase_battery if isinstance(phase_battery, dict) else {},
+        "samples": {
+            "count": len(items),
+            "total": total,
+            "page": safe_page,
+            "page_size": safe_page_size,
+            "has_next": end < total,
+            "has_prev": safe_page > 1,
+            "items": items,
+        },
+    }
+
+
+def list_daily_reports(
+    db_path: DatabaseTarget,
+    *,
+    limit: int = 366,
+    start_day_local: date | None = None,
+    end_day_local: date | None = None,
+) -> list[dict[str, object]]:
+    if not _db_exists(db_path):
+        return []
+    safe_limit = max(1, min(3660, int(limit)))
+    try:
+        with _session_scope(db_path) as session:
+            stmt = select(DailyReportRow)
+            if start_day_local is not None:
+                stmt = stmt.where(DailyReportRow.report_day_local >= start_day_local.isoformat())
+            if end_day_local is not None:
+                stmt = stmt.where(DailyReportRow.report_day_local < end_day_local.isoformat())
+            rows = session.scalars(stmt.order_by(desc(DailyReportRow.report_day_local)).limit(safe_limit)).all()
+    except SQLAlchemyError:
+        return []
+    return [
+        {
+            "report_day_local": str(row.report_day_local),
+            "timezone_name": str(row.timezone_name),
+            "generated_at_utc": str(row.generated_at_utc),
+            "sample_count": int(row.sample_count or 0),
+        }
+        for row in rows
+    ]
+
+
 def get_latest_sample(db_path: DatabaseTarget, *, system: str) -> dict[str, object] | None:
     if not _db_exists(db_path):
         return None
@@ -2686,7 +3081,7 @@ def list_zero_hero_window_history(
         items.append(
             {
                 "date_local": day_local.isoformat(),
-                "is_today": day_local == anchor_day,
+                "is_today": day_local == now_local.date(),
                 "window_count": window_count_per_day,
                 "summary": {
                     "import_windows": int(summary["import_windows"]),

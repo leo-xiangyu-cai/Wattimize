@@ -46,6 +46,7 @@ from app.persistence import (
     migrate_worker_log_legacy_statuses,
     count_pending_worker_api_logs,
     backfill_notification_entries_from_worker_logs,
+    build_daily_report_phase_battery,
     compute_daily_usage,
     compute_usage_between,
     delete_worker_api_logs_older_than,
@@ -59,6 +60,7 @@ from app.persistence import (
     list_operation_runs,
     get_realtime_kv_by_prefix,
     get_latest_sample,
+    get_daily_report,
     get_metric_rows,
     get_series_samples,
     get_storage_status,
@@ -71,6 +73,7 @@ from app.persistence import (
     list_active_notification_entries,
     list_database_table_rows,
     list_database_tables,
+    list_daily_reports,
     list_zero_hero_window_history,
     list_time_window_rule_state_rows,
     list_realtime_kv_rows,
@@ -78,6 +81,7 @@ from app.persistence import (
     list_worker_api_logs,
     insert_operation_run,
     recover_sqlite_database,
+    save_daily_report,
     upsert_time_window_rule_state,
     upsert_operation_definitions,
     upsert_notification_entries,
@@ -116,6 +120,7 @@ logger = logging.getLogger(__name__)
 
 
 settings = load_settings()
+
 
 POWER_FLOW_ACTIVE_THRESHOLD_W = 30
 POLLED_SYSTEMS = ("saj", "solplanet")
@@ -296,6 +301,9 @@ TIME_WINDOW_RULE_WINDOWS_BY_CODE: dict[str, tuple[str, ...]] = {
 TESLA_AUTO_CONTROL_RULE_CODES: tuple[str, ...] = tuple(
     code for code in TIME_WINDOW_RULE_CODES if code.startswith("tesla_") and code.endswith("_control")
 )
+POOL_PUMP_AUTO_CONTROL_RULE_CODES: tuple[str, ...] = tuple(
+    code for code in TIME_WINDOW_RULE_CODES if code.startswith("pool_pump_") and code.endswith("_control")
+)
 MANUAL_OPERATION_DEFINITIONS: tuple[dict[str, object], ...] = (
     {
         "operation_code": "tesla.manual.toggle_charging",
@@ -450,6 +458,7 @@ solplanet_context_lock = asyncio.Lock()
 runtime_lock = asyncio.Lock()
 db_recovery_lock = asyncio.Lock()
 window_control_lock = asyncio.Lock()
+daily_report_generation_lock = asyncio.Lock()
 db_recovery_state: dict[str, object] = {
     "in_progress": False,
     "last_attempt_at": None,
@@ -464,6 +473,8 @@ export_window_fast_guard_task: asyncio.Task[None] | None = None
 export_window_fast_guard_stop_event = asyncio.Event()
 worker_log_cleanup_task: asyncio.Task[None] | None = None
 worker_log_cleanup_stop_event = asyncio.Event()
+daily_report_task: asyncio.Task[None] | None = None
+daily_report_stop_event = asyncio.Event()
 storage_db_path = Path(os.getenv("WATTIMIZE_DB_PATH", "").strip() or DEFAULT_DB_PATH)
 worker_failure_log_path = Path(
     os.getenv("WATTIMIZE_WORKER_FAILURE_LOG_PATH", "").strip() or storage_db_path.with_name("worker_failures.log")
@@ -3509,8 +3520,16 @@ def _is_tesla_auto_control_rule(rule_code: str) -> bool:
     return normalized_code in TESLA_AUTO_CONTROL_RULE_CODES
 
 
+def _is_pool_pump_auto_control_rule(rule_code: str) -> bool:
+    normalized_code = str(rule_code or "").strip()
+    return normalized_code in POOL_PUMP_AUTO_CONTROL_RULE_CODES
+
+
 def _is_time_window_rule_editable(rule_code: str) -> bool:
-    return not _is_tesla_auto_control_rule(rule_code)
+    return not (
+        _is_tesla_auto_control_rule(rule_code)
+        or _is_pool_pump_auto_control_rule(rule_code)
+    )
 
 
 def _saj_profile_rule_code_for_time(now_local: datetime) -> str:
@@ -3518,12 +3537,21 @@ def _saj_profile_rule_code_for_time(now_local: datetime) -> str:
 
 
 async def _load_time_window_rule_enabled_map() -> dict[str, bool]:
-    return await asyncio.to_thread(
+    enabled_map = await asyncio.to_thread(
         get_time_window_rule_states,
         storage_db_path,
         rule_codes=TIME_WINDOW_RULE_CODES,
         default_enabled=True,
     )
+    tesla_auto_control_enabled, pool_pump_auto_control_enabled = await asyncio.gather(
+        _load_tesla_auto_control_enabled(),
+        _load_pool_pump_auto_control_enabled(),
+    )
+    for code in TESLA_AUTO_CONTROL_RULE_CODES:
+        enabled_map[code] = tesla_auto_control_enabled
+    for code in POOL_PUMP_AUTO_CONTROL_RULE_CODES:
+        enabled_map[code] = pool_pump_auto_control_enabled
+    return enabled_map
 
 
 def _is_time_window_rule_enabled(enabled_map: dict[str, bool] | None, rule_code: str) -> bool:
@@ -12547,6 +12575,155 @@ async def _stop_worker_log_cleanup() -> None:
         worker_log_cleanup_task = None
 
 
+def _daily_report_local_period(report_day_local: date) -> tuple[datetime, datetime, str]:
+    now_local, timezone_name = _tesla_grid_support_now_local()
+    local_tz = now_local.tzinfo or UTC
+    start_local = datetime.combine(report_day_local, time.min, tzinfo=local_tz)
+    end_local = datetime.combine(report_day_local + timedelta(days=1), time.min, tzinfo=local_tz)
+    return start_local.astimezone(UTC), end_local.astimezone(UTC), timezone_name
+
+
+async def _generate_daily_report(report_day_local: date) -> dict[str, object]:
+    async with daily_report_generation_lock:
+        start_at_utc, end_at_utc, timezone_name = _daily_report_local_period(report_day_local)
+        logger.info("Generating daily report for %s (%s)", report_day_local.isoformat(), timezone_name)
+
+        usage_tasks = {
+            system: asyncio.to_thread(
+                compute_usage_between,
+                storage_db_path,
+                system=system,
+                start_at_utc=start_at_utc,
+                end_at_utc=end_at_utc,
+                sample_interval_seconds=_sample_interval_for_system(system),
+                local_timezone_name=timezone_name,
+                grid_import_window_start_hour=FREE_ENERGY_WINDOW_START_HOUR,
+                grid_import_window_end_hour=FREE_ENERGY_WINDOW_END_HOUR,
+                grid_export_window_start_hour=EXPORT_WINDOW_START_HOUR,
+                grid_export_window_end_hour=EXPORT_WINDOW_END_HOUR,
+            )
+            for system in ("saj", "solplanet", "combined")
+        }
+        series_tasks = {
+            system: asyncio.to_thread(
+                get_series_samples,
+                storage_db_path,
+                system=system,
+                hours=24,
+                max_points=500,
+                start_at_utc=start_at_utc,
+                end_at_utc=end_at_utc,
+            )
+            for system in ("saj", "solplanet", "combined")
+        }
+        zero_hero_task = asyncio.to_thread(
+            list_zero_hero_window_history,
+            storage_db_path,
+            system="combined",
+            days=1,
+            sample_interval_seconds=_sample_interval_for_system("combined"),
+            local_timezone_name=timezone_name,
+            recent_day_anchor_local=report_day_local,
+            now_utc=end_at_utc,
+            window_start_hour=EXPORT_WINDOW_START_HOUR,
+            window_end_hour=EXPORT_WINDOW_END_HOUR,
+            window_minutes=ZERO_HERO_WINDOW_MINUTES,
+        )
+        phase_battery_task = asyncio.to_thread(
+            build_daily_report_phase_battery,
+            storage_db_path,
+            report_day_local=report_day_local,
+            local_timezone_name=timezone_name,
+        )
+        task_keys = [
+            *(("usage", system) for system in usage_tasks),
+            *(("series", system) for system in series_tasks),
+            ("zero_hero", "combined"),
+            ("phase_battery", "combined"),
+        ]
+        results = await asyncio.gather(*usage_tasks.values(), *series_tasks.values(), zero_hero_task, phase_battery_task)
+        result_map = dict(zip(task_keys, results, strict=True))
+        usage_by_system = {system: result_map[("usage", system)] for system in usage_tasks}
+        series_by_system = {system: result_map[("series", system)] for system in series_tasks}
+        zero_hero_history = result_map[("zero_hero", "combined")]
+        phase_battery = result_map[("phase_battery", "combined")]
+        generated_at_utc = datetime.now(UTC)
+        saved = await asyncio.to_thread(
+            save_daily_report,
+            storage_db_path,
+            report_day_local=report_day_local,
+            timezone_name=timezone_name,
+            period_start_utc=start_at_utc,
+            period_end_utc=end_at_utc,
+            generated_at_utc=generated_at_utc,
+            usage_by_system=usage_by_system,
+            series_by_system=series_by_system,
+            zero_hero_history=zero_hero_history,
+            phase_battery=phase_battery,
+        )
+        logger.info(
+            "Generated daily report for %s with %s samples",
+            report_day_local.isoformat(),
+            saved.get("sample_count"),
+        )
+        return saved
+
+
+async def _daily_report_loop() -> None:
+    while not daily_report_stop_event.is_set():
+        now_local, _ = _tesla_grid_support_now_local()
+        yesterday = now_local.date() - timedelta(days=1)
+        existing = await asyncio.to_thread(list_daily_reports, storage_db_path, limit=2)
+        if not any(item.get("report_day_local") == yesterday.isoformat() for item in existing):
+            try:
+                await _generate_daily_report(yesterday)
+            except Exception:  # noqa: BLE001
+                logger.exception("Daily report backfill failed for %s", yesterday.isoformat())
+                try:
+                    await asyncio.wait_for(daily_report_stop_event.wait(), timeout=300.0)
+                except asyncio.TimeoutError:
+                    pass
+                continue
+
+        now_local, _ = _tesla_grid_support_now_local()
+        report_day = now_local.date()
+        next_midnight_local = datetime.combine(report_day + timedelta(days=1), time.min, tzinfo=now_local.tzinfo)
+        wait_seconds = max(0.05, (next_midnight_local.astimezone(UTC) - datetime.now(UTC)).total_seconds())
+        try:
+            await asyncio.wait_for(daily_report_stop_event.wait(), timeout=wait_seconds)
+            continue
+        except asyncio.TimeoutError:
+            pass
+        try:
+            await _generate_daily_report(report_day)
+        except Exception:  # noqa: BLE001
+            logger.exception("Daily report generation failed for %s", report_day.isoformat())
+            try:
+                await asyncio.wait_for(daily_report_stop_event.wait(), timeout=300.0)
+            except asyncio.TimeoutError:
+                pass
+
+
+async def _start_daily_reports() -> None:
+    global daily_report_task  # noqa: PLW0603
+    if daily_report_task and not daily_report_task.done():
+        return
+    daily_report_stop_event.clear()
+    daily_report_task = asyncio.create_task(_daily_report_loop())
+
+
+async def _stop_daily_reports() -> None:
+    global daily_report_task  # noqa: PLW0603
+    daily_report_stop_event.set()
+    if daily_report_task:
+        daily_report_task.cancel()
+        try:
+            await daily_report_task
+        except asyncio.CancelledError:
+            pass
+        daily_report_task = None
+
+
 async def _restart_collector() -> dict[str, object]:
     async with runtime_lock:
         was_running = bool(collector_task and not collector_task.done())
@@ -12868,6 +13045,85 @@ async def storage_zero_hero_window_history(
     )
 
 
+@app.get("/api/reports/daily")
+async def daily_report(
+    day_local: str | None = Query(default=None, description="Local day in YYYY-MM-DD, default=yesterday"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+) -> dict[str, object]:
+    now_local, _ = _tesla_grid_support_now_local()
+    target_day = now_local.date() - timedelta(days=1)
+    if day_local:
+        try:
+            target_day = date.fromisoformat(day_local)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid day_local format, expected YYYY-MM-DD") from exc
+    payload = await asyncio.to_thread(
+        get_daily_report,
+        storage_db_path,
+        report_day_local=target_day,
+        page=page,
+        page_size=page_size,
+    )
+    if payload is None:
+        available = await asyncio.to_thread(list_daily_reports, storage_db_path, limit=30)
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": f"Daily report is not available for {target_day.isoformat()}",
+                "available_days": [item.get("report_day_local") for item in available],
+            },
+        )
+    return payload
+
+
+@app.get("/api/reports/daily/index")
+async def daily_report_index(
+    limit: int = Query(default=366, ge=1, le=3660),
+    month: str | None = Query(default=None, description="Local month in YYYY-MM"),
+) -> dict[str, object]:
+    start_day_local: date | None = None
+    end_day_local: date | None = None
+    if month:
+        try:
+            year_text, month_text = month.split("-", 1)
+            year = int(year_text)
+            month_number = int(month_text)
+            if month_number < 1 or month_number > 12:
+                raise ValueError
+            start_day_local = date(year, month_number, 1)
+            if month_number == 12:
+                end_day_local = date(year + 1, 1, 1)
+            else:
+                end_day_local = date(year, month_number + 1, 1)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid month format, expected YYYY-MM") from exc
+    items = await asyncio.to_thread(
+        list_daily_reports,
+        storage_db_path,
+        limit=limit,
+        start_day_local=start_day_local,
+        end_day_local=end_day_local,
+    )
+    return {"count": len(items), "items": items, "updated_at": datetime.now(UTC).isoformat()}
+
+
+@app.post("/api/reports/daily/generate")
+async def generate_daily_report(
+    day_local: str | None = Query(default=None, description="Completed local day in YYYY-MM-DD, default=yesterday"),
+) -> dict[str, object]:
+    now_local, _ = _tesla_grid_support_now_local()
+    target_day = now_local.date() - timedelta(days=1)
+    if day_local:
+        try:
+            target_day = date.fromisoformat(day_local)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid day_local format, expected YYYY-MM-DD") from exc
+    if target_day >= now_local.date():
+        raise HTTPException(status_code=400, detail="Daily reports can only be generated for completed local days")
+    return await _generate_daily_report(target_day)
+
+
 @app.get("/api/database/tables")
 async def database_tables() -> dict[str, object]:
     payload = await asyncio.to_thread(list_database_tables, storage_db_path)
@@ -12906,7 +13162,7 @@ async def database_export_sqlite() -> Response:
 @app.post("/api/database/import.sqlite3")
 async def database_import_sqlite(file: UploadFile = File(...)) -> dict[str, object]:
     raw = await file.read()
-    async with runtime_lock:
+    async with runtime_lock, daily_report_generation_lock:
         await _stop_collector()
         try:
             result = await asyncio.to_thread(import_database_bytes, storage_db_path, raw)
@@ -13138,7 +13394,10 @@ async def dashboard_notifications() -> dict[str, object]:
 @app.get("/api/time-window-rules")
 async def get_time_window_rules() -> dict[str, object]:
     rows = await asyncio.to_thread(list_time_window_rule_state_rows, storage_db_path)
-    tesla_auto_control_enabled = await _load_tesla_auto_control_enabled()
+    tesla_auto_control_enabled, pool_pump_auto_control_enabled = await asyncio.gather(
+        _load_tesla_auto_control_enabled(),
+        _load_pool_pump_auto_control_enabled(),
+    )
     state_by_code = {
         str(item.get("rule_code") or "").strip(): bool(item.get("enabled"))
         for item in rows
@@ -13155,6 +13414,8 @@ async def get_time_window_rules() -> dict[str, object]:
             "enabled": (
                 tesla_auto_control_enabled
                 if _is_tesla_auto_control_rule(code)
+                else pool_pump_auto_control_enabled
+                if _is_pool_pump_auto_control_rule(code)
                 else bool(state_by_code.get(code, True))
             ),
             "kind": next((item["kind"] for item in TIME_WINDOW_RULE_DEFINITIONS if item["code"] == code), "notification"),
@@ -14800,6 +15061,7 @@ async def get_solplanet_cgi_explore() -> dict[str, object]:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    await _stop_daily_reports()
     await _stop_worker_log_cleanup()
     await _stop_collector()
     await solplanet_client.aclose()
@@ -14821,6 +15083,7 @@ async def on_startup() -> None:
     )
     await _prune_worker_api_logs_once()
     await _start_worker_log_cleanup()
+    await _start_daily_reports()
     await _start_collector()
 
 

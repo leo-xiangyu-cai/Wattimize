@@ -8,6 +8,18 @@ DEV_HEALTHCHECK_URL="${DEV_HEALTHCHECK_URL:-http://127.0.0.1:${HOST_PORT}/api/co
 DEV_HEALTHCHECK_RETRIES="${DEV_HEALTHCHECK_RETRIES:-60}"
 DEV_HEALTHCHECK_SLEEP_SECONDS="${DEV_HEALTHCHECK_SLEEP_SECONDS:-2}"
 
+is_truthy() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+skip_db_pull=0
+if is_truthy "${SKIP_DB_PULL:-}" || is_truthy "${NO_DB_PULL:-}"; then
+  skip_db_pull=1
+fi
+
 wait_for_local_healthcheck() {
   local attempt=1
   echo "Waiting for local API health check at ${DEV_HEALTHCHECK_URL}..."
@@ -37,7 +49,9 @@ else
     stop_remote_container
   fi
 
-  if [[ "${remote_was_running}" -eq 1 ]] || remote_db_exists; then
+  if [[ "${skip_db_pull}" -eq 1 ]]; then
+    echo "Database pull disabled by SKIP_DB_PULL/NO_DB_PULL; preserving local database."
+  elif [[ "${remote_was_running}" -eq 1 ]] || remote_db_exists; then
     bash "${SCRIPT_DIR}/pull-nas-db.sh"
   else
     echo "No remote runtime or remote database found; skipping database pull."

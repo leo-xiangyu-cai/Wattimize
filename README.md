@@ -84,6 +84,9 @@ curl -s "http://<wattimize-host>:18000/api/storage/samples?system=saj&start_utc=
 curl -s "http://<wattimize-host>:18000/api/storage/series?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z&max_points=500" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/usage-range?system=saj&start_utc=2026-03-03T00:00:00Z&end_utc=2026-03-04T00:00:00Z" | jq
 curl -s "http://<wattimize-host>:18000/api/storage/zero-hero-window-history?system=combined&days=1&day_local=2026-03-03" | jq
+curl -s "http://<wattimize-host>:18000/api/reports/daily?day_local=2026-03-03&page=1&page_size=100" | jq
+curl -s "http://<wattimize-host>:18000/api/reports/daily/index" | jq
+curl -s -X POST "http://<wattimize-host>:18000/api/reports/daily/generate?day_local=2026-03-03" | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/charging -H 'Content-Type: application/json' -d '{"enabled":true}' | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/current -H 'Content-Type: application/json' -d '{"amps":16}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/tesla/auto-control -H 'Content-Type: application/json' -d '{"enabled":false}' | jq
@@ -118,6 +121,14 @@ Use `make status` any time to check whether local or NAS is currently running an
 
 `make dev` now switches execution to local: if local is not already running, it stops the NAS container, pulls the NAS SQLite database into `./data/`, and then starts local `docker compose`. If local is already running, it treats the command as a local code refresh and skips database sync. After the containers start, the script waits for the local collector status endpoint to become healthy before returning.
 
+To start local dev without pulling the NAS database, use:
+
+```bash
+make dev SKIP_DB_PULL=1
+```
+
+`NO_DB_PULL=1` is also accepted as an alias.
+
 To stop only the NAS container without starting local services:
 
 ```bash
@@ -131,6 +142,14 @@ make nas-deploy
 ```
 
 `make nas-deploy` now stops local `docker compose` services first. If the NAS container is not already running, it pushes the local SQLite database to the NAS before deploying. If the NAS container is already running, it treats the command as a code-only refresh and skips database sync.
+
+To deploy code to the NAS without pushing the local database, use:
+
+```bash
+make nas-deploy SKIP_DB_PUSH=1
+```
+
+`NO_DB_PUSH=1` is also accepted as an alias.
 
 For the first sync from local to NAS while the NAS is still running, use:
 
@@ -185,6 +204,7 @@ First-run configuration:
 - Daily usage endpoint integrates power snapshots into kWh (UTC day).
 - `system=combined` is available on range usage and trend series endpoints for the frontend overall view.
 - The `History` tab combines range selection with an energy breakdown card, a power timeline chart, split SOC mini-charts for SAJ/Solplanet/Tesla, a pool-pump on/off timeline, a live 5-minute Zero Hero export-window observation card, and a selected-day `18:00-20:00` matrix of all 24 five-minute export windows, color-coded for net import, mixed import/net export, and pure export.
+- The `Report` tab reuses the History presentation but reads a persisted daily snapshot. The backend generates the completed local day at midnight, immediately backfills yesterday after an upgrade when needed, and stores precomputed usage, chart series, Zero Hero windows, and paginable sample rows for fast reads.
 - `GET /api/storage/samples?system=combined` now includes `tesla_charge_power_w` and `pool_pump_power_w` so frontend charts can separate home load from Tesla/pool-pump overlays.
 - The frontend can export and import the full SQLite database from the Database tab.
 

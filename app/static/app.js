@@ -293,6 +293,7 @@ const I18N = {
     solplanetControlTab: "Solplanet Control",
     entitiesTab: "Entities",
     samplingTab: "History",
+    reportTab: "Report",
     databaseTab: "Database",
     workerLogsTab: "Worker Logs",
     operationTimelineTab: "Operations",
@@ -622,6 +623,36 @@ const I18N = {
     socLabel: "SOC",
     entityExplorerTitle: "Entity Explorer",
     samplingTitle: "Sampling Records",
+    reportTitle: "Daily Report",
+    reportGeneratedMeta: "Saved daily report for {day} · generated {time}",
+    reportGeneratingMeta: "Generating daily report for {day}...",
+    reportLoadingMeta: "Loading daily report for {day}...",
+    reportLoadingModalTitle: "Loading Daily Report",
+    reportLoadingModalBody: "Preparing saved report data...",
+    reportUnavailable: "No saved daily report is available for {day}",
+    reportNotReady: "Future dates are not ready yet.",
+    reportGenerateFailed: "Daily report generation failed for {day}: {error}",
+    reportLatestBadge: "Latest",
+    reportCalendarTitle: "Report Calendar",
+    reportCalendarMeta: "{month} · saved reports {count}/{days}",
+    reportCalendarLoading: "Loading report index...",
+    reportCalendarHint: "Today loads live from raw data. Saved days load immediately; past days without a report will be generated on click.",
+    reportCalendarSaved: "Saved",
+    reportCalendarLive: "Live",
+    reportCalendarMissing: "Generate",
+    reportCalendarPending: "Not ready",
+    reportCalendarChecking: "Checking",
+    reportCalendarGenerating: "Generating",
+    reportTodayLiveMeta: "Live report for {day} · raw data",
+    reportCalendarPrevMonth: "Previous month",
+    reportCalendarNextMonth: "Next month",
+    reportWeekdayMon: "Mon",
+    reportWeekdayTue: "Tue",
+    reportWeekdayWed: "Wed",
+    reportWeekdayThu: "Thu",
+    reportWeekdayFri: "Fri",
+    reportWeekdaySat: "Sat",
+    reportWeekdaySun: "Sun",
     samplingSystemLabel: "System",
     samplingSystemOverall: "Overall",
     samplingRangeModeLabel: "Range",
@@ -675,7 +706,7 @@ const I18N = {
     samplingZeroHeroFieldCoverage: "Coverage",
     samplingZeroHeroAwaiting: "No live export-window observation yet.",
     samplingZeroHeroCoverageText: "{samples}/{expected} samples · {coverage}%",
-    samplingZeroHeroHistoryTitle: "Selected 18:00-20:00 Windows",
+    samplingZeroHeroHistoryTitle: "18:00-20:00 Export Window Review",
     samplingZeroHeroHistoryBadgeImport: "{count} import seen · {netCount} net import",
     samplingZeroHeroHistoryBadgeMixed: "{count} import seen · net export",
     samplingZeroHeroHistoryBadgeClean: "0 import",
@@ -699,6 +730,18 @@ const I18N = {
     samplingChartTitle: "Power Timeline",
     samplingChartMeta: "{system} · {range} · {count} points",
     samplingChartNoData: "No chart data yet for this range",
+    samplingLegendGroupSolar: "Solar",
+    samplingLegendGroupGrid: "Grid",
+    samplingLegendGroupLoad: "Home Load",
+    samplingLegendGroupBattery: "Battery",
+    samplingLegendGroupSajBattery: "SAJ Battery",
+    samplingLegendGroupSolplanetBattery: "Solplanet Battery",
+    samplingLegendSeriesGeneration: "Generation",
+    samplingLegendSeriesImport: "Import",
+    samplingLegendSeriesExport: "Export",
+    samplingLegendSeriesOther: "Other",
+    samplingLegendSeriesCharge: "Charge",
+    samplingLegendSeriesDischarge: "Discharge",
     samplingBatteryTimelineTitle: "Battery timeline",
     samplingBatteryTimelineMeta: "{range} · SAJ + Solplanet SOC · {count} points",
     samplingBatteryTimelineNoData: "No battery timeline data yet for this range",
@@ -720,9 +763,17 @@ const I18N = {
     samplingTotalsScopeSolplanetBattery: "Solplanet Battery",
     samplingTotalsGridTitle: "Grid",
     samplingTotalsNoData: "No totals available for this range",
+    samplingTotalsWindowFree: "Free",
+    samplingTotalsWindowPaid: "Paid",
     samplingTotalsWindowOther: "Other",
     samplingTotalsWindowTotal: "Total",
     samplingTotalsPointsCompact: "{samples} pts",
+    samplingPhaseBatteryTitle: "Stage-End Battery Remaining",
+    samplingPhaseBatteryMeta: "{day} · SAJ + Solplanet usable battery at each stage end",
+    samplingPhaseBatteryNoData: "No stage-end battery data for this day",
+    samplingPhaseBatteryUnavailable: "No data",
+    samplingPhaseBatteryEndAt: "End {time}",
+    samplingPhaseBatteryDetail: "SAJ {saj} · Solplanet {solplanet}",
     samplingOverallMetricPv: "PV Generation",
     samplingOverallMetricGridImport: "Grid Import",
     samplingOverallMetricGridExport: "Grid Export",
@@ -1153,6 +1204,7 @@ const I18N = {
     solplanetControlTab: "Solplanet 管理",
     entitiesTab: "实体",
     samplingTab: "历史",
+    reportTab: "日报",
     databaseTab: "Database",
     workerLogsTab: "Worker日志",
     operationTimelineTab: "操作记录",
@@ -1482,6 +1534,36 @@ const I18N = {
     socLabel: "电池电量",
     entityExplorerTitle: "实体浏览",
     samplingTitle: "采样记录",
+    reportTitle: "每日日报",
+    reportGeneratedMeta: "{day} 的已保存日报 · 生成于 {time}",
+    reportGeneratingMeta: "正在生成 {day} 的每日日报...",
+    reportLoadingMeta: "正在加载 {day} 的每日日报...",
+    reportLoadingModalTitle: "正在加载每日日报",
+    reportLoadingModalBody: "正在准备已保存的日报数据...",
+    reportUnavailable: "{day} 暂无已保存日报",
+    reportNotReady: "未来日期暂时不能生成日报。",
+    reportGenerateFailed: "{day} 的每日日报生成失败：{error}",
+    reportLatestBadge: "最新",
+    reportCalendarTitle: "日报日历",
+    reportCalendarMeta: "{month} · 已保存日报 {count}/{days}",
+    reportCalendarLoading: "正在加载日报索引...",
+    reportCalendarHint: "今天直接加载实时原始数据；已有日报的日期会直接加载，过去但未生成的日期点击后会立即生成并保存。",
+    reportCalendarSaved: "已保存",
+    reportCalendarLive: "实时",
+    reportCalendarMissing: "生成",
+    reportCalendarPending: "未就绪",
+    reportCalendarChecking: "检查中",
+    reportCalendarGenerating: "生成中",
+    reportTodayLiveMeta: "{day} 的实时日报 · 使用原始数据",
+    reportCalendarPrevMonth: "上个月",
+    reportCalendarNextMonth: "下个月",
+    reportWeekdayMon: "一",
+    reportWeekdayTue: "二",
+    reportWeekdayWed: "三",
+    reportWeekdayThu: "四",
+    reportWeekdayFri: "五",
+    reportWeekdaySat: "六",
+    reportWeekdaySun: "日",
     samplingSystemLabel: "系统",
     samplingSystemOverall: "综合",
     samplingRangeModeLabel: "范围",
@@ -1535,7 +1617,7 @@ const I18N = {
     samplingZeroHeroFieldCoverage: "覆盖率",
     samplingZeroHeroAwaiting: "当前还没有 export window 的实时观测。",
     samplingZeroHeroCoverageText: "{samples}/{expected} 个样本 · {coverage}%",
-    samplingZeroHeroHistoryTitle: "所选日期 18:00-20:00 窗口",
+    samplingZeroHeroHistoryTitle: "18:00-20:00 外送窗口回顾",
     samplingZeroHeroHistoryBadgeImport: "购电 {count} 窗 · 净购电 {netCount} 窗",
     samplingZeroHeroHistoryBadgeMixed: "购电 {count} 窗 · 净卖电",
     samplingZeroHeroHistoryBadgeClean: "0 购电",
@@ -1559,6 +1641,18 @@ const I18N = {
     samplingChartTitle: "功率时间线",
     samplingChartMeta: "{system} · {range} · {count} 个点",
     samplingChartNoData: "当前时间范围暂无图表数据",
+    samplingLegendGroupSolar: "光伏",
+    samplingLegendGroupGrid: "电网",
+    samplingLegendGroupLoad: "家庭负载",
+    samplingLegendGroupBattery: "电池",
+    samplingLegendGroupSajBattery: "SAJ 电池",
+    samplingLegendGroupSolplanetBattery: "Solplanet 电池",
+    samplingLegendSeriesGeneration: "发电",
+    samplingLegendSeriesImport: "购电",
+    samplingLegendSeriesExport: "上网",
+    samplingLegendSeriesOther: "其他",
+    samplingLegendSeriesCharge: "充电",
+    samplingLegendSeriesDischarge: "放电",
     samplingBatteryTimelineTitle: "电池时间线",
     samplingBatteryTimelineMeta: "{range} · SAJ + Solplanet SOC · {count} 个点",
     samplingBatteryTimelineNoData: "当前时间范围暂无电池时间线数据",
@@ -1580,9 +1674,17 @@ const I18N = {
     samplingTotalsScopeSolplanetBattery: "Solplanet 电池",
     samplingTotalsGridTitle: "电网",
     samplingTotalsNoData: "当前区间暂无可显示的累计值",
+    samplingTotalsWindowFree: "免费",
+    samplingTotalsWindowPaid: "收费",
     samplingTotalsWindowOther: "其他",
     samplingTotalsWindowTotal: "总量",
     samplingTotalsPointsCompact: "{samples} 点",
+    samplingPhaseBatteryTitle: "阶段结束剩余电量",
+    samplingPhaseBatteryMeta: "{day} · 每个阶段结束时 SAJ + Solplanet 可用电量",
+    samplingPhaseBatteryNoData: "当天暂无阶段结束电量数据",
+    samplingPhaseBatteryUnavailable: "无数据",
+    samplingPhaseBatteryEndAt: "{time} 结束",
+    samplingPhaseBatteryDetail: "SAJ {saj} · Solplanet {solplanet}",
     samplingOverallMetricPv: "光伏发电",
     samplingOverallMetricGridImport: "电网购电",
     samplingOverallMetricGridExport: "电网上网",
@@ -1894,6 +1996,14 @@ const CONFIG_SAMPLE_INTERVAL_OPTIONS = [5, 10, 30, 60, 300];
 const BALANCE_TOLERANCE_W = 100;
 const SAMPLING_GRID_IMPORT_WINDOW = { startHour: 11, endHour: 14, label: "11:00-14:00" };
 const SAMPLING_GRID_EXPORT_WINDOW = { startHour: 18, endHour: 20, label: "18:00-20:00" };
+const SAMPLING_PHASE_BATTERY_ENDS = [
+  { id: "overnight_shoulder", titleKey: "notificationMatrixWindowOvernightTitle", endHour: 11 },
+  { id: "free_energy", titleKey: "notificationMatrixWindowFreeEnergyTitle", endHour: 14 },
+  { id: "after_free_shoulder", titleKey: "notificationMatrixWindowAfterFreeShoulderTitle", endHour: 18 },
+  { id: "export_window", titleKey: "notificationMatrixWindowExportTitle", endHour: 20 },
+  { id: "post_export_peak", titleKey: "notificationMatrixWindowPostExportPeakTitle", endHour: 23 },
+];
+const SAMPLING_PHASE_BATTERY_SAMPLE_TOLERANCE_MS = 15 * 60 * 1000;
 const SOLPLANET_REALTIME_KV_URL = "/api/solplanet/realtime-kv";
 const SOLPLANET_RAW_APIS = [
   { key: "getdevdata_device_2", titleKey: "rawApiGetdevdata2", url: "/api/solplanet/cgi/getdevdata-device-2" },
@@ -1926,6 +2036,17 @@ const SAMPLING_BATTERY_TIMELINE_SERIES = [
   { key: "solplanet_battery_soc_percent", labelKey: "samplingBatteryTimelineSeriesSolplanet", color: "#7c3aed" },
   { key: "tesla_battery_soc_percent", labelKey: "samplingBatteryTimelineSeriesTesla", color: "#dc2626" },
 ];
+
+const SAMPLING_POWER_LEGEND_LABEL_KEYS = {
+  pv_total_w: "samplingLegendSeriesGeneration",
+  grid_import_w: "samplingLegendSeriesImport",
+  grid_export_w: "samplingLegendSeriesExport",
+  load_w: "samplingLegendSeriesOther",
+  saj_battery_charge_w: "samplingLegendSeriesCharge",
+  saj_battery_discharge_w: "samplingLegendSeriesDischarge",
+  solplanet_battery_charge_w: "samplingLegendSeriesCharge",
+  solplanet_battery_discharge_w: "samplingLegendSeriesDischarge",
+};
 
 const SAMPLING_SERIES_META_BY_KEY = Object.fromEntries(
   [...SAMPLING_SERIES, ...SAMPLING_OVERALL_SERIES, ...SAMPLING_BATTERY_TIMELINE_SERIES].map((item) => [item.key, item]),
@@ -2104,6 +2225,7 @@ const stateCache = {
   lastSamplingPage: null,
   lastSamplingSeries: null,
   lastSamplingBatteryTimeline: null,
+  lastSamplingPhaseBattery: null,
   lastSamplingPumpStatus: null,
   lastSamplingZeroHeroHistory: null,
   lastDatabaseTables: null,
@@ -2168,6 +2290,13 @@ const NOTIFICATION_MATRIX_WINDOWS = [
         triggerKey: "notificationRuleTeslaOvernightShoulderTrigger",
       },
       {
+        kind: "operation",
+        level: "info",
+        code: "pool_pump_overnight_control",
+        titleKey: "notificationRulePoolPumpOvernightTitle",
+        triggerKey: "notificationRulePoolPumpOvernightTrigger",
+      },
+      {
         kind: "notification",
         level: "warning",
         code: "saj_battery_watch_50_percent",
@@ -2202,6 +2331,13 @@ const NOTIFICATION_MATRIX_WINDOWS = [
         code: "tesla_free_energy_control",
         titleKey: "notificationRuleTeslaFreeEnergyTitle",
         triggerKey: "notificationRuleTeslaFreeEnergyTrigger",
+      },
+      {
+        kind: "operation",
+        level: "info",
+        code: "pool_pump_free_energy_control",
+        titleKey: "notificationRulePoolPumpFreeEnergyTitle",
+        triggerKey: "notificationRulePoolPumpFreeEnergyTrigger",
       },
     ],
   },
@@ -2347,12 +2483,13 @@ function getLang() {
 
 let currentLang = getLang();
 const _hashTab = location.hash.slice(1);
-let currentTab = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "operationTimeline", "workerFailureLog"].includes(_hashTab)
-  ? _hashTab
-  : (["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "operationTimeline", "workerFailureLog"].includes(localStorage.getItem("activeTab"))
-    ? localStorage.getItem("activeTab")
-    : "dashboard");
-const ALL_TABS = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "sampling", "database", "workerLogs", "operationTimeline", "workerFailureLog"];
+const ALL_TABS = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "report", "database", "workerLogs", "operationTimeline", "workerFailureLog"];
+function normalizeAppTab(tab) {
+  const normalized = String(tab || "").trim();
+  if (normalized === "sampling") return "report";
+  return ALL_TABS.includes(normalized) ? normalized : "";
+}
+let currentTab = normalizeAppTab(_hashTab) || normalizeAppTab(localStorage.getItem("activeTab")) || "dashboard";
 let solplanetRawMode = localStorage.getItem(SOLPLANET_RAW_MODE_KEY) === "table" ? "table" : "cards";
 let rawDataSystem = localStorage.getItem(RAW_DATA_SYSTEM_KEY) === "saj" ? "saj" : "solplanet";
 let sajActionDebugMode = localStorage.getItem(SAJ_ACTION_DEBUG_MODE_KEY) === "1";
@@ -2382,6 +2519,7 @@ let samplingBrushGlobalHandlersBound = false;
 let samplingHoverRepairRafId = 0;
 let samplingHoverRepairNeedsResize = false;
 const SAMPLING_CHART_CLICK_INTERACTION_ENABLED = false;
+const SAMPLING_CHART_LEGEND_SELECT_ENABLED = true;
 const samplingBrushState = {
   active: false,
   pendingRange: null,
@@ -2396,6 +2534,7 @@ const tabLoadState = {
   rawData: { inFlight: false },
   solplanetControl: { inFlight: false },
   sampling: { inFlight: false },
+  report: { inFlight: false },
   database: { inFlight: false },
   workerLogs: { inFlight: false },
   operationTimeline: { inFlight: false },
@@ -2411,6 +2550,18 @@ const samplingRangeState = {
   endDate: "",
   startDateTime: "",
   endDateTime: "",
+};
+const initialReportDay = getLocalDateText();
+const initialReportDayParts = localDateParts(initialReportDay);
+const reportCalendarState = {
+  selectedDay: initialReportDay,
+  month: initialReportDayParts ? initialReportDayParts.monthIndex + 1 : new Date().getMonth() + 1,
+  monthYear: initialReportDayParts ? initialReportDayParts.year : new Date().getFullYear(),
+  availableDays: new Map(),
+  loadedMonths: new Set(),
+  loadingIndex: false,
+  loadingDay: "",
+  statusText: "",
 };
 
 function getSelectedSamplingSystem() {
@@ -2560,6 +2711,32 @@ function setHtml(id, html) {
   const el = document.getElementById(id);
   if (el) {
     el.innerHTML = html;
+  }
+}
+
+function setReportLoadingModal(visible, message = "") {
+  const modal = document.getElementById("reportLoadingModal");
+  if (!modal) return;
+  const shouldShow = Boolean(visible) && currentTab === "report";
+  modal.classList.toggle("hidden", !shouldShow);
+  modal.setAttribute("aria-hidden", shouldShow ? "false" : "true");
+  setText("reportLoadingTitle", t("reportLoadingModalTitle"));
+  setText("reportLoadingBody", message || t("reportLoadingModalBody"));
+}
+
+function setSamplingZeroHeroCurrentVisible(visible) {
+  const card = document.getElementById("samplingZeroHeroCurrentCard");
+  if (!card) return;
+  card.hidden = !visible;
+  card.classList.toggle("hidden", !visible);
+}
+
+function setSamplingSamplesSectionVisible(visible) {
+  for (const id of ["samplingCount", "samplingPager", "samplingTableWrap"]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.hidden = !visible;
+    el.classList.toggle("hidden", !visible);
   }
 }
 
@@ -7589,6 +7766,7 @@ function extractBrushTimeRange(areas) {
 }
 
 async function applyChartSelectionRange(startMs, endMs) {
+  if (currentTab !== "sampling") return;
   if (samplingRangeApplyingFromBrush) return;
   const start = Number(startMs);
   const end = Number(endMs);
@@ -7727,6 +7905,273 @@ function getMonthInfo(monthText, yearText) {
     label: `${year}-${String(month).padStart(2, "0")}`,
     display: t("samplingMonthDisplay", { year, month: monthLabel(month) }),
   };
+}
+
+function localDateTextFromDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function getReportMonthInfo() {
+  return getMonthInfo(reportCalendarState.month, reportCalendarState.monthYear);
+}
+
+function getReportMonthKey() {
+  return getReportMonthInfo().label;
+}
+
+function setReportCalendarMonthFromDay(dayText) {
+  const parts = localDateParts(dayText);
+  if (!parts) return;
+  reportCalendarState.month = parts.monthIndex + 1;
+  reportCalendarState.monthYear = parts.year;
+}
+
+function isReportGeneratableDay(dayText) {
+  return Boolean(localDateParts(dayText)) && String(dayText) < getLocalDateText();
+}
+
+function getReportMonthCompletedDayCount(info = getReportMonthInfo()) {
+  const today = getLocalDateText();
+  const daysInMonth = new Date(info.year, info.month, 0).getDate();
+  let count = 0;
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const dayText = `${info.year}-${String(info.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (dayText < today) count += 1;
+  }
+  return count;
+}
+
+function setReportCalendarVisible(visible) {
+  const calendarPanel = document.getElementById("reportCalendarPanel");
+  const filterBar = document.getElementById("samplingFilterBar");
+  if (calendarPanel) {
+    calendarPanel.hidden = !visible;
+    calendarPanel.classList.toggle("hidden", !visible);
+  }
+  if (filterBar) {
+    filterBar.hidden = visible;
+    filterBar.classList.toggle("hidden", visible);
+  }
+}
+
+function renderReportCalendar() {
+  const panel = document.getElementById("reportCalendarPanel");
+  if (!panel) return;
+  const info = getReportMonthInfo();
+  const monthKey = info.label;
+  const today = getLocalDateText();
+  const daysInMonth = new Date(info.year, info.month, 0).getDate();
+  const completedDays = getReportMonthCompletedDayCount(info);
+  const savedDays = Array.from(reportCalendarState.availableDays.keys()).filter((day) => day.startsWith(monthKey)).length;
+  setText("reportCalendarTitle", info.display);
+  setText("reportCalendarMeta", t("reportCalendarMeta", { month: monthKey, count: savedDays, days: completedDays }));
+  setText(
+    "reportCalendarStatus",
+    reportCalendarState.statusText ||
+      (reportCalendarState.loadingIndex ? t("reportCalendarLoading") : t("reportCalendarHint")),
+  );
+
+  const prevBtn = document.getElementById("reportCalendarPrevBtn");
+  const nextBtn = document.getElementById("reportCalendarNextBtn");
+  if (prevBtn) {
+    prevBtn.setAttribute("aria-label", t("reportCalendarPrevMonth"));
+    prevBtn.disabled = reportCalendarState.loadingIndex || Boolean(reportCalendarState.loadingDay);
+    prevBtn.onclick = async () => {
+      const current = new Date(info.year, info.month - 1, 1, 0, 0, 0, 0);
+      current.setMonth(current.getMonth() - 1);
+      reportCalendarState.monthYear = current.getFullYear();
+      reportCalendarState.month = current.getMonth() + 1;
+      reportCalendarState.statusText = "";
+      renderReportCalendar();
+      await loadReportIndexForVisibleMonth();
+    };
+  }
+  if (nextBtn) {
+    nextBtn.setAttribute("aria-label", t("reportCalendarNextMonth"));
+    nextBtn.disabled = reportCalendarState.loadingIndex || Boolean(reportCalendarState.loadingDay);
+    nextBtn.onclick = async () => {
+      const current = new Date(info.year, info.month - 1, 1, 0, 0, 0, 0);
+      current.setMonth(current.getMonth() + 1);
+      reportCalendarState.monthYear = current.getFullYear();
+      reportCalendarState.month = current.getMonth() + 1;
+      reportCalendarState.statusText = "";
+      renderReportCalendar();
+      await loadReportIndexForVisibleMonth();
+    };
+  }
+
+  const weekdays = document.getElementById("reportCalendarWeekdays");
+  if (weekdays) {
+    weekdays.innerHTML = [
+      "reportWeekdayMon",
+      "reportWeekdayTue",
+      "reportWeekdayWed",
+      "reportWeekdayThu",
+      "reportWeekdayFri",
+      "reportWeekdaySat",
+      "reportWeekdaySun",
+    ]
+      .map((key) => `<div class="report-calendar-weekday">${escapeHtml(t(key))}</div>`)
+      .join("");
+  }
+
+  const grid = document.getElementById("reportCalendarGrid");
+  if (!grid) return;
+  const firstDay = new Date(info.year, info.month - 1, 1, 0, 0, 0, 0);
+  const leadingEmptyCells = (firstDay.getDay() + 6) % 7;
+  const cells = [];
+  for (let i = 0; i < leadingEmptyCells; i += 1) {
+    cells.push('<div class="report-calendar-empty" aria-hidden="true"></div>');
+  }
+  const monthLoaded = reportCalendarState.loadedMonths.has(monthKey);
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const dayText = `${info.year}-${String(info.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const hasReport = reportCalendarState.availableDays.has(dayText);
+    const live = dayText === today;
+    const unavailable = dayText > today;
+    const loading = reportCalendarState.loadingDay === dayText;
+    const classes = [
+      "report-calendar-day",
+      hasReport ? "has-report" : "missing-report",
+      live ? "is-live" : "",
+      unavailable ? "is-unavailable" : "",
+      dayText === reportCalendarState.selectedDay ? "is-selected" : "",
+      loading ? "is-loading" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const statusText = loading
+      ? t("reportCalendarGenerating")
+      : live
+        ? t("reportCalendarLive")
+      : unavailable
+        ? t("reportCalendarPending")
+        : hasReport
+          ? t("reportCalendarSaved")
+          : monthLoaded
+            ? t("reportCalendarMissing")
+            : t("reportCalendarChecking");
+    const disabled = unavailable || loading || reportCalendarState.loadingIndex || Boolean(reportCalendarState.loadingDay);
+    const dayLabel = `${dayText} ${statusText}`;
+    cells.push(`
+      <button type="button" class="${classes}" data-report-day="${escapeHtml(dayText)}" aria-label="${escapeHtml(dayLabel)}" title="${escapeHtml(dayLabel)}" ${disabled ? "disabled" : ""}>
+        <span class="report-calendar-day-number">${day}</span>
+        <span class="report-calendar-day-status" title="${escapeHtml(statusText)}">${escapeHtml(statusText)}</span>
+      </button>
+    `);
+  }
+  grid.innerHTML = cells.join("");
+  grid.querySelectorAll("[data-report-day]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const day = button.getAttribute("data-report-day") || "";
+      await selectReportDay(day, { generateIfMissing: true });
+    });
+  });
+}
+
+async function loadReportIndexForVisibleMonth({ force = false } = {}) {
+  const monthKey = getReportMonthKey();
+  if (!force && reportCalendarState.loadedMonths.has(monthKey)) {
+    renderReportCalendar();
+    return;
+  }
+  reportCalendarState.loadingIndex = true;
+  reportCalendarState.statusText = t("reportCalendarLoading");
+  setReportLoadingModal(true, reportCalendarState.statusText);
+  renderReportCalendar();
+  try {
+    const payload = await fetchJson(`/api/reports/daily/index?month=${encodeURIComponent(monthKey)}&limit=62`, {
+      timeoutMs: 10000,
+    });
+    for (const item of payload.items || []) {
+      if (item?.report_day_local) reportCalendarState.availableDays.set(String(item.report_day_local), item);
+    }
+    reportCalendarState.loadedMonths.add(monthKey);
+    reportCalendarState.statusText = "";
+  } catch (err) {
+    reportCalendarState.statusText = t("loadFailed", { error: String(err) });
+  } finally {
+    reportCalendarState.loadingIndex = false;
+    renderReportCalendar();
+    if (!reportCalendarState.loadingDay) setReportLoadingModal(false);
+  }
+}
+
+async function fetchDailyReportPayload(day, { timeoutMs = 10000 } = {}) {
+  const params = new URLSearchParams({
+    day_local: day,
+    page: String(samplingPager.page),
+    page_size: String(SAMPLING_PAGE_SIZE),
+  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`/api/reports/daily?${params.toString()}`, { signal: controller.signal });
+    window.clearTimeout(timeoutId);
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response));
+    }
+    return response.json();
+  } catch (err) {
+    window.clearTimeout(timeoutId);
+    if (err?.name === "AbortError") {
+      throw new Error(`Request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  }
+}
+
+function emptySamplingPagePayload() {
+  return {
+    count: 0,
+    total: 0,
+    page: 1,
+    page_size: SAMPLING_PAGE_SIZE,
+    has_next: false,
+    has_prev: false,
+    items: [],
+  };
+}
+
+function renderDailyReportEmpty(message, rangeLabel) {
+  stateCache.lastSamplingDaily = null;
+  stateCache.lastSamplingUsageBySystem = null;
+  stateCache.lastSamplingPage = null;
+  stateCache.lastSamplingSeries = null;
+  stateCache.lastSamplingBatteryTimeline = null;
+  stateCache.lastSamplingPhaseBattery = null;
+  stateCache.lastSamplingPumpStatus = null;
+  stateCache.lastSamplingZeroHeroHistory = null;
+  samplingPager.hasNext = false;
+  samplingPager.hasPrev = false;
+  setText("samplingUpdatedAt", message);
+  setText("samplingDailyMeta", message);
+  setText("samplingChartMeta", message);
+  setText("samplingBatteryTimelineMeta", message);
+  setText("samplingPumpStatusMeta", message);
+  renderSamplingPage(emptySamplingPagePayload());
+  renderSamplingChart({ items: [] });
+  renderSamplingBatteryTimeline({ series: [] });
+  renderSamplingPhaseBatteryRemaining(null, rangeLabel);
+  renderSamplingPumpStatusTimeline({ data: [] });
+  renderSamplingTotals(null, "overall", rangeLabel, { metaText: message });
+  renderSamplingZeroHeroHistory({ items: [] });
+}
+
+async function selectReportDay(day, { generateIfMissing = false } = {}) {
+  if (!localDateParts(day)) return;
+  reportCalendarState.selectedDay = day;
+  setReportCalendarMonthFromDay(day);
+  samplingPager.page = 1;
+  reportCalendarState.statusText = "";
+  renderReportCalendar();
+  await loadReportIndexForVisibleMonth();
+  await loadDailyReport({ generateIfMissing });
 }
 
 function parseSamplingRelativeInput(rawValue) {
@@ -7872,7 +8317,8 @@ function getSamplingFocusLocalDay() {
 function buildSamplingRangeCurrentBadge(mode) {
   if (mode === "day") {
     const selected = samplingRangeState.day || getLocalDateText();
-    return selected === getLocalDateText() ? t("samplingRangeTodayBadge") : "";
+    const currentDay = getLocalDateText();
+    return selected === currentDay ? t("samplingRangeTodayBadge") : "";
   }
   if (mode === "week") {
     const selected = getWeekInfo(samplingRangeState.week || getLocalDateText());
@@ -8144,9 +8590,8 @@ function bindSamplingRangeInputEvents() {
   }
 }
 
-function buildSamplingUrl() {
+function buildSamplingUrl(range = getSamplingRange()) {
   const params = new URLSearchParams();
-  const range = getSamplingRange();
   if (range.startUtc) params.set("start_utc", range.startUtc);
   if (range.endUtc) params.set("end_utc", range.endUtc);
   params.set("page", String(samplingPager.page));
@@ -8780,6 +9225,7 @@ function renderSamplingStatus(status) {
 }
 
 function getSamplingZeroHeroObservationSource() {
+  if (currentTab === "report") return { collectorStatus: null, midday: {}, observation: null };
   const summaryCollectorStatus = stateCache.lastSummary?.collectorStatus || null;
   const collectorStatus = stateCache.lastCollectorStatus || summaryCollectorStatus || null;
   const combined = collectorStatus?.systems?.combined || summaryCollectorStatus?.systems?.combined || {};
@@ -9036,20 +9482,28 @@ function renderSamplingZeroHeroHistory(payload = stateCache.lastSamplingZeroHero
                       import: formatSamplingZeroHeroEnergyWh(windowItem?.grid_import_wh),
                       export: formatSamplingZeroHeroEnergyWh(windowItem?.grid_export_wh),
                     });
+                const rangeText = formatSamplingZeroHeroHistoryWindowRange(windowItem);
+                const stateText = formatSamplingZeroHeroHistoryState(windowItem);
+                const coverageText = formatSamplingZeroHeroHistoryCoverage(windowItem);
+                const tooltipLines = [
+                  rangeText,
+                  stateText,
+                  energyText,
+                  coverageText,
+                ].filter((line) => line && line !== "-");
+                const tooltipText = tooltipLines.join(" · ");
                 return `
-                  <article class="sampling-zero-hero-history-window ${stateClass}${partialClass}">
-                    <div class="sampling-zero-hero-history-window-head">
-                      <p class="sampling-zero-hero-history-window-time">${escapeHtml(
-                        formatSamplingZeroHeroHistoryWindowRange(windowItem),
-                      )}</p>
-                      <p class="sampling-zero-hero-history-window-state">${escapeHtml(
-                        formatSamplingZeroHeroHistoryState(windowItem),
-                      )}</p>
+                  <article
+                    class="sampling-zero-hero-history-window ${stateClass}${partialClass}"
+                    tabindex="0"
+                    aria-label="${escapeHtml(tooltipText || rangeText)}"
+                  >
+                    <div class="sampling-zero-hero-history-window-tooltip" role="tooltip">
+                      <p class="sampling-zero-hero-history-window-tooltip-title">${escapeHtml(rangeText)}</p>
+                      <p>${escapeHtml(stateText)}</p>
+                      <p>${escapeHtml(energyText)}</p>
+                      <p>${escapeHtml(coverageText)}</p>
                     </div>
-                    <p class="sampling-zero-hero-history-window-energy">${escapeHtml(energyText)}</p>
-                    <p class="sampling-zero-hero-history-window-coverage">${escapeHtml(
-                      formatSamplingZeroHeroHistoryCoverage(windowItem),
-                    )}</p>
                   </article>
                 `;
               })
@@ -9126,7 +9580,9 @@ function setSamplingFocusSeries(nextKey) {
   samplingChartFocusSeries = samplingChartFocusSeries === nextKey ? null : nextKey;
   if (samplingChartLastPayload) renderSamplingChart(samplingChartLastPayload);
   if (stateCache.lastSamplingUsageBySystem) {
-    const range = getSamplingRange();
+    const range = currentTab === "report"
+      ? getDayInfo(reportCalendarState.selectedDay || getLocalDateText(-1))
+      : getSamplingRange();
     const system = getSelectedSamplingSystem();
     renderSamplingTotals(stateCache.lastSamplingUsageBySystem, system, range.label);
   }
@@ -9146,6 +9602,24 @@ function formatSamplingWindowSplit(windowValue, totalValue) {
   const total = Math.max(Number(totalValue || 0), 0);
   if (total <= 0) return "-";
   return `⏱ ${formatEnergyKwhText(Math.max(Number(windowValue || 0), 0))}  📊 ${formatEnergyKwhText(total)}`;
+}
+
+function formatSamplingGridImportCostSplit(freeValue, totalValue) {
+  const total = Math.max(Number(totalValue || 0), 0);
+  if (total <= 0) return "-";
+  const free = Math.max(0, Math.min(total, Number(freeValue || 0)));
+  const paid = Math.max(0, total - free);
+  return `${t("samplingTotalsWindowFree")} ${formatTrimmedDecimal(free, 2)} + ${t("samplingTotalsWindowPaid")} ${formatTrimmedDecimal(paid, 2)} / ${t("samplingTotalsWindowTotal")} ${formatTrimmedDecimal(total, 2)} kWh`;
+}
+
+function buildSamplingGridImportCostParts(freeValue, totalValue) {
+  const total = Math.max(Number(totalValue || 0), 0);
+  const free = Math.max(0, Math.min(total, Number(freeValue || 0)));
+  return [
+    { label: t("samplingTotalsWindowFree"), value: free },
+    { label: t("samplingTotalsWindowPaid"), value: Math.max(total - free, 0) },
+    { label: t("samplingTotalsWindowTotal"), value: total },
+  ];
 }
 
 function formatSamplingPointsCompact(samples) {
@@ -9234,6 +9708,7 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         leftSeriesKey: "grid_import_w",
         leftWindowValue: gridImportBreakdown.windowValue,
         leftWindowLabel: SAMPLING_GRID_IMPORT_WINDOW.label,
+        leftWindowCostSplit: true,
         rightLabel: t("samplingOverallMetricGridExport"),
         rightValue: totalGridExport,
         rightKind: "export",
@@ -9340,6 +9815,7 @@ function buildSamplingTotalsSummary(usageBySystem, selectedSystem) {
         leftSeriesKey: "grid_w",
         leftWindowValue: gridImportBreakdown.windowValue,
         leftWindowLabel: SAMPLING_GRID_IMPORT_WINDOW.label,
+        leftWindowCostSplit: true,
         rightLabel: t("samplingOverallMetricGridExport"),
         rightValue: totalGridExport,
         rightKind: "export",
@@ -9514,6 +9990,134 @@ function buildBatteryTimelinePayload(seriesBySystem, range) {
   };
 }
 
+function getBatteryUsableKwhValue(system, socPercent) {
+  const capacityKwh = BATTERY_CAPACITY_KWH[system];
+  const minDischargeSoc = BATTERY_MIN_DISCHARGE_SOC[system] ?? 0;
+  const soc = Number(socPercent);
+  if (!Number.isFinite(capacityKwh) || !Number.isFinite(soc)) return null;
+  const usableSoc = Math.max(0, Math.min(100, soc) - minDischargeSoc);
+  return (capacityKwh * usableSoc) / 100;
+}
+
+function findNearestSeriesSampleAt(seriesPayload, targetMs, toleranceMs = SAMPLING_PHASE_BATTERY_SAMPLE_TOLERANCE_MS) {
+  if (!Number.isFinite(targetMs)) return null;
+  const items = Array.isArray(seriesPayload?.items) ? seriesPayload.items : [];
+  let best = null;
+  let bestDelta = Infinity;
+  for (const item of items) {
+    const ts = new Date(item?.sampled_at_utc || "").getTime();
+    if (!Number.isFinite(ts)) continue;
+    const delta = Math.abs(ts - targetMs);
+    if (delta > toleranceMs || delta >= bestDelta) continue;
+    best = item;
+    bestDelta = delta;
+  }
+  return best;
+}
+
+function buildSamplingPhaseBatteryPayload(seriesBySystem, dayText) {
+  const parts = localDateParts(dayText);
+  if (!parts) return { day: dayText || "", items: [] };
+  const items = SAMPLING_PHASE_BATTERY_ENDS.map((stage) => {
+    const target = new Date(parts.year, parts.monthIndex, parts.day, stage.endHour, 0, 0, 0);
+    const targetMs = target.getTime();
+    const sajSample = findNearestSeriesSampleAt(seriesBySystem?.saj, targetMs);
+    const solplanetSample = findNearestSeriesSampleAt(seriesBySystem?.solplanet, targetMs);
+    const sajKwh = getBatteryUsableKwhValue("saj", sajSample?.battery_soc_percent);
+    const solplanetKwh = getBatteryUsableKwhValue("solplanet", solplanetSample?.battery_soc_percent);
+    const values = [sajKwh, solplanetKwh].filter((value) => Number.isFinite(value));
+    return {
+      id: stage.id,
+      titleKey: stage.titleKey,
+      endHour: stage.endHour,
+      endTime: `${String(stage.endHour).padStart(2, "0")}:00`,
+      target_at_utc: target.toISOString(),
+      total_kwh: values.length ? values.reduce((sum, value) => sum + value, 0) : null,
+      saj_kwh: sajKwh,
+      solplanet_kwh: solplanetKwh,
+      saj_soc_percent: Number.isFinite(Number(sajSample?.battery_soc_percent)) ? Number(sajSample.battery_soc_percent) : null,
+      solplanet_soc_percent: Number.isFinite(Number(solplanetSample?.battery_soc_percent)) ? Number(solplanetSample.battery_soc_percent) : null,
+    };
+  });
+  return { day: dayText, items };
+}
+
+function normalizeSamplingPhaseBatteryPayload(rawPayload, fallbackDay = "") {
+  if (!rawPayload || typeof rawPayload !== "object") return null;
+  const rawItems = Array.isArray(rawPayload.items) ? rawPayload.items : [];
+  if (!rawItems.length) return null;
+  const stageById = new Map(SAMPLING_PHASE_BATTERY_ENDS.map((stage) => [stage.id, stage]));
+  const numberOrNull = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
+  const items = rawItems.map((rawItem, index) => {
+    const item = rawItem && typeof rawItem === "object" ? rawItem : {};
+    const stage = stageById.get(String(item.id || "")) || SAMPLING_PHASE_BATTERY_ENDS[index] || {};
+    const endHour = numberOrNull(item.endHour ?? item.end_hour ?? stage.endHour);
+    return {
+      id: item.id || stage.id || `stage_${index}`,
+      titleKey: item.titleKey || item.title_key || stage.titleKey || "",
+      endHour,
+      endTime: item.endTime || item.end_time || (Number.isFinite(endHour) ? `${String(endHour).padStart(2, "0")}:00` : "-"),
+      target_at_local: item.target_at_local || "",
+      target_at_utc: item.target_at_utc || "",
+      total_kwh: numberOrNull(item.total_kwh),
+      saj_kwh: numberOrNull(item.saj_kwh),
+      solplanet_kwh: numberOrNull(item.solplanet_kwh),
+      saj_soc_percent: numberOrNull(item.saj_soc_percent),
+      solplanet_soc_percent: numberOrNull(item.solplanet_soc_percent),
+      saj_sampled_at_utc: item.saj_sampled_at_utc || "",
+      solplanet_sampled_at_utc: item.solplanet_sampled_at_utc || "",
+    };
+  });
+  return {
+    day: rawPayload.day || fallbackDay || "",
+    timezone_name: rawPayload.timezone_name || "",
+    tolerance_seconds: numberOrNull(rawPayload.tolerance_seconds),
+    items,
+  };
+}
+
+function formatPhaseBatteryKwh(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? `${formatTrimmedDecimal(n, 1)} kWh` : "-";
+}
+
+function renderSamplingPhaseBatteryRemaining(payload, rangeLabel = "") {
+  const metaEl = document.getElementById("samplingPhaseBatteryMeta");
+  const bodyEl = document.getElementById("samplingPhaseBatteryBody");
+  if (!metaEl || !bodyEl) return;
+  const day = payload?.day || rangeLabel || "-";
+  metaEl.textContent = t("samplingPhaseBatteryMeta", { day });
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const hasData = items.some((item) => Number.isFinite(Number(item?.total_kwh)));
+  if (!hasData) {
+    bodyEl.innerHTML = `<div class="sampling-phase-battery-empty">${escapeHtml(t("samplingPhaseBatteryNoData"))}</div>`;
+    return;
+  }
+  bodyEl.innerHTML = items
+    .map((item) => {
+      const hasItemData = Number.isFinite(Number(item?.total_kwh));
+      const totalText = hasItemData ? formatPhaseBatteryKwh(item.total_kwh) : t("samplingPhaseBatteryUnavailable");
+      const detailText = t("samplingPhaseBatteryDetail", {
+        saj: formatPhaseBatteryKwh(item?.saj_kwh),
+        solplanet: formatPhaseBatteryKwh(item?.solplanet_kwh),
+      });
+      const stageTitle = item.titleKey ? t(item.titleKey) : String(item.id || "");
+      const titleText = `${stageTitle} ${t("samplingPhaseBatteryEndAt", { time: item.endTime })}\n${totalText}\n${detailText}`;
+      return `
+        <article class="sampling-phase-battery-item${hasItemData ? "" : " is-empty"}" title="${escapeHtml(titleText)}">
+          <p class="sampling-phase-battery-stage">${escapeHtml(stageTitle)}</p>
+          <p class="sampling-phase-battery-time">${escapeHtml(t("samplingPhaseBatteryEndAt", { time: item.endTime }))}</p>
+          <p class="sampling-phase-battery-value">${escapeHtml(totalText)}</p>
+          <p class="sampling-phase-battery-detail">${escapeHtml(detailText)}</p>
+        </article>
+      `;
+    })
+    .join("");
+}
+
 function buildPumpStatusTimelinePayload(combinedSeriesPayload, range) {
   const items = Array.isArray(combinedSeriesPayload?.items) ? combinedSeriesPayload.items : [];
   const data = items
@@ -9637,24 +10241,22 @@ function ensureSamplingChart() {
         if (!picked) return;
         setSamplingFocusSeries(picked);
       });
+    }
+    if (SAMPLING_CHART_LEGEND_SELECT_ENABLED) {
       samplingChart.on("legendselectchanged", (params) => {
         if (samplingLegendSyncing) return;
         const picked = params?.name;
         if (!picked) return;
         setSamplingFocusSeries(picked);
-        // Keep all legend items selected; focus is controlled by line styles, not hide/show.
-        if (samplingChart) {
-          samplingLegendSyncing = true;
-          samplingChart.dispatchAction({ type: "legendAllSelect" });
-          samplingLegendSyncing = false;
-        }
       });
     }
     samplingChart.on("restore", () => {
       samplingChartFocusSeries = null;
       if (samplingChartLastPayload) renderSamplingChart(samplingChartLastPayload);
       if (stateCache.lastSamplingUsageBySystem) {
-        const range = getSamplingRange();
+        const range = currentTab === "report"
+          ? getDayInfo(reportCalendarState.selectedDay || getLocalDateText(-1))
+          : getSamplingRange();
         const system = getSelectedSamplingSystem();
         renderSamplingTotals(stateCache.lastSamplingUsageBySystem, system, range.label);
       }
@@ -9768,7 +10370,7 @@ function resetSamplingChartsHoverState({ resize = false } = {}) {
 }
 
 function scheduleSamplingChartsHoverReset({ resize = false } = {}) {
-  if (currentTab !== "sampling") return;
+  if (currentTab !== "sampling" && currentTab !== "report") return;
   samplingHoverRepairNeedsResize = samplingHoverRepairNeedsResize || Boolean(resize);
   if (samplingHoverRepairRafId) return;
   samplingHoverRepairRafId = window.requestAnimationFrame(() => {
@@ -9785,6 +10387,92 @@ function getSamplingSmoothConfig() {
     return { targetCount: 420, window1: 5, window2: 1, smooth: 0.35 };
   }
   return { targetCount: 180, window1: 15, window2: 11, smooth: 0.85 };
+}
+
+function buildSamplingChartLegendRows(chartSeriesMeta) {
+  const availableKeys = new Set(chartSeriesMeta.map((item) => item.key));
+  const isOverall = availableKeys.has("pv_total_w") || availableKeys.has("grid_import_w");
+  const rows = isOverall
+    ? [
+        { titleKey: "samplingLegendGroupSolar", keys: ["pv_total_w"] },
+        { titleKey: "samplingLegendGroupGrid", keys: ["grid_import_w", "grid_export_w"] },
+        { titleKey: "samplingLegendGroupLoad", keys: ["tesla_charge_power_w", "load_w"] },
+        { titleKey: "samplingLegendGroupSajBattery", keys: ["saj_battery_charge_w", "saj_battery_discharge_w"] },
+        {
+          titleKey: "samplingLegendGroupSolplanetBattery",
+          keys: ["solplanet_battery_charge_w", "solplanet_battery_discharge_w"],
+        },
+      ]
+    : [
+        { titleKey: "samplingLegendGroupSolar", keys: ["pv_w"] },
+        { titleKey: "samplingLegendGroupGrid", keys: ["grid_w"] },
+        { titleKey: "samplingLegendGroupBattery", keys: ["battery_w"] },
+        { titleKey: "samplingLegendGroupLoad", keys: ["load_w"] },
+      ];
+  return rows
+    .map((row) => ({ ...row, keys: row.keys.filter((key) => availableKeys.has(key)) }))
+    .filter((row) => row.keys.length > 0);
+}
+
+function formatSamplingChartLegendLabel(seriesKey, chartSeriesMeta) {
+  const isOverall = chartSeriesMeta.some((item) => item.key === "pv_total_w" || item.key === "grid_import_w");
+  const compactLabelKey = isOverall ? SAMPLING_POWER_LEGEND_LABEL_KEYS[seriesKey] : "";
+  if (compactLabelKey) return t(compactLabelKey);
+  const hit = chartSeriesMeta.find((item) => item.key === seriesKey);
+  return hit ? t(hit.labelKey) : String(seriesKey);
+}
+
+function buildSamplingChartLegendLayout(chartSeriesMeta, legendSelected) {
+  const rows = buildSamplingChartLegendRows(chartSeriesMeta);
+  const legendLeft = 14;
+  const legendTop = 48;
+  const legendWidth = 134;
+  const gridLeft = 182;
+  const groupTitleHeight = 17;
+  const legendItemRowHeight = 19;
+  const groupGap = 9;
+  let cursorTop = legendTop;
+  const legend = [];
+  const graphic = [];
+  for (const row of rows) {
+    graphic.push({
+      type: "text",
+      left: legendLeft,
+      top: cursorTop,
+      silent: true,
+      style: {
+        text: t(row.titleKey),
+        fill: "#20372d",
+        fontSize: 12,
+        fontWeight: 800,
+      },
+    });
+    cursorTop += groupTitleHeight;
+    legend.push({
+      type: "plain",
+      top: cursorTop,
+      left: legendLeft,
+      width: legendWidth,
+      height: row.keys.length * legendItemRowHeight,
+      orient: "vertical",
+      selectedMode: SAMPLING_CHART_LEGEND_SELECT_ENABLED,
+      selected: legendSelected,
+      data: row.keys,
+      icon: "roundRect",
+      itemWidth: 12,
+      itemHeight: 8,
+      itemGap: 5,
+      formatter: (name) => formatSamplingChartLegendLabel(name, chartSeriesMeta),
+      textStyle: { color: "#56675d", fontSize: 12 },
+    });
+    cursorTop += row.keys.length * legendItemRowHeight + groupGap;
+  }
+  return {
+    legend,
+    graphic,
+    gridLeft,
+    gridBottom: 58,
+  };
 }
 
 function renderSamplingChart(seriesPayload) {
@@ -9870,27 +10558,28 @@ function renderSamplingChart(seriesPayload) {
       animation: false,
     };
   });
+  const legendSelected = Object.fromEntries(
+    chartSeriesMeta.map((item) => [item.key, !samplingChartFocusSeries || samplingChartFocusSeries === item.key]),
+  );
+  const legendLayout = buildSamplingChartLegendLayout(chartSeriesMeta, legendSelected);
+  const chartGraphic = items.length
+    ? legendLayout.graphic
+    : [
+        ...legendLayout.graphic,
+        {
+          type: "text",
+          left: "center",
+          top: "middle",
+          style: { text: t("samplingChartNoData"), fill: "#6b7f72", fontSize: 14 },
+        },
+      ];
 
   chart.setOption(
     {
       animation: false,
-      grid: { left: 58, right: 18, top: 58, bottom: 98 },
-      legend: {
-        top: null,
-        bottom: 10,
-        left: 12,
-        right: 18,
-        selectedMode: SAMPLING_CHART_CLICK_INTERACTION_ENABLED,
-        selected: Object.fromEntries(chartSeriesMeta.map((item) => [item.key, true])),
-        itemWidth: 12,
-        itemHeight: 8,
-        itemGap: 10,
-        formatter: (name) => {
-          const hit = chartSeriesMeta.find((item) => item.key === name);
-          return hit ? t(hit.labelKey) : String(name);
-        },
-        textStyle: { color: "#56675d", fontSize: 12 },
-      },
+      grid: { left: legendLayout.gridLeft, right: 18, top: 58, bottom: legendLayout.gridBottom },
+      legend: legendLayout.legend,
+      graphic: chartGraphic,
       tooltip: {
         show: true,
         trigger: "axis",
@@ -9945,16 +10634,6 @@ function renderSamplingChart(seriesPayload) {
             toolbox: false,
           },
       series,
-      graphic: items.length
-        ? []
-        : [
-            {
-              type: "text",
-              left: "center",
-              top: "middle",
-              style: { text: t("samplingChartNoData"), fill: "#6b7f72", fontSize: 14 },
-            },
-          ],
     },
     true,
   );
@@ -10214,14 +10893,19 @@ function buildSamplingTotalsChartRows(cards) {
         value: Math.max(Number(card.leftValue || 0), 0),
         overlayValue: Math.max(Number(card.leftWindowValue || 0), 0),
         overlayLabel: card.leftWindowLabel || "",
+        windowCostSplit: Boolean(card.leftWindowCostSplit),
         valueLabel:
           Number(card.leftValue || 0) > 0
-            ? (card.leftWindowLabel
+            ? (card.leftWindowCostSplit
+                ? formatSamplingGridImportCostSplit(card.leftWindowValue, card.leftValue)
+                : card.leftWindowLabel
                 ? formatSamplingWindowSplit(card.leftWindowValue, card.leftValue)
                 : formatEnergyKwhText(card.leftValue))
             : null,
         valueParts:
-          Number(card.leftValue || 0) > 0 && card.leftWindowLabel
+          Number(card.leftValue || 0) > 0 && card.leftWindowCostSplit
+            ? buildSamplingGridImportCostParts(card.leftWindowValue, card.leftValue)
+            : Number(card.leftValue || 0) > 0 && card.leftWindowLabel
             ? [
                 { icon: "⏱", value: Number(card.leftWindowValue || 0) },
                 { icon: "📊", value: Number(card.leftValue || 0) },
@@ -10236,14 +10920,19 @@ function buildSamplingTotalsChartRows(cards) {
         value: Math.max(Number(card.rightValue || 0), 0),
         overlayValue: Math.max(Number(card.rightWindowValue || 0), 0),
         overlayLabel: card.rightWindowLabel || "",
+        windowCostSplit: Boolean(card.rightWindowCostSplit),
         valueLabel:
           Number(card.rightValue || 0) > 0
-            ? (card.rightWindowLabel
+            ? (card.rightWindowCostSplit
+                ? formatSamplingGridImportCostSplit(card.rightWindowValue, card.rightValue)
+                : card.rightWindowLabel
                 ? formatSamplingWindowSplit(card.rightWindowValue, card.rightValue)
                 : formatEnergyKwhText(card.rightValue))
             : null,
         valueParts:
-          Number(card.rightValue || 0) > 0 && card.rightWindowLabel
+          Number(card.rightValue || 0) > 0 && card.rightWindowCostSplit
+            ? buildSamplingGridImportCostParts(card.rightWindowValue, card.rightValue)
+            : Number(card.rightValue || 0) > 0 && card.rightWindowLabel
             ? [
                 { icon: "⏱", value: Number(card.rightWindowValue || 0) },
                 { icon: "📊", value: Number(card.rightValue || 0) },
@@ -10270,6 +10959,17 @@ function buildSamplingTotalsChartRows(cards) {
 }
 
 function buildEbValueHtml(row) {
+  if (row.valueParts && row.valueParts.length === 3) {
+    const [free, paid, total] = row.valueParts;
+    const parts = [
+      formatTrimmedDecimal(Number(free.value || 0), 2),
+      "+",
+      formatTrimmedDecimal(Number(paid.value || 0), 2),
+      "/",
+      `${formatTrimmedDecimal(Number(total.value || 0), 2)} kWh`,
+    ];
+    return `<span class="eb-value eb-value-cost-split">${parts.map((part) => `<span>${escapeHtml(part)}</span>`).join("")}</span>`;
+  }
   if (row.valueParts && row.valueParts.length === 2) {
     const [a, b] = row.valueParts;
     const compactText = `${formatTrimmedDecimal(Number(a.value || 0), 2)} / ${formatTrimmedDecimal(Number(b.value || 0), 2)} kWh`;
@@ -10407,7 +11107,14 @@ function renderSamplingTotalsChart(cards) {
       const rightPct = (100 - pct).toFixed(2);
       const labelHtml = escapeHtml(formatEnergyBreakdownLabel(row));
       const valueHtml = buildEbValueHtml(row);
-      return `<div class="eb-row${dimmed ? " eb-dimmed" : ""}${inGroup ? " eb-row-grouped" : ""}" data-row-key="${escapeHtml(row.rowKey || "")}" data-series-key="${escapeHtml(row.seriesKey || "")}" title="${escapeHtml(titleText)}">
+      const costSplitClass = row.windowCostSplit ? " eb-row-cost-split" : "";
+      if (row.overlayLabel && row.windowCostSplit) {
+        titleText = `${row.label}: ${formatEnergyKwhText(val)}`;
+        titleText += `\n${t("samplingTotalsWindowFree")} (${row.overlayLabel}): ${formatEnergyKwhText(overlayVal)}`;
+        titleText += `\n${t("samplingTotalsWindowPaid")}: ${formatEnergyKwhText(Math.max(val - overlayVal, 0))}`;
+        titleText += `\n${t("samplingTotalsWindowTotal")}: ${formatEnergyKwhText(val)}`;
+      }
+      return `<div class="eb-row${dimmed ? " eb-dimmed" : ""}${inGroup ? " eb-row-grouped" : ""}${costSplitClass}" data-row-key="${escapeHtml(row.rowKey || "")}" data-series-key="${escapeHtml(row.seriesKey || "")}" title="${escapeHtml(titleText)}">
   <div class="eb-track">
     <div class="eb-fill" style="width:${pct.toFixed(2)}%;background:${color};">${overlayHtml}</div>
   </div>
@@ -12914,6 +13621,7 @@ async function importDatabaseFile(file) {
     stateCache.lastSampling = null;
     stateCache.lastSamplingSeries = null;
     stateCache.lastSamplingBatteryTimeline = null;
+    stateCache.lastSamplingPhaseBattery = null;
     stateCache.lastSamplingPumpStatus = null;
     stateCache.lastStorageStatus = null;
     await loadDatabase();
@@ -12946,13 +13654,190 @@ async function importDatabaseFile(file) {
   }
 }
 
-async function loadSampling() {
+async function loadDailyReport({ generateIfMissing = false } = {}) {
+  const day = reportCalendarState.selectedDay || getLocalDateText();
+  const today = getLocalDateText();
+  if (day === today) {
+    reportCalendarState.statusText = t("reportTodayLiveMeta", { day });
+    setReportLoadingModal(true, reportCalendarState.statusText);
+    renderReportCalendar();
+    try {
+      await loadSampling({ forceRaw: true, reportDay: day });
+    } finally {
+      setReportLoadingModal(false);
+      renderReportCalendar();
+    }
+    return;
+  }
+
+  if (samplingLoadInFlight) return;
+  samplingLoadInFlight = true;
+  const range = getDayInfo(day);
+  setSamplingZeroHeroCurrentVisible(false);
+  setSamplingSamplesSectionVisible(false);
+  setSamplingRangeControlsDisabled(true);
+  setSamplingTotalsChartLoading(true);
+  setSamplingChartLoading(true);
+  setSamplingBatteryTimelineLoading(true);
+  setSamplingPumpStatusLoading(true);
+  try {
+    if (day > today || !isReportGeneratableDay(day)) {
+      const message = t("reportNotReady");
+      reportCalendarState.statusText = message;
+      renderReportCalendar();
+      renderDailyReportEmpty(message, range.label);
+      return;
+    }
+
+    reportCalendarState.loadingDay = day;
+    reportCalendarState.statusText = t("reportLoadingMeta", { day });
+    setReportLoadingModal(true, reportCalendarState.statusText);
+    renderReportCalendar();
+    let payload = await fetchDailyReportPayload(day, { timeoutMs: 10000 });
+    if (!payload && generateIfMissing) {
+      reportCalendarState.statusText = t("reportGeneratingMeta", { day });
+      setReportLoadingModal(true, reportCalendarState.statusText);
+      renderReportCalendar();
+      const generated = await fetchJson(`/api/reports/daily/generate?day_local=${encodeURIComponent(day)}`, {
+        method: "POST",
+        timeoutMs: 180000,
+      });
+      reportCalendarState.availableDays.set(day, generated || { report_day_local: day });
+      payload = await fetchDailyReportPayload(day, { timeoutMs: 10000 });
+    }
+    if (!payload) {
+      const message = t("reportUnavailable", { day });
+      if (generateIfMissing) reportCalendarState.availableDays.delete(day);
+      reportCalendarState.statusText = message;
+      renderReportCalendar();
+      renderDailyReportEmpty(message, range.label);
+      return;
+    }
+    reportCalendarState.availableDays.set(day, {
+      report_day_local: payload.report_day_local || day,
+      timezone_name: payload.timezone_name || "",
+      generated_at_utc: payload.generated_at_utc || "",
+      sample_count: payload.samples?.total || 0,
+    });
+    reportCalendarState.statusText = "";
+    const usageBySystem = payload.usage_by_system || {};
+    const seriesBySystem = payload.series_by_system || {};
+    const combinedSeries = seriesBySystem.combined || null;
+    const sajSeries = seriesBySystem.saj || null;
+    const solplanetSeries = seriesBySystem.solplanet || null;
+    const overallSeries = buildOverallSeriesPayload(
+      { combined: combinedSeries, saj: sajSeries, solplanet: solplanetSeries },
+      null,
+      range,
+    );
+
+    stateCache.lastSamplingUsageBySystem = usageBySystem;
+    stateCache.lastSamplingDaily = combineSamplingUsageForOverall(usageBySystem);
+    renderSamplingUsage(stateCache.lastSamplingDaily, range.label);
+    renderSamplingTotals(usageBySystem, "overall", range.label);
+
+    stateCache.lastSamplingZeroHeroHistory = payload.zero_hero_history || null;
+    renderSamplingZeroHeroHistory(stateCache.lastSamplingZeroHeroHistory);
+
+    const samples = payload.samples || { items: [], page: 1, page_size: SAMPLING_PAGE_SIZE };
+    samplingPager.hasNext = Boolean(samples.has_next);
+    samplingPager.hasPrev = Boolean(samples.has_prev);
+    stateCache.lastSamplingPage = samples;
+    renderSamplingPage(samples);
+
+    stateCache.lastSamplingSeries = overallSeries;
+    setText(
+      "samplingChartMeta",
+      t("samplingChartMeta", {
+        system: formatSamplingSystemLabel("overall"),
+        range: range.label,
+        count: overallSeries.count || 0,
+      }),
+    );
+    renderSamplingChart(overallSeries);
+
+    const batteryTimelinePayload = buildBatteryTimelinePayload(
+      { combined: combinedSeries, saj: sajSeries, solplanet: solplanetSeries },
+      range,
+    );
+    stateCache.lastSamplingBatteryTimeline = batteryTimelinePayload;
+    const phaseBatteryPayload =
+      normalizeSamplingPhaseBatteryPayload(payload.phase_battery, day) ||
+      buildSamplingPhaseBatteryPayload({ saj: sajSeries, solplanet: solplanetSeries }, day);
+    stateCache.lastSamplingPhaseBattery = phaseBatteryPayload;
+    setText(
+      "samplingBatteryTimelineMeta",
+      t("samplingBatteryTimelineMeta", { range: range.label, count: batteryTimelinePayload.count || 0 }),
+    );
+    renderSamplingBatteryTimeline(batteryTimelinePayload);
+    renderSamplingPhaseBatteryRemaining(phaseBatteryPayload, range.label);
+
+    const pumpStatusPayload = buildPumpStatusTimelinePayload(combinedSeries, range);
+    stateCache.lastSamplingPumpStatus = pumpStatusPayload;
+    setText(
+      "samplingPumpStatusMeta",
+      t("samplingPumpStatusMeta", {
+        range: range.label,
+        count: pumpStatusPayload.count || 0,
+        totalHours: formatTrimmedDecimal(Number(pumpStatusPayload.total_on_hours || 0), 2),
+        dayHours: formatTrimmedDecimal(Number(pumpStatusPayload.day_on_hours || 0), 2),
+        nightHours: formatTrimmedDecimal(Number(pumpStatusPayload.night_on_hours || 0), 2),
+      }),
+    );
+    renderSamplingPumpStatusTimeline(pumpStatusPayload);
+    setText(
+      "samplingUpdatedAt",
+      t("reportGeneratedMeta", {
+        day: payload.report_day_local || day,
+        time: formatSamplingDateTime(payload.generated_at_utc),
+      }),
+    );
+  } catch (err) {
+    const message = generateIfMissing
+      ? t("reportGenerateFailed", { day, error: String(err) })
+      : t("loadFailed", { error: String(err) });
+    reportCalendarState.statusText = message;
+    renderDailyReportEmpty(message, range.label);
+  } finally {
+    reportCalendarState.loadingDay = "";
+    renderReportCalendar();
+    setReportLoadingModal(false);
+    setSamplingTotalsChartLoading(false);
+    setSamplingChartLoading(false);
+    setSamplingBatteryTimelineLoading(false);
+    setSamplingPumpStatusLoading(false);
+    setSamplingRangeControlsDisabled(false);
+    samplingLoadInFlight = false;
+  }
+}
+
+async function loadReportView({ generateIfMissing = true } = {}) {
+  setReportCalendarVisible(true);
+  setReportCalendarMonthFromDay(reportCalendarState.selectedDay || getLocalDateText(-1));
+  renderReportCalendar();
+  await loadReportIndexForVisibleMonth();
+  await loadDailyReport({ generateIfMissing });
+}
+
+async function loadSampling({ forceRaw = false, reportDay = "" } = {}) {
+  if (currentTab === "report" && !forceRaw) {
+    await loadDailyReport();
+    return;
+  }
   if (samplingLoadInFlight) return;
   samplingLoadInFlight = true;
   const system = getSelectedSamplingSystem();
   const overallMode = system === "overall";
-  const range = getSamplingRange();
-  renderSamplingZeroHeroWindow();
+  const normalizedReportDay = localDateParts(reportDay) ? reportDay : "";
+  const reportRawMode = currentTab === "report" && forceRaw;
+  const range = normalizedReportDay ? getDayInfo(normalizedReportDay) : getSamplingRange();
+  setSamplingSamplesSectionVisible(!reportRawMode);
+  setSamplingZeroHeroCurrentVisible(!reportRawMode);
+  if (reportRawMode) {
+    setText("samplingUpdatedAt", t("reportTodayLiveMeta", { day: normalizedReportDay || getLocalDateText() }));
+  } else {
+    renderSamplingZeroHeroWindow();
+  }
   renderSamplingZeroHeroHistory();
   setSamplingRangeControlsDisabled(true);
   setSamplingTotalsChartLoading(true);
@@ -12967,6 +13852,7 @@ async function loadSampling() {
       stateCache.lastSamplingPage = null;
       stateCache.lastSamplingSeries = null;
       stateCache.lastSamplingBatteryTimeline = null;
+      stateCache.lastSamplingPhaseBattery = null;
       stateCache.lastSamplingPumpStatus = null;
       setText("samplingDailyMeta", t("loadFailed", { error: invalidMessage }));
       setText("samplingChartMeta", t("loadFailed", { error: invalidMessage }));
@@ -12975,6 +13861,7 @@ async function loadSampling() {
       renderSamplingRows([]);
       renderSamplingChart({ items: [] });
       renderSamplingBatteryTimeline({ series: [] });
+      renderSamplingPhaseBatteryRemaining(null, range.label);
       renderSamplingPumpStatusTimeline({ data: [] });
       renderSamplingTotals(null, system, range.label, { metaText: t("loadFailed", { error: invalidMessage }) });
       return;
@@ -12992,7 +13879,7 @@ async function loadSampling() {
     const combinedSeriesUrl =
       `/api/storage/series?system=combined&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}&max_points=500`;
     const selectedSeriesUrl = overallMode ? combinedSeriesUrl : system === "solplanet" ? solplanetSeriesUrl : sajSeriesUrl;
-    const zeroHeroHistoryDay = getSamplingFocusLocalDay();
+    const zeroHeroHistoryDay = normalizedReportDay || getSamplingFocusLocalDay();
     const zeroHeroHistoryUrl =
       `/api/storage/zero-hero-window-history?system=combined&days=1&day_local=${encodeURIComponent(zeroHeroHistoryDay)}`;
 
@@ -13002,7 +13889,7 @@ async function loadSampling() {
       fetchJson(sajUsageUrl, { timeoutMs: 6000 }),
       fetchJson(solplanetUsageUrl, { timeoutMs: 6000 }),
       overallMode ? fetchJson(combinedUsageUrl, { timeoutMs: 6000 }) : Promise.resolve(null),
-      fetchJson(buildSamplingUrl(), { timeoutMs: 6000 }),
+      fetchJson(buildSamplingUrl(range), { timeoutMs: 6000 }),
       fetchJson(selectedSeriesUrl, { timeoutMs: 6000 }),
       overallMode ? fetchJson(sajSeriesUrl, { timeoutMs: 6000 }) : Promise.resolve(null),
       overallMode ? fetchJson(solplanetSeriesUrl, { timeoutMs: 6000 }) : Promise.resolve(null),
@@ -13016,7 +13903,7 @@ async function loadSampling() {
         stateCache.lastSummary.collectorStatus = collectorResult.value;
       }
     }
-    renderSamplingZeroHeroWindow();
+    if (!reportRawMode) renderSamplingZeroHeroWindow();
     if (zeroHeroHistoryResult.status === "fulfilled") {
       stateCache.lastSamplingZeroHeroHistory = zeroHeroHistoryResult.value;
       renderSamplingZeroHeroHistory(zeroHeroHistoryResult.value);
@@ -13126,6 +14013,15 @@ async function loadSampling() {
       }),
     );
     renderSamplingBatteryTimeline(batteryTimelinePayload);
+    const phaseBatteryPayload = buildSamplingPhaseBatteryPayload(
+      {
+        saj: overallSajSeriesResult.status === "fulfilled" ? overallSajSeriesResult.value : null,
+        solplanet: overallSolplanetSeriesResult.status === "fulfilled" ? overallSolplanetSeriesResult.value : null,
+      },
+      normalizedReportDay || getSamplingFocusLocalDay(),
+    );
+    stateCache.lastSamplingPhaseBattery = phaseBatteryPayload;
+    renderSamplingPhaseBatteryRemaining(phaseBatteryPayload, range.label);
 
     const combinedSeriesForPump = overallMode
       ? (seriesResult.status === "fulfilled" ? seriesResult.value : null)
@@ -13143,6 +14039,9 @@ async function loadSampling() {
       }),
     );
     renderSamplingPumpStatusTimeline(pumpStatusPayload);
+    if (reportRawMode) {
+      setText("samplingUpdatedAt", t("reportTodayLiveMeta", { day: normalizedReportDay || getLocalDateText() }));
+    }
   } finally {
     setSamplingTotalsChartLoading(false);
     setSamplingChartLoading(false);
@@ -13227,6 +14126,12 @@ function rerenderSamplingViewFromCache() {
       }),
     );
     renderSamplingBatteryTimeline(stateCache.lastSamplingBatteryTimeline);
+  }
+  if (stateCache.lastSamplingPhaseBattery) {
+    const range = currentTab === "report"
+      ? getDayInfo(reportCalendarState.selectedDay || getLocalDateText(-1))
+      : getSamplingRange();
+    renderSamplingPhaseBatteryRemaining(stateCache.lastSamplingPhaseBattery, range.label);
   }
   if (stateCache.lastSamplingPumpStatus) {
     const range = getSamplingRange();
@@ -13343,11 +14248,11 @@ async function loadTabWithGuard(tab, fromAutoRefresh = false) {
       await loadSolplanetControl();
       return true;
     }
-    if (tabKey === "sampling") {
-      if (fromAutoRefresh) {
+    if (tabKey === "report") {
+      if (fromAutoRefresh && reportCalendarState.selectedDay !== getLocalDateText()) {
         return false;
       }
-      await loadSampling();
+      await loadReportView({ generateIfMissing: !fromAutoRefresh });
       return true;
     }
     if (tabKey === "database") {
@@ -13405,24 +14310,15 @@ function forceRefreshCurrentView() {
   applyTranslations();
   setActiveTab(currentTab, false);
   refreshMobileCombinedFlowDiagram();
-  if (currentTab === "sampling") {
+  if (currentTab === "sampling" || currentTab === "report") {
     scheduleSamplingChartsHoverReset({ resize: true });
   }
 }
 
 function setActiveTab(tab, load = true) {
   const previousTab = currentTab;
-  currentTab =
-    tab === "notificationMatrix" ||
-    tab === "rawData" ||
-    tab === "solplanetControl" ||
-    tab === "sampling" ||
-    tab === "database" ||
-    tab === "workerLogs" ||
-    tab === "operationTimeline" ||
-    tab === "workerFailureLog"
-      ? tab
-      : "dashboard";
+  currentTab = normalizeAppTab(tab) || "dashboard";
+  const samplingRangeModeSelect = document.getElementById("samplingRangeModeSelect");
   if (currentTab === "notificationMatrix" && previousTab !== "notificationMatrix") {
     resetNotificationMatrixCollapseState();
   }
@@ -13442,7 +14338,7 @@ function setActiveTab(tab, load = true) {
   const tabNotificationMatrix = document.getElementById("tabNotificationMatrix");
   const tabRawData = document.getElementById("tabRawData");
   const tabSolplanetControl = document.getElementById("tabSolplanetControl");
-  const tabSampling = document.getElementById("tabSampling");
+  const tabReport = document.getElementById("tabReport");
   const tabDatabase = document.getElementById("tabDatabase");
   const tabWorkerLogs = document.getElementById("tabWorkerLogs");
   const tabOperationTimeline = document.getElementById("tabOperationTimeline");
@@ -13452,7 +14348,8 @@ function setActiveTab(tab, load = true) {
   const notificationMatrixActive = currentTab === "notificationMatrix";
   const rawDataActive = currentTab === "rawData";
   const solplanetControlActive = currentTab === "solplanetControl";
-  const samplingActive = currentTab === "sampling";
+  const samplingActive = currentTab === "sampling" || currentTab === "report";
+  const reportActive = currentTab === "report";
   const databaseActive = currentTab === "database";
   const workerLogsActive = currentTab === "workerLogs";
   const operationTimelineActive = currentTab === "operationTimeline";
@@ -13470,7 +14367,7 @@ function setActiveTab(tab, load = true) {
   if (tabNotificationMatrix) tabNotificationMatrix.classList.toggle("active", notificationMatrixActive);
   if (tabRawData) tabRawData.classList.toggle("active", rawDataActive);
   if (tabSolplanetControl) tabSolplanetControl.classList.toggle("active", solplanetControlActive);
-  if (tabSampling) tabSampling.classList.toggle("active", samplingActive);
+  if (tabReport) tabReport.classList.toggle("active", reportActive);
   if (tabDatabase) tabDatabase.classList.toggle("active", databaseActive);
   if (tabWorkerLogs) tabWorkerLogs.classList.toggle("active", workerLogsActive);
   if (tabOperationTimeline) tabOperationTimeline.classList.toggle("active", operationTimelineActive);
@@ -13480,7 +14377,7 @@ function setActiveTab(tab, load = true) {
     [tabNotificationMatrix, notificationMatrixActive],
     [tabRawData, rawDataActive],
     [tabSolplanetControl, solplanetControlActive],
-    [tabSampling, samplingActive],
+    [tabReport, reportActive],
     [tabDatabase, databaseActive],
     [tabWorkerLogs, workerLogsActive],
     [tabOperationTimeline, operationTimelineActive],
@@ -13491,6 +14388,22 @@ function setActiveTab(tab, load = true) {
     tab.tabIndex = active ? 0 : -1;
   });
   syncRawDataSystemUi();
+  const samplingTitle = document.getElementById("samplingTitle");
+  if (samplingTitle) {
+    const titleKey = reportActive ? "reportTitle" : "samplingTitle";
+    samplingTitle.dataset.i18n = titleKey;
+    samplingTitle.textContent = t(titleKey);
+  }
+  if (samplingRangeModeSelect) samplingRangeModeSelect.disabled = false;
+  setReportCalendarVisible(reportActive);
+  setSamplingZeroHeroCurrentVisible(samplingActive && !reportActive);
+  setSamplingSamplesSectionVisible(samplingActive && !reportActive);
+  if (!reportActive) setReportLoadingModal(false);
+  if (currentTab === "sampling") {
+    renderSamplingRangeInputContainer();
+  } else if (currentTab === "report") {
+    renderReportCalendar();
+  }
   if (dashboardActive) {
     window.requestAnimationFrame(() => {
       refreshFlowDiagrams();
@@ -13516,7 +14429,8 @@ bindChangeIfPresent("langSelect", (event) => {
   localStorage.setItem("lang", nextLang);
   applyTranslations();
   refreshFlowDiagrams();
-  renderSamplingRangeInputContainer();
+  if (currentTab === "report") renderReportCalendar();
+  else renderSamplingRangeInputContainer();
   syncWorkerLogsFilters();
   if (stateCache.lastWorkerLogsPage) renderWorkerLogsPage(stateCache.lastWorkerLogsPage);
   if (stateCache.lastOperationTimeline) renderOperationTimelinePage(stateCache.lastOperationTimeline);
@@ -13561,8 +14475,8 @@ bindClickIfPresent("tabSolplanetControl", () => {
   setActiveTab("solplanetControl");
 });
 
-bindClickIfPresent("tabSampling", () => {
-  setActiveTab("sampling");
+bindClickIfPresent("tabReport", () => {
+  setActiveTab("report");
 });
 bindClickIfPresent("tabDatabase", () => {
   setActiveTab("database");
@@ -13607,11 +14521,13 @@ bindChangeIfPresent("databaseTableSelect", async () => {
 });
 
 bindChangeIfPresent("samplingRangeModeSelect", async () => {
+  if (currentTab !== "sampling") return;
   renderSamplingRangeInputContainer();
   samplingPager.page = 1;
   await loadSampling();
 });
 bindClickIfPresent("samplingRangeJumpBtn", async () => {
+  if (currentTab !== "sampling") return;
   const mode = document.getElementById("samplingRangeModeSelect")?.value || "day";
   if (mode === "day") {
     samplingRangeState.day = getLocalDateText();
@@ -14047,7 +14963,7 @@ document.addEventListener("click", (event) => {
   }
   const insidePopover = target.closest("#sajDashboardProfilePopover");
   if (!insidePopover) setSajDashboardProfilePopoverVisible(false);
-  if (currentTab === "sampling") {
+  if (currentTab === "report") {
     scheduleSamplingChartsHoverReset({ resize: false });
   }
 });
