@@ -2094,7 +2094,6 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
     tesla_control_state = tesla_raw.get("control_state")
     tesla_control_state_map = tesla_control_state if isinstance(tesla_control_state, dict) else {}
     tesla_control_feedback = _resolve_tesla_control_feedback(tesla_control_state_map)
-    overnight_energy_reference = _build_overnight_energy_reference(metrics)
     tesla_battery_soc_percent = _to_number(metrics.get("tesla_battery_soc_percent"))
     tesla_current_energy_kwh = (
         round((TESLA_BATTERY_CAPACITY_KWH * max(0.0, min(100.0, tesla_battery_soc_percent))) / 100.0, 4)
@@ -2148,7 +2147,6 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
                 "feedback": tesla_control_feedback,
             },
         },
-        "overnight_energy_reference": overnight_energy_reference,
         "notification_metrics": {
             "grid_w": _to_number(metrics.get("grid_w")),
             "saj_battery_soc_percent": _to_number(metrics.get("battery1_soc_percent")),
@@ -10822,6 +10820,11 @@ COMBINED_REALTIME_METRIC_KEYS: tuple[str, ...] = (
     "tesla_connection_state",
     "tesla_charge_requested_enabled",
     "tesla_cable_connected",
+    "pool_pump_power_w",
+    "pool_pump_power_stale",
+    "pool_pump_available",
+    "pool_pump_unavailable_reason",
+    "pool_pump_enabled",
 )
 
 
@@ -10856,6 +10859,44 @@ def _build_combined_realtime_kv_rows(flow: dict[str, object]) -> list[tuple[str,
     for key in ("enabled", "min_current_amps", "max_current_amps", "current_step_amps", "status_text", "voltage_v"):
         if key in charging:
             _append_kv_row(rows, f"combined.raw.tesla.observation.charging.{key}", charging.get(key))
+
+    pool_pump_obj = raw_map.get("pool_pump")
+    pool_pump = pool_pump_obj if isinstance(pool_pump_obj, dict) else {}
+    pool_control_obj = pool_pump.get("control")
+    pool_control = pool_control_obj if isinstance(pool_control_obj, dict) else {}
+    pool_metrics_obj = pool_pump.get("metrics")
+    pool_metrics = pool_metrics_obj if isinstance(pool_metrics_obj, dict) else {}
+
+    if "updated_at" in pool_pump:
+        _append_kv_row(rows, "combined.raw.pool_pump.updated_at", pool_pump.get("updated_at"))
+    for key in (
+        "enabled",
+        "available",
+        "unavailable_reason",
+        "state",
+        "effective_state",
+        "state_known",
+        "state_unknown",
+        "enabled_source",
+        "switch_entity",
+    ):
+        if key in pool_control:
+            _append_kv_row(rows, f"combined.raw.pool_pump.control.{key}", pool_control.get(key))
+    for key in (
+        "power_w",
+        "power_w_raw",
+        "power_available",
+        "power_unavailable_reason",
+        "power_stale",
+        "power_age_seconds",
+        "power_entity",
+        "energy_today_kwh",
+        "energy_today_available",
+        "energy_today_recent",
+        "energy_today_entity",
+    ):
+        if key in pool_metrics:
+            _append_kv_row(rows, f"combined.raw.pool_pump.metrics.{key}", pool_metrics.get(key))
 
     return rows
 
@@ -10976,6 +11017,15 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
                     kv_map, system=system, key="metrics.tesla_charge_requested_enabled"
                 ),
                 "tesla_cable_connected": _kv_value(kv_map, system=system, key="metrics.tesla_cable_connected"),
+                "pool_pump_power_w": _to_number(_kv_value(kv_map, system=system, key="metrics.pool_pump_power_w")),
+                "pool_pump_power_stale": _kv_value(kv_map, system=system, key="metrics.pool_pump_power_stale"),
+                "pool_pump_available": _kv_value(kv_map, system=system, key="metrics.pool_pump_available"),
+                "pool_pump_unavailable_reason": _kv_value(
+                    kv_map,
+                    system=system,
+                    key="metrics.pool_pump_unavailable_reason",
+                ),
+                "pool_pump_enabled": _kv_value(kv_map, system=system, key="metrics.pool_pump_enabled"),
             }
         )
 
@@ -11032,6 +11082,59 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
                 },
             }
         }
+        flow["pool_pump"] = {
+            "device_key": "pool_pump",
+            "label": "Pool Pump",
+            "location": "home_load",
+            "updated_at": _kv_value(kv_map, system=system, key="raw.pool_pump.updated_at") or updated_at,
+            "control": {
+                "enabled": _kv_value(kv_map, system=system, key="raw.pool_pump.control.enabled"),
+                "available": _kv_value(kv_map, system=system, key="raw.pool_pump.control.available"),
+                "unavailable_reason": _kv_value(
+                    kv_map,
+                    system=system,
+                    key="raw.pool_pump.control.unavailable_reason",
+                ),
+                "state": _kv_value(kv_map, system=system, key="raw.pool_pump.control.state"),
+                "effective_state": _kv_value(kv_map, system=system, key="raw.pool_pump.control.effective_state"),
+                "state_known": _kv_value(kv_map, system=system, key="raw.pool_pump.control.state_known"),
+                "state_unknown": _kv_value(kv_map, system=system, key="raw.pool_pump.control.state_unknown"),
+                "enabled_source": _kv_value(kv_map, system=system, key="raw.pool_pump.control.enabled_source"),
+                "switch_entity": _kv_value(kv_map, system=system, key="raw.pool_pump.control.switch_entity"),
+            },
+            "metrics": {
+                "power_w": _to_number(_kv_value(kv_map, system=system, key="raw.pool_pump.metrics.power_w")),
+                "power_w_raw": _to_number(_kv_value(kv_map, system=system, key="raw.pool_pump.metrics.power_w_raw")),
+                "power_available": _kv_value(kv_map, system=system, key="raw.pool_pump.metrics.power_available"),
+                "power_unavailable_reason": _kv_value(
+                    kv_map,
+                    system=system,
+                    key="raw.pool_pump.metrics.power_unavailable_reason",
+                ),
+                "power_stale": _kv_value(kv_map, system=system, key="raw.pool_pump.metrics.power_stale"),
+                "power_age_seconds": _to_number(
+                    _kv_value(kv_map, system=system, key="raw.pool_pump.metrics.power_age_seconds")
+                ),
+                "power_entity": _kv_value(kv_map, system=system, key="raw.pool_pump.metrics.power_entity"),
+                "energy_today_kwh": _to_number(
+                    _kv_value(kv_map, system=system, key="raw.pool_pump.metrics.energy_today_kwh")
+                ),
+                "energy_today_available": _kv_value(
+                    kv_map,
+                    system=system,
+                    key="raw.pool_pump.metrics.energy_today_available",
+                ),
+                "energy_today_recent": _kv_value(kv_map, system=system, key="raw.pool_pump.metrics.energy_today_recent"),
+                "energy_today_entity": _kv_value(kv_map, system=system, key="raw.pool_pump.metrics.energy_today_entity"),
+            },
+        }
+        pool_control = flow["pool_pump"]["control"]
+        pool_metrics = flow["pool_pump"]["metrics"]
+        has_pool_snapshot = any(value is not None for value in pool_control.values()) or any(
+            value is not None for value in pool_metrics.values()
+        )
+        if not has_pool_snapshot:
+            flow.pop("pool_pump", None)
     return flow
 
 

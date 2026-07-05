@@ -597,20 +597,6 @@ const I18N = {
     teslaControlStatusFailedStop: "Stop request did not go through.",
     teslaControlStatusStarted: "Charging started.",
     teslaControlStatusStopped: "Charging stopped.",
-    overnightEnergyReferenceTitle: "Overnight Battery Reference",
-    overnightEnergyReferenceIntro: "Shows recent average base home load excluding Tesla charging and the pool pump, then estimates usable remaining battery by the next 08:00 and 11:00.",
-    overnightEnergyReferenceCurrentUsable: "Current usable battery",
-    overnightEnergyReferenceAvg3d: "Base use, last 3 windows",
-    overnightEnergyReferenceAvg7d: "Base use, last 7 windows",
-    overnightEnergyReferenceLeft3d: "Usable remaining battery, 3-window avg",
-    overnightEnergyReferenceLeft7d: "Usable remaining battery, 7-window avg",
-    overnightEnergyReferenceTargetLabel: "By {time}",
-    overnightEnergyReferenceReferenceOnly: "Reference only",
-    overnightEnergyReferenceUnavailable: "-",
-    overnightEnergyReferencePumpScenarioTitle: "Pump 23:00-05:00 (6h)",
-    overnightEnergyReferencePumpPower: "Pump power",
-    overnightEnergyReferencePumpEnergy: "Pump energy",
-    overnightEnergyReferenceAssumedPower: "Assumed power",
     teslaBatteryEnergyUnavailable: "- / - kWh",
     teslaChargeEtaUnavailable: "Est. full -",
     batteryTitle: "Battery",
@@ -1609,20 +1595,6 @@ const I18N = {
     teslaControlStatusFailedStop: "停止充电请求没有成功发出。",
     teslaControlStatusStarted: "已开始充电。",
     teslaControlStatusStopped: "已停止充电。",
-    overnightEnergyReferenceTitle: "夜间电量参考",
-    overnightEnergyReferenceIntro: "展示已扣除 Tesla 充电和泳池水泵后的家庭基础平均用电，并按下一个 08:00 / 11:00 估算可用剩余电量。",
-    overnightEnergyReferenceCurrentUsable: "当前可用电池",
-    overnightEnergyReferenceAvg3d: "最近 3 个窗口基础用电",
-    overnightEnergyReferenceAvg7d: "最近 7 个窗口基础用电",
-    overnightEnergyReferenceLeft3d: "按 3 个窗口均值的可用剩余电量",
-    overnightEnergyReferenceLeft7d: "按 7 个窗口均值的可用剩余电量",
-    overnightEnergyReferenceTargetLabel: "到 {time}",
-    overnightEnergyReferenceReferenceOnly: "仅供参考",
-    overnightEnergyReferenceUnavailable: "-",
-    overnightEnergyReferencePumpScenarioTitle: "水泵 23:00-05:00（6小时）",
-    overnightEnergyReferencePumpPower: "水泵功率",
-    overnightEnergyReferencePumpEnergy: "水泵耗电",
-    overnightEnergyReferenceAssumedPower: "估算功率",
     teslaBatteryEnergyUnavailable: "- / - kWh",
     teslaChargeEtaUnavailable: "预计充满 -",
     batteryTitle: "电池",
@@ -2688,6 +2660,7 @@ function getLang() {
 let currentLang = getLang();
 const _hashTab = location.hash.slice(1);
 const ALL_TABS = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "report", "monthlyReport", "database", "workerLogs", "operationTimeline", "workerFailureLog"];
+const SAJ_PROFILE_IDS = ["self_consumption", "time_of_use", "microgrid"];
 function normalizeAppTab(tab) {
   const normalized = String(tab || "").trim();
   if (normalized === "sampling") return "report";
@@ -3514,6 +3487,25 @@ function fillConfigForm(payload = {}) {
   );
   if (payload.weather_lat != null) document.getElementById("cfgWeatherLat").value = payload.weather_lat;
   if (payload.weather_lon != null) document.getElementById("cfgWeatherLon").value = payload.weather_lon;
+  cacheSajProfileFromConfig(payload);
+}
+
+function normalizeSajProfileId(profileId) {
+  const normalized = String(profileId || "").trim();
+  return SAJ_PROFILE_IDS.includes(normalized) ? normalized : "self_consumption";
+}
+
+function cacheSajProfileFromConfig(payload = {}) {
+  const selectedProfile = normalizeSajProfileId(payload.saj_target_profile);
+  const previous = stateCache.lastSajProfile?.profile_state || stateCache.lastSajProfile || {};
+  const previousMap = previous && typeof previous === "object" ? previous : {};
+  stateCache.lastSajProfile = {
+    ...previousMap,
+    selected_profile: selectedProfile,
+    input_profile: previousMap.input_profile || selectedProfile,
+    effective_profile: previousMap.actual_profile || selectedProfile,
+    source: previousMap.source || "config_cache",
+  };
 }
 
 function hasConfigValue(value) {
@@ -3707,6 +3699,16 @@ function formatBatteryUsableKwh(system, batterySoc) {
   const usableSoc = Math.max(0, clampedSoc - minDischargeSoc);
   const usableKwh = (capacityKwh * usableSoc) / 100;
   return t("batteryUsableRemaining", { value: formatTrimmedDecimal(usableKwh, 1) });
+}
+
+function batteryUsableKwh(system, batterySoc) {
+  const capacityKwh = BATTERY_CAPACITY_KWH[system];
+  const minDischargeSoc = BATTERY_MIN_DISCHARGE_SOC[system] ?? 0;
+  const numericSoc = toFiniteNumber(batterySoc);
+  if (!Number.isFinite(capacityKwh) || numericSoc === null) return null;
+  const clampedSoc = Math.max(0, Math.min(100, numericSoc));
+  const usableSoc = Math.max(0, clampedSoc - minDischargeSoc);
+  return (capacityKwh * usableSoc) / 100;
 }
 
 function formatBatteryRuntimeTargetTime(targetAt) {
@@ -5333,6 +5335,17 @@ function latestIsoTime(...isoTexts) {
   return latestIso;
 }
 
+function pickLatestPoolPumpDevice(previousDevice, nextDevice) {
+  if (!previousDevice || typeof previousDevice !== "object") return nextDevice || null;
+  if (!nextDevice || typeof nextDevice !== "object") return previousDevice;
+  const previousMs = new Date(previousDevice.updated_at || 0).getTime();
+  const nextMs = new Date(nextDevice.updated_at || 0).getTime();
+  if (Number.isFinite(previousMs) && Number.isFinite(nextMs) && previousMs > nextMs) {
+    return previousDevice;
+  }
+  return nextDevice;
+}
+
 function wattsFromStateUnit(stateValue, unitValue) {
   const numeric = toFiniteNumber(stateValue);
   if (numeric === null) return null;
@@ -5739,13 +5752,9 @@ function teslaInfoFromCombinedFlow(combinedFlow) {
   return result;
 }
 
-function overnightEnergyReferenceFromCombinedFlow(combinedFlow) {
-  return combinedFlow?.overnight_energy_reference || null;
-}
-
 function formatEnergyReferenceValue(value) {
   const numeric = toFiniteNumber(value);
-  if (numeric === null) return t("overnightEnergyReferenceUnavailable");
+  if (numeric === null) return "-";
   return `${formatTrimmedDecimal(numeric, 1)} kWh`;
 }
 
@@ -5794,8 +5803,14 @@ function renderMobileFlowStep({ title, valueHtml, stateText, stateTone = "", row
 }
 
 function renderCombinedUsableBatteryNode(combinedFlow) {
-  const reference = overnightEnergyReferenceFromCombinedFlow(combinedFlow);
-  const usableBatteryKwh = toFiniteNumber(reference?.usable_battery_total_kwh);
+  const metrics = combinedFlow?.metrics || {};
+  const usableValues = [
+    batteryUsableKwh("saj", metrics.battery1_soc_percent),
+    batteryUsableKwh("solplanet", metrics.battery2_soc_percent),
+  ].filter((value) => value !== null);
+  const usableBatteryKwh = usableValues.length
+    ? usableValues.reduce((total, value) => total + value, 0)
+    : null;
   setText("combined-usableBatteryValue", formatEnergyReferenceValue(usableBatteryKwh));
 }
 
@@ -14238,14 +14253,13 @@ async function loadSummary() {
   renderSummary(summary);
   renderSajProfilePanel();
   const previousCombinedFlow = summary.combinedFlow;
-  const previousPoolPump = summary.poolPump || null;
   const combinedRequest = fetchJson("/api/energy-flow/combined", { timeoutMs: 30000 });
-  const poolPumpRequest = fetchJson("/api/devices/pool-pump", { timeoutMs: 10000 });
 
   void combinedRequest
     .then((combinedFlow) => {
       if (requestId !== summaryRequestId) return;
       summary.combinedFlow = { ...combinedFlow, __load_error: false };
+      summary.poolPump = pickLatestPoolPumpDevice(summary.poolPump, combinedFlow?.pool_pump);
       setSystemLoadMeta("combined", {
         phase: "done",
         updatedAt: combinedFlow?.updated_at || new Date().toISOString(),
@@ -14276,39 +14290,15 @@ async function loadSummary() {
       renderSummary(summary);
     });
 
-  void poolPumpRequest
-    .then((poolPump) => {
-      if (requestId !== summaryRequestId) return;
-      summary.poolPump = poolPump;
-      writeCachedDashboardSummary(summary);
-      renderSummary(summary);
-    })
-    .catch(() => {
-      if (requestId !== summaryRequestId) return;
-      summary.poolPump = previousPoolPump;
-      renderSummary(summary);
-    });
-
   const baseResults = await Promise.allSettled([
     fetchJson("/api/collector/status", { timeoutMs: 6000 }),
-    fetchJson("/api/saj/control/profile", { timeoutMs: 8000 }),
-    fetchJson("/api/time-window-rules", { timeoutMs: 8000 }),
-    loadWeatherForecast(),
   ]);
+  void loadWeatherForecast();
   if (requestId !== summaryRequestId) return;
 
   if (baseResults[0].status === "fulfilled") {
     summary.collectorStatus = baseResults[0].value;
     stateCache.lastCollectorStatus = baseResults[0].value;
-  }
-  if (baseResults[1].status === "fulfilled") {
-    stateCache.lastSajProfile = baseResults[1].value;
-    renderSajProfilePanel();
-  } else {
-    setText("sajProfileStatusText", t("sajProfileLoadFailed", { error: String(baseResults[1].reason) }));
-  }
-  if (baseResults[2].status === "fulfilled") {
-    stateCache.lastTimeWindowRules = baseResults[2].value;
   }
   renderSummary(summary);
 }
