@@ -1915,6 +1915,12 @@ def _build_combined_display(metrics: dict[str, object]) -> dict[str, object]:
     battery2_source = str(metrics.get("battery2_source") or "unavailable")
     inverter1_source = str(metrics.get("inverter1_power_source") or "unavailable")
     inverter2_source = str(metrics.get("inverter2_power_source") or "unavailable")
+    usable_battery_reference = _combined_usable_battery_reference(metrics)
+    usable_battery_total_kwh = _to_number(usable_battery_reference.get("usable_battery_total_kwh"))
+    usable_battery_source = str(
+        metrics.get("usable_battery_source")
+        or "calc:saj usable battery + solplanet usable battery"
+    )
 
     items = {
         "solar": _display_item(
@@ -2001,6 +2007,13 @@ def _build_combined_display(metrics: dict[str, object]) -> dict[str, object]:
             kind="real",
             source="solplanet.battery_energy_kwh",
         ),
+        "usable_battery_total": _display_item(
+            label="Usable Battery Total",
+            value=usable_battery_total_kwh,
+            unit="kWh",
+            kind="calculated",
+            source=usable_battery_source,
+        ),
         "inverter1_power": _display_item(
             label="SAJ Inverter Power",
             value=_to_number(metrics.get("inverter1_w")),
@@ -2082,7 +2095,12 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
     metrics_obj = flow.get("metrics")
     metrics = metrics_obj if isinstance(metrics_obj, dict) else {}
     display_obj = flow.get("display")
-    display = display_obj if isinstance(display_obj, dict) else _build_combined_display(metrics)
+    display_items = display_obj.get("items") if isinstance(display_obj, dict) else None
+    if isinstance(display_obj, dict) and isinstance(display_items, dict) and "usable_battery_total" in display_items:
+        display = display_obj
+    else:
+        display = _build_combined_display(metrics)
+    energy_reference = _combined_usable_battery_reference(metrics)
     raw_obj = flow.get("raw")
     raw_map = raw_obj if isinstance(raw_obj, dict) else {}
     tesla_raw_obj = raw_map.get("tesla")
@@ -2110,6 +2128,7 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
         "system": "combined",
         "updated_at": flow.get("updated_at"),
         "display": display,
+        "energy_reference": energy_reference,
         "pool_pump": flow.get("pool_pump") if isinstance(flow.get("pool_pump"), dict) else None,
         "tesla": {
             "charging": {
@@ -2152,6 +2171,7 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
             "saj_battery_soc_percent": _to_number(metrics.get("battery1_soc_percent")),
             "solplanet_battery_soc_percent": _to_number(metrics.get("battery2_soc_percent")),
             "solplanet_battery_energy_kwh": _to_number(metrics.get("battery2_energy_kwh")),
+            "usable_battery_total_kwh": _to_number(energy_reference.get("usable_battery_total_kwh")),
         },
         "meta": {
             "source_type": ((flow.get("source") if isinstance(flow.get("source"), dict) else {}).get("type")),
@@ -2429,6 +2449,31 @@ def _battery_usable_energy_kwh(system: str, soc_percent: object) -> float | None
     return round((capacity_kwh * usable_soc) / 100.0, 4)
 
 
+def _combined_usable_battery_reference(metrics: dict[str, object]) -> dict[str, object]:
+    saj_usable_kwh = _to_number(metrics.get("battery1_usable_kwh"))
+    if saj_usable_kwh is None:
+        saj_usable_kwh = _battery_usable_energy_kwh("saj", metrics.get("battery1_soc_percent"))
+    solplanet_usable_kwh = _to_number(metrics.get("battery2_usable_kwh"))
+    if solplanet_usable_kwh is None:
+        solplanet_usable_kwh = _battery_usable_energy_kwh("solplanet", metrics.get("battery2_soc_percent"))
+
+    usable_by_system = {
+        "saj": saj_usable_kwh,
+        "solplanet": solplanet_usable_kwh,
+    }
+    usable_values = [value for value in usable_by_system.values() if value is not None]
+    usable_total_kwh = _to_number(metrics.get("usable_battery_total_kwh"))
+    if usable_total_kwh is None and usable_values:
+        usable_total_kwh = round(sum(usable_values), 4)
+
+    return {
+        "usable_battery_total_kwh": usable_total_kwh,
+        "usable_battery_by_system_kwh": usable_by_system,
+        "battery_capacity_kwh": dict(BATTERY_CAPACITY_KWH),
+        "min_discharge_soc_percent": dict(BATTERY_MIN_DISCHARGE_SOC_PERCENT),
+    }
+
+
 def _effective_usage_coverage_ratio(usage: dict[str, object]) -> float | None:
     quality_map = usage.get("quality")
     quality = quality_map if isinstance(quality_map, dict) else {}
@@ -2660,11 +2705,14 @@ def _build_overnight_energy_reference(metrics: dict[str, object]) -> dict[str, o
     if local_tz is None:
         return None
 
+    usable_battery_reference = _combined_usable_battery_reference(metrics)
+    usable_battery_by_system = usable_battery_reference.get("usable_battery_by_system_kwh")
+    usable_battery_map = usable_battery_by_system if isinstance(usable_battery_by_system, dict) else {}
     usable_battery_values = [
-        _battery_usable_energy_kwh("saj", metrics.get("battery1_soc_percent")),
-        _battery_usable_energy_kwh("solplanet", metrics.get("battery2_soc_percent")),
+        _to_number(usable_battery_map.get("saj")),
+        _to_number(usable_battery_map.get("solplanet")),
     ]
-    usable_battery_total_kwh = round(sum(value for value in usable_battery_values if value is not None), 4)
+    usable_battery_total_kwh = _to_number(usable_battery_reference.get("usable_battery_total_kwh")) or 0.0
     has_current_battery_state = any(value is not None for value in usable_battery_values)
     pool_pump_power_w = _to_number(metrics.get("pool_pump_power_w"))
     projection_to_8 = _build_overnight_home_load_reference(
@@ -9283,6 +9331,13 @@ def _build_combined_flow_payload(
     if inverter1_w is not None and inverter2_w is not None:
         total_inverter_w = inverter1_w + inverter2_w
 
+    battery1_usable_kwh = _battery_usable_energy_kwh("saj", battery1_soc)
+    battery2_usable_kwh = _battery_usable_energy_kwh("solplanet", battery2_soc)
+    usable_battery_values = [
+        value for value in (battery1_usable_kwh, battery2_usable_kwh) if value is not None
+    ]
+    usable_battery_total_kwh = round(sum(usable_battery_values), 4) if usable_battery_values else None
+
     _source_times = [t for t in [saj_flow.get("updated_at"), solplanet_flow.get("updated_at")] if t]
     updated_at = min(_source_times) if _source_times else datetime.now(UTC).isoformat()
     metrics = {
@@ -9298,6 +9353,9 @@ def _build_combined_flow_payload(
         "battery1_soc_percent": battery1_soc,
         "battery2_soc_percent": battery2_soc,
         "battery2_energy_kwh": battery2_energy_kwh,
+        "battery1_usable_kwh": battery1_usable_kwh,
+        "battery2_usable_kwh": battery2_usable_kwh,
+        "usable_battery_total_kwh": usable_battery_total_kwh,
         "tesla_charge_power_w": tesla_charge_power_w,
         "tesla_charge_current_amps": tesla_current_amps,
         "tesla_configured_current_amps": tesla_configured_current_amps,
@@ -9326,6 +9384,7 @@ def _build_combined_flow_payload(
         "battery_source": "calc:saj.battery_w + solplanet.battery_w",
         "battery1_source": str(saj_metrics_map.get("battery_source") or "unavailable"),
         "battery2_source": str(solplanet_metrics_map.get("battery_source") or "unavailable"),
+        "usable_battery_source": "calc:saj_soc_min_reserve + solplanet_soc_min_reserve",
         "load_source": "calc:saj.inverter_power_w + solplanet.inverter_power_w + saj.grid_w",
         "inverter_power_source": "calc:saj.inverter_power_w + solplanet.inverter_power_w",
         "inverter1_power_source": str(saj_metrics_map.get("inverter_power_source") or "unavailable"),
@@ -10800,6 +10859,9 @@ COMBINED_REALTIME_METRIC_KEYS: tuple[str, ...] = (
     "battery1_soc_percent",
     "battery2_soc_percent",
     "battery2_energy_kwh",
+    "battery1_usable_kwh",
+    "battery2_usable_kwh",
+    "usable_battery_total_kwh",
     "inverter1_w",
     "inverter2_w",
     "inverter1_status",
@@ -10810,6 +10872,7 @@ COMBINED_REALTIME_METRIC_KEYS: tuple[str, ...] = (
     "battery_source",
     "battery1_source",
     "battery2_source",
+    "usable_battery_source",
     "load_source",
     "inverter1_power_source",
     "inverter2_power_source",
@@ -10996,10 +11059,20 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
                 ),
                 "inverter1_w": _to_number(_kv_value(kv_map, system=system, key="metrics.inverter1_w")),
                 "inverter2_w": _to_number(_kv_value(kv_map, system=system, key="metrics.inverter2_w")),
+                "battery1_usable_kwh": _to_number(
+                    _kv_value(kv_map, system=system, key="metrics.battery1_usable_kwh")
+                ),
+                "battery2_usable_kwh": _to_number(
+                    _kv_value(kv_map, system=system, key="metrics.battery2_usable_kwh")
+                ),
+                "usable_battery_total_kwh": _to_number(
+                    _kv_value(kv_map, system=system, key="metrics.usable_battery_total_kwh")
+                ),
                 "inverter1_status": _kv_value(kv_map, system=system, key="metrics.inverter1_status"),
                 "inverter2_status": _kv_value(kv_map, system=system, key="metrics.inverter2_status"),
                 "battery1_source": _kv_value(kv_map, system=system, key="metrics.battery1_source"),
                 "battery2_source": _kv_value(kv_map, system=system, key="metrics.battery2_source"),
+                "usable_battery_source": _kv_value(kv_map, system=system, key="metrics.usable_battery_source"),
                 "inverter1_power_source": _kv_value(kv_map, system=system, key="metrics.inverter1_power_source"),
                 "inverter2_power_source": _kv_value(kv_map, system=system, key="metrics.inverter2_power_source"),
                 "tesla_charge_power_w": _to_number(_kv_value(kv_map, system=system, key="metrics.tesla_charge_power_w")),
@@ -11027,6 +11100,18 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
                 ),
                 "pool_pump_enabled": _kv_value(kv_map, system=system, key="metrics.pool_pump_enabled"),
             }
+        )
+        usable_battery_reference = _combined_usable_battery_reference(metrics)
+        usable_battery_by_system = usable_battery_reference.get("usable_battery_by_system_kwh")
+        usable_battery_map = usable_battery_by_system if isinstance(usable_battery_by_system, dict) else {}
+        metrics["battery1_usable_kwh"] = _to_number(usable_battery_map.get("saj"))
+        metrics["battery2_usable_kwh"] = _to_number(usable_battery_map.get("solplanet"))
+        metrics["usable_battery_total_kwh"] = _to_number(
+            usable_battery_reference.get("usable_battery_total_kwh")
+        )
+        metrics["usable_battery_source"] = (
+            metrics.get("usable_battery_source")
+            or "calc:saj_soc_min_reserve + solplanet_soc_min_reserve"
         )
 
     flow: dict[str, object] = {

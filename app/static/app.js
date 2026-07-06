@@ -5804,13 +5804,24 @@ function renderMobileFlowStep({ title, valueHtml, stateText, stateTone = "", row
 
 function renderCombinedUsableBatteryNode(combinedFlow) {
   const metrics = combinedFlow?.metrics || {};
-  const usableValues = [
-    batteryUsableKwh("saj", metrics.battery1_soc_percent),
-    batteryUsableKwh("solplanet", metrics.battery2_soc_percent),
-  ].filter((value) => value !== null);
-  const usableBatteryKwh = usableValues.length
-    ? usableValues.reduce((total, value) => total + value, 0)
-    : null;
+  const displayItem = combinedDisplayItem(combinedFlow, "usable_battery_total");
+  const energyReference = combinedFlow?.energy_reference || {};
+  let usableBatteryKwh = toFiniteNumber(displayItem?.value ?? energyReference.usable_battery_total_kwh);
+  if (usableBatteryKwh === null) {
+    const battery1Soc = toFiniteNumber(
+      combinedDisplayItem(combinedFlow, "battery1_soc")?.value ?? metrics.battery1_soc_percent,
+    );
+    const battery2Soc = toFiniteNumber(
+      combinedDisplayItem(combinedFlow, "battery2_soc")?.value ?? metrics.battery2_soc_percent,
+    );
+    const usableValues = [
+      batteryUsableKwh("saj", battery1Soc),
+      batteryUsableKwh("solplanet", battery2Soc),
+    ].filter((value) => value !== null);
+    usableBatteryKwh = usableValues.length
+      ? usableValues.reduce((total, value) => total + value, 0)
+      : null;
+  }
   setText("combined-usableBatteryValue", formatEnergyReferenceValue(usableBatteryKwh));
 }
 
