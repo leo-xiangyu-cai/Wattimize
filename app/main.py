@@ -1662,35 +1662,37 @@ def _integrate_pool_pump_priority_window_runtime(
     end = end_utc.astimezone(UTC)
     while current < end:
         current_local = current.astimezone(local_tz)
-        current_window = next(
-            (
-                item
-                for item in windows
-                if isinstance(item.get("start_local"), datetime)
-                and isinstance(item.get("end_local"), datetime)
-                and item["start_local"] <= current_local < item["end_local"]
-            ),
-            None,
-        )
-        if current_window is None:
+        current_windows = [
+            item
+            for item in windows
+            if isinstance(item.get("start_local"), datetime)
+            and isinstance(item.get("end_local"), datetime)
+            and item["start_local"] <= current_local < item["end_local"]
+        ]
+        if not current_windows:
             current = min(end, _next_pool_pump_priority_boundary_local(current_local).astimezone(UTC))
             continue
         next_boundary_local = _next_pool_pump_priority_boundary_local(current_local)
         segment_end = min(
             end,
-            current_window["end_local"].astimezone(UTC),
+            *(item["end_local"].astimezone(UTC) for item in current_windows),
             next_boundary_local.astimezone(UTC),
         )
         duration_hours = max((segment_end - current).total_seconds(), 0.0) / 3600.0
         if duration_hours > 0:
             period, weight = _pool_pump_priority_period_for_local_dt(current_local)
-            current_window["raw_runtime_hours"] = float(current_window.get("raw_runtime_hours") or 0.0) + duration_hours
-            current_window["weighted_runtime_hours"] = (
-                float(current_window.get("weighted_runtime_hours") or 0.0)
-                + (duration_hours * weight)
-            )
             runtime_key = "night_runtime_hours" if period == "night" else "day_runtime_hours"
-            current_window[runtime_key] = float(current_window.get(runtime_key) or 0.0) + duration_hours
+            for current_window in current_windows:
+                current_window["raw_runtime_hours"] = (
+                    float(current_window.get("raw_runtime_hours") or 0.0) + duration_hours
+                )
+                current_window["weighted_runtime_hours"] = (
+                    float(current_window.get("weighted_runtime_hours") or 0.0)
+                    + (duration_hours * weight)
+                )
+                current_window[runtime_key] = (
+                    float(current_window.get(runtime_key) or 0.0) + duration_hours
+                )
         current = segment_end
 
 
