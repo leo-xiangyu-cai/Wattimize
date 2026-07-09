@@ -1159,6 +1159,12 @@ def _review_round_results(results: dict[str, dict[str, object]]) -> dict[str, ob
 _COMPACT_RESULT_KEY_METRIC_FIELDS: tuple[str, ...] = (
     "pv_w",
     "grid_w",
+    "saj_grid_w",
+    "solplanet_grid_w",
+    "grid_selected_system",
+    "grid_balance_w",
+    "saj_grid_balance_w",
+    "solplanet_grid_balance_w",
     "battery_w",
     "battery1_w",
     "battery2_w",
@@ -2123,6 +2129,28 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
         if tesla_current_energy_kwh is not None
         else None
     )
+    grid_diagnostics = {
+        "selected_system": metrics.get("grid_selected_system"),
+        "selected_grid_w": _to_number(metrics.get("grid_w")),
+        "selected_source": metrics.get("grid_source"),
+        "balance_load_w": _to_number(metrics.get("grid_balance_load_w")),
+        "balance_load_source": metrics.get("grid_balance_load_source"),
+        "selected_balance_w": _to_number(metrics.get("grid_balance_w")),
+        "candidates": [
+            {
+                "system": "saj",
+                "grid_w": _to_number(metrics.get("saj_grid_w")),
+                "source": metrics.get("saj_grid_source"),
+                "balance_w": _to_number(metrics.get("saj_grid_balance_w")),
+            },
+            {
+                "system": "solplanet",
+                "grid_w": _to_number(metrics.get("solplanet_grid_w")),
+                "source": metrics.get("solplanet_grid_source"),
+                "balance_w": _to_number(metrics.get("solplanet_grid_balance_w")),
+            },
+        ],
+    }
 
     return {
         "system": "combined",
@@ -2181,6 +2209,7 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
             "sample_age_seconds": _to_number(flow.get("sample_age_seconds")),
             "kv_item_count": _to_number(flow.get("kv_item_count")),
             "item_count": len(display.get("order") or []),
+            "grid_diagnostics": grid_diagnostics,
         },
     }
 
@@ -9224,6 +9253,83 @@ def _combined_pseudo_entity(
     }
 
 
+def _flow_balance_residual_w(
+    *,
+    pv_w: float | None,
+    grid_w: float | None,
+    battery_w: float | None,
+    load_w: float | None,
+) -> float | None:
+    if pv_w is None or grid_w is None or battery_w is None or load_w is None:
+        return None
+    battery_discharge_w = max(battery_w, 0.0)
+    battery_charge_w = max(-battery_w, 0.0)
+    grid_import_w = max(grid_w, 0.0)
+    grid_export_w = max(-grid_w, 0.0)
+    return pv_w + battery_discharge_w + grid_import_w - load_w - battery_charge_w - grid_export_w
+
+
+def _build_combined_grid_candidate(
+    *,
+    system: str,
+    grid_w: float | None,
+    source: object,
+    total_solar_w: float | None,
+    total_battery_w: float | None,
+    balance_load_w: float | None,
+) -> dict[str, object]:
+    balance_w = _flow_balance_residual_w(
+        pv_w=total_solar_w,
+        grid_w=grid_w,
+        battery_w=total_battery_w,
+        load_w=balance_load_w,
+    )
+    return {
+        "system": system,
+        "grid_w": grid_w,
+        "source": str(source or "unavailable"),
+        "balance_w": balance_w,
+        "abs_balance_w": abs(balance_w) if balance_w is not None else None,
+    }
+
+
+def _select_combined_grid_candidate(candidates: list[dict[str, object]]) -> dict[str, object]:
+    available_candidates = [item for item in candidates if _to_number(item.get("grid_w")) is not None]
+    if not available_candidates:
+        return {
+            "system": "unavailable",
+            "grid_w": None,
+            "source": "unavailable",
+            "balance_w": None,
+            "abs_balance_w": None,
+        }
+
+    default_candidate = next(
+        (item for item in available_candidates if str(item.get("system") or "") == "saj"),
+        available_candidates[0],
+    )
+    scoreable_candidates = [
+        item for item in available_candidates if _to_number(item.get("abs_balance_w")) is not None
+    ]
+    if not scoreable_candidates:
+        return default_candidate
+
+    best_candidate = min(
+        scoreable_candidates,
+        key=lambda item: float(_to_number(item.get("abs_balance_w")) or 0.0),
+    )
+    default_score = _to_number(default_candidate.get("abs_balance_w"))
+    best_score = _to_number(best_candidate.get("abs_balance_w"))
+    if (
+        str(best_candidate.get("system") or "") != str(default_candidate.get("system") or "")
+        and default_score is not None
+        and best_score is not None
+        and default_score - best_score <= BALANCE_TOLERANCE_W
+    ):
+        return default_candidate
+    return best_candidate
+
+
 def _build_combined_flow_payload(
     saj_flow: dict[str, object],
     solplanet_flow: dict[str, object],
@@ -9239,7 +9345,8 @@ def _build_combined_flow_payload(
 
     solar_primary_w = _to_number(saj_metrics_map.get("pv_w"))
     solar_secondary_w = _to_number(solplanet_metrics_map.get("pv_w"))
-    grid_w = _to_number(saj_metrics_map.get("grid_w"))
+    saj_grid_w = _to_number(saj_metrics_map.get("grid_w"))
+    solplanet_grid_w = _to_number(solplanet_metrics_map.get("grid_w"))
     battery1_w = _to_number(saj_metrics_map.get("battery_w"))
     battery2_w = _to_number(solplanet_metrics_map.get("battery_w"))
     inverter1_w = _to_number(saj_metrics_map.get("inverter_power_w"))
@@ -9313,12 +9420,6 @@ def _build_combined_flow_payload(
     if use_saj_pv_estimate:
         solar_primary_w = saj_pv_estimate_w
 
-    total_load_w: float | None = None
-    if inverter1_w is not None and inverter2_w is not None and grid_w is not None:
-        total_load_w = inverter1_w + inverter2_w + grid_w
-        if abs(total_load_w) <= BALANCE_TOLERANCE_W:
-            total_load_w = 0.0
-
     total_solar_w: float | None = None
     if solar_primary_w is not None and solar_secondary_w is not None:
         total_solar_w = solar_primary_w + solar_secondary_w
@@ -9330,6 +9431,57 @@ def _build_combined_flow_payload(
     total_inverter_w: float | None = None
     if inverter1_w is not None and inverter2_w is not None:
         total_inverter_w = inverter1_w + inverter2_w
+
+    saj_load_w = _to_number(saj_metrics_map.get("load_w"))
+    solplanet_load_w = _to_number(solplanet_metrics_map.get("load_w"))
+    grid_balance_load_w: float | None = None
+    grid_balance_load_source = "unavailable"
+    # The displayed combined load is derived from selected grid, so use subsystem
+    # load readings for candidate scoring; otherwise grid cancels out of balance.
+    if saj_load_w is not None and solplanet_load_w is not None:
+        grid_balance_load_w = saj_load_w + solplanet_load_w
+        grid_balance_load_source = "calc:saj.load_w + solplanet.load_w"
+
+    grid_candidates = [
+        _build_combined_grid_candidate(
+            system="saj",
+            grid_w=saj_grid_w,
+            source=saj_metrics_map.get("grid_source"),
+            total_solar_w=total_solar_w,
+            total_battery_w=total_battery_w,
+            balance_load_w=grid_balance_load_w,
+        ),
+        _build_combined_grid_candidate(
+            system="solplanet",
+            grid_w=solplanet_grid_w,
+            source=solplanet_metrics_map.get("grid_source"),
+            total_solar_w=total_solar_w,
+            total_battery_w=total_battery_w,
+            balance_load_w=grid_balance_load_w,
+        ),
+    ]
+    selected_grid_candidate = _select_combined_grid_candidate(grid_candidates)
+    selected_grid_system = str(selected_grid_candidate.get("system") or "unavailable")
+    grid_w = _to_number(selected_grid_candidate.get("grid_w"))
+    saj_grid_source = str(saj_metrics_map.get("grid_source") or "unavailable")
+    solplanet_grid_source = str(solplanet_metrics_map.get("grid_source") or "unavailable")
+    grid_source = str(selected_grid_candidate.get("source") or "unavailable")
+    grid_balance_w = _to_number(selected_grid_candidate.get("balance_w"))
+    saj_grid_balance_w = _to_number(grid_candidates[0].get("balance_w"))
+    solplanet_grid_balance_w = _to_number(grid_candidates[1].get("balance_w"))
+    selected_grid_load_term = (
+        "saj.grid_w"
+        if selected_grid_system == "saj"
+        else "solplanet.grid_w"
+        if selected_grid_system == "solplanet"
+        else "selected_grid_w"
+    )
+
+    total_load_w: float | None = None
+    if inverter1_w is not None and inverter2_w is not None and grid_w is not None:
+        total_load_w = inverter1_w + inverter2_w + grid_w
+        if abs(total_load_w) <= BALANCE_TOLERANCE_W:
+            total_load_w = 0.0
 
     battery1_usable_kwh = _battery_usable_energy_kwh("saj", battery1_soc)
     battery2_usable_kwh = _battery_usable_energy_kwh("solplanet", battery2_soc)
@@ -9356,6 +9508,16 @@ def _build_combined_flow_payload(
         "battery1_usable_kwh": battery1_usable_kwh,
         "battery2_usable_kwh": battery2_usable_kwh,
         "usable_battery_total_kwh": usable_battery_total_kwh,
+        "saj_grid_w": saj_grid_w,
+        "solplanet_grid_w": solplanet_grid_w,
+        "saj_grid_source": saj_grid_source,
+        "solplanet_grid_source": solplanet_grid_source,
+        "grid_selected_system": selected_grid_system,
+        "grid_balance_w": grid_balance_w,
+        "saj_grid_balance_w": saj_grid_balance_w,
+        "solplanet_grid_balance_w": solplanet_grid_balance_w,
+        "grid_balance_load_w": grid_balance_load_w,
+        "grid_balance_load_source": grid_balance_load_source,
         "tesla_charge_power_w": tesla_charge_power_w,
         "tesla_charge_current_amps": tesla_current_amps,
         "tesla_configured_current_amps": tesla_configured_current_amps,
@@ -9380,12 +9542,12 @@ def _build_combined_flow_payload(
             if use_saj_pv_estimate
             else "calc:saj.pv_w + solplanet.pv_w"
         ),
-        "grid_source": str(saj_metrics_map.get("grid_source") or "unavailable"),
+        "grid_source": grid_source,
         "battery_source": "calc:saj.battery_w + solplanet.battery_w",
         "battery1_source": str(saj_metrics_map.get("battery_source") or "unavailable"),
         "battery2_source": str(solplanet_metrics_map.get("battery_source") or "unavailable"),
         "usable_battery_source": "calc:saj_soc_min_reserve + solplanet_soc_min_reserve",
-        "load_source": "calc:saj.inverter_power_w + solplanet.inverter_power_w + saj.grid_w",
+        "load_source": f"calc:saj.inverter_power_w + solplanet.inverter_power_w + {selected_grid_load_term}",
         "inverter_power_source": "calc:saj.inverter_power_w + solplanet.inverter_power_w",
         "inverter1_power_source": str(saj_metrics_map.get("inverter_power_source") or "unavailable"),
         "inverter2_power_source": str(solplanet_metrics_map.get("inverter_power_source") or "unavailable"),
@@ -9400,13 +9562,18 @@ def _build_combined_flow_payload(
         "matched_entities": 12,
         "notes": [
             "combined_flow_requires_full_round_success",
-            "combined_grid_uses_saj_grid_w",
+            f"combined_grid_uses_balance_selected_{selected_grid_system}_grid_w",
+            f"combined_grid_balance_load_source:{grid_balance_load_source}",
+            f"combined_grid_candidate_saj_w:{round(saj_grid_w, 1) if saj_grid_w is not None else 'unavailable'}",
+            f"combined_grid_candidate_solplanet_w:{round(solplanet_grid_w, 1) if solplanet_grid_w is not None else 'unavailable'}",
+            f"combined_grid_candidate_saj_balance_w:{round(saj_grid_balance_w, 1) if saj_grid_balance_w is not None else 'unavailable'}",
+            f"combined_grid_candidate_solplanet_balance_w:{round(solplanet_grid_balance_w, 1) if solplanet_grid_balance_w is not None else 'unavailable'}",
             (
                 "combined_solar_uses_saj_inverter_minus_battery_when_solplanet_discharge_pollutes_saj_pv"
                 if use_saj_pv_estimate
                 else "combined_solar_uses_saj_pv_plus_solplanet_pv"
             ),
-            "combined_total_load_uses_saj_inverter_power + solplanet_inverter_power + saj_grid",
+            f"combined_total_load_uses_saj_inverter_power + solplanet_inverter_power + {selected_grid_load_term}",
             "combined_tesla_observation_embedded",
             "combined_pool_pump_observation_embedded",
         ],
@@ -10862,6 +11029,16 @@ COMBINED_REALTIME_METRIC_KEYS: tuple[str, ...] = (
     "battery1_usable_kwh",
     "battery2_usable_kwh",
     "usable_battery_total_kwh",
+    "saj_grid_w",
+    "solplanet_grid_w",
+    "saj_grid_source",
+    "solplanet_grid_source",
+    "grid_selected_system",
+    "grid_balance_w",
+    "saj_grid_balance_w",
+    "solplanet_grid_balance_w",
+    "grid_balance_load_w",
+    "grid_balance_load_source",
     "inverter1_w",
     "inverter2_w",
     "inverter1_status",
@@ -11067,6 +11244,26 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
                 ),
                 "usable_battery_total_kwh": _to_number(
                     _kv_value(kv_map, system=system, key="metrics.usable_battery_total_kwh")
+                ),
+                "saj_grid_w": _to_number(_kv_value(kv_map, system=system, key="metrics.saj_grid_w")),
+                "solplanet_grid_w": _to_number(_kv_value(kv_map, system=system, key="metrics.solplanet_grid_w")),
+                "saj_grid_source": _kv_value(kv_map, system=system, key="metrics.saj_grid_source"),
+                "solplanet_grid_source": _kv_value(kv_map, system=system, key="metrics.solplanet_grid_source"),
+                "grid_selected_system": _kv_value(kv_map, system=system, key="metrics.grid_selected_system"),
+                "grid_balance_w": _to_number(_kv_value(kv_map, system=system, key="metrics.grid_balance_w")),
+                "saj_grid_balance_w": _to_number(
+                    _kv_value(kv_map, system=system, key="metrics.saj_grid_balance_w")
+                ),
+                "solplanet_grid_balance_w": _to_number(
+                    _kv_value(kv_map, system=system, key="metrics.solplanet_grid_balance_w")
+                ),
+                "grid_balance_load_w": _to_number(
+                    _kv_value(kv_map, system=system, key="metrics.grid_balance_load_w")
+                ),
+                "grid_balance_load_source": _kv_value(
+                    kv_map,
+                    system=system,
+                    key="metrics.grid_balance_load_source",
                 ),
                 "inverter1_status": _kv_value(kv_map, system=system, key="metrics.inverter1_status"),
                 "inverter2_status": _kv_value(kv_map, system=system, key="metrics.inverter2_status"),

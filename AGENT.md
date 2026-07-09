@@ -169,6 +169,7 @@ Dashboard mapping rule:
 - For combined flow semantics, align control logic with the dashboard labels. Current dashboard mapping is:
   - `battery1_*` / `inverter1_*` = SAJ side
   - `battery2_*` / `inverter2_*` = Solplanet/SoulPlanet side
+  - combined `grid_w` = balance-selected SAJ or Solplanet grid candidate; `saj_grid_w` and `solplanet_grid_w` preserve the raw candidates
 - If a future dashboard change alters these labels, update backend control matching to follow the dashboard after confirmation.
 
 ## 11) Next Suggested Steps

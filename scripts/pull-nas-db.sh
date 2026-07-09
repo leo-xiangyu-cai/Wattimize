@@ -30,6 +30,22 @@ for suffix in -wal -shm; do
   fi
 done
 
+if command -v sqlite3 >/dev/null 2>&1; then
+  echo "Validating downloaded database..."
+  quick_check_output="$(sqlite3 "${tmpdir}/${DB_BASENAME}" "PRAGMA quick_check;" 2>&1)" || {
+    echo "Downloaded database failed SQLite validation; preserving existing local database." >&2
+    echo "${quick_check_output}" >&2
+    exit 1
+  }
+  if [[ "${quick_check_output}" != "ok" ]]; then
+    echo "Downloaded database failed SQLite quick_check; preserving existing local database." >&2
+    echo "${quick_check_output}" >&2
+    exit 1
+  fi
+else
+  echo "sqlite3 command not found; skipping downloaded database validation." >&2
+fi
+
 mkdir -p "${LOCAL_DB_DIR}"
 rm -f "${LOCAL_DB_FILE}" "${LOCAL_DB_FILE}-wal" "${LOCAL_DB_FILE}-shm"
 mv "${tmpdir}/${DB_BASENAME}" "${LOCAL_DB_FILE}"

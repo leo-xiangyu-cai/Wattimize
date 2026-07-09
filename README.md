@@ -126,7 +126,7 @@ curl -s http://<wattimize-host>:18000/api/saj/entities/core | jq
 
 Use `make status` any time to check whether local or NAS is currently running and whether each side has a SQLite database file.
 
-`make dev` now switches execution to local: if local is not already running, it stops the NAS container, pulls the NAS SQLite database into `./data/`, and then starts local `docker compose`. If local is already running, it treats the command as a local code refresh and skips database sync. After the containers start, the script waits for the local collector status endpoint to become healthy before returning.
+`make dev` now switches execution to local: if local is not already running, it stops the NAS container, pulls the NAS SQLite database into `./data/`, and then starts local `docker compose`. If local is already running, it treats the command as a local code refresh and skips database sync. When `sqlite3` is available, the downloaded database must pass `PRAGMA quick_check` before it replaces the existing local database. After the containers start, the script waits for the local collector status endpoint to become healthy before returning.
 
 To start local dev without pulling the NAS database, use:
 
@@ -210,6 +210,7 @@ First-run configuration:
 - When SQLite corruption is detected during runtime recovery flows, the backend attempts an automatic recovery into the recovery directory and reinitializes the runtime connection pool.
 - Daily usage endpoint integrates power snapshots into kWh (UTC day).
 - `system=combined` is available on range usage and trend series endpoints for the frontend overall view.
+- The combined dashboard selects `grid_w` from the SAJ or Solplanet grid reading with the lower power-balance residual and exposes both source values in the grid tooltip, marking the selected source with a check.
 - The `History` tab combines range selection with an energy breakdown card, a power timeline chart, a combined SAJ/Solplanet SOC chart, a total usable remaining-energy chart, a Tesla SOC chart, a pool-pump on/off timeline, a live 5-minute Zero Hero export-window observation card, and a selected-day `18:00-20:00` matrix of all 24 five-minute export windows, color-coded for net import, mixed import/net export, and pure export.
 - The `Report` tab reuses the History presentation but reads a persisted daily snapshot. The backend generates the completed local day at midnight, immediately backfills yesterday after an upgrade when needed, and stores precomputed usage, chart series, Zero Hero windows, and paginable sample rows for fast reads.
 - `GET /api/storage/samples?system=combined` now includes `tesla_charge_power_w` and `pool_pump_power_w` so frontend charts can separate home load from Tesla/pool-pump overlays.

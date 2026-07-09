@@ -5879,6 +5879,7 @@ function combinedDisplayItem(combinedFlow, key) {
 
 function buildCombinedFlowMetrics(combinedFlow) {
   const displayItems = combinedFlow?.display?.items || {};
+  const gridDiagnostics = combinedFlow?.meta?.grid_diagnostics || null;
   const pvW = toFiniteNumber(displayItems.solar?.value);
   const solarW = toFiniteNumber(displayItems.solar_primary?.value);
   const solar2W = toFiniteNumber(displayItems.solar_secondary?.value);
@@ -5925,6 +5926,7 @@ function buildCombinedFlowMetrics(combinedFlow) {
     battery2Soc: toFiniteNumber(displayItems.battery2_soc?.value),
     solarToInverter1W,
     availableCount,
+    gridDiagnostics,
     dataKinds: {
       solar: solarKind,
       grid: gridKind,
@@ -5949,6 +5951,42 @@ function buildCombinedFlowMetrics(combinedFlow) {
       balance: displayItems.balance?.source || "unavailable",
     },
   };
+}
+
+function formatCombinedGridSystemName(system) {
+  if (system === "saj") return "SAJ";
+  if (system === "solplanet") return "Solplanet";
+  return system ? String(system) : "-";
+}
+
+function formatCombinedGridDiagnosticsTip(diagnostics) {
+  const candidates = (Array.isArray(diagnostics?.candidates) ? diagnostics.candidates : []).filter((candidate) => {
+    return toFiniteNumber(candidate?.grid_w) !== null;
+  });
+  if (!candidates.length) return "";
+  const selectedSystem = typeof diagnostics?.selected_system === "string" ? diagnostics.selected_system : "";
+  return candidates
+    .map((candidate) => {
+      const system = typeof candidate?.system === "string" ? candidate.system : "";
+      const selectedPrefix = system === selectedSystem ? "✓ " : "";
+      return `${selectedPrefix}${formatCombinedGridSystemName(system)}: ${formatSignedKwFromWatts(candidate?.grid_w)}`;
+    })
+    .join("\n");
+}
+
+function formatCombinedGridValueHtml(gridW, dataKind, diagnostics) {
+  const valueHtml = formatValueWithDataKindHtml(formatPowerKwFromWatts(gridW === null ? null : Math.abs(gridW)), dataKind);
+  const tipText = formatCombinedGridDiagnosticsTip(diagnostics);
+  if (!tipText) return valueHtml;
+  const label = currentLang === "zh"
+    ? "查看 SAJ 和 Solplanet 电网来源值"
+    : "View SAJ and Solplanet grid source values";
+  return (
+    `<span class="combined-grid-value">` +
+    `${valueHtml}` +
+    `<span class="grid-source-tip has-source-tip" tabindex="0" role="img" aria-label="${escapeHtml(label)}" data-source-tip="${escapeHtml(tipText)}">!</span>` +
+    `</span>`
+  );
 }
 
 function mobileFlowIconMarkup(kind) {
@@ -6121,6 +6159,7 @@ function renderMobileCombinedFlow({
     inverter2W,
     solarToInverter1W,
     dataKinds,
+    gridDiagnostics,
   } = combined;
   const poolPumpW = toFiniteNumber(poolPumpDevice?.metrics?.power_w);
   const gridActive = gridW !== null && Math.abs(gridW) >= POWER_FLOW_ACTIVE_THRESHOLD_W;
@@ -6180,7 +6219,7 @@ function renderMobileCombinedFlow({
         cls: "node-grid",
         kind: "grid",
         title: t("gridTitle"),
-        valueHtml: formatValueWithDataKindHtml(formatPowerKwFromWatts(gridW === null ? null : Math.abs(gridW)), dataKinds.grid),
+        valueHtml: formatCombinedGridValueHtml(gridW, dataKinds.grid, gridDiagnostics),
         subValueHtml: escapeHtml(gridActive ? (gridImport ? t("stateImporting") : t("stateExporting")) : t("stateIdle")),
         metaHtml: escapeHtml(gridImport ? "AC IN" : "AC OUT"),
         accent: "grid",
@@ -6325,6 +6364,7 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null, poolPumpDevice
     battery1Soc,
     battery2Soc,
     solarToInverter1W,
+    gridDiagnostics,
     sources,
     dataKinds,
   } = combined;
@@ -6362,7 +6402,7 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null, poolPumpDevice
   });
 
   setHtml("combined-solarPowerValue", formatValueWithDataKindHtml(formatPowerKwFromWatts(solarW), dataKinds.solar));
-  setHtml("combined-gridPowerValue", formatValueWithDataKindHtml(formatPowerKwFromWatts(gridW === null ? null : Math.abs(gridW)), dataKinds.grid));
+  setHtml("combined-gridPowerValue", formatCombinedGridValueHtml(gridW, dataKinds.grid, gridDiagnostics));
   setHtml(
     "combined-inverter1RatioValue",
     formatValueWithDataKindHtml(formatInverterConversion(inverter1W, battery1W, solarToInverter1W), dataKinds.inverterRatio),
@@ -6424,7 +6464,7 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null, poolPumpDevice
   }
 
   setNodeSourceTip("combined-solarPowerValue", formatMetricSourceText("saj", "solar", sources.solar));
-  setNodeSourceTip("combined-gridPowerValue", formatMetricSourceText("saj", "grid", sources.grid));
+  setNodeSourceTip("combined-gridPowerValue", null);
   setNodeSourceTip(
     "combined-loadPowerValue",
     currentLang === "zh"
