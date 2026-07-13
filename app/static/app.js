@@ -371,7 +371,13 @@ const I18N = {
     databaseTransferImportApplying: "Replacing local database. Please wait...",
     databaseTransferImportRefreshing: "Refreshing page data...",
     databaseTransferImportDone: "Import complete.",
+    databaseTransferBackupTitle: "Creating database backup",
+    databaseTransferBackupRunning: "Copying a consistent SQLite snapshot...",
+    databaseTransferBackupDone: "Backup complete.",
     databaseTransferFailed: "Failed",
+    databaseBackupMeta: "Backups {count}/{retention} · Latest {latest} ({size}) · Total {totalSize} · {directory}",
+    databaseBackupMetaEmpty: "Backups none yet · keeping latest {retention} · {directory}",
+    databaseBackupMetaFailed: "Backup status failed: {error}",
     sajControlTitle: "SAJ Control",
     solplanetControlTitle: "Solplanet Control",
     solplanetControlLimitsTitle: "Power Limits",
@@ -931,10 +937,14 @@ const I18N = {
     samplingTableInverter: "Inverter",
     databaseExportBtn: "Export Database",
     databaseImportBtn: "Import Database",
+    databaseBackupNowBtn: "Back Up Now",
     databaseExporting: "Exporting...",
     databaseImporting: "Importing...",
+    databaseBackupRunning: "Backing up...",
     databaseImportConfirmReplace: "Import will replace the current database file. Continue?",
     databaseImportDone: "Database import completed",
+    databaseBackupDone: "Database backup completed",
+    databaseBackupSkipped: "Backup already exists for today",
     workerLogsTitle: "Worker API Logs",
     workerLogsCategoryLabel: "Category",
     workerLogsCategoryAll: "All",
@@ -1035,6 +1045,7 @@ const I18N = {
     loadFailed: "Load failed: {error}",
     databaseExportFailed: "Database export failed: {error}",
     databaseImportFailed: "Database import failed: {error}",
+    databaseBackupFailed: "Database backup failed: {error}",
     inverterRunning: "Running",
     inverterOffline: "Offline",
     inverterStandby: "Standby",
@@ -1409,7 +1420,13 @@ const I18N = {
     databaseTransferImportApplying: "正在替换本地数据库，请稍候...",
     databaseTransferImportRefreshing: "正在刷新页面数据...",
     databaseTransferImportDone: "导入完成。",
+    databaseTransferBackupTitle: "正在备份数据库",
+    databaseTransferBackupRunning: "正在复制一致性的 SQLite 快照...",
+    databaseTransferBackupDone: "备份完成。",
     databaseTransferFailed: "失败",
+    databaseBackupMeta: "备份 {count}/{retention} · 最近 {latest}（{size}）· 总计 {totalSize} · {directory}",
+    databaseBackupMetaEmpty: "还没有备份 · 只保留最近 {retention} 个 · {directory}",
+    databaseBackupMetaFailed: "备份状态加载失败：{error}",
     sajControlTitle: "SAJ 管理",
     solplanetControlTitle: "Solplanet 管理",
     solplanetControlLimitsTitle: "功率限制",
@@ -1969,10 +1986,14 @@ const I18N = {
     samplingTableInverter: "逆变器",
     databaseExportBtn: "导出数据库",
     databaseImportBtn: "导入数据库",
+    databaseBackupNowBtn: "立即备份",
     databaseExporting: "导出中...",
     databaseImporting: "导入中...",
+    databaseBackupRunning: "备份中...",
     databaseImportConfirmReplace: "导入会覆盖当前数据库文件，是否继续？",
     databaseImportDone: "数据库导入完成",
+    databaseBackupDone: "数据库备份完成",
+    databaseBackupSkipped: "今天已经有数据库备份",
     workerLogsTitle: "Worker API 日志",
     workerLogsCategoryLabel: "分类",
     workerLogsCategoryAll: "全部",
@@ -2073,6 +2094,7 @@ const I18N = {
     loadFailed: "加载失败：{error}",
     databaseExportFailed: "数据库导出失败：{error}",
     databaseImportFailed: "数据库导入失败：{error}",
+    databaseBackupFailed: "数据库备份失败：{error}",
     inverterRunning: "运行中",
     inverterOffline: "离线",
     inverterStandby: "待机",
@@ -2487,6 +2509,7 @@ const stateCache = {
   lastSamplingZeroHeroHistory: null,
   lastDatabaseTables: null,
   lastDatabasePage: null,
+  lastDatabaseBackups: null,
   lastWorkerLogsPage: null,
   lastOperationTimeline: null,
   lastWorkerFailureLog: null,
@@ -10016,6 +10039,43 @@ function renderDatabaseEmptyState() {
   if (nextBtn) nextBtn.disabled = true;
 }
 
+function renderDatabaseBackupStatus(payload) {
+  const status = payload?.backup_status || payload || {};
+  const backups = Array.isArray(status.backups) ? status.backups : [];
+  const latest = status.latest_backup || backups[0] || null;
+  const retention = Number(status.retention_count || 3);
+  const directory = String(status.backup_dir || "-");
+  if (!latest) {
+    setText("databaseBackupMeta", t("databaseBackupMetaEmpty", { retention, directory }));
+    return;
+  }
+  const latestText = latest.backup_date || formatDateTimeWithAgo(latest.modified_at_utc);
+  setText(
+    "databaseBackupMeta",
+    t("databaseBackupMeta", {
+      count: Number(status.count || backups.length || 0),
+      retention,
+      latest: latestText || "-",
+      size: formatBinarySize(latest.size_bytes),
+      totalSize: formatBinarySize(status.total_size_bytes),
+      directory,
+    }),
+  );
+}
+
+async function loadDatabaseBackupStatus() {
+  try {
+    const payload = await fetchJson("/api/database/backups", { timeoutMs: 6000 });
+    stateCache.lastDatabaseBackups = payload;
+    renderDatabaseBackupStatus(payload);
+    return payload;
+  } catch (err) {
+    stateCache.lastDatabaseBackups = null;
+    setText("databaseBackupMeta", t("databaseBackupMetaFailed", { error: String(err) }));
+    return null;
+  }
+}
+
 function openDatabaseRowDetailModal(payload, item) {
   const tableName = String(payload?.table || "-");
   const columns = Array.isArray(payload?.columns) ? payload.columns : [];
@@ -10042,6 +10102,7 @@ function openDatabaseRowDetailModal(payload, item) {
 }
 
 function rerenderDatabaseViewFromCache() {
+  if (stateCache.lastDatabaseBackups) renderDatabaseBackupStatus(stateCache.lastDatabaseBackups);
   if (stateCache.lastDatabaseTables) renderDatabaseTableOptions(stateCache.lastDatabaseTables);
   if (stateCache.lastDatabasePage) {
     renderDatabasePage(stateCache.lastDatabasePage);
@@ -14806,9 +14867,10 @@ async function loadSajRaw() {
   await loadRawPanel(SAJ_RAW_APIS, stateCache.lastSajRaw, "sajRawBody", "sajRawMeta", "sajRawUpdatedAt");
 }
 
-function setDatabaseActionBusy(busy, exporting = false, importing = false) {
+function setDatabaseActionBusy(busy, exporting = false, importing = false, backingUp = false) {
   const exportBtn = document.getElementById("databaseExportBtn");
   const importBtn = document.getElementById("databaseImportBtn");
+  const backupBtn = document.getElementById("databaseBackupNowBtn");
   if (exportBtn) {
     exportBtn.disabled = busy;
     exportBtn.textContent = exporting ? t("databaseExporting") : t("databaseExportBtn");
@@ -14816,6 +14878,10 @@ function setDatabaseActionBusy(busy, exporting = false, importing = false) {
   if (importBtn) {
     importBtn.disabled = busy;
     importBtn.textContent = importing ? t("databaseImporting") : t("databaseImportBtn");
+  }
+  if (backupBtn) {
+    backupBtn.disabled = busy;
+    backupBtn.textContent = backingUp ? t("databaseBackupRunning") : t("databaseBackupNowBtn");
   }
 }
 
@@ -14970,6 +15036,7 @@ async function importDatabaseFile(file) {
     samplingPager.page = 1;
     stateCache.lastDatabaseTables = null;
     stateCache.lastDatabasePage = null;
+    stateCache.lastDatabaseBackups = null;
     stateCache.lastSampling = null;
     stateCache.lastSamplingSeries = null;
     stateCache.lastSamplingBatteryTimeline = null;
@@ -15003,6 +15070,49 @@ async function importDatabaseFile(file) {
     setDatabaseActionBusy(false, false, false);
     const input = document.getElementById("databaseImportFileInput");
     if (input) input.value = "";
+  }
+}
+
+async function runDatabaseBackupNow() {
+  setDatabaseActionBusy(true, false, false, true);
+  try {
+    setDatabaseTransferState({
+      title: t("databaseTransferBackupTitle"),
+      message: t("databaseTransferBackupRunning"),
+      ratio: 0.04,
+      status: "loading",
+    });
+    startDatabaseTransferAutoProgress(0.92, 0.006, 300);
+    const result = await fetchJson("/api/database/backups/run?force=true", {
+      method: "POST",
+      timeoutMs: 900000,
+    });
+    stopDatabaseTransferAutoProgress();
+    const statusPayload = result?.backup_status || result;
+    stateCache.lastDatabaseBackups = statusPayload;
+    renderDatabaseBackupStatus(statusPayload);
+    setDatabaseTransferState({
+      title: t("databaseTransferBackupTitle"),
+      message: result?.created ? t("databaseTransferBackupDone") : t("databaseBackupSkipped"),
+      ratio: 1,
+      status: "done",
+    });
+    window.alert(result?.created ? t("databaseBackupDone") : t("databaseBackupSkipped"));
+    window.setTimeout(() => {
+      clearDatabaseTransferState();
+    }, 1200);
+  } catch (err) {
+    stopDatabaseTransferAutoProgress();
+    setDatabaseTransferState({
+      title: t("databaseTransferBackupTitle"),
+      message: String(err),
+      percentText: t("databaseTransferFailed"),
+      ratio: 1,
+      status: "failed",
+    });
+    window.alert(t("databaseBackupFailed", { error: String(err) }));
+  } finally {
+    setDatabaseActionBusy(false, false, false, false);
   }
 }
 
@@ -15407,6 +15517,7 @@ async function loadSampling({ forceRaw = false, reportDay = "" } = {}) {
 }
 
 async function loadDatabase() {
+  await loadDatabaseBackupStatus();
   try {
     const tablesPayload = await fetchJson("/api/database/tables", { timeoutMs: 6000 });
     stateCache.lastDatabaseTables = tablesPayload;
@@ -15989,6 +16100,9 @@ bindClickIfPresent("databaseImportBtn", () => {
     return;
   }
   fileInput.click();
+});
+bindClickIfPresent("databaseBackupNowBtn", () => {
+  void runDatabaseBackupNow();
 });
 
 {

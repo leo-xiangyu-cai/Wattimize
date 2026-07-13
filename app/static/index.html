@@ -544,6 +544,7 @@
           <div class="sampling-actions">
             <button id="databaseExportBtn" class="btn sampling-action-btn" type="button" data-i18n="databaseExportBtn">Export Database</button>
             <button id="databaseImportBtn" class="btn sampling-action-btn" type="button" data-i18n="databaseImportBtn">Import Database</button>
+            <button id="databaseBackupNowBtn" class="btn sampling-action-btn" type="button" data-i18n="databaseBackupNowBtn">Back Up Now</button>
             <input id="databaseImportFileInput" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3,application/octet-stream" class="hidden" hidden />
           </div>
           <div id="databaseTransferStatus" class="database-transfer hidden" aria-live="polite">
@@ -556,6 +557,7 @@
             </div>
             <p id="databaseTransferMessage" class="muted">-</p>
           </div>
+          <p id="databaseBackupMeta" class="muted">-</p>
           <p id="databaseMeta" class="muted">-</p>
           <p id="databaseCount" class="muted">-</p>
           <div class="pager">

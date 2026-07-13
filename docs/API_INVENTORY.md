@@ -43,6 +43,8 @@ Status values:
 - `GET /api/storage/zero-hero-window-history`
 - `GET /api/database/tables`
 - `GET /api/database/tables/{table_name}/rows`
+- `GET /api/database/backups`
+- `POST /api/database/backups/run`
 - `GET /api/database/export.sqlite3`
 - `POST /api/database/import.sqlite3`
 

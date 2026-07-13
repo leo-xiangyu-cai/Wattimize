@@ -46,6 +46,7 @@ from app.persistence import (
     OPERATION_RUN_STATUS_PENDING,
     OPERATION_RUN_STATUS_SUCCEEDED,
     OPERATION_RUN_STATUS_TIMEOUT,
+    create_sqlite_backup,
     migrate_worker_log_legacy_statuses,
     count_pending_worker_api_logs,
     backfill_notification_entries_from_worker_logs,
@@ -80,6 +81,7 @@ from app.persistence import (
     list_database_tables,
     list_daily_reports,
     list_monthly_reports,
+    list_sqlite_backups,
     list_zero_hero_window_history,
     list_time_window_rule_state_rows,
     list_realtime_kv_rows,
@@ -147,6 +149,7 @@ TESLA_CONTROL_FEEDBACK_FAILURE_TTL_SECONDS = 30.0
 TESLA_OPERATION_PENDING_TIMEOUT_SECONDS = 180.0
 WORKER_API_LOG_TTL_DAYS = 3
 WORKER_API_LOG_CLEANUP_INTERVAL_SECONDS = 6 * 60 * 60
+DATABASE_BACKUP_RETENTION_COUNT = 3
 POOL_PUMP_SWITCH_ENTITY_ID = "switch.cuco_v3_3c00_switch"
 POOL_PUMP_POWER_ENTITY_ID = "sensor.cuco_v3_3c00_electric_power"
 POOL_PUMP_ENERGY_TODAY_ENTITY_ID = "sensor.cuco_v3_3c00_power_cost_today"
@@ -468,11 +471,20 @@ solplanet_context_cache: dict[str, object] = {"payload": None, "at_monotonic": 0
 solplanet_context_lock = asyncio.Lock()
 runtime_lock = asyncio.Lock()
 db_recovery_lock = asyncio.Lock()
+db_backup_lock = asyncio.Lock()
 window_control_lock = asyncio.Lock()
 daily_report_generation_lock = asyncio.Lock()
 monthly_report_generation_lock = asyncio.Lock()
 detailed_data_maintenance_lock = asyncio.Lock()
 db_recovery_state: dict[str, object] = {
+    "in_progress": False,
+    "last_attempt_at": None,
+    "last_success_at": None,
+    "last_error_at": None,
+    "last_error": None,
+    "last_result": None,
+}
+db_backup_state: dict[str, object] = {
     "in_progress": False,
     "last_attempt_at": None,
     "last_success_at": None,
@@ -486,6 +498,8 @@ export_window_fast_guard_task: asyncio.Task[None] | None = None
 export_window_fast_guard_stop_event = asyncio.Event()
 worker_log_cleanup_task: asyncio.Task[None] | None = None
 worker_log_cleanup_stop_event = asyncio.Event()
+database_backup_task: asyncio.Task[None] | None = None
+database_backup_stop_event = asyncio.Event()
 daily_report_task: asyncio.Task[None] | None = None
 daily_report_stop_event = asyncio.Event()
 storage_db_path = Path(os.getenv("WATTIMIZE_DB_PATH", "").strip() or DEFAULT_DB_PATH)
@@ -12976,6 +12990,81 @@ async def _stop_worker_log_cleanup() -> None:
         worker_log_cleanup_task = None
 
 
+async def _run_database_backup_once(*, force: bool = False) -> dict[str, object]:
+    now_local, _ = _tesla_grid_support_now_local()
+    async with db_backup_lock:
+        db_backup_state["in_progress"] = True
+        db_backup_state["last_attempt_at"] = datetime.now(UTC).isoformat()
+        try:
+            result = await asyncio.to_thread(
+                create_sqlite_backup,
+                storage_db_path,
+                retention_count=DATABASE_BACKUP_RETENTION_COUNT,
+                backup_date=now_local.date(),
+                force=force,
+            )
+            db_backup_state["last_result"] = result
+            db_backup_state["last_success_at"] = datetime.now(UTC).isoformat()
+            db_backup_state["last_error"] = None
+            if bool(result.get("created")):
+                logger.info(
+                    "Created SQLite backup at %s (%s bytes)",
+                    result.get("backup_path"),
+                    result.get("backup_size_bytes"),
+                )
+            return result
+        except Exception as exc:  # noqa: BLE001
+            db_backup_state["last_error_at"] = datetime.now(UTC).isoformat()
+            db_backup_state["last_error"] = f"{type(exc).__name__}: {exc}"
+            logger.exception("SQLite backup failed")
+            raise
+        finally:
+            db_backup_state["in_progress"] = False
+
+
+async def _database_backup_loop() -> None:
+    while not database_backup_stop_event.is_set():
+        try:
+            await _run_database_backup_once()
+        except Exception:  # noqa: BLE001
+            try:
+                await asyncio.wait_for(database_backup_stop_event.wait(), timeout=300.0)
+            except asyncio.TimeoutError:
+                pass
+            continue
+
+        now_local, _ = _tesla_grid_support_now_local()
+        next_midnight_local = datetime.combine(
+            now_local.date() + timedelta(days=1),
+            time.min,
+            tzinfo=now_local.tzinfo,
+        )
+        wait_seconds = max(0.05, (next_midnight_local.astimezone(UTC) - datetime.now(UTC)).total_seconds())
+        try:
+            await asyncio.wait_for(database_backup_stop_event.wait(), timeout=wait_seconds)
+        except asyncio.TimeoutError:
+            continue
+
+
+async def _start_database_backups() -> None:
+    global database_backup_task  # noqa: PLW0603
+    if database_backup_task and not database_backup_task.done():
+        return
+    database_backup_stop_event.clear()
+    database_backup_task = asyncio.create_task(_database_backup_loop())
+
+
+async def _stop_database_backups() -> None:
+    global database_backup_task  # noqa: PLW0603
+    database_backup_stop_event.set()
+    if database_backup_task:
+        try:
+            await database_backup_task
+        except asyncio.CancelledError:
+            pass
+        database_backup_task = None
+
+
 def _detail_retention_cutoff_local(now_local: datetime, retention_months: int) -> date:
     source_day = now_local.date()
     month_index = (source_day.year * 12) + (source_day.month - 1) - retention_months
@@ -13766,6 +13855,33 @@ async def database_table_rows(
     return payload
 
 
+@app.get("/api/database/backups")
+async def database_backups() -> dict[str, object]:
+    payload = await asyncio.to_thread(
+        list_sqlite_backups,
+        storage_db_path,
+        retention_count=DATABASE_BACKUP_RETENTION_COUNT,
+    )
+    payload["runtime"] = dict(db_backup_state)
+    payload["updated_at"] = datetime.now(UTC).isoformat()
+    return payload
+
+
+@app.post("/api/database/backups/run")
+async def database_backup_run(force: bool = Query(default=True)) -> dict[str, object]:
+    try:
+        result = await _run_database_backup_once(force=force)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=507, detail=f"Database backup failed: {exc}") from exc
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=500, detail=f"Database backup failed: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Database backup failed: {exc}") from exc
+    return {"ok": True, **result, "runtime": dict(db_backup_state)}
+
+
 @app.get("/api/database/export.sqlite3")
 async def database_export_sqlite() -> Response:
     db_bytes = await asyncio.to_thread(export_database_bytes, storage_db_path)
@@ -13777,7 +13893,7 @@ async def database_export_sqlite() -> Response:
 @app.post("/api/database/import.sqlite3")
 async def database_import_sqlite(file: UploadFile = File(...)) -> dict[str, object]:
     raw = await file.read()
-    async with runtime_lock, daily_report_generation_lock:
+    async with runtime_lock, daily_report_generation_lock, db_backup_lock:
         await _stop_collector()
         try:
             result = await asyncio.to_thread(import_database_bytes, storage_db_path, raw)
@@ -15683,6 +15799,7 @@ async def get_solplanet_cgi_explore() -> dict[str, object]:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    await _stop_database_backups()
     await _stop_daily_reports()
     await _stop_worker_log_cleanup()
     await _stop_collector()
@@ -15710,6 +15827,7 @@ async def on_startup() -> None:
     except Exception:  # noqa: BLE001
         logger.exception("Detailed data retention startup cleanup failed")
     await _start_worker_log_cleanup()
+    await _start_database_backups()
     await _start_daily_reports()
     await _start_collector()
 

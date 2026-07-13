@@ -9,7 +9,7 @@ import sqlite3
 import statistics
 import subprocess
 import tempfile
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
@@ -43,6 +43,9 @@ DEFAULT_SAMPLE_INTERVAL_SECONDS = 5.0
 SQLITE_BUSY_TIMEOUT_SECONDS = 10.0
 SQLITE_INTEGRITY_CHECK_TIMEOUT_SECONDS = 600.0
 SQLITE_VACUUM_MIN_RECLAIM_BYTES = 16 * 1024 * 1024
+SQLITE_BACKUP_PAGE_BATCH_SIZE = 1000
+SQLITE_BACKUP_SLEEP_SECONDS = 0.05
+SQLITE_BACKUP_STALE_TEMP_SECONDS = 24 * 60 * 60
 CSV_HEADERS: tuple[str, ...] = (
     "system",
     "sampled_at_utc",
@@ -356,6 +359,99 @@ def _sqlite_sidecar_paths(sqlite_path: Path) -> tuple[Path, Path]:
         sqlite_path.with_name(f"{sqlite_path.name}-wal"),
         sqlite_path.with_name(f"{sqlite_path.name}-shm"),
     )
+
+
+def _existing_paths_size(paths: tuple[Path, ...] | list[Path]) -> int:
+    return sum(path.stat().st_size for path in paths if path.exists())
+
+
+def _sqlite_backup_dir(sqlite_path: Path, backup_dir: Path | None = None) -> Path:
+    return backup_dir or sqlite_path.parent / "backups"
+
+
+def _sqlite_backup_glob(sqlite_path: Path) -> str:
+    return f"{sqlite_path.stem}.*{sqlite_path.suffix}"
+
+
+def _sqlite_backup_date_from_name(sqlite_path: Path, backup_path: Path) -> str | None:
+    prefix = f"{sqlite_path.stem}."
+    suffix = sqlite_path.suffix
+    name = backup_path.name
+    if not name.startswith(prefix) or not name.endswith(suffix):
+        return None
+    raw = name[len(prefix) : -len(suffix)]
+    if len(raw) == 8 and raw.isdigit():
+        return f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"
+    return raw or None
+
+
+def _sqlite_backup_files(sqlite_path: Path, backup_dir: Path) -> list[Path]:
+    if not backup_dir.exists():
+        return []
+    return sorted(
+        [path for path in backup_dir.glob(_sqlite_backup_glob(sqlite_path)) if path.is_file()],
+        key=lambda path: (path.name, path.stat().st_mtime),
+        reverse=True,
+    )
+
+
+def _prune_sqlite_backups(sqlite_path: Path, backup_dir: Path, retention_count: int) -> list[str]:
+    safe_retention = max(0, int(retention_count))
+    backup_files = _sqlite_backup_files(sqlite_path, backup_dir)
+    pruned_paths: list[str] = []
+    for stale_path in backup_files[safe_retention:]:
+        for path in (stale_path, *_sqlite_sidecar_paths(stale_path)):
+            try:
+                if not path.exists():
+                    continue
+                path.unlink()
+                pruned_paths.append(str(path))
+            except FileNotFoundError:
+                continue
+    return pruned_paths
+
+
+def _cleanup_stale_sqlite_backup_temp_files(
+    sqlite_path: Path,
+    backup_dir: Path,
+    *,
+    min_age_seconds: float = SQLITE_BACKUP_STALE_TEMP_SECONDS,
+) -> list[str]:
+    if not backup_dir.exists():
+        return []
+    now_epoch = datetime.now(UTC).timestamp()
+    min_age = max(0.0, float(min_age_seconds))
+    cleaned_paths: list[str] = []
+    for temp_path in backup_dir.glob(f".{sqlite_path.stem}.*.tmp*"):
+        if not temp_path.is_file():
+            continue
+        try:
+            age_seconds = now_epoch - temp_path.stat().st_mtime
+            if age_seconds < min_age:
+                continue
+            temp_path.unlink()
+            cleaned_paths.append(str(temp_path))
+        except FileNotFoundError:
+            continue
+    return cleaned_paths
+
+
+def _cleanup_sqlite_backup_temp_family(temp_path: Path) -> list[str]:
+    cleaned_paths: list[str] = []
+    for path in (
+        temp_path,
+        Path(f"{temp_path}-journal"),
+        Path(f"{temp_path}-wal"),
+        Path(f"{temp_path}-shm"),
+    ):
+        try:
+            if not path.exists():
+                continue
+            path.unlink()
+            cleaned_paths.append(str(path))
+        except FileNotFoundError:
+            continue
+    return cleaned_paths
 
 
 def _is_sqlite(db_path: DatabaseTarget) -> bool:
@@ -707,6 +803,149 @@ def inspect_sqlite_database(db_path: DatabaseTarget) -> dict[str, object]:
         "quick_check": [checks[-1]] if checks else [],
         "returncode": result.returncode,
         "stderr": (result.stderr or "").strip(),
+    }
+
+
+def list_sqlite_backups(
+    db_path: DatabaseTarget,
+    *,
+    backup_dir: Path | None = None,
+    retention_count: int = 3,
+) -> dict[str, object]:
+    sqlite_path = _sqlite_file_path(db_path)
+    if sqlite_path is None:
+        raise ValueError("Database backups only support local SQLite files")
+    target_backup_dir = _sqlite_backup_dir(sqlite_path, backup_dir)
+    backup_items: list[dict[str, object]] = []
+    for backup_path in _sqlite_backup_files(sqlite_path, target_backup_dir):
+        stat = backup_path.stat()
+        sidecar_paths = [path for path in _sqlite_sidecar_paths(backup_path) if path.exists()]
+        backup_items.append(
+            {
+                "name": backup_path.name,
+                "path": str(backup_path),
+                "backup_date": _sqlite_backup_date_from_name(sqlite_path, backup_path),
+                "size_bytes": stat.st_size + _existing_paths_size(sidecar_paths),
+                "database_file_size_bytes": stat.st_size,
+                "sidecar_size_bytes": _existing_paths_size(sidecar_paths),
+                "sidecar_paths": [str(path) for path in sidecar_paths],
+                "modified_at_utc": datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
+            }
+        )
+    return {
+        "db_path": str(sqlite_path),
+        "backup_dir": str(target_backup_dir),
+        "retention_count": max(0, int(retention_count)),
+        "count": len(backup_items),
+        "total_size_bytes": sum(int(item.get("size_bytes") or 0) for item in backup_items),
+        "latest_backup": backup_items[0] if backup_items else None,
+        "backups": backup_items,
+    }
+
+
+def create_sqlite_backup(
+    db_path: DatabaseTarget,
+    *,
+    backup_dir: Path | None = None,
+    retention_count: int = 3,
+    backup_date: date | None = None,
+    force: bool = False,
+) -> dict[str, object]:
+    sqlite_path = _sqlite_file_path(db_path)
+    if sqlite_path is None:
+        raise ValueError("Database backups only support local SQLite files")
+
+    target_backup_dir = _sqlite_backup_dir(sqlite_path, backup_dir)
+    safe_retention = max(0, int(retention_count))
+    cleaned_temp_paths = _cleanup_stale_sqlite_backup_temp_files(sqlite_path, target_backup_dir)
+    if not sqlite_path.exists():
+        pruned_paths = _prune_sqlite_backups(sqlite_path, target_backup_dir, safe_retention)
+        return {
+            "created": False,
+            "skipped": True,
+            "reason": "database_missing",
+            "db_path": str(sqlite_path),
+            "backup_dir": str(target_backup_dir),
+            "pruned_paths": pruned_paths,
+            "cleaned_temp_paths": cleaned_temp_paths,
+            "backup_status": list_sqlite_backups(
+                db_path,
+                backup_dir=target_backup_dir,
+                retention_count=safe_retention,
+            ),
+        }
+
+    target_backup_dir.mkdir(parents=True, exist_ok=True)
+    target_date = backup_date or datetime.now(UTC).date()
+    target_path = target_backup_dir / f"{sqlite_path.stem}.{target_date.strftime('%Y%m%d')}{sqlite_path.suffix}"
+    if target_path.exists() and not force:
+        pruned_paths = _prune_sqlite_backups(sqlite_path, target_backup_dir, safe_retention)
+        return {
+            "created": False,
+            "skipped": True,
+            "reason": "already_exists",
+            "db_path": str(sqlite_path),
+            "backup_path": str(target_path),
+            "backup_dir": str(target_backup_dir),
+            "backup_date": target_date.isoformat(),
+            "backup_size_bytes": _existing_paths_size([target_path, *_sqlite_sidecar_paths(target_path)]),
+            "pruned_paths": pruned_paths,
+            "cleaned_temp_paths": cleaned_temp_paths,
+            "backup_status": list_sqlite_backups(
+                db_path,
+                backup_dir=target_backup_dir,
+                retention_count=safe_retention,
+            ),
+        }
+
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
+    temp_path = target_backup_dir / f".{target_path.name}.{timestamp}.{os.getpid()}.tmp"
+    if temp_path.exists():
+        temp_path.unlink()
+
+    quick_check: list[str] = []
+    started_at = datetime.now(UTC)
+    try:
+        with closing(sqlite3.connect(str(sqlite_path), timeout=SQLITE_BUSY_TIMEOUT_SECONDS)) as source_conn:
+            source_conn.execute(f"PRAGMA busy_timeout = {int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)}")
+            with closing(sqlite3.connect(str(temp_path), timeout=SQLITE_BUSY_TIMEOUT_SECONDS)) as backup_conn:
+                backup_conn.execute(f"PRAGMA busy_timeout = {int(SQLITE_BUSY_TIMEOUT_SECONDS * 1000)}")
+                source_conn.backup(
+                    backup_conn,
+                    pages=SQLITE_BACKUP_PAGE_BATCH_SIZE,
+                    sleep=SQLITE_BACKUP_SLEEP_SECONDS,
+                )
+                quick_check = [str(row[0]) for row in backup_conn.execute("PRAGMA quick_check").fetchall()]
+                if not quick_check or any(line != "ok" for line in quick_check):
+                    raise sqlite3.DatabaseError(f"Backup quick_check failed: {quick_check}")
+        temp_path.replace(target_path)
+    except Exception:
+        _cleanup_sqlite_backup_temp_family(temp_path)
+        raise
+
+    cleaned_temp_paths.extend(_cleanup_sqlite_backup_temp_family(temp_path))
+    pruned_paths = _prune_sqlite_backups(sqlite_path, target_backup_dir, safe_retention)
+    finished_at = datetime.now(UTC)
+    return {
+        "created": True,
+        "skipped": False,
+        "db_path": str(sqlite_path),
+        "backup_path": str(target_path),
+        "backup_dir": str(target_backup_dir),
+        "backup_date": target_date.isoformat(),
+        "db_size_bytes": sqlite_path.stat().st_size,
+        "backup_size_bytes": _existing_paths_size([target_path, *_sqlite_sidecar_paths(target_path)]),
+        "quick_check": quick_check,
+        "started_at_utc": started_at.isoformat(),
+        "finished_at_utc": finished_at.isoformat(),
+        "duration_seconds": round((finished_at - started_at).total_seconds(), 3),
+        "pruned_paths": pruned_paths,
+        "cleaned_temp_paths": cleaned_temp_paths,
+        "backup_status": list_sqlite_backups(
+            db_path,
+            backup_dir=target_backup_dir,
+            retention_count=safe_retention,
+        ),
     }
 
 

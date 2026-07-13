@@ -104,6 +104,8 @@ curl -s http://<wattimize-host>:18000/api/devices/pool-pump | jq
 curl -s -X POST http://<wattimize-host>:18000/api/devices/pool-pump/toggle -H 'Content-Type: application/json' -d '{"enabled":true}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/devices/pool-pump/auto-control -H 'Content-Type: application/json' -d '{"enabled":false}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/devices/pool-pump/force-min-runtime-hours -H 'Content-Type: application/json' -d '{"threshold_hours":1.5}' | jq
+curl -s http://<wattimize-host>:18000/api/database/backups | jq
+curl -s -X POST http://<wattimize-host>:18000/api/database/backups/run | jq
 curl -s http://<wattimize-host>:18000/api/database/export.sqlite3 -o wattimize.sqlite3
 curl -s -X POST http://<wattimize-host>:18000/api/database/import.sqlite3 -F "file=@wattimize.sqlite3" | jq
 curl -s -X POST http://<wattimize-host>:18000/api/config/solplanet/discover -H 'Content-Type: application/json' -d '{"solplanet_dongle_host":"192.168.1.10"}' | jq
@@ -209,13 +211,14 @@ First-run configuration:
 - Every sample stores current `pv_w/grid_w/battery_w/load_w/soc/inverter_status/balance` and raw flow payload.
 - SQLite writes and worker log persistence now retry on transient database failures before surfacing an error in collector status.
 - When SQLite corruption is detected during runtime recovery flows, the backend attempts an automatic recovery into the recovery directory and reinitializes the runtime connection pool.
+- The backend creates a consistent SQLite backup once per local day under `data/backups/`, validates it with `PRAGMA quick_check`, and keeps only the latest 3 backup files.
 - Daily usage endpoint integrates power snapshots into kWh (UTC day).
 - `system=combined` is available on range usage and trend series endpoints for the frontend overall view.
 - The combined dashboard selects `grid_w` from the SAJ or Solplanet grid reading with the lower power-balance residual and exposes both source values in the grid tooltip, marking the selected source with a check.
 - The `History` tab combines range selection with an energy breakdown card, a power timeline chart, a combined SAJ/Solplanet SOC chart, a total usable remaining-energy chart, a Tesla SOC chart, a pool-pump on/off timeline, a live 5-minute Zero Hero export-window observation card, and a selected-day `18:00-20:00` matrix of all 24 five-minute export windows, color-coded for net import, mixed import/net export, and pure export.
 - The `Report` tab reuses the History presentation but reads a persisted daily snapshot. The backend generates the completed local day at midnight, immediately backfills yesterday after an upgrade when needed, and stores precomputed usage, chart series, Zero Hero windows, and paginable sample rows for fast reads.
 - `GET /api/storage/samples?system=combined` now includes `tesla_charge_power_w` and `pool_pump_power_w` so frontend charts can separate home load from Tesla/pool-pump overlays.
-- The frontend can export and import the full SQLite database from the Database tab.
+- The frontend can export, import, view backup status, and manually trigger a full SQLite backup from the Database tab.
 
 ## 7) Time Window Rules And Tesla Control
 
