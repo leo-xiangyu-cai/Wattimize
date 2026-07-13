@@ -95,6 +95,8 @@ curl -s "http://<wattimize-host>:18000/api/reports/monthly/index?year=2026" | jq
 curl -s "http://<wattimize-host>:18000/api/reports/monthly?month=2026-03" | jq
 curl -s -X POST "http://<wattimize-host>:18000/api/reports/monthly/generate?month=2026-03" | jq
 curl -s http://<wattimize-host>:18000/api/home-plan/electricity-plans | jq
+curl -s http://<wattimize-host>:18000/api/bills | jq
+curl -s -X POST http://<wattimize-host>:18000/api/bills/upload -F "file=@globird-bill.pdf" | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/charging -H 'Content-Type: application/json' -d '{"enabled":true}' | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/current -H 'Content-Type: application/json' -d '{"amps":16}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/tesla/auto-control -H 'Content-Type: application/json' -d '{"enabled":false}' | jq
@@ -218,7 +220,10 @@ First-run configuration:
 - `system=combined` is available on range usage and trend series endpoints for the frontend overall view.
 - The combined dashboard selects `grid_w` from the SAJ or Solplanet grid reading with the lower power-balance residual and exposes both source values in the grid tooltip, marking the selected source with a check.
 - The `History` tab combines range selection with an energy breakdown card, a power timeline chart, a combined SAJ/Solplanet SOC chart, a total usable remaining-energy chart, a Tesla SOC chart, a pool-pump on/off timeline, a live 5-minute Zero Hero export-window observation card, and a selected-day `18:00-20:00` matrix of all 24 five-minute export windows, color-coded for net import, mixed import/net export, and pure export.
-- The `Report` tab reuses the History presentation but reads a persisted daily snapshot. The backend generates the completed local day at midnight, immediately backfills yesterday after an upgrade when needed, and stores precomputed usage, chart series, Zero Hero windows, and paginable sample rows for fast reads.
+- The `Report` tab reuses the History presentation but reads a persisted daily snapshot. The backend generates the completed local day at midnight, immediately backfills yesterday after an upgrade when needed, and stores precomputed usage, daily electricity cost, chart series, Zero Hero windows, and paginable sample rows for fast reads.
+- Daily report cost uses the bill-derived GloBird ZEROHERO rates in `data/home-plan/electricity-plans.json`, including fixed charges, import time windows, feed-in credits, Super Export top-up, and the estimated ZEROHERO day credit. The Report tab displays estimated cost, uploaded-bill actual cost, and the estimate-vs-bill delta in one compact breakdown.
+- Electricity bill uploads are accepted through the Report tab or `POST /api/bills/upload`. Uploaded PDF/text artifacts are stored under `data/home-plan/bills/`, parsed into `bills-index.json`, and allocated back into matching daily reports as `_bill_actual_cost`.
+- To audit or backfill persisted daily report cost fields without starting the app, run `PYTHONPYCACHEPREFIX=/tmp/wattimize-pycache python3.12 scripts/audit-daily-report-costs.py` for a read-only comparison, or add `--write` to update missing/mismatched `_daily_cost` payloads. Stop any Wattimize service that uses `data/wattimize.sqlite3` before running a write-mode DB audit/backfill.
 - `GET /api/storage/samples?system=combined` now includes `tesla_charge_power_w` and `pool_pump_power_w` so frontend charts can separate home load from Tesla/pool-pump overlays.
 - The frontend can export, import, view backup status, and manually trigger a full SQLite backup from the Database tab.
 

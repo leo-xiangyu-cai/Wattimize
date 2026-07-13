@@ -23,6 +23,12 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 
+from app.billing import (
+    apply_bill_actuals_to_daily_reports,
+    load_bills_index,
+    parse_bill_upload,
+    save_bill_artifacts,
+)
 from app.config import (
     ALLOWED_DETAIL_RETENTION_MONTHS,
     ALLOWED_SAMPLE_INTERVAL_SECONDS,
@@ -53,6 +59,8 @@ from app.persistence import (
     build_daily_report_phase_battery,
     build_monthly_report_analysis,
     compute_daily_usage,
+    compute_daily_cost_between,
+    compute_daily_report_cost,
     compute_usage_between,
     delete_worker_api_logs_older_than,
     dismiss_notification_entry,
@@ -91,6 +99,7 @@ from app.persistence import (
     recover_sqlite_database,
     save_daily_report,
     save_monthly_report,
+    select_billed_electricity_plan,
     prune_detailed_data_older_than,
     vacuum_sqlite_database,
     upsert_time_window_rule_state,
@@ -464,6 +473,8 @@ INDEX_CACHE_PLACEHOLDER = "__WATTIMIZE_STATIC_VERSION__"
 static_asset_version = "dev"
 HOME_PLAN_DIR = Path(__file__).resolve().parent.parent / "data" / "home-plan"
 ELECTRICITY_PLANS_PATH = HOME_PLAN_DIR / "electricity-plans.json"
+BILLS_DIR = HOME_PLAN_DIR / "bills"
+MAX_BILL_UPLOAD_BYTES = 20 * 1024 * 1024
 
 solplanet_flow_cache: dict[str, object] = {"payload": None, "at_monotonic": 0.0}
 solplanet_flow_lock = asyncio.Lock()
@@ -13118,6 +13129,7 @@ def _daily_report_local_period(report_day_local: date) -> tuple[datetime, dateti
 async def _generate_daily_report(report_day_local: date) -> dict[str, object]:
     async with daily_report_generation_lock:
         start_at_utc, end_at_utc, timezone_name = _daily_report_local_period(report_day_local)
+        electricity_plan = _billed_electricity_plan_for_day(report_day_local)
         logger.info("Generating daily report for %s (%s)", report_day_local.isoformat(), timezone_name)
 
         usage_tasks = {
@@ -13167,15 +13179,34 @@ async def _generate_daily_report(report_day_local: date) -> dict[str, object]:
             report_day_local=report_day_local,
             local_timezone_name=timezone_name,
         )
+        daily_cost_task = asyncio.to_thread(
+            compute_daily_cost_between,
+            storage_db_path,
+            system="combined",
+            report_day_local=report_day_local,
+            start_at_utc=start_at_utc,
+            end_at_utc=end_at_utc,
+            sample_interval_seconds=_sample_interval_for_system("combined"),
+            local_timezone_name=timezone_name,
+            electricity_plan=electricity_plan,
+        )
         task_keys = [
             *(("usage", system) for system in usage_tasks),
             *(("series", system) for system in series_tasks),
             ("zero_hero", "combined"),
             ("phase_battery", "combined"),
+            ("daily_cost", "combined"),
         ]
-        results = await asyncio.gather(*usage_tasks.values(), *series_tasks.values(), zero_hero_task, phase_battery_task)
+        results = await asyncio.gather(
+            *usage_tasks.values(),
+            *series_tasks.values(),
+            zero_hero_task,
+            phase_battery_task,
+            daily_cost_task,
+        )
         result_map = dict(zip(task_keys, results, strict=True))
         usage_by_system = {system: result_map[("usage", system)] for system in usage_tasks}
+        usage_by_system["_daily_cost"] = result_map[("daily_cost", "combined")]
         series_by_system = {system: result_map[("series", system)] for system in series_tasks}
         zero_hero_history = result_map[("zero_hero", "combined")]
         phase_battery = result_map[("phase_battery", "combined")]
@@ -13350,8 +13381,7 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/api/home-plan/electricity-plans")
-async def home_plan_electricity_plans() -> dict[str, object]:
+def _load_electricity_plan_payload() -> dict[str, object]:
     try:
         raw = ELECTRICITY_PLANS_PATH.read_text(encoding="utf-8")
         payload = json.loads(raw)
@@ -13362,6 +13392,57 @@ async def home_plan_electricity_plans() -> dict[str, object]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=500, detail="Electricity plan data file must contain a JSON object")
     return payload
+
+
+def _billed_electricity_plan_for_day(report_day_local: date) -> dict[str, object] | None:
+    return select_billed_electricity_plan(_load_electricity_plan_payload(), report_day_local)
+
+
+def _parse_save_apply_bill_upload(filename: str, raw: bytes) -> dict[str, object]:
+    bill, extracted_text = parse_bill_upload(raw, filename=filename)
+    saved_bill = save_bill_artifacts(BILLS_DIR, raw=raw, filename=filename, bill=bill, text=extracted_text)
+    update_result = apply_bill_actuals_to_daily_reports(storage_db_path, saved_bill)
+    return {
+        "ok": True,
+        "bill": saved_bill,
+        "daily_report_update": update_result,
+    }
+
+
+@app.get("/api/home-plan/electricity-plans")
+async def home_plan_electricity_plans() -> dict[str, object]:
+    return _load_electricity_plan_payload()
+
+
+@app.get("/api/bills")
+async def electricity_bills() -> dict[str, object]:
+    payload = await asyncio.to_thread(load_bills_index, BILLS_DIR)
+    payload["updated_at"] = datetime.now(UTC).isoformat()
+    return payload
+
+
+@app.post("/api/bills/upload")
+async def electricity_bill_upload(file: UploadFile = File(...)) -> dict[str, object]:
+    filename = Path(str(file.filename or "bill.pdf")).name
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Uploaded bill is empty")
+    if len(raw) > MAX_BILL_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"Uploaded bill exceeds {MAX_BILL_UPLOAD_BYTES // (1024 * 1024)} MB")
+    lower_name = filename.lower()
+    if not (lower_name.endswith(".pdf") or lower_name.endswith(".txt") or raw[:4] == b"%PDF"):
+        raise HTTPException(status_code=400, detail="Upload a PDF bill or extracted text file")
+    try:
+        async with daily_report_generation_lock:
+            return await asyncio.to_thread(_parse_save_apply_bill_upload, filename, raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=507, detail=f"Bill upload failed: {exc}") from exc
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=500, detail=f"Daily report update failed: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -13713,6 +13794,23 @@ async def daily_report(
                 "available_days": [item.get("report_day_local") for item in available],
             },
         )
+    if not payload.get("daily_cost"):
+        try:
+            period_start = _parse_iso_utc_datetime(str(payload.get("period_start_utc") or ""), field_name="period_start_utc")
+            period_end = _parse_iso_utc_datetime(str(payload.get("period_end_utc") or ""), field_name="period_end_utc")
+            payload["daily_cost"] = await asyncio.to_thread(
+                compute_daily_report_cost,
+                storage_db_path,
+                report_day_local=target_day,
+                system="combined",
+                start_at_utc=period_start,
+                end_at_utc=period_end,
+                sample_interval_seconds=_sample_interval_for_system("combined"),
+                local_timezone_name=str(payload.get("timezone_name") or ""),
+                electricity_plan=_billed_electricity_plan_for_day(target_day),
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Daily cost fallback calculation failed for %s", target_day.isoformat())
     return payload
 
 

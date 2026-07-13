@@ -684,6 +684,39 @@ const I18N = {
     reportNotReady: "Future dates are not ready yet.",
     reportGenerateFailed: "Daily report generation failed for {day}: {error}",
     reportLatestBadge: "Latest",
+    reportDailyCostTitle: "Daily Cost",
+    reportDailyCostMeta: "{plan} · {basis} · {samples} samples",
+    reportDailyCostNoData: "Cost estimate unavailable for this report.",
+    reportDailyCostEstimated: "Estimated",
+    reportDailyCostBillActual: "Bill actual",
+    reportDailyCostBillAllocated: "allocated",
+    reportDailyCostNoBill: "No bill uploaded for this day",
+    reportDailyCostDelta: "Delta",
+    reportDailyCostDeltaDetail: "estimate minus bill",
+    reportDailyCostFixed: "Fixed",
+    reportDailyCostImport: "Import",
+    reportDailyCostCredits: "Credits",
+    reportDailyCostZeroHero: "ZEROHERO",
+    reportDailyCostBreakdown: "Breakdown",
+    reportDailyCostComponent: "Component",
+    reportDailyCostBill: "Bill",
+    reportDailyCostEstimateMinusBill: "Estimate - bill",
+    reportDailyCostHigher: "estimate higher",
+    reportDailyCostLower: "estimate lower",
+    reportDailyCostEven: "aligned",
+    reportDailyCostFixedDetail: "daily supply + metering",
+    reportDailyCostImportDetail: "peak {peak} · shoulder {shoulder} · free {free}",
+    reportDailyCostCreditDetail: "feed-in {fit} · super export {superExport}",
+    reportDailyCostZeroHeroDetail: "{status} · import {importKwh} · coverage {coverage}",
+    reportDailyCostQualified: "qualified",
+    reportDailyCostNotQualified: "not qualified",
+    reportDailyCostInsufficient: "insufficient data",
+    reportDailyCostNotAvailable: "not available",
+    reportBillChooseBtn: "Upload bill",
+    reportBillUploading: "Uploading bill...",
+    reportBillUploaded: "Bill {invoice} uploaded · updated {days} reports",
+    reportBillUploadFailed: "Bill upload failed: {error}",
+    reportBillNoFile: "Choose a PDF bill first.",
     reportCalendarTitle: "Report Calendar",
     reportCalendarMeta: "{month} · generated reports {count}/{days}",
     reportCalendarLoading: "Loading report index...",
@@ -1740,6 +1773,39 @@ const I18N = {
     reportNotReady: "未来日期暂时不能生成日报。",
     reportGenerateFailed: "{day} 的每日日报生成失败：{error}",
     reportLatestBadge: "最新",
+    reportDailyCostTitle: "当日电费",
+    reportDailyCostMeta: "{plan} · {basis} · {samples} 个样本",
+    reportDailyCostNoData: "此日报暂无法估算电费。",
+    reportDailyCostEstimated: "系统估算",
+    reportDailyCostBillActual: "账单实际",
+    reportDailyCostBillAllocated: "已分摊",
+    reportDailyCostNoBill: "这一天还没有上传账单",
+    reportDailyCostDelta: "差额",
+    reportDailyCostDeltaDetail: "估算减账单",
+    reportDailyCostFixed: "固定费",
+    reportDailyCostImport: "买电",
+    reportDailyCostCredits: "抵扣",
+    reportDailyCostZeroHero: "ZEROHERO",
+    reportDailyCostBreakdown: "明细",
+    reportDailyCostComponent: "项目",
+    reportDailyCostBill: "账单",
+    reportDailyCostEstimateMinusBill: "估算 - 账单",
+    reportDailyCostHigher: "估算偏高",
+    reportDailyCostLower: "估算偏低",
+    reportDailyCostEven: "基本一致",
+    reportDailyCostFixedDetail: "日供电费 + 计量费",
+    reportDailyCostImportDetail: "peak {peak} · shoulder {shoulder} · free {free}",
+    reportDailyCostCreditDetail: "feed-in {fit} · super export {superExport}",
+    reportDailyCostZeroHeroDetail: "{status} · import {importKwh} · coverage {coverage}",
+    reportDailyCostQualified: "已达标",
+    reportDailyCostNotQualified: "未达标",
+    reportDailyCostInsufficient: "数据不足",
+    reportDailyCostNotAvailable: "不可用",
+    reportBillChooseBtn: "上传账单",
+    reportBillUploading: "正在上传账单...",
+    reportBillUploaded: "账单 {invoice} 已上传 · 更新 {days} 条日报",
+    reportBillUploadFailed: "账单上传失败：{error}",
+    reportBillNoFile: "请先选择 PDF 账单。",
     reportCalendarTitle: "日报日历",
     reportCalendarMeta: "{month} · 已生成日报 {count}/{days}",
     reportCalendarLoading: "正在加载日报索引...",
@@ -9328,6 +9394,14 @@ function setReportCalendarVisible(visible) {
   }
 }
 
+function setReportBillUploadVisible(visible) {
+  const toolbar = document.getElementById("reportBillUploadToolbar");
+  if (!toolbar) return;
+  toolbar.hidden = !visible;
+  toolbar.classList.toggle("hidden", !visible);
+  toolbar.setAttribute("aria-hidden", visible ? "false" : "true");
+}
+
 function renderReportCalendar() {
   const panel = document.getElementById("reportCalendarPanel");
   if (!panel) return;
@@ -9543,6 +9617,7 @@ function renderDailyReportEmpty(message, rangeLabel) {
   renderSamplingPhaseBatteryRemaining(null, rangeLabel);
   renderSamplingPumpStatusTimeline({ data: [] });
   renderSamplingTotals(null, "overall", rangeLabel, { metaText: message });
+  renderSamplingDailyCost(null);
   renderSamplingZeroHeroHistory({ items: [] });
 }
 
@@ -10961,6 +11036,203 @@ function formatEnergyKwhText(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "-";
   return `${formatTrimmedDecimal(n, 3)} kWh`;
+}
+
+function formatDailyCostAud(value, { signed = false } = {}) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  const sign = n < 0 ? "-" : (signed && n > 0 ? "+" : "");
+  return `${sign}$${formatTrimmedDecimal(Math.abs(n), 2)}`;
+}
+
+function formatDailyCostKwh(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${formatTrimmedDecimal(n, 2)} kWh`;
+}
+
+function dailyCostZeroHeroStatusText(item) {
+  const status = String(item?.status || "");
+  if (item?.qualified === true || status === "qualified") return t("reportDailyCostQualified");
+  if (status === "not_qualified") return t("reportDailyCostNotQualified");
+  if (status === "insufficient_data") return t("reportDailyCostInsufficient");
+  if (status === "not_available") return t("reportDailyCostNotAvailable");
+  return "-";
+}
+
+function formatApiErrorMessage(err) {
+  const raw = String(err?.message || err || "");
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.detail === "string") return parsed.detail;
+  } catch (_err) {
+    // Use the original message.
+  }
+  return raw;
+}
+
+function setSamplingDailyCostHidden(hidden) {
+  const container = document.getElementById("samplingDailyCost");
+  if (!container) return;
+  container.classList.toggle("hidden", Boolean(hidden));
+  container.hidden = Boolean(hidden);
+  container.setAttribute("aria-hidden", hidden ? "true" : "false");
+  if (hidden) container.innerHTML = "";
+}
+
+function renderSamplingDailyCost(dailyCost, billActualCost = null) {
+  const container = document.getElementById("samplingDailyCost");
+  if (!container) return;
+  if (currentTab !== "report" || !dailyCost || typeof dailyCost !== "object" || !Object.keys(dailyCost).length) {
+    setSamplingDailyCostHidden(true);
+    return;
+  }
+
+  setSamplingDailyCostHidden(false);
+  const total = Number(dailyCost.total_daily_cost_aud);
+  if (!Number.isFinite(total)) {
+    container.innerHTML = `<p class="sampling-daily-cost-meta">${escapeHtml(t("reportDailyCostNoData"))}</p>`;
+    return;
+  }
+
+  const lineItems = dailyCost.line_items || {};
+  const fixed = lineItems.fixed || {};
+  const importItem = lineItems.import || {};
+  const exportItem = lineItems.export || {};
+  const zeroHero = lineItems.zerohero || {};
+  const fixedAud = Number(fixed.total_aud || 0);
+  const importAud = Number(importItem.charge_aud || 0);
+  const exportCreditAud = Number(exportItem.credit_aud || 0);
+  const fitCreditAud = Number(exportItem.fit_credit_aud || 0);
+  const superExportCreditAud = Number(exportItem.super_export_credit_aud || 0);
+  const zeroHeroCreditAud = Number(zeroHero.credit_aud || 0);
+  const planName = dailyCost.plan?.display_name || dailyCost.plan?.id || "-";
+  const basis = dailyCost.price_basis || "inc GST";
+  const samples = Number(dailyCost.samples || 0);
+  const hasBillActual = billActualCost && typeof billActualCost === "object" && Number.isFinite(Number(billActualCost.actual_daily_cost_aud));
+  const actualTotal = hasBillActual ? Number(billActualCost.actual_daily_cost_aud) : null;
+  const deltaAud = hasBillActual
+    ? Number.isFinite(Number(billActualCost.delta_aud))
+      ? Number(billActualCost.delta_aud)
+      : total - actualTotal
+    : null;
+  const actualItems = hasBillActual && billActualCost.line_items && typeof billActualCost.line_items === "object"
+    ? billActualCost.line_items
+    : {};
+  const actualFixed = Number(actualItems.fixed_aud || 0);
+  const actualImport = Number(actualItems.import_aud || 0);
+  const actualExport = Number(actualItems.solar_feed_in_aud || 0) + Number(actualItems.super_export_aud || 0);
+  const actualZeroHero = Number(actualItems.zerohero_aud || 0);
+  const invoiceText = hasBillActual
+    ? `${billActualCost.invoice_number || "-"} · ${t("reportDailyCostBillAllocated")}`
+    : t("reportDailyCostNoBill");
+  const zeroHeroCoverage = Number(zeroHero.coverage_ratio);
+  const zeroHeroCoverageText = Number.isFinite(zeroHeroCoverage)
+    ? `${formatTrimmedDecimal(zeroHeroCoverage * 100, 0)}%`
+    : "-";
+  const deltaTone = (value) => {
+    if (!hasBillActual || !Number.isFinite(Number(value))) return "is-muted";
+    if (Math.abs(Number(value)) < 0.01) return "is-even";
+    return Number(value) > 0 ? "is-higher" : "is-lower";
+  };
+  const deltaMetaText = hasBillActual
+    ? Math.abs(deltaAud) < 0.01
+      ? t("reportDailyCostEven")
+      : deltaAud > 0
+        ? t("reportDailyCostHigher")
+        : t("reportDailyCostLower")
+    : t("reportDailyCostNoBill");
+  const rows = [
+    {
+      key: "fixed",
+      label: t("reportDailyCostFixed"),
+      detail: t("reportDailyCostFixedDetail"),
+      estimated: fixedAud,
+      actual: actualFixed,
+    },
+    {
+      key: "import",
+      label: t("reportDailyCostImport"),
+      detail: t("reportDailyCostImportDetail", {
+        peak: formatDailyCostKwh(importItem.peak_kwh),
+        shoulder: formatDailyCostKwh(importItem.shoulder_kwh),
+        free: formatDailyCostKwh(importItem.free_kwh),
+      }),
+      estimated: importAud,
+      actual: actualImport,
+    },
+    {
+      key: "credits",
+      label: t("reportDailyCostCredits"),
+      detail: t("reportDailyCostCreditDetail", {
+        fit: formatDailyCostAud(-fitCreditAud),
+        superExport: formatDailyCostAud(-superExportCreditAud),
+      }),
+      estimated: -exportCreditAud,
+      actual: actualExport,
+    },
+    {
+      key: "zerohero",
+      label: t("reportDailyCostZeroHero"),
+      detail: t("reportDailyCostZeroHeroDetail", {
+        status: dailyCostZeroHeroStatusText(zeroHero),
+        importKwh: formatDailyCostKwh(zeroHero.import_kwh),
+        coverage: zeroHeroCoverageText,
+      }),
+      estimated: -zeroHeroCreditAud,
+      actual: actualZeroHero,
+    },
+  ];
+  const rowHtml = rows
+    .map((row) => {
+      const rowDelta = hasBillActual ? row.estimated - row.actual : null;
+      return `
+        <div class="sampling-daily-cost-row" role="row">
+          <div class="sampling-daily-cost-component" role="cell">
+            <span class="sampling-daily-cost-component-name">${escapeHtml(row.label)}</span>
+            <span class="sampling-daily-cost-component-detail">${escapeHtml(row.detail)}</span>
+          </div>
+          <div class="sampling-daily-cost-amount" role="cell">${escapeHtml(formatDailyCostAud(row.estimated))}</div>
+          <div class="sampling-daily-cost-amount ${hasBillActual ? "" : "is-muted"}" role="cell">${escapeHtml(hasBillActual ? formatDailyCostAud(row.actual) : "-")}</div>
+          <div class="sampling-daily-cost-amount ${deltaTone(rowDelta)}" role="cell">${escapeHtml(hasBillActual ? formatDailyCostAud(rowDelta, { signed: true }) : "-")}</div>
+        </div>
+      `;
+    })
+    .join("");
+
+  container.innerHTML = `
+    <div class="sampling-daily-cost-head">
+      <div>
+        <p class="sampling-daily-cost-title">${escapeHtml(t("reportDailyCostTitle"))}</p>
+        <p class="sampling-daily-cost-meta">${escapeHtml(t("reportDailyCostMeta", { plan: planName, basis, samples }))}</p>
+      </div>
+      <p class="sampling-daily-cost-bill-chip ${hasBillActual ? "has-bill" : "no-bill"}">${escapeHtml(invoiceText)}</p>
+    </div>
+    <div class="sampling-daily-cost-summary">
+      <div class="sampling-daily-cost-metric">
+        <span class="sampling-daily-cost-label">${escapeHtml(t("reportDailyCostEstimated"))}</span>
+        <strong class="sampling-daily-cost-metric-value">${escapeHtml(formatDailyCostAud(total))}</strong>
+      </div>
+      <div class="sampling-daily-cost-metric ${hasBillActual ? "" : "is-muted"}">
+        <span class="sampling-daily-cost-label">${escapeHtml(t("reportDailyCostBillActual"))}</span>
+        <strong class="sampling-daily-cost-metric-value">${escapeHtml(hasBillActual ? formatDailyCostAud(actualTotal) : "-")}</strong>
+      </div>
+      <div class="sampling-daily-cost-metric ${deltaTone(deltaAud)}">
+        <span class="sampling-daily-cost-label">${escapeHtml(t("reportDailyCostDelta"))}</span>
+        <strong class="sampling-daily-cost-metric-value">${escapeHtml(hasBillActual ? formatDailyCostAud(deltaAud, { signed: true }) : "-")}</strong>
+        <span class="sampling-daily-cost-metric-note">${escapeHtml(deltaMetaText)}</span>
+      </div>
+    </div>
+    <div class="sampling-daily-cost-table" role="table" aria-label="${escapeHtml(t("reportDailyCostBreakdown"))}">
+      <div class="sampling-daily-cost-row sampling-daily-cost-row-head" role="row">
+        <div role="columnheader">${escapeHtml(t("reportDailyCostComponent"))}</div>
+        <div role="columnheader">${escapeHtml(t("reportDailyCostEstimated"))}</div>
+        <div role="columnheader">${escapeHtml(t("reportDailyCostBill"))}</div>
+        <div role="columnheader">${escapeHtml(t("reportDailyCostEstimateMinusBill"))}</div>
+      </div>
+      ${rowHtml}
+    </div>
+  `;
 }
 
 function formatSamplingSystemLabel(system) {
@@ -15277,6 +15549,7 @@ async function loadDailyReport({ generateIfMissing = false } = {}) {
     stateCache.lastSamplingDaily = combineSamplingUsageForOverall(usageBySystem);
     renderSamplingUsage(stateCache.lastSamplingDaily, range.label);
     renderSamplingTotals(usageBySystem, "overall", range.label);
+    renderSamplingDailyCost(payload.daily_cost || null, payload.bill_actual_cost || null);
 
     stateCache.lastSamplingZeroHeroHistory = payload.zero_hero_history || null;
     renderSamplingZeroHeroHistory(stateCache.lastSamplingZeroHeroHistory);
@@ -15354,6 +15627,41 @@ async function loadDailyReport({ generateIfMissing = false } = {}) {
   }
 }
 
+function setReportBillUploadBusy(busy) {
+  const button = document.getElementById("reportBillChooseBtn");
+  const input = document.getElementById("reportBillFileInput");
+  if (button) button.disabled = Boolean(busy);
+  if (input) input.disabled = Boolean(busy);
+}
+
+async function uploadReportBillFile(file) {
+  if (!file) {
+    setText("reportBillUploadStatus", t("reportBillNoFile"));
+    return;
+  }
+  setReportBillUploadBusy(true);
+  setText("reportBillUploadStatus", t("reportBillUploading"));
+  const formData = new FormData();
+  formData.append("file", file);
+  try {
+    const payload = await fetchJson("/api/bills/upload", {
+      method: "POST",
+      body: formData,
+      timeoutMs: 120000,
+    });
+    const invoice = payload?.bill?.invoice_number || "-";
+    const updatedDays = Number(payload?.daily_report_update?.updated_daily_reports || 0);
+    setText("reportBillUploadStatus", t("reportBillUploaded", { invoice, days: updatedDays }));
+    await loadDailyReport({ generateIfMissing: false });
+  } catch (err) {
+    setText("reportBillUploadStatus", t("reportBillUploadFailed", { error: formatApiErrorMessage(err) }));
+  } finally {
+    setReportBillUploadBusy(false);
+    const input = document.getElementById("reportBillFileInput");
+    if (input) input.value = "";
+  }
+}
+
 async function loadReportView({ generateIfMissing = true } = {}) {
   setReportCalendarVisible(true);
   setReportCalendarMonthFromDay(reportCalendarState.selectedDay || getLocalDateText(-1));
@@ -15407,6 +15715,7 @@ async function loadSampling({ forceRaw = false, reportDay = "" } = {}) {
       renderSamplingPhaseBatteryRemaining(null, range.label);
       renderSamplingPumpStatusTimeline({ data: [] });
       renderSamplingTotals(null, system, range.label, { metaText: t("loadFailed", { error: invalidMessage }) });
+      renderSamplingDailyCost(null);
       return;
     }
     const sajUsageUrl =
@@ -15498,6 +15807,7 @@ async function loadSampling({ forceRaw = false, reportDay = "" } = {}) {
       setText("samplingDailyMeta", t("loadFailed", { error: String(selectedUsageError) }));
     }
     renderSamplingTotals(usageBySystem, system, range.label);
+    renderSamplingDailyCost(null);
 
     if (samplesResult.status === "fulfilled") {
       const payload = samplesResult.value;
@@ -15963,6 +16273,7 @@ function setActiveTab(tab, load = true) {
   }
   if (samplingRangeModeSelect) samplingRangeModeSelect.disabled = false;
   setReportCalendarVisible(reportActive);
+  setReportBillUploadVisible(reportActive);
   setSamplingZeroHeroCurrentVisible(samplingActive && !reportActive);
   setSamplingSamplesSectionVisible(samplingActive && !reportActive);
   if (!reportActive) setReportLoadingModal(false);
@@ -16055,6 +16366,14 @@ bindClickIfPresent("tabSolplanetControl", () => {
 
 bindClickIfPresent("tabReport", () => {
   setActiveTab("report");
+});
+bindClickIfPresent("reportBillChooseBtn", () => {
+  const input = document.getElementById("reportBillFileInput");
+  if (input) input.click();
+});
+bindChangeIfPresent("reportBillFileInput", (event) => {
+  const file = event?.target?.files?.[0] || null;
+  void uploadReportBillFile(file);
 });
 bindClickIfPresent("tabMonthlyReport", () => {
   setActiveTab("monthlyReport");

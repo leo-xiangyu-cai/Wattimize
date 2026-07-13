@@ -98,6 +98,9 @@ DAILY_REPORT_STATUS_SAVED = "saved"
 DAILY_REPORT_STATUS_NO_DATA = "no_data"
 MONTHLY_REPORT_STATUS_SAVED = "saved"
 MONTHLY_REPORT_STATUS_NO_DATA = "no_data"
+ELECTRICITY_PLAN_CURRENT_BILLED_ID = "globird-zerohero-old-current"
+ELECTRICITY_PLAN_HISTORICAL_BILLED_ID = "globird-zerohero-old-before-2026-07-01"
+DAILY_COST_ZEROHERO_IMPORT_THRESHOLD_KWH = 0.00001
 
 
 @dataclass(frozen=True)
@@ -2272,6 +2275,530 @@ def _load_power_rows(
         return []
 
 
+def _load_daily_report_power_rows(
+    db_path: DatabaseTarget,
+    *,
+    report_day_local: date,
+    system: str,
+) -> list[tuple[float, float | None, float | None, float | None, float | None, float | None, float | None]]:
+    if not _db_exists(db_path):
+        return []
+    try:
+        with _session_scope(db_path) as session:
+            rows = session.execute(
+                select(
+                    DailyReportSampleRow.sampled_at_epoch,
+                    DailyReportSampleRow.pv_w,
+                    DailyReportSampleRow.grid_w,
+                    DailyReportSampleRow.battery_w,
+                    DailyReportSampleRow.load_w,
+                )
+                .where(
+                    DailyReportSampleRow.report_day_local == report_day_local.isoformat(),
+                    DailyReportSampleRow.system == system,
+                )
+                .order_by(DailyReportSampleRow.sampled_at_epoch.asc())
+            ).all()
+            return [(float(row[0]), row[1], row[2], row[3], row[4], None, None) for row in rows]
+    except SQLAlchemyError:
+        return []
+
+
+def _first_iso_date(value: object) -> date | None:
+    match = re.search(r"\d{4}-\d{2}-\d{2}", str(value or ""))
+    if not match:
+        return None
+    try:
+        return date.fromisoformat(match.group(0))
+    except ValueError:
+        return None
+
+
+def select_billed_electricity_plan(plan_payload: object, report_day_local: date) -> dict[str, object] | None:
+    if not isinstance(plan_payload, dict):
+        return None
+    plans = plan_payload.get("plans")
+    if not isinstance(plans, list):
+        return None
+
+    day = report_day_local
+    candidates: list[tuple[date, dict[str, object]]] = []
+    for raw_plan in plans:
+        if not isinstance(raw_plan, dict):
+            continue
+        plan_id = str(raw_plan.get("id") or "")
+        plan_type = str(raw_plan.get("plan_type") or "").lower()
+        is_billed = (
+            plan_id in {ELECTRICITY_PLAN_CURRENT_BILLED_ID, ELECTRICITY_PLAN_HISTORICAL_BILLED_ID}
+            or ("bill-derived" in plan_type and "quote" not in plan_type)
+        )
+        if not is_billed:
+            continue
+        effective_from = _first_iso_date(raw_plan.get("effective_from")) or date.min
+        effective_to = _first_iso_date(raw_plan.get("effective_to")) or date.max
+        if effective_from <= day <= effective_to:
+            candidates.append((effective_from, raw_plan))
+
+    if candidates:
+        return dict(max(candidates, key=lambda item: item[0])[1])
+
+    preferred_ids = (
+        (ELECTRICITY_PLAN_CURRENT_BILLED_ID, ELECTRICITY_PLAN_HISTORICAL_BILLED_ID)
+        if day >= date(2026, 7, 1)
+        else (ELECTRICITY_PLAN_HISTORICAL_BILLED_ID, ELECTRICITY_PLAN_CURRENT_BILLED_ID)
+    )
+    for preferred_id in preferred_ids:
+        for raw_plan in plans:
+            if isinstance(raw_plan, dict) and raw_plan.get("id") == preferred_id:
+                return dict(raw_plan)
+    return dict(plans[0]) if isinstance(plans[0], dict) else None
+
+
+def _cost_number(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
+def _plan_rate_value(rates: dict[str, object], key: str, default: float = 0.0) -> float:
+    raw = rates.get(key)
+    if isinstance(raw, dict):
+        for field in ("after_discount", "before_discount"):
+            number = _cost_number(raw.get(field))
+            if number is not None:
+                return number
+    number = _cost_number(raw)
+    return number if number is not None else default
+
+
+def _plan_rate_cap_kwh(rates: dict[str, object], key: str) -> float | None:
+    raw = rates.get(key)
+    if not isinstance(raw, dict):
+        return None
+    number = _cost_number(raw.get("daily_cap_kwh"))
+    return number if number is not None and number > 0 else None
+
+
+def _parse_time_window_text(value: object) -> tuple[time, time] | None:
+    text_value = str(value or "")
+    match = re.search(r"(\d{1,2})(?::(\d{2}))?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?", text_value)
+    if not match:
+        return None
+    start_hour = int(match.group(1))
+    start_minute = int(match.group(2) or "0")
+    end_hour = int(match.group(3))
+    end_minute = int(match.group(4) or "0")
+    if not (0 <= start_hour <= 23 and 0 <= end_hour <= 23 and 0 <= start_minute <= 59 and 0 <= end_minute <= 59):
+        return None
+    return time(hour=start_hour, minute=start_minute), time(hour=end_hour, minute=end_minute)
+
+
+def _plan_rate_window(
+    rates: dict[str, object],
+    key: str,
+    fallback: tuple[time, time],
+) -> tuple[time, time]:
+    raw = rates.get(key)
+    if isinstance(raw, dict):
+        parsed = _parse_time_window_text(raw.get("time_window"))
+        if parsed is not None:
+            return parsed
+    return fallback
+
+
+def _time_minutes(value: time) -> int:
+    return value.hour * 60 + value.minute
+
+
+def _time_in_window(local_value: datetime, window: tuple[time, time]) -> bool:
+    start_minute = _time_minutes(window[0])
+    end_minute = _time_minutes(window[1])
+    current_minute = local_value.hour * 60 + local_value.minute
+    if start_minute == end_minute:
+        return True
+    if start_minute < end_minute:
+        return start_minute <= current_minute < end_minute
+    return current_minute >= start_minute or current_minute < end_minute
+
+
+def _window_duration_seconds(window: tuple[time, time]) -> float:
+    start_minute = _time_minutes(window[0])
+    end_minute = _time_minutes(window[1])
+    if start_minute == end_minute:
+        return 24 * 3600.0
+    minutes = end_minute - start_minute if end_minute > start_minute else (24 * 60 - start_minute) + end_minute
+    return float(minutes * 60)
+
+
+def _next_local_boundary_after(
+    current_utc: datetime,
+    *,
+    local_tz: object,
+    windows: list[tuple[time, time]],
+) -> datetime | None:
+    local_current = current_utc.astimezone(local_tz)
+    current_ts = current_utc.timestamp()
+    candidates: list[datetime] = []
+    boundary_times = {time.min}
+    for start_time, end_time in windows:
+        boundary_times.add(start_time)
+        boundary_times.add(end_time)
+    for day_offset in range(2):
+        local_day = local_current.date() + timedelta(days=day_offset)
+        for boundary_time in boundary_times:
+            candidate_local = datetime.combine(local_day, boundary_time, tzinfo=local_tz)
+            candidate_utc = candidate_local.astimezone(UTC)
+            if candidate_utc.timestamp() > current_ts + 0.000001:
+                candidates.append(candidate_utc)
+    return min(candidates, default=None)
+
+
+def _iter_interval_cost_segments(
+    *,
+    start_ts: float,
+    duration_seconds: float,
+    local_tz: object,
+    windows: list[tuple[time, time]],
+):
+    current = datetime.fromtimestamp(start_ts, UTC)
+    interval_end = current + timedelta(seconds=max(0.0, duration_seconds))
+    while current < interval_end:
+        next_boundary = _next_local_boundary_after(current, local_tz=local_tz, windows=windows)
+        segment_end = min(interval_end, next_boundary) if next_boundary is not None else interval_end
+        if segment_end <= current:
+            break
+        yield current, (segment_end - current).total_seconds()
+        current = segment_end
+
+
+def _round_kwh(value_wh: float) -> float:
+    return round(value_wh / 1000.0, 4)
+
+
+def _round_aud(value: float) -> float:
+    return round(value, 4)
+
+
+def _integrate_daily_cost_rows(
+    rows: list[tuple[float, float | None, float | None, float | None, float | None, float | None, float | None]],
+    *,
+    system: str,
+    report_day_local: date,
+    period_start_utc: datetime,
+    period_end_utc: datetime,
+    sample_interval_seconds: float,
+    local_timezone_name: str | None,
+    electricity_plan: dict[str, object] | None,
+    source: str,
+) -> dict[str, object]:
+    try:
+        local_tz = ZoneInfo(local_timezone_name) if local_timezone_name else datetime.now().astimezone().tzinfo
+    except ZoneInfoNotFoundError:
+        local_tz = datetime.now().astimezone().tzinfo
+    if local_tz is None:
+        local_tz = UTC
+
+    plan = electricity_plan if isinstance(electricity_plan, dict) else {}
+    rates = plan.get("rates") if isinstance(plan.get("rates"), dict) else {}
+    daily_rate = _plan_rate_value(rates, "daily_charge_aud_per_day")
+    metering_rate = _plan_rate_value(rates, "metering_charge_aud_per_day")
+    peak_rate = _plan_rate_value(rates, "peak_usage_aud_per_kwh")
+    free_rate = _plan_rate_value(rates, "off_peak_first_50_kwh_per_day_aud_per_kwh")
+    off_peak_balance_rate = _plan_rate_value(rates, "off_peak_balance_aud_per_kwh", free_rate)
+    shoulder_rate = _plan_rate_value(rates, "shoulder_usage_aud_per_kwh")
+    fit_evening_rate = _plan_rate_value(rates, "solar_feed_in_4pm_11pm_aud_per_kwh")
+    fit_other_rate = _plan_rate_value(rates, "solar_feed_in_11pm_4pm_aud_per_kwh")
+    super_export_rate = _plan_rate_value(rates, "super_export_top_up_aud_per_kwh")
+    zerohero_rate = _plan_rate_value(rates, "zerohero_credit_aud_per_qualified_day")
+
+    free_import_window = _plan_rate_window(
+        rates,
+        "off_peak_first_50_kwh_per_day_aud_per_kwh",
+        (time(hour=11), time(hour=14)),
+    )
+    peak_import_window = _plan_rate_window(rates, "peak_usage_aud_per_kwh", (time(hour=16), time(hour=23)))
+    fit_evening_window = _plan_rate_window(
+        rates,
+        "solar_feed_in_4pm_11pm_aud_per_kwh",
+        (time(hour=16), time(hour=21)),
+    )
+    super_export_window = _plan_rate_window(rates, "super_export_top_up_aud_per_kwh", (time(hour=18), time(hour=20)))
+    zerohero_window = _plan_rate_window(rates, "zerohero_credit_aud_per_qualified_day", super_export_window)
+    segment_windows = [free_import_window, peak_import_window, fit_evening_window, super_export_window, zerohero_window]
+
+    duration_seconds = max(0.0, period_end_utc.astimezone(UTC).timestamp() - period_start_utc.astimezone(UTC).timestamp())
+    expected = int(round(duration_seconds / sample_interval_seconds)) if sample_interval_seconds > 0 else 0
+    fixed_charge_aud = daily_rate + metering_rate
+    empty_status = "fixed_only" if fixed_charge_aud else "no_data"
+
+    if len(rows) < 2:
+        return {
+            "status": empty_status,
+            "system": system,
+            "source": source,
+            "report_day_local": report_day_local.isoformat(),
+            "period_start_utc": period_start_utc.astimezone(UTC).isoformat(),
+            "period_end_utc": period_end_utc.astimezone(UTC).isoformat(),
+            "timezone_name": str(local_timezone_name or ""),
+            "currency": "AUD",
+            "price_basis": plan.get("price_basis") or "",
+            "plan": {
+                "id": plan.get("id") or "",
+                "display_name": plan.get("display_name") or plan.get("name") or "",
+                "retailer": plan.get("retailer") or "",
+            },
+            "samples": len(rows),
+            "expected_samples": expected,
+            "coverage_ratio": round((len(rows) / expected), 4) if expected > 0 else None,
+            "total_daily_cost_aud": _round_aud(fixed_charge_aud),
+            "line_items": {
+                "fixed": {
+                    "daily_supply_aud": _round_aud(daily_rate),
+                    "metering_aud": _round_aud(metering_rate),
+                    "total_aud": _round_aud(fixed_charge_aud),
+                },
+                "import": {"charge_aud": 0.0},
+                "export": {"credit_aud": 0.0},
+                "zerohero": {"credit_aud": 0.0, "qualified": False, "status": "insufficient_data"},
+            },
+            "quality": {"note": "Not enough samples to estimate variable energy charges."},
+        }
+
+    observed_dts = [
+        max(0.0, float(next_row[0]) - float(current_row[0]))
+        for current_row, next_row in zip(rows, rows[1:])
+        if float(next_row[0]) > float(current_row[0])
+    ]
+    observed_interval_seconds = statistics.median(observed_dts) if observed_dts else 0.0
+    baseline_interval_seconds = max(float(sample_interval_seconds), float(observed_interval_seconds or 0.0))
+    max_dt = baseline_interval_seconds * 2.5
+
+    free_import_wh = 0.0
+    peak_import_wh = 0.0
+    shoulder_import_wh = 0.0
+    fit_evening_export_wh = 0.0
+    fit_other_export_wh = 0.0
+    super_export_window_wh = 0.0
+    zerohero_import_wh = 0.0
+    zerohero_observed_seconds = 0.0
+
+    for current_row, next_row in zip(rows, rows[1:]):
+        ts = float(current_row[0])
+        next_ts = float(next_row[0])
+        dt = max(0.0, next_ts - ts)
+        if dt <= 0:
+            continue
+        if dt > max_dt:
+            dt = max_dt
+        grid_w = current_row[2]
+        if grid_w is None:
+            continue
+        grid = float(grid_w)
+        for segment_start_utc, segment_seconds in _iter_interval_cost_segments(
+            start_ts=ts,
+            duration_seconds=dt,
+            local_tz=local_tz,
+            windows=segment_windows,
+        ):
+            local_segment_start = segment_start_utc.astimezone(local_tz)
+            if _time_in_window(local_segment_start, zerohero_window):
+                zerohero_observed_seconds += segment_seconds
+                if grid > 0:
+                    zerohero_import_wh += grid * segment_seconds / 3600.0
+            if grid > 0:
+                segment_import_wh = grid * segment_seconds / 3600.0
+                if _time_in_window(local_segment_start, free_import_window):
+                    free_import_wh += segment_import_wh
+                elif _time_in_window(local_segment_start, peak_import_window):
+                    peak_import_wh += segment_import_wh
+                else:
+                    shoulder_import_wh += segment_import_wh
+            elif grid < 0:
+                segment_export_wh = (-grid) * segment_seconds / 3600.0
+                if _time_in_window(local_segment_start, fit_evening_window):
+                    fit_evening_export_wh += segment_export_wh
+                else:
+                    fit_other_export_wh += segment_export_wh
+                if _time_in_window(local_segment_start, super_export_window):
+                    super_export_window_wh += segment_export_wh
+
+    free_import_kwh = free_import_wh / 1000.0
+    free_import_cap_kwh = _plan_rate_cap_kwh(rates, "off_peak_first_50_kwh_per_day_aud_per_kwh")
+    free_import_billable_kwh = free_import_kwh
+    off_peak_balance_kwh = 0.0
+    if free_import_cap_kwh is not None and free_import_kwh > free_import_cap_kwh:
+        free_import_billable_kwh = free_import_cap_kwh
+        off_peak_balance_kwh = free_import_kwh - free_import_cap_kwh
+
+    peak_import_kwh = peak_import_wh / 1000.0
+    shoulder_import_kwh = shoulder_import_wh / 1000.0
+    import_charge_aud = (
+        free_import_billable_kwh * free_rate
+        + off_peak_balance_kwh * off_peak_balance_rate
+        + peak_import_kwh * peak_rate
+        + shoulder_import_kwh * shoulder_rate
+    )
+
+    fit_evening_export_kwh = fit_evening_export_wh / 1000.0
+    fit_other_export_kwh = fit_other_export_wh / 1000.0
+    super_export_window_kwh = super_export_window_wh / 1000.0
+    super_export_cap_kwh = _plan_rate_cap_kwh(rates, "super_export_top_up_aud_per_kwh")
+    super_export_billable_kwh = min(super_export_window_kwh, super_export_cap_kwh) if super_export_cap_kwh is not None else super_export_window_kwh
+    fit_credit_aud = fit_evening_export_kwh * fit_evening_rate + fit_other_export_kwh * fit_other_rate
+    super_export_credit_aud = super_export_billable_kwh * super_export_rate
+
+    zerohero_expected_seconds = _window_duration_seconds(zerohero_window)
+    zerohero_coverage_ratio = (
+        max(0.0, min(1.0, zerohero_observed_seconds / zerohero_expected_seconds))
+        if zerohero_expected_seconds > 0
+        else None
+    )
+    zerohero_import_kwh = zerohero_import_wh / 1000.0
+    zerohero_has_enough_data = zerohero_coverage_ratio is not None and zerohero_coverage_ratio >= 0.95
+    zerohero_qualified = (
+        zerohero_rate > 0
+        and zerohero_has_enough_data
+        and zerohero_import_kwh <= DAILY_COST_ZEROHERO_IMPORT_THRESHOLD_KWH
+    )
+    zerohero_credit_aud = zerohero_rate if zerohero_qualified else 0.0
+    if zerohero_rate <= 0:
+        zerohero_status = "not_available"
+    elif not zerohero_has_enough_data:
+        zerohero_status = "insufficient_data"
+    elif zerohero_qualified:
+        zerohero_status = "qualified"
+    else:
+        zerohero_status = "not_qualified"
+
+    export_credit_aud = fit_credit_aud + super_export_credit_aud
+    total_daily_cost_aud = fixed_charge_aud + import_charge_aud - export_credit_aud - zerohero_credit_aud
+
+    return {
+        "status": "estimated",
+        "system": system,
+        "source": source,
+        "report_day_local": report_day_local.isoformat(),
+        "period_start_utc": period_start_utc.astimezone(UTC).isoformat(),
+        "period_end_utc": period_end_utc.astimezone(UTC).isoformat(),
+        "timezone_name": str(local_timezone_name or ""),
+        "currency": "AUD",
+        "price_basis": plan.get("price_basis") or "",
+        "plan": {
+            "id": plan.get("id") or "",
+            "display_name": plan.get("display_name") or plan.get("name") or "",
+            "retailer": plan.get("retailer") or "",
+        },
+        "samples": len(rows),
+        "expected_samples": expected,
+        "coverage_ratio": round((len(rows) / expected), 4) if expected > 0 else None,
+        "total_daily_cost_aud": _round_aud(total_daily_cost_aud),
+        "line_items": {
+            "fixed": {
+                "daily_supply_aud": _round_aud(daily_rate),
+                "metering_aud": _round_aud(metering_rate),
+                "total_aud": _round_aud(fixed_charge_aud),
+            },
+            "import": {
+                "free_kwh": round(free_import_billable_kwh, 4),
+                "off_peak_balance_kwh": round(off_peak_balance_kwh, 4),
+                "peak_kwh": _round_kwh(peak_import_wh),
+                "shoulder_kwh": _round_kwh(shoulder_import_wh),
+                "total_kwh": round(free_import_kwh + peak_import_kwh + shoulder_import_kwh, 4),
+                "charge_aud": _round_aud(import_charge_aud),
+            },
+            "export": {
+                "fit_evening_kwh": _round_kwh(fit_evening_export_wh),
+                "fit_other_kwh": _round_kwh(fit_other_export_wh),
+                "super_export_window_kwh": _round_kwh(super_export_window_wh),
+                "super_export_billable_kwh": round(super_export_billable_kwh, 4),
+                "fit_credit_aud": _round_aud(fit_credit_aud),
+                "super_export_credit_aud": _round_aud(super_export_credit_aud),
+                "credit_aud": _round_aud(export_credit_aud),
+            },
+            "zerohero": {
+                "qualified": zerohero_qualified,
+                "status": zerohero_status,
+                "import_kwh": round(zerohero_import_kwh, 5),
+                "coverage_ratio": round(zerohero_coverage_ratio, 4) if zerohero_coverage_ratio is not None else None,
+                "credit_aud": _round_aud(zerohero_credit_aud),
+                "import_threshold_kwh": DAILY_COST_ZEROHERO_IMPORT_THRESHOLD_KWH,
+            },
+        },
+        "rates": {
+            "daily_charge_aud_per_day": daily_rate,
+            "metering_charge_aud_per_day": metering_rate,
+            "peak_usage_aud_per_kwh": peak_rate,
+            "off_peak_first_50_kwh_per_day_aud_per_kwh": free_rate,
+            "off_peak_balance_aud_per_kwh": off_peak_balance_rate,
+            "shoulder_usage_aud_per_kwh": shoulder_rate,
+            "solar_feed_in_evening_aud_per_kwh": fit_evening_rate,
+            "solar_feed_in_other_aud_per_kwh": fit_other_rate,
+            "super_export_top_up_aud_per_kwh": super_export_rate,
+            "zerohero_credit_aud_per_qualified_day": zerohero_rate,
+        },
+        "quality": {
+            "integration": "left-rectangle",
+            "configured_interval_seconds": float(sample_interval_seconds),
+            "observed_interval_seconds": round(observed_interval_seconds, 3) if observed_interval_seconds > 0 else None,
+            "gap_clamp_seconds": max_dt,
+        },
+    }
+
+
+def compute_daily_cost_between(
+    db_path: DatabaseTarget,
+    *,
+    system: str,
+    report_day_local: date,
+    start_at_utc: datetime,
+    end_at_utc: datetime,
+    sample_interval_seconds: float,
+    local_timezone_name: str | None,
+    electricity_plan: dict[str, object] | None,
+) -> dict[str, object]:
+    start_ts = start_at_utc.astimezone(UTC).timestamp()
+    end_ts = end_at_utc.astimezone(UTC).timestamp()
+    rows = _load_power_rows(db_path, system=system, start_ts=start_ts, end_ts=end_ts)
+    return _integrate_daily_cost_rows(
+        rows,
+        system=system,
+        report_day_local=report_day_local,
+        period_start_utc=start_at_utc,
+        period_end_utc=end_at_utc,
+        sample_interval_seconds=sample_interval_seconds,
+        local_timezone_name=local_timezone_name,
+        electricity_plan=electricity_plan,
+        source="assembled_flow_snapshots",
+    )
+
+
+def compute_daily_report_cost(
+    db_path: DatabaseTarget,
+    *,
+    report_day_local: date,
+    system: str,
+    start_at_utc: datetime,
+    end_at_utc: datetime,
+    sample_interval_seconds: float,
+    local_timezone_name: str | None,
+    electricity_plan: dict[str, object] | None,
+) -> dict[str, object]:
+    rows = _load_daily_report_power_rows(db_path, report_day_local=report_day_local, system=system)
+    return _integrate_daily_cost_rows(
+        rows,
+        system=system,
+        report_day_local=report_day_local,
+        period_start_utc=start_at_utc,
+        period_end_utc=end_at_utc,
+        sample_interval_seconds=sample_interval_seconds,
+        local_timezone_name=local_timezone_name,
+        electricity_plan=electricity_plan,
+        source="daily_report_samples",
+    )
+
+
 def compute_daily_usage(
     db_path: DatabaseTarget,
     *,
@@ -2818,9 +3345,13 @@ def get_daily_report(
         return None
 
     phase_battery = None
+    daily_cost = None
+    bill_actual_cost = None
     if isinstance(usage_by_system, dict):
         usage_by_system = dict(usage_by_system)
         phase_battery = usage_by_system.pop("_phase_battery", None)
+        daily_cost = usage_by_system.pop("_daily_cost", None)
+        bill_actual_cost = usage_by_system.pop("_bill_actual_cost", None)
 
     if not isinstance(series_by_system, dict) or not series_by_system:
         try:
@@ -2864,6 +3395,8 @@ def get_daily_report(
         "series_by_system": series_by_system if isinstance(series_by_system, dict) else {},
         "zero_hero_history": zero_hero_history if isinstance(zero_hero_history, dict) else {},
         "phase_battery": phase_battery if isinstance(phase_battery, dict) else {},
+        "daily_cost": daily_cost if isinstance(daily_cost, dict) else {},
+        "bill_actual_cost": bill_actual_cost if isinstance(bill_actual_cost, dict) else {},
         "samples": {
             "count": len(items),
             "total": total,

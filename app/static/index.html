@@ -232,9 +232,16 @@
 
       <section id="samplingView" class="view hidden">
         <section class="card">
-          <div class="section-header">
+          <div class="section-header sampling-report-header">
             <h2 id="samplingTitle" data-i18n="samplingTitle">Sampling Records</h2>
-            <span id="samplingUpdatedAt" class="muted">-</span>
+            <div class="report-header-actions">
+              <div id="reportBillUploadToolbar" class="report-bill-upload-toolbar hidden" hidden aria-hidden="true">
+                <input id="reportBillFileInput" type="file" accept="application/pdf,.pdf,text/plain,.txt" hidden />
+                <button id="reportBillChooseBtn" type="button" class="btn secondary report-bill-upload-btn" data-i18n="reportBillChooseBtn">Upload bill</button>
+                <span id="reportBillUploadStatus" class="report-bill-upload-status muted" aria-live="polite"></span>
+              </div>
+              <span id="samplingUpdatedAt" class="muted">-</span>
+            </div>
           </div>
           <p id="samplingStorageMeta" class="muted hidden" hidden aria-hidden="true">-</p>
           <p id="samplingDailyMeta" class="muted hidden" hidden aria-hidden="true">-</p>
@@ -247,6 +254,7 @@
               <div class="sampling-totals-chart-wrap">
                 <div id="samplingTotalsChartCanvas" class="sampling-totals-chart"></div>
               </div>
+              <div id="samplingDailyCost" class="sampling-daily-cost hidden" hidden aria-hidden="true"></div>
               <div class="sampling-phase-battery">
                 <div class="sampling-phase-battery-head">
                   <h4 data-i18n="samplingPhaseBatteryTitle">Stage-End Battery Remaining</h4>

@@ -16,11 +16,13 @@ if str(ROOT) not in sys.path:
 from app.config import get_config_path, load_settings
 from app.persistence import (
     build_daily_report_phase_battery,
+    compute_daily_cost_between,
     compute_usage_between,
     get_series_samples,
     init_db,
     list_zero_hero_window_history,
     save_daily_report,
+    select_billed_electricity_plan,
 )
 
 SYSTEMS = ("saj", "solplanet", "combined")
@@ -30,6 +32,7 @@ EXPORT_WINDOW_START_HOUR = 18
 EXPORT_WINDOW_END_HOUR = 20
 ZERO_HERO_WINDOW_MINUTES = 5
 SERIES_MAX_POINTS = 500
+ELECTRICITY_PLANS_PATH = ROOT / "data" / "home-plan" / "electricity-plans.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,6 +73,10 @@ def sample_interval_for_system(system: str) -> float:
     if system == "solplanet":
         return solplanet_interval
     return saj_interval
+
+
+def load_electricity_plan_payload() -> dict[str, object]:
+    return json.loads(ELECTRICITY_PLANS_PATH.read_text(encoding="utf-8"))
 
 
 def local_period(day: date, local_tz: object) -> tuple[datetime, datetime]:
@@ -123,11 +130,18 @@ def existing_report_state(db_path: Path, day: date) -> str:
         json.loads(row[2] or "{}")
     except json.JSONDecodeError:
         return "invalid"
-    return "valid" if isinstance(usage_json, dict) and isinstance(usage_json.get("_phase_battery"), dict) else "missing_phase_battery"
+    if not isinstance(usage_json, dict):
+        return "invalid"
+    if not isinstance(usage_json.get("_phase_battery"), dict):
+        return "missing_phase_battery"
+    if not isinstance(usage_json.get("_daily_cost"), dict):
+        return "missing_daily_cost"
+    return "valid"
 
 
 def generate_report(db_path: Path, day: date, local_tz: object, timezone_name: str) -> dict[str, object]:
     start_at_utc, end_at_utc = local_period(day, local_tz)
+    electricity_plan = select_billed_electricity_plan(load_electricity_plan_payload(), day)
     usage_by_system = {
         system: compute_usage_between(
             db_path,
@@ -143,6 +157,16 @@ def generate_report(db_path: Path, day: date, local_tz: object, timezone_name: s
         )
         for system in SYSTEMS
     }
+    usage_by_system["_daily_cost"] = compute_daily_cost_between(
+        db_path,
+        system="combined",
+        report_day_local=day,
+        start_at_utc=start_at_utc,
+        end_at_utc=end_at_utc,
+        sample_interval_seconds=sample_interval_for_system("combined"),
+        local_timezone_name=timezone_name,
+        electricity_plan=electricity_plan,
+    )
     series_by_system = {
         system: get_series_samples(
             db_path,
