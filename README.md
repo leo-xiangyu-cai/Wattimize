@@ -152,6 +152,7 @@ make nas-deploy
 ```
 
 `make nas-deploy` now stops local `docker compose` services first. If the NAS container is not already running, it pushes the local SQLite database to the NAS before deploying. If the NAS container is already running, it treats the command as a code-only refresh and skips database sync.
+Every NAS deploy also uploads `data/home-plan/electricity-plans.json` to `${NAS_DATA_DIR}/home-plan/electricity-plans.json`, which is mounted in the container as `/app/data/home-plan/electricity-plans.json` for the Plan tab.
 
 To deploy code to the NAS without pushing the local database, use:
 
@@ -173,6 +174,7 @@ Supported overrides for `make nas-deploy`:
 - `CONTAINER_NAME`, `IMAGE_NAME`, `IMAGE_REPOSITORY`
 - `NAS_DATA_DIR`, `HOST_PORT`, `CONTAINER_PORT`, `TZ_VALUE`
 - `DOCKER_BIN`, `RETENTION_DAYS`
+- `LOCAL_PLAN_PATH`
 
 Test the actual SSH and NAS storage path used by deployments:
 

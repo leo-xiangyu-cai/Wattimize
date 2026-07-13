@@ -20,6 +20,10 @@ if is_truthy "${SKIP_DB_PUSH:-}" || is_truthy "${NO_DB_PUSH:-}"; then
   skip_db_push=1
 fi
 
+LOCAL_PLAN_PATH="${LOCAL_PLAN_PATH:-data/home-plan/electricity-plans.json}"
+REMOTE_PLAN_DIR="${NAS_DATA_DIR}/home-plan"
+REMOTE_PLAN_FILE="${REMOTE_PLAN_DIR}/electricity-plans.json"
+
 cleanup_remote_temp() {
   remote_exec "
     set -euo pipefail
@@ -29,6 +33,29 @@ cleanup_remote_temp() {
 }
 
 trap cleanup_remote_temp EXIT
+
+sync_plan_file_to_nas() {
+  if [[ ! -f "${LOCAL_PLAN_PATH}" ]]; then
+    echo "Electricity plan file not found at ${LOCAL_PLAN_PATH}; cannot deploy Plan page data." >&2
+    exit 1
+  fi
+
+  local timestamp
+  timestamp="$(date +%Y%m%d_%H%M%S)"
+  local remote_backup_dir="${NAS_DATA_DIR}/backup/home-plan"
+  local plan_size_bytes
+  plan_size_bytes="$(wc -c < "${LOCAL_PLAN_PATH}" | tr -d ' ')"
+
+  echo "Uploading electricity plan data ${LOCAL_PLAN_PATH} ($(format_bytes "${plan_size_bytes}")) to ${SSH_TARGET}:${REMOTE_PLAN_FILE}..."
+  remote_exec "
+    set -euo pipefail
+    mkdir -p '${REMOTE_PLAN_DIR}' '${remote_backup_dir}'
+    if [ -f '${REMOTE_PLAN_FILE}' ]; then
+      cp '${REMOTE_PLAN_FILE}' '${remote_backup_dir}/electricity-plans.json.${timestamp}.bak'
+    fi
+  "
+  cat "${LOCAL_PLAN_PATH}" | remote_exec "cat > '${REMOTE_PLAN_FILE}'"
+}
 
 echo "Stopping local docker compose services before deployment..."
 stop_local_compose
@@ -40,6 +67,8 @@ elif [[ "${skip_db_push}" -eq 1 ]]; then
 else
   bash "${SCRIPT_DIR}/push-db-to-nas.sh"
 fi
+
+sync_plan_file_to_nas
 
 echo "Building image TAR..."
 make docker

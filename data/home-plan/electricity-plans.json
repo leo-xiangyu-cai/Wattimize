@@ -1,0 +1,425 @@
+{
+  "recorded_at_local": "2026-07-13",
+  "timezone": "Australia/Sydney",
+  "home": {
+    "address": "20 Lowanna Ave, Baulkham Hills NSW 2153",
+    "address_status": "confirmed_by_bills",
+    "address_note": "User originally provided 20 Lowanna Ave. The Mar-Jul 2026 GloBird bills confirm 20 LOWANNA AVE; one earlier pasted quote page appeared to show 18 LOWANNA AVE.",
+    "distributor": "Endeavour Energy",
+    "postcode": "2153",
+    "nmi": "43104479765"
+  },
+  "plans": [
+    {
+      "id": "globird-zerohero-old-before-2026-07-01",
+      "retailer": "GloBird Energy",
+      "name": "Old ZEROHERO - before Jul 2026",
+      "display_name": "Old ZEROHERO (before 2026-07-01)",
+      "plan_type": "Bill-derived legacy ZEROHERO",
+      "effective_from": "2026-03-03 bill",
+      "effective_to": "2026-06-30",
+      "price_basis": "inc GST",
+      "discount_note": "Bill-derived historical rates. These were stable across the provided March-June 2026 bills.",
+      "rates": {
+        "daily_charge_aud_per_day": {
+          "before_discount": 1.397,
+          "after_discount": 1.397
+        },
+        "peak_usage_aud_per_kwh": {
+          "before_discount": 0.506,
+          "after_discount": 0.506,
+          "time_window": "16:00-23:00"
+        },
+        "off_peak_first_50_kwh_per_day_aud_per_kwh": {
+          "before_discount": 0,
+          "after_discount": 0,
+          "time_window": "11:00-14:00",
+          "note": "Bills show all recorded offpeak usage charged at $0.00/kWh. No balance line appeared."
+        },
+        "off_peak_balance_aud_per_kwh": {
+          "before_discount": null,
+          "after_discount": null,
+          "time_window": "Not visible in provided bills"
+        },
+        "shoulder_usage_aud_per_kwh": {
+          "before_discount": 0.363,
+          "after_discount": 0.363,
+          "time_window": "14:00-16:00, 23:00-11:00"
+        },
+        "controlled_load_aud_per_kwh": {
+          "before_discount": null,
+          "after_discount": null,
+          "note": "No controlled-load charge appeared in the provided bills."
+        },
+        "metering_charge_aud_per_day": {
+          "before_discount": 0,
+          "after_discount": 0
+        },
+        "solar_feed_in_4pm_11pm_aud_per_kwh": {
+          "before_discount": 0.06,
+          "after_discount": 0.06,
+          "time_window": "16:00-21:00 on bills"
+        },
+        "solar_feed_in_11pm_4pm_aud_per_kwh": {
+          "before_discount": 0,
+          "after_discount": 0,
+          "time_window": "21:00-10:00, 14:00-16:00, and 10:00-14:00 on bills"
+        },
+        "super_export_top_up_aud_per_kwh": {
+          "before_discount": 0.09,
+          "after_discount": 0.09,
+          "time_window": "18:00-20:00",
+          "daily_cap_kwh": 10,
+          "note": "Top-up component only. Notice says total Super Export value was 15 c/kWh including 6 c/kWh feed-in plus 9 c/kWh top-up."
+        },
+        "zerohero_credit_aud_per_qualified_day": {
+          "before_discount": 1,
+          "after_discount": 1,
+          "time_window": "18:00-20:00"
+        }
+      },
+      "benefits": [
+        {
+          "label": "Old free window",
+          "description": "11:00-14:00 offpeak usage was billed at $0.00/kWh."
+        },
+        {
+          "label": "Old ZEROHERO",
+          "description": "$1/day credit window was 18:00-20:00."
+        },
+        {
+          "label": "Old Super Export",
+          "description": "Top-up was 9 c/kWh before 2026-07-01, for the first 10 kWh/day exported between 18:00 and 20:00."
+        }
+      ],
+      "source": "User-provided GloBird bills from 2026-03-03 to 2026-06-30 plus Energy Market Pricing Review Price Update notice"
+    },
+    {
+      "id": "globird-zerohero-old-current",
+      "retailer": "GloBird Energy",
+      "name": "Old ZEROHERO - current billed",
+      "display_name": "Old ZEROHERO (current billed)",
+      "plan_type": "Bill-derived legacy ZEROHERO",
+      "effective_from": "2026-07-01",
+      "expected_unchanged_until": "2027-07",
+      "price_basis": "inc GST",
+      "discount_note": "Latest bill-derived rates. This legacy plan may not be available for switching.",
+      "estimated_annual_price": {
+        "bill_note": "Latest bill says FOUR4FREE may cost up to $301.15 less per year than the current plan, but that comparison may not fully value achieved ZEROHERO and Super Export credits."
+      },
+      "rates": {
+        "daily_charge_aud_per_day": {
+          "before_discount": 1.705,
+          "after_discount": 1.705
+        },
+        "peak_usage_aud_per_kwh": {
+          "before_discount": 0.528,
+          "after_discount": 0.528,
+          "time_window": "16:00-23:00"
+        },
+        "off_peak_first_50_kwh_per_day_aud_per_kwh": {
+          "before_discount": 0,
+          "after_discount": 0,
+          "time_window": "11:00-14:00",
+          "note": "Bills show all recorded offpeak usage charged at $0.00/kWh. No balance line appeared."
+        },
+        "off_peak_balance_aud_per_kwh": {
+          "before_discount": null,
+          "after_discount": null,
+          "time_window": "Not visible in provided bills"
+        },
+        "shoulder_usage_aud_per_kwh": {
+          "before_discount": 0.418,
+          "after_discount": 0.418,
+          "time_window": "14:00-16:00, 23:00-11:00"
+        },
+        "controlled_load_aud_per_kwh": {
+          "before_discount": null,
+          "after_discount": null,
+          "note": "No controlled-load charge appeared in the provided bills."
+        },
+        "metering_charge_aud_per_day": {
+          "before_discount": 0,
+          "after_discount": 0
+        },
+        "solar_feed_in_4pm_11pm_aud_per_kwh": {
+          "before_discount": 0.02,
+          "after_discount": 0.02,
+          "time_window": "16:00-21:00 on bills"
+        },
+        "solar_feed_in_11pm_4pm_aud_per_kwh": {
+          "before_discount": 0,
+          "after_discount": 0,
+          "time_window": "21:00-10:00, 14:00-16:00, and 10:00-14:00 on bills"
+        },
+        "super_export_top_up_aud_per_kwh": {
+          "before_discount": 0.08,
+          "after_discount": 0.08,
+          "time_window": "18:00-20:00",
+          "daily_cap_kwh": 10,
+          "note": "Top-up component only. Notice says current total Super Export value is 10 c/kWh including 2 c/kWh feed-in plus 8 c/kWh top-up."
+        },
+        "zerohero_credit_aud_per_qualified_day": {
+          "before_discount": 1,
+          "after_discount": 1,
+          "time_window": "18:00-20:00",
+          "note": "$1/day credit when the qualifying condition is met. Recent bills credited 117 of 124 days."
+        }
+      },
+      "benefits": [
+        {
+          "label": "Current old free window",
+          "description": "11:00-14:00 remains the bill-visible $0.00/kWh window."
+        },
+        {
+          "label": "Current old ZEROHERO",
+          "description": "$1/day credit window shown on bills remains 18:00-20:00."
+        },
+        {
+          "label": "Current Super Export",
+          "description": "Top-up is now 8 c/kWh for the first 10 kWh/day exported between 18:00 and 20:00."
+        }
+      ],
+      "source": "User-provided GloBird invoice 10993507, 2026-07-01 to 2026-07-04 segment plus Energy Market Pricing Review Price Update notice"
+    },
+    {
+      "id": "globird-zerohero-new-quote",
+      "retailer": "GloBird Energy",
+      "name": "ZEROHERO - new quote",
+      "display_name": "ZEROHERO (new quote)",
+      "plan_type": "VPP battery plan - new quote",
+      "effective_from": "2026-07-01",
+      "price_basis": "inc GST",
+      "discount_note": "No quoted discount in the pasted ZEROHERO table.",
+      "estimated_annual_price": {
+        "with_vpp_benefits_aud": 3493,
+        "without_vpp_benefits_aud": 3785,
+        "quote_note": "Pasted quote assumed $292 ZEROHERO credit for the with-benefits estimate."
+      },
+      "rates": {
+        "daily_charge_aud_per_day": {
+          "before_discount": 2.035,
+          "after_discount": 2.035
+        },
+        "peak_usage_aud_per_kwh": {
+          "before_discount": 0.594,
+          "after_discount": 0.594,
+          "time_window": "16:00-22:59"
+        },
+        "off_peak_first_50_kwh_per_day_aud_per_kwh": {
+          "before_discount": 0,
+          "after_discount": 0,
+          "time_window": "12:00-14:59",
+          "daily_cap_kwh": 50
+        },
+        "off_peak_balance_aud_per_kwh": {
+          "before_discount": 0.308,
+          "after_discount": 0.308,
+          "time_window": "12:00-14:59 after 50 kWh/day"
+        },
+        "shoulder_usage_aud_per_kwh": {
+          "before_discount": 0.528,
+          "after_discount": 0.528,
+          "time_window": "00:00-11:59, 15:00-15:59, 23:00-23:59"
+        },
+        "controlled_load_aud_per_kwh": {
+          "before_discount": 0.308,
+          "after_discount": 0.308
+        },
+        "metering_charge_aud_per_day": {
+          "before_discount": 0,
+          "after_discount": 0
+        },
+        "solar_feed_in_4pm_11pm_aud_per_kwh": {
+          "before_discount": 0.02,
+          "after_discount": 0.02,
+          "time_window": "16:00-23:00"
+        },
+        "solar_feed_in_11pm_4pm_aud_per_kwh": {
+          "before_discount": 0,
+          "after_discount": 0,
+          "time_window": "23:00-16:00"
+        },
+        "super_export_top_up_aud_per_kwh": {
+          "before_discount": 0.08,
+          "after_discount": 0.08,
+          "time_window": "18:00-21:00",
+          "daily_cap_kwh": 15,
+          "note": "Top-up component only. Total value is intended to be 10 c/kWh including the 2 c/kWh standard feed-in."
+        },
+        "zerohero_credit_aud_per_qualified_day": {
+          "before_discount": 1,
+          "after_discount": 1,
+          "time_window": "18:00-21:00"
+        }
+      },
+      "benefits": [
+        {
+          "label": "ZEROCHARGE",
+          "description": "12:00-15:00 local time, first 50 kWh/day on standard energy circuits is free."
+        },
+        {
+          "label": "ZEROHERO",
+          "description": "$1/day credit when grid import is zero or near-zero between 18:00 and 21:00."
+        },
+        {
+          "label": "ZEROWASTEDSOLAR",
+          "description": "18:00-21:00 export credit is treated as 10 c/kWh total for the first 15 kWh/day unless a bill proves otherwise."
+        }
+      ],
+      "source": "GloBird fact sheet plus user-pasted quote rate table"
+    },
+    {
+      "id": "globird-four4free-quote",
+      "retailer": "GloBird Energy",
+      "name": "FOUR4FREE - quote",
+      "display_name": "FOUR4FREE (quote)",
+      "plan_type": "Free midday usage plan - quote",
+      "effective_from": "2026-07-13 quote",
+      "price_basis": "inc GST",
+      "discount_note": "Pasted table includes before-discount and after-discount rates. This card records the quote; no comparison is calculated here.",
+      "estimated_annual_price": {
+        "quote_aud": 3168
+      },
+      "rates": {
+        "daily_charge_aud_per_day": {
+          "before_discount": 1.529,
+          "after_discount": 1.48313
+        },
+        "peak_usage_aud_per_kwh": {
+          "before_discount": 0.5962,
+          "after_discount": 0.57831
+        },
+        "off_peak_first_50_kwh_per_day_aud_per_kwh": {
+          "before_discount": 0,
+          "after_discount": 0,
+          "time_window": "11:00-15:00 expected from FOUR4FREE quote card",
+          "daily_cap_kwh": 50
+        },
+        "off_peak_balance_aud_per_kwh": {
+          "before_discount": 0.297,
+          "after_discount": 0.28809
+        },
+        "shoulder_usage_aud_per_kwh": {
+          "before_discount": 0.3861,
+          "after_discount": 0.37452
+        },
+        "controlled_load_aud_per_kwh": {
+          "before_discount": 0.297,
+          "after_discount": 0.28809
+        },
+        "metering_charge_aud_per_day": {
+          "before_discount": 0,
+          "after_discount": 0
+        },
+        "solar_feed_in_4pm_11pm_aud_per_kwh": {
+          "before_discount": 0.08,
+          "after_discount": 0.08,
+          "time_window": "16:00-23:00"
+        },
+        "solar_feed_in_11pm_4pm_aud_per_kwh": {
+          "before_discount": 0,
+          "after_discount": 0,
+          "time_window": "23:00-16:00"
+        }
+      },
+      "benefits": [
+        {
+          "label": "Four free hours",
+          "description": "$0.00 usage charge between 11:00 and 15:00, excluding controlled load."
+        },
+        {
+          "label": "Higher standard feed-in",
+          "description": "4pm-11pm feed-in is 8 c/kWh in the pasted quote table."
+        }
+      ],
+      "source": "User-pasted GloBird quote rate table"
+    }
+  ],
+  "rate_change_history": [
+    {
+      "id": "old-zerohero-stable-mar-to-jun-2026",
+      "title": "Old ZEROHERO stable period",
+      "period": "2026-03-03 to 2026-06-30",
+      "source": "Invoices 10003540, 10222162, 10469689, 10715037, the pre-2026-07-01 segment of invoice 10993507, and Energy Market Pricing Review Price Update notice.",
+      "summary": "The provided bills show the same Old ZEROHERO rates from March through June 2026.",
+      "rates": [
+        {
+          "label_key": "planRateDaily",
+          "unit": "$/day",
+          "value": 1.397
+        },
+        {
+          "label_key": "planRatePeak",
+          "unit": "$/kWh",
+          "value": 0.506
+        },
+        {
+          "label_key": "planRateShoulder",
+          "unit": "$/kWh",
+          "value": 0.363
+        },
+        {
+          "label_key": "planRateFitEvening",
+          "unit": "$/kWh",
+          "value": 0.06
+        },
+        {
+          "label_key": "planRateSuperExportTopUp",
+          "unit": "$/kWh",
+          "value": 0.09
+        }
+      ]
+    },
+    {
+      "id": "old-zerohero-rate-change-2026-07-01",
+      "title": "Old ZEROHERO price change",
+      "period": "From 2026-07-01",
+      "source": "Energy Market Pricing Review Price Update notice and invoice 10993507, which splits 2026-06-07 to 2026-06-30 and 2026-07-01 to 2026-07-04.",
+      "summary": "This is the only clear rate change in the provided bills: daily, peak, and shoulder charges increased; evening feed-in and Super Export top-up decreased.",
+      "changes": [
+        {
+          "label_key": "planRateDaily",
+          "unit": "$/day",
+          "from": 1.397,
+          "to": 1.705
+        },
+        {
+          "label_key": "planRatePeak",
+          "unit": "$/kWh",
+          "from": 0.506,
+          "to": 0.528
+        },
+        {
+          "label_key": "planRateShoulder",
+          "unit": "$/kWh",
+          "from": 0.363,
+          "to": 0.418
+        },
+        {
+          "label_key": "planRateFitEvening",
+          "unit": "$/kWh",
+          "from": 0.06,
+          "to": 0.02
+        },
+        {
+          "label_key": "planRateSuperExportTopUp",
+          "unit": "$/kWh",
+          "from": 0.09,
+          "to": 0.08
+        }
+      ],
+      "unchanged": [
+        "Offpeak bill-visible usage stayed at $0.00/kWh.",
+        "ZEROHERO credit stayed at $1/day.",
+        "Old ZEROHERO credit window stayed 18:00-20:00.",
+        "Super Export stayed limited to the first 10 kWh/day exported between 18:00 and 20:00."
+      ]
+    }
+  ],
+  "notes": [
+    "Plan tab uses a time-based timetable as the comparison view for the four plan records.",
+    "Old ZEROHERO before 2026-07-01 and Old ZEROHERO current billed are separated so the price change is visible.",
+    "ZEROHERO new quote and FOUR4FREE quote are quote records, not bill-derived current-account rates."
+  ]
+}

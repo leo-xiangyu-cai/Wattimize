@@ -30,6 +30,7 @@ help:
 	@echo "  make nas-stop    Stop the NAS container without touching local services"
 	@echo "  make nas-deploy  Build and deploy to TerraMaster NAS over SSH"
 	@echo "                  Use SKIP_DB_PUSH=1 to deploy without pushing the local SQLite database"
+	@echo "                  Always syncs data/home-plan/electricity-plans.json to the NAS data volume"
 	@echo "  make test-tnas   Test NAS latency, packet loss, upload speed, and download speed"
 
 docker:

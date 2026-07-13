@@ -4,7 +4,10 @@
 __pycache__/
 *.pyc
 *.pyo
-data/
+data/*
+!data/home-plan/
+data/home-plan/*
+!data/home-plan/electricity-plans.json
 *.tar
 dist/
 .idea/
