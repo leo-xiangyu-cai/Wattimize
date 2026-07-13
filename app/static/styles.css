@@ -426,6 +426,344 @@ select {
   overflow-x: auto;
 }
 
+.plan-summary-card,
+.plan-matrix-card,
+.plan-rates-card,
+.plan-change-card {
+  margin-bottom: 12px;
+}
+
+.plan-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.plan-summary-item {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(103, 133, 118, 0.22);
+  border-radius: 8px;
+  background: rgba(246, 250, 244, 0.92);
+}
+
+.plan-summary-item span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.plan-summary-item strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 17px;
+  word-break: break-word;
+}
+
+.plan-matrix-table {
+  min-width: 1120px;
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.plan-matrix-table th,
+.plan-matrix-table td {
+  padding: 10px;
+  border-bottom: 1px solid rgba(103, 133, 118, 0.18);
+  text-align: left;
+  vertical-align: top;
+}
+
+.plan-matrix-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #edf5ee;
+  color: #214536;
+  font-size: 13px;
+}
+
+.plan-matrix-table tbody th {
+  width: 190px;
+  background: rgba(246, 250, 244, 0.92);
+}
+
+.plan-matrix-table tbody th strong {
+  display: block;
+  font-size: 14px;
+}
+
+.plan-matrix-table tbody th span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.plan-matrix-cell {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.plan-matrix-cell strong {
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+.plan-matrix-cell span,
+.plan-matrix-empty {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.plan-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.plan-rate-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(103, 133, 118, 0.22);
+  border-radius: 8px;
+  background: rgba(248, 251, 248, 0.96);
+}
+
+.plan-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.plan-card-retailer {
+  margin: 0 0 2px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.plan-card-head h3 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.plan-annual {
+  display: grid;
+  gap: 4px;
+  min-width: 170px;
+  text-align: right;
+  font-size: 14px;
+  font-weight: 700;
+  color: #214536;
+}
+
+.plan-card-note {
+  margin: 10px 0 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(194, 122, 24, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 248, 232, 0.72);
+  color: #72531f;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.plan-rate-list {
+  display: grid;
+  gap: 0;
+  margin-top: 8px;
+}
+
+.plan-rate-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.15fr) minmax(210px, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(103, 133, 118, 0.16);
+}
+
+.plan-rate-name {
+  min-width: 0;
+}
+
+.plan-rate-name span {
+  display: block;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.plan-rate-name small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.plan-rate-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.plan-rate-values span {
+  min-width: 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(232, 242, 235, 0.72);
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.plan-rate-values em {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.plan-benefits {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.plan-benefit {
+  padding: 10px;
+  border-left: 4px solid rgba(31, 122, 82, 0.55);
+  border-radius: 8px;
+  background: rgba(235, 245, 239, 0.88);
+}
+
+.plan-benefit strong,
+.plan-benefit span {
+  display: block;
+}
+
+.plan-benefit strong {
+  font-size: 14px;
+}
+
+.plan-benefit span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.plan-notes {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.plan-notes p,
+.plan-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.plan-change-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.plan-change-item {
+  padding: 14px;
+  border: 1px solid rgba(103, 133, 118, 0.22);
+  border-radius: 8px;
+  background: rgba(248, 251, 248, 0.96);
+}
+
+.plan-change-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.plan-change-head h3 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.plan-change-head span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.plan-change-summary {
+  margin: 10px 0 0;
+  color: #385345;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.plan-change-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.plan-change-metric {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(232, 242, 235, 0.72);
+}
+
+.plan-change-metric span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.plan-change-metric strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 15px;
+  word-break: break-word;
+}
+
+.plan-change-unchanged {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.plan-change-source {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .sampling-chart-card {
   margin-top: 10px;
   padding: 12px;
@@ -7357,6 +7695,31 @@ td {
   .monthly-report-controls {
     grid-template-columns: 1fr;
     width: 100%;
+  }
+
+  .plan-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .plan-card-head {
+    display: grid;
+  }
+
+  .plan-annual {
+    min-width: 0;
+    text-align: left;
+  }
+
+  .plan-rate-row {
+    grid-template-columns: 1fr;
+  }
+
+  .plan-rate-values {
+    grid-template-columns: 1fr;
+  }
+
+  .plan-rate-values span {
+    white-space: normal;
   }
 
   .monthly-report-month-grid {

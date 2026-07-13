@@ -23,7 +23,7 @@ Use the web config page:
 - Optional field: `SOLPLANET_DONGLE_HOST`.
 - The config dialog can auto-discover `SOLPLANET_INVERTER_SN` and `SOLPLANET_BATTERY_SN` from the dongle CGI API.
 - Adjustable sampling fields: `SAJ_SAMPLE_INTERVAL_SECONDS`, `SOLPLANET_SAMPLE_INTERVAL_SECONDS` (choices: `5/10/30/60/300`).
-- Detailed history retention: `1/2/3/6/12` months, default `2`. Older raw samples and per-point daily/monthly history are removed; report summaries and recommendations remain available.
+- Detailed history retention: `1/2/3/6/12` months, default `2`. Older high-frequency source snapshots are removed to keep SQLite compact, while generated daily/monthly reports and their saved report details are preserved.
 - The Monthly tab provides month-to-date estimates, comparison baselines, Hero Window analysis, anomalies, and load-shifting recommendations. Its year picker shows whether each month is saved, has no data, is ready to generate, or is live; completed months are persisted automatically and can also be generated through the API.
 - Saved daily and monthly reports expose a `report_status` of `saved` or `no_data`. Persisted monthly snapshots remain available after detailed-history cleanup.
 
@@ -94,6 +94,7 @@ curl -s -X POST "http://<wattimize-host>:18000/api/reports/daily/generate?day_lo
 curl -s "http://<wattimize-host>:18000/api/reports/monthly/index?year=2026" | jq
 curl -s "http://<wattimize-host>:18000/api/reports/monthly?month=2026-03" | jq
 curl -s -X POST "http://<wattimize-host>:18000/api/reports/monthly/generate?month=2026-03" | jq
+curl -s http://<wattimize-host>:18000/api/home-plan/electricity-plans | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/charging -H 'Content-Type: application/json' -d '{"enabled":true}' | jq
 curl -s -X POST http://<wattimize-host>:18000/api/tesla/control/current -H 'Content-Type: application/json' -d '{"amps":16}' | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/tesla/auto-control -H 'Content-Type: application/json' -d '{"enabled":false}' | jq

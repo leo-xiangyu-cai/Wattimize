@@ -1926,14 +1926,11 @@ def prune_detailed_data_older_than(
     older_than_epoch: float,
     older_than_day_local: date | None = None,
 ) -> dict[str, object]:
-    """Remove high-frequency history while retaining daily and monthly summaries."""
+    """Remove high-frequency source snapshots while preserving generated reports."""
     cutoff = float(older_than_epoch)
     result = {
         "cutoff_epoch": cutoff,
         "raw_snapshot_rows_deleted": 0,
-        "daily_sample_rows_deleted": 0,
-        "daily_reports_compacted": 0,
-        "monthly_reports_compacted": 0,
     }
     if not _db_exists(db_path):
         return result
@@ -1943,56 +1940,7 @@ def prune_detailed_data_older_than(
             raw_deleted = session.execute(
                 delete(AssembledFlowSnapshotRow).where(AssembledFlowSnapshotRow.assembled_at_epoch < cutoff)
             )
-            daily_samples_deleted = session.execute(
-                delete(DailyReportSampleRow).where(DailyReportSampleRow.sampled_at_epoch < cutoff)
-            )
             result["raw_snapshot_rows_deleted"] = max(0, int(raw_deleted.rowcount or 0))
-            result["daily_sample_rows_deleted"] = max(0, int(daily_samples_deleted.rowcount or 0))
-
-            old_daily_reports = session.scalars(
-                select(DailyReportRow).where(DailyReportRow.period_end_epoch <= cutoff)
-            ).all()
-            for report in old_daily_reports:
-                if report.series_json == "{}" and report.zero_hero_json == "{}" and int(report.sample_count or 0) == 0:
-                    continue
-                report.series_json = "{}"
-                report.zero_hero_json = "{}"
-                report.sample_count = 0
-                result["daily_reports_compacted"] = int(result["daily_reports_compacted"]) + 1
-
-            monthly_reports = session.scalars(select(MonthlyReportRow)).all()
-            for report in monthly_reports:
-                payload = _json_loads(report.payload_json, default={})
-                if not isinstance(payload, dict):
-                    continue
-                zero_hero = payload.get("zero_hero")
-                history = zero_hero.get("history") if isinstance(zero_hero, dict) else None
-                items = history.get("items") if isinstance(history, dict) else None
-                if not isinstance(items, list) or not items:
-                    continue
-                retained_items = items
-                if older_than_day_local is not None:
-                    cutoff_day_text = older_than_day_local.isoformat()
-                    retained_items = [
-                        item
-                        for item in items
-                        if isinstance(item, dict) and str(item.get("date_local") or "") >= cutoff_day_text
-                    ]
-                elif float(report.period_end_epoch or 0.0) <= cutoff:
-                    retained_items = []
-                if len(retained_items) == len(items):
-                    continue
-                compact_history = dict(history)
-                compact_history["items"] = retained_items
-                compact_history["days"] = len(retained_items)
-                compact_history["detail_retained"] = bool(retained_items)
-                compact_history["detail_pruned_before_epoch"] = cutoff
-                compact_history["detail_pruned_before_day_local"] = older_than_day_local.isoformat() if older_than_day_local else None
-                compact_zero_hero = dict(zero_hero)
-                compact_zero_hero["history"] = compact_history
-                payload["zero_hero"] = compact_zero_hero
-                report.payload_json = _json_dumps_full(payload) or "{}"
-                result["monthly_reports_compacted"] = int(result["monthly_reports_compacted"]) + 1
     except SQLAlchemyError:
         return result
     return result

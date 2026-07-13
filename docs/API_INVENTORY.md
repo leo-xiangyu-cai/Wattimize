@@ -1,6 +1,6 @@
 # API Inventory
 
-Last updated: 2026-05-15
+Last updated: 2026-07-13
 
 This file tracks all backend APIs and their current usage status.
 
@@ -45,6 +45,9 @@ Status values:
 - `GET /api/database/tables/{table_name}/rows`
 - `GET /api/database/export.sqlite3`
 - `POST /api/database/import.sqlite3`
+
+### Plan tab
+- `GET /api/home-plan/electricity-plans`
 
 ### Solplanet Raw tab
 - `GET /api/solplanet/cgi/getdev-device-2`

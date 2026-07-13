@@ -135,6 +135,46 @@ const I18N = {
     weatherLoadError: "Weather unavailable: {error}",
     refreshBtn: "Refresh",
     dashboardTab: "Dashboard",
+    planTab: "Plan",
+    planTitle: "Electricity Plan",
+    planMatrixTitle: "Plan Matrix",
+    planMatrixHint: "Rows are charge types or time windows; columns are plans.",
+    planMatrixType: "Type / window",
+    planRatesTitle: "Rates",
+    planRatesHint: "Four plan records are shown without a comparison table.",
+    planChangeTitle: "Rate Changes",
+    planChangeHint: "Bill-derived change history for the current account.",
+    planBeforeDiscount: "Before",
+    planAfterDiscount: "After",
+    planRecordedAt: "Recorded {date} · {distributor} · {postcode}",
+    planUpdatedAt: "Updated {date}",
+    planAddressNeedsCheck: "Address house number still needs confirmation.",
+    planAddressConfirmed: "Confirmed by bills",
+    planAnnualWithVpp: "With VPP: {value}/yr",
+    planAnnualWithoutVpp: "Without VPP: {value}/yr",
+    planAnnualQuote: "Quote: {value}/yr",
+    planNoData: "No plan data available.",
+    planLoadFailed: "Plan data unavailable: {error}",
+    planNotListed: "Not listed",
+    planCapKwhPerDay: "{value} kWh/day cap",
+    planRateDaily: "Daily charge",
+    planRatePeak: "Peak usage",
+    planRateOffPeakFirst: "Free/off-peak window",
+    planRateOffPeakBalance: "Off-peak balance",
+    planRateShoulder: "Shoulder usage",
+    planRateControlledLoad: "Controlled load",
+    planRateMetering: "Metering charge",
+    planRateFitEvening: "Solar feed-in 4pm-11pm",
+    planRateFitOther: "Solar feed-in 11pm-4pm",
+    planRateSuperExportTopUp: "Super Export top-up",
+    planRateZeroHeroCredit: "ZEROHERO credit",
+    planNoRateChanges: "No rate changes recorded.",
+    planChangeSource: "Source: {source}",
+    planChangeFromTo: "{from} -> {to}",
+    planSummaryRetailer: "Retailer",
+    planSummaryDistributor: "Distributor",
+    planSummaryPostcode: "Postcode",
+    planSummaryStatus: "Status",
     notificationMatrixTab: "Time Window",
     notificationMatrixTitle: "Time Window",
     notificationMatrixIntro: "Each panel groups rules by Operation and Notification so you can quickly distinguish automated actions from alerts. Tesla and pool pump auto control are managed only from Priority Scores, not from each time-window rule.",
@@ -1133,6 +1173,46 @@ const I18N = {
     weatherLoadError: "天气获取失败: {error}",
     refreshBtn: "刷新",
     dashboardTab: "总览",
+    planTab: "电价",
+    planTitle: "电价计划",
+    planMatrixTitle: "Plan 矩阵",
+    planMatrixHint: "行是费用类型或时段，列是每个 plan。",
+    planMatrixType: "类型 / 时段",
+    planRatesTitle: "费率",
+    planRatesHint: "只显示四个 plan 记录，暂不做横向对比。",
+    planChangeTitle: "费率变化",
+    planChangeHint: "按账单整理的当前账户调价记录。",
+    planBeforeDiscount: "折前",
+    planAfterDiscount: "折后",
+    planRecordedAt: "记录 {date} · {distributor} · {postcode}",
+    planUpdatedAt: "更新 {date}",
+    planAddressNeedsCheck: "门牌号仍需确认。",
+    planAddressConfirmed: "账单已确认",
+    planAnnualWithVpp: "含 VPP：{value}/年",
+    planAnnualWithoutVpp: "不含 VPP：{value}/年",
+    planAnnualQuote: "报价：{value}/年",
+    planNoData: "没有计划数据。",
+    planLoadFailed: "计划数据不可用：{error}",
+    planNotListed: "未列出",
+    planCapKwhPerDay: "{value} kWh/天 cap",
+    planRateDaily: "每日供电费",
+    planRatePeak: "Peak 用电",
+    planRateOffPeakFirst: "免费/Off-peak 时段",
+    planRateOffPeakBalance: "Off-peak 超出部分",
+    planRateShoulder: "Shoulder 用电",
+    planRateControlledLoad: "Controlled load",
+    planRateMetering: "Metering charge",
+    planRateFitEvening: "Solar feed-in 4pm-11pm",
+    planRateFitOther: "Solar feed-in 11pm-4pm",
+    planRateSuperExportTopUp: "Super Export top-up",
+    planRateZeroHeroCredit: "ZEROHERO credit",
+    planNoRateChanges: "暂无费率变化记录。",
+    planChangeSource: "来源：{source}",
+    planChangeFromTo: "{from} -> {to}",
+    planSummaryRetailer: "零售商",
+    planSummaryDistributor: "供电区",
+    planSummaryPostcode: "邮编",
+    planSummaryStatus: "状态",
     notificationMatrixTab: "Time Window",
     notificationMatrixTitle: "Time Window",
     notificationMatrixIntro: "每个面板会按 Operation 和 Notification 分组展示规则，这样你可以更快区分自动执行的动作和提醒通知。Tesla 和水泵的自动控制都只在 Priority Scores 里统一管理，不在各个 time window 规则里单独修改。",
@@ -2395,6 +2475,7 @@ const stateCache = {
   lastSolplanetControl: null,
   lastSolplanetControlLive: null,
   lastSolplanetControlFetch: null,
+  lastHomePlan: null,
   lastSamplingStatus: null,
   lastSamplingDaily: null,
   lastSamplingUsageBySystem: null,
@@ -2659,8 +2740,21 @@ function getLang() {
 
 let currentLang = getLang();
 const _hashTab = location.hash.slice(1);
-const ALL_TABS = ["dashboard", "notificationMatrix", "rawData", "solplanetControl", "report", "monthlyReport", "database", "workerLogs", "operationTimeline", "workerFailureLog"];
+const ALL_TABS = ["dashboard", "plan", "notificationMatrix", "rawData", "solplanetControl", "report", "monthlyReport", "database", "workerLogs", "operationTimeline", "workerFailureLog"];
 const SAJ_PROFILE_IDS = ["self_consumption", "time_of_use", "microgrid"];
+const PLAN_RATE_ROWS = [
+  { key: "daily_charge_aud_per_day", labelKey: "planRateDaily", unit: "$/day", better: "lower" },
+  { key: "peak_usage_aud_per_kwh", labelKey: "planRatePeak", unit: "$/kWh", better: "lower" },
+  { key: "off_peak_first_50_kwh_per_day_aud_per_kwh", labelKey: "planRateOffPeakFirst", unit: "$/kWh", better: "lower" },
+  { key: "off_peak_balance_aud_per_kwh", labelKey: "planRateOffPeakBalance", unit: "$/kWh", better: "lower" },
+  { key: "shoulder_usage_aud_per_kwh", labelKey: "planRateShoulder", unit: "$/kWh", better: "lower" },
+  { key: "controlled_load_aud_per_kwh", labelKey: "planRateControlledLoad", unit: "$/kWh", better: "lower" },
+  { key: "metering_charge_aud_per_day", labelKey: "planRateMetering", unit: "$/day", better: "lower" },
+  { key: "solar_feed_in_4pm_11pm_aud_per_kwh", labelKey: "planRateFitEvening", unit: "$/kWh", better: "higher" },
+  { key: "solar_feed_in_11pm_4pm_aud_per_kwh", labelKey: "planRateFitOther", unit: "$/kWh", better: "higher" },
+  { key: "super_export_top_up_aud_per_kwh", labelKey: "planRateSuperExportTopUp", unit: "$/kWh", better: "higher" },
+  { key: "zerohero_credit_aud_per_qualified_day", labelKey: "planRateZeroHeroCredit", unit: "$/day", better: "higher" },
+];
 function normalizeAppTab(tab) {
   const normalized = String(tab || "").trim();
   if (normalized === "sampling") return "report";
@@ -2707,6 +2801,7 @@ let notificationMatrixCollapseInitialized = false;
 let notificationMatrixPriorityCollapsed = true;
 const tabLoadState = {
   dashboard: { inFlight: false },
+  plan: { inFlight: false },
   notificationMatrix: { inFlight: false },
   entities: { inFlight: false },
   rawData: { inFlight: false },
@@ -3285,6 +3380,255 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function parsePlanNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatPlanAud(value, digits = 0) {
+  const n = parsePlanNumber(value);
+  if (n === null) return "-";
+  return `$${n.toFixed(digits)}`;
+}
+
+function formatPlanRateValue(value, unit) {
+  const n = parsePlanNumber(value);
+  if (n === null) return "-";
+  const suffix = unit === "$/day" ? "/day" : "/kWh";
+  return `$${n.toFixed(5)}${suffix}`;
+}
+
+function getPlanRate(plan, key, column = "after_discount") {
+  return parsePlanNumber(plan?.rates?.[key]?.[column]);
+}
+
+function getPlanRateWindow(plan, key) {
+  const rate = plan?.rates?.[key];
+  const parts = [];
+  if (rate?.time_window) parts.push(String(rate.time_window));
+  if (rate?.daily_cap_kwh) parts.push(t("planCapKwhPerDay", { value: rate.daily_cap_kwh }));
+  return parts.join(" · ");
+}
+
+function getPlanDisplayName(plan) {
+  return String(plan?.display_name || plan?.name || plan?.id || "-");
+}
+
+function renderPlanMatrixCell(plan, row) {
+  const rate = plan?.rates?.[row.key];
+  const after = getPlanRate(plan, row.key, "after_discount");
+  const before = getPlanRate(plan, row.key, "before_discount");
+  if (!rate || after === null) {
+    return `<span class="plan-matrix-empty">${escapeHtml(t("planNotListed"))}</span>`;
+  }
+  const value = formatPlanRateValue(after, row.unit);
+  const details = [];
+  if (before !== null && Math.abs(before - after) > 0.000001) {
+    details.push(`${t("planBeforeDiscount")} ${formatPlanRateValue(before, row.unit)}`);
+  }
+  const windowText = getPlanRateWindow(plan, row.key);
+  if (windowText) details.push(windowText);
+  return `
+    <div class="plan-matrix-cell">
+      <strong>${escapeHtml(value)}</strong>
+      ${details.map((detail) => `<span>${escapeHtml(detail)}</span>`).join("")}
+    </div>
+  `;
+}
+
+function renderPlanMatrix(plans) {
+  const matrixHead = document.getElementById("planMatrixHead");
+  const matrixBody = document.getElementById("planMatrixBody");
+  if (!matrixHead || !matrixBody) return;
+  matrixHead.innerHTML = `
+    <th>${escapeHtml(t("planMatrixType"))}</th>
+    ${plans.map((plan) => `<th>${escapeHtml(getPlanDisplayName(plan))}</th>`).join("")}
+  `;
+  if (!plans.length) {
+    matrixBody.innerHTML = `
+      <tr>
+        <td colspan="1"><span class="plan-empty">${escapeHtml(t("planNoData"))}</span></td>
+      </tr>
+    `;
+    return;
+  }
+  matrixBody.innerHTML = PLAN_RATE_ROWS.map((row) => `
+    <tr>
+      <th scope="row">
+        <strong>${escapeHtml(t(row.labelKey))}</strong>
+        <span>${escapeHtml(row.unit)}</span>
+      </th>
+      ${plans.map((plan) => `<td>${renderPlanMatrixCell(plan, row)}</td>`).join("")}
+    </tr>
+  `).join("");
+}
+
+function renderPlanRateRows(plan) {
+  return PLAN_RATE_ROWS.map((row) => {
+    const before = getPlanRate(plan, row.key, "before_discount");
+    const after = getPlanRate(plan, row.key, "after_discount");
+    const windowText = getPlanRateWindow(plan, row.key);
+    return `
+      <div class="plan-rate-row">
+        <div class="plan-rate-name">
+          <span>${escapeHtml(t(row.labelKey))}</span>
+          ${windowText ? `<small>${escapeHtml(windowText)}</small>` : ""}
+        </div>
+        <div class="plan-rate-values">
+          <span><em>${escapeHtml(t("planBeforeDiscount"))}</em>${escapeHtml(formatPlanRateValue(before, row.unit))}</span>
+          <span><em>${escapeHtml(t("planAfterDiscount"))}</em>${escapeHtml(formatPlanRateValue(after, row.unit))}</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderPlanAnnualEstimate(plan) {
+  const annual = plan?.estimated_annual_price || {};
+  const lines = [];
+  if (annual.with_vpp_benefits_aud != null) {
+    lines.push(t("planAnnualWithVpp", { value: formatPlanAud(annual.with_vpp_benefits_aud, 0) }));
+  }
+  if (annual.without_vpp_benefits_aud != null) {
+    lines.push(t("planAnnualWithoutVpp", { value: formatPlanAud(annual.without_vpp_benefits_aud, 0) }));
+  }
+  if (annual.quote_aud != null) {
+    lines.push(t("planAnnualQuote", { value: formatPlanAud(annual.quote_aud, 0) }));
+  }
+  return lines.length ? lines.map((line) => `<span>${escapeHtml(line)}</span>`).join("") : "<span>-</span>";
+}
+
+function renderPlanChangeHistory(changes) {
+  if (!Array.isArray(changes) || !changes.length) {
+    return `<div class="plan-empty">${escapeHtml(t("planNoRateChanges"))}</div>`;
+  }
+  return changes.map((change) => {
+    const metrics = Array.isArray(change.changes) && change.changes.length ? change.changes : Array.isArray(change.rates) ? change.rates : [];
+    const unchanged = Array.isArray(change.unchanged) ? change.unchanged : [];
+    return `
+      <article class="plan-change-item">
+        <div class="plan-change-head">
+          <div>
+            <h3>${escapeHtml(change.title || "-")}</h3>
+            <span>${escapeHtml(change.period || "-")}</span>
+          </div>
+        </div>
+        ${change.summary ? `<p class="plan-change-summary">${escapeHtml(change.summary)}</p>` : ""}
+        ${metrics.length ? `
+          <div class="plan-change-metrics">
+            ${metrics.map((item) => {
+              const label = item.label_key ? t(item.label_key) : String(item.label || "-");
+              const valueText = item.from !== undefined || item.to !== undefined
+                ? t("planChangeFromTo", {
+                    from: formatPlanRateValue(item.from, item.unit),
+                    to: formatPlanRateValue(item.to, item.unit),
+                  })
+                : formatPlanRateValue(item.value, item.unit);
+              return `
+                <div class="plan-change-metric">
+                  <span>${escapeHtml(label)}</span>
+                  <strong>${escapeHtml(valueText)}</strong>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        ` : ""}
+        ${unchanged.length ? `
+          <ul class="plan-change-unchanged">
+            ${unchanged.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        ` : ""}
+        ${change.source ? `<p class="plan-change-source">${escapeHtml(t("planChangeSource", { source: change.source }))}</p>` : ""}
+      </article>
+    `;
+  }).join("");
+}
+
+function renderHomePlan(payload = stateCache.lastHomePlan) {
+  const planMeta = document.getElementById("planMeta");
+  const planUpdatedAt = document.getElementById("planUpdatedAt");
+  const summaryGrid = document.getElementById("planSummaryGrid");
+  const cards = document.getElementById("planCards");
+  const matrixBody = document.getElementById("planMatrixBody");
+  const changeList = document.getElementById("planChangeList");
+  const notes = document.getElementById("planNotes");
+  if (!summaryGrid || !cards || !matrixBody || !changeList) return;
+
+  const plans = Array.isArray(payload?.plans) ? payload.plans : [];
+  const home = payload?.home || {};
+  if (planMeta) {
+    planMeta.textContent = payload
+      ? t("planRecordedAt", {
+          date: payload.recorded_at_local || "-",
+          distributor: home.distributor || "-",
+          postcode: home.postcode || "-",
+        })
+      : t("planNoData");
+  }
+  if (planUpdatedAt) planUpdatedAt.textContent = payload?.recorded_at_local ? t("planUpdatedAt", { date: payload.recorded_at_local }) : "-";
+
+  if (!plans.length) {
+    summaryGrid.innerHTML = `<div class="plan-empty">${escapeHtml(t("planNoData"))}</div>`;
+    renderPlanMatrix([]);
+    cards.innerHTML = "";
+    changeList.innerHTML = renderPlanChangeHistory([]);
+    if (notes) notes.innerHTML = "";
+    return;
+  }
+
+  const retailers = [...new Set(plans.map((plan) => plan.retailer).filter(Boolean))].join(", ") || "-";
+  const statusText = home.address_status === "needs_house_number_confirmation"
+    ? t("planAddressNeedsCheck")
+    : home.address_status === "confirmed_by_bills"
+      ? t("planAddressConfirmed")
+      : "-";
+  summaryGrid.innerHTML = [
+    { label: t("planSummaryRetailer"), value: retailers },
+    { label: t("planSummaryDistributor"), value: home.distributor || "-" },
+    { label: t("planSummaryPostcode"), value: home.postcode || "-" },
+    { label: t("planSummaryStatus"), value: statusText },
+  ].map((item) => `
+    <div class="plan-summary-item">
+      <span>${escapeHtml(item.label)}</span>
+      <strong>${escapeHtml(item.value)}</strong>
+    </div>
+  `).join("");
+
+  renderPlanMatrix(plans);
+
+  cards.innerHTML = plans.map((plan) => {
+    const benefits = Array.isArray(plan.benefits) ? plan.benefits : [];
+    return `
+      <article class="plan-rate-card">
+        <div class="plan-card-head">
+          <div>
+            <p class="plan-card-retailer">${escapeHtml(plan.retailer || "-")}</p>
+            <h3>${escapeHtml(plan.display_name || plan.name || "-")}</h3>
+            <p class="muted">${escapeHtml(plan.plan_type || "-")} · ${escapeHtml(plan.price_basis || "-")}</p>
+          </div>
+          <div class="plan-annual">${renderPlanAnnualEstimate(plan)}</div>
+        </div>
+        ${plan.discount_note ? `<p class="plan-card-note">${escapeHtml(plan.discount_note)}</p>` : ""}
+        <div class="plan-rate-list">${renderPlanRateRows(plan)}</div>
+        <div class="plan-benefits">
+          ${benefits.map((benefit) => `
+            <div class="plan-benefit">
+              <strong>${escapeHtml(benefit.label || "-")}</strong>
+              <span>${escapeHtml(benefit.description || "")}</span>
+            </div>
+          `).join("")}
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  changeList.innerHTML = renderPlanChangeHistory(payload?.rate_change_history);
+
+  const planNotes = Array.isArray(payload?.notes) ? payload.notes : [];
+  if (notes) notes.innerHTML = planNotes.map((note) => `<p>${escapeHtml(note)}</p>`).join("");
+}
+
 function formatRelativeAgo(isoText) {
   if (!isoText) return "-";
   const dt = new Date(isoText);
@@ -3438,6 +3782,7 @@ function applyTranslations() {
   renderSajProfilePanel();
   renderSolplanetControlFromCache();
   renderNotificationMatrix();
+  renderHomePlan();
   rerenderSamplingViewFromCache();
   rerenderDatabaseViewFromCache();
   if (stateCache.lastOperationTimeline) renderOperationTimelinePage(stateCache.lastOperationTimeline);
@@ -14286,6 +14631,20 @@ async function loadWeatherForecast() {
   }
 }
 
+async function loadHomePlan() {
+  const planMeta = document.getElementById("planMeta");
+  if (planMeta) planMeta.textContent = t("planNoData");
+  try {
+    const payload = await fetchJson("/api/home-plan/electricity-plans", { timeoutMs: 6000 });
+    stateCache.lastHomePlan = payload;
+    renderHomePlan(payload);
+  } catch (err) {
+    stateCache.lastHomePlan = null;
+    setText("planMeta", t("planLoadFailed", { error: String(err) }));
+    renderHomePlan(null);
+  }
+}
+
 async function loadSummary() {
   const requestId = ++summaryRequestId;
   const summary = stateCache.lastSummary || {
@@ -15219,13 +15578,17 @@ async function loadCurrentTab(fromAutoRefresh = false) {
 
 
 async function loadTabWithGuard(tab, fromAutoRefresh = false) {
-  if (!configReady) return false;
   const tabKey = ALL_TABS.includes(tab) ? tab : "dashboard";
+  if (!configReady && tabKey !== "plan") return false;
   if (tabKey === "notificationMatrix" && fromAutoRefresh) return false;
   const slot = tabLoadState[tabKey];
   if (slot?.inFlight) return false;
   if (slot) slot.inFlight = true;
   try {
+    if (tabKey === "plan") {
+      await loadHomePlan();
+      return true;
+    }
     if (tabKey === "notificationMatrix") {
       await loadNotificationMatrix();
       return true;
@@ -15328,6 +15691,7 @@ function setActiveTab(tab, load = true) {
   location.hash = currentTab;
 
   const dashboardView = document.getElementById("dashboardView");
+  const planView = document.getElementById("planView");
   const notificationMatrixView = document.getElementById("notificationMatrixView");
   const rawDataView = document.getElementById("rawDataView");
   const solplanetControlView = document.getElementById("solplanetControlView");
@@ -15338,6 +15702,7 @@ function setActiveTab(tab, load = true) {
   const operationTimelineView = document.getElementById("operationTimelineView");
   const workerFailureLogView = document.getElementById("workerFailureLogView");
   const tabDashboard = document.getElementById("tabDashboard");
+  const tabPlan = document.getElementById("tabPlan");
   const tabNotificationMatrix = document.getElementById("tabNotificationMatrix");
   const tabRawData = document.getElementById("tabRawData");
   const tabSolplanetControl = document.getElementById("tabSolplanetControl");
@@ -15349,6 +15714,7 @@ function setActiveTab(tab, load = true) {
   const tabWorkerFailureLog = document.getElementById("tabWorkerFailureLog");
 
   const dashboardActive = currentTab === "dashboard";
+  const planActive = currentTab === "plan";
   const notificationMatrixActive = currentTab === "notificationMatrix";
   const rawDataActive = currentTab === "rawData";
   const solplanetControlActive = currentTab === "solplanetControl";
@@ -15360,6 +15726,7 @@ function setActiveTab(tab, load = true) {
   const operationTimelineActive = currentTab === "operationTimeline";
   const workerFailureLogActive = currentTab === "workerFailureLog";
   if (dashboardView) dashboardView.classList.toggle("hidden", !dashboardActive);
+  if (planView) planView.classList.toggle("hidden", !planActive);
   if (notificationMatrixView) notificationMatrixView.classList.toggle("hidden", !notificationMatrixActive);
   if (rawDataView) rawDataView.classList.toggle("hidden", !rawDataActive);
   if (solplanetControlView) solplanetControlView.classList.toggle("hidden", !solplanetControlActive);
@@ -15370,6 +15737,7 @@ function setActiveTab(tab, load = true) {
   if (operationTimelineView) operationTimelineView.classList.toggle("hidden", !operationTimelineActive);
   if (workerFailureLogView) workerFailureLogView.classList.toggle("hidden", !workerFailureLogActive);
   if (tabDashboard) tabDashboard.classList.toggle("active", dashboardActive);
+  if (tabPlan) tabPlan.classList.toggle("active", planActive);
   if (tabNotificationMatrix) tabNotificationMatrix.classList.toggle("active", notificationMatrixActive);
   if (tabRawData) tabRawData.classList.toggle("active", rawDataActive);
   if (tabSolplanetControl) tabSolplanetControl.classList.toggle("active", solplanetControlActive);
@@ -15381,6 +15749,7 @@ function setActiveTab(tab, load = true) {
   if (tabWorkerFailureLog) tabWorkerFailureLog.classList.toggle("active", workerFailureLogActive);
   [
     [tabDashboard, dashboardActive],
+    [tabPlan, planActive],
     [tabNotificationMatrix, notificationMatrixActive],
     [tabRawData, rawDataActive],
     [tabSolplanetControl, solplanetControlActive],
@@ -15413,6 +15782,8 @@ function setActiveTab(tab, load = true) {
     renderReportCalendar();
   } else if (currentTab === "monthlyReport") {
     renderMonthlyReport();
+  } else if (currentTab === "plan") {
+    renderHomePlan();
   }
   if (dashboardActive) {
     window.requestAnimationFrame(() => {
@@ -15447,6 +15818,7 @@ bindChangeIfPresent("langSelect", (event) => {
   syncWorkerLogsFilters();
   if (stateCache.lastWorkerLogsPage) renderWorkerLogsPage(stateCache.lastWorkerLogsPage);
   if (stateCache.lastOperationTimeline) renderOperationTimelinePage(stateCache.lastOperationTimeline);
+  if (stateCache.lastHomePlan) renderHomePlan(stateCache.lastHomePlan);
   if (stateCache.lastOperationTimeline || currentTab === "operationTimeline") {
     void loadOperationTimeline();
   }
@@ -15468,6 +15840,9 @@ bindClickIfPresent("configBtn", () => {
 
 bindClickIfPresent("tabDashboard", () => {
   setActiveTab("dashboard");
+});
+bindClickIfPresent("tabPlan", () => {
+  setActiveTab("plan");
 });
 bindClickIfPresent("tabNotificationMatrix", () => {
   setActiveTab("notificationMatrix");

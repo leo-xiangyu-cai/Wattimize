@@ -40,6 +40,9 @@
         <button id="tabMonthlyReport" class="tab-btn" type="button" data-tab="monthlyReport" data-i18n="monthlyReportTab" role="tab" aria-selected="false" aria-controls="monthlyReportView" tabindex="-1">
           Monthly
         </button>
+        <button id="tabPlan" class="tab-btn" type="button" data-tab="plan" data-i18n="planTab" role="tab" aria-selected="false" aria-controls="planView" tabindex="-1">
+          Plan
+        </button>
         <button id="tabNotificationMatrix" class="tab-btn" type="button" data-tab="notificationMatrix" data-i18n="notificationMatrixTab" role="tab" aria-selected="false" aria-controls="notificationMatrixView" tabindex="-1">
           Time Window
         </button>
@@ -105,6 +108,53 @@
               <p id="combined-loadFormulaText" class="balance-formula muted">-</p>
             </section>
           </div>
+        </section>
+      </section>
+
+      <section id="planView" class="view hidden">
+        <section class="card plan-summary-card">
+          <div class="section-header">
+            <div>
+              <h2 data-i18n="planTitle">Electricity Plan</h2>
+              <p id="planMeta" class="muted">-</p>
+            </div>
+            <span id="planUpdatedAt" class="muted">-</span>
+          </div>
+          <div id="planSummaryGrid" class="plan-summary-grid"></div>
+        </section>
+
+        <section class="card plan-matrix-card">
+          <div class="section-header">
+            <h2 data-i18n="planMatrixTitle">Plan Matrix</h2>
+            <span class="muted" data-i18n="planMatrixHint">Rows are charge types or time windows; columns are plans.</span>
+          </div>
+          <div class="table-wrap">
+            <table class="plan-matrix-table">
+              <thead>
+                <tr id="planMatrixHead">
+                  <th data-i18n="planMatrixType">Type / window</th>
+                </tr>
+              </thead>
+              <tbody id="planMatrixBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card plan-rates-card">
+          <div class="section-header">
+            <h2 data-i18n="planRatesTitle">Rates</h2>
+            <span class="muted" data-i18n="planRatesHint">Four plan records are shown without a comparison table.</span>
+          </div>
+          <div id="planCards" class="plan-card-grid"></div>
+        </section>
+
+        <section class="card plan-change-card">
+          <div class="section-header">
+            <h2 data-i18n="planChangeTitle">Rate Changes</h2>
+            <span class="muted" data-i18n="planChangeHint">Bill-derived change history for the current account.</span>
+          </div>
+          <div id="planChangeList" class="plan-change-list"></div>
+          <div id="planNotes" class="plan-notes"></div>
         </section>
       </section>
 

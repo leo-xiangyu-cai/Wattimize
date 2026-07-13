@@ -459,6 +459,8 @@ if static_dir.exists():
 
 INDEX_CACHE_PLACEHOLDER = "__WATTIMIZE_STATIC_VERSION__"
 static_asset_version = "dev"
+HOME_PLAN_DIR = Path(__file__).resolve().parent.parent / "data" / "home-plan"
+ELECTRICITY_PLANS_PATH = HOME_PLAN_DIR / "electricity-plans.json"
 
 solplanet_flow_cache: dict[str, object] = {"payload": None, "at_monotonic": 0.0}
 solplanet_flow_lock = asyncio.Lock()
@@ -13003,23 +13005,15 @@ async def _prune_detailed_data_once(*, reclaim_space: bool = False) -> dict[str,
     result["cutoff_utc"] = cutoff_local.astimezone(UTC).isoformat()
     rows_changed = sum(
         int(result.get(key) or 0)
-        for key in (
-            "raw_snapshot_rows_deleted",
-            "daily_sample_rows_deleted",
-            "daily_reports_compacted",
-            "monthly_reports_compacted",
-        )
+        for key in ("raw_snapshot_rows_deleted",)
     )
     if reclaim_space:
         result["storage_compaction"] = await asyncio.to_thread(vacuum_sqlite_database, storage_db_path)
     if rows_changed:
         logger.info(
-            "Pruned detailed data before %s: raw=%s daily_samples=%s daily_reports=%s monthly_reports=%s",
+            "Pruned source snapshots before %s: raw=%s",
             cutoff_day_local.isoformat(),
             result.get("raw_snapshot_rows_deleted"),
-            result.get("daily_sample_rows_deleted"),
-            result.get("daily_reports_compacted"),
-            result.get("monthly_reports_compacted"),
         )
     return result
 
@@ -13265,6 +13259,20 @@ async def _restart_collector() -> dict[str, object]:
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/home-plan/electricity-plans")
+async def home_plan_electricity_plans() -> dict[str, object]:
+    try:
+        raw = ELECTRICITY_PLANS_PATH.read_text(encoding="utf-8")
+        payload = json.loads(raw)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Electricity plan data file not found") from exc
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail=f"Electricity plan data file is invalid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=500, detail="Electricity plan data file must contain a JSON object")
+    return payload
 
 
 # ---------------------------------------------------------------------------
