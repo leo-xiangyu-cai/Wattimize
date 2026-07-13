@@ -137,11 +137,9 @@ const I18N = {
     dashboardTab: "Dashboard",
     planTab: "Plan",
     planTitle: "Electricity Plan",
-    planMatrixTitle: "Plan Matrix",
-    planMatrixHint: "Rows are charge types or time windows; columns are plans.",
-    planMatrixType: "Type / window",
-    planRatesTitle: "Rates",
-    planRatesHint: "Four plan records are shown without a comparison table.",
+    planMatrixTitle: "Plan Timetable",
+    planMatrixHint: "Cell tint follows buy price: green is lower, orange is higher.",
+    planMatrixType: "Time",
     planChangeTitle: "Rate Changes",
     planChangeHint: "Bill-derived change history for the current account.",
     planBeforeDiscount: "Before",
@@ -150,9 +148,6 @@ const I18N = {
     planUpdatedAt: "Updated {date}",
     planAddressNeedsCheck: "Address house number still needs confirmation.",
     planAddressConfirmed: "Confirmed by bills",
-    planAnnualWithVpp: "With VPP: {value}/yr",
-    planAnnualWithoutVpp: "Without VPP: {value}/yr",
-    planAnnualQuote: "Quote: {value}/yr",
     planNoData: "No plan data available.",
     planLoadFailed: "Plan data unavailable: {error}",
     planNotListed: "Not listed",
@@ -175,6 +170,18 @@ const I18N = {
     planSummaryDistributor: "Distributor",
     planSummaryPostcode: "Postcode",
     planSummaryStatus: "Status",
+    planTimetableFixed: "Fixed / non-time",
+    planTimetableBuy: "Buy",
+    planTimetableSell: "Sell",
+    planTimetableSpecial: "Special",
+    planTimetableNone: "None",
+    planTimetableFreeUsage: "Free usage",
+    planTimetableDailySupply: "Daily supply",
+    planTimetableMetering: "Metering",
+    planTimetableControlledLoad: "Controlled load",
+    planTimetableSuperExport: "Super Export",
+    planTimetableTotalExport: "total {value}",
+    planTimetableZeroHero: "ZEROHERO credit",
     notificationMatrixTab: "Time Window",
     notificationMatrixTitle: "Time Window",
     notificationMatrixIntro: "Each panel groups rules by Operation and Notification so you can quickly distinguish automated actions from alerts. Tesla and pool pump auto control are managed only from Priority Scores, not from each time-window rule.",
@@ -1186,11 +1193,9 @@ const I18N = {
     dashboardTab: "总览",
     planTab: "电价",
     planTitle: "电价计划",
-    planMatrixTitle: "Plan 矩阵",
-    planMatrixHint: "行是费用类型或时段，列是每个 plan。",
-    planMatrixType: "类型 / 时段",
-    planRatesTitle: "费率",
-    planRatesHint: "只显示四个 plan 记录，暂不做横向对比。",
+    planMatrixTitle: "电价时间表",
+    planMatrixHint: "底色按买入价变化：绿色更低，橙色更高。",
+    planMatrixType: "时间段",
     planChangeTitle: "费率变化",
     planChangeHint: "按账单整理的当前账户调价记录。",
     planBeforeDiscount: "折前",
@@ -1199,9 +1204,6 @@ const I18N = {
     planUpdatedAt: "更新 {date}",
     planAddressNeedsCheck: "门牌号仍需确认。",
     planAddressConfirmed: "账单已确认",
-    planAnnualWithVpp: "含 VPP：{value}/年",
-    planAnnualWithoutVpp: "不含 VPP：{value}/年",
-    planAnnualQuote: "报价：{value}/年",
     planNoData: "没有计划数据。",
     planLoadFailed: "计划数据不可用：{error}",
     planNotListed: "未列出",
@@ -1224,6 +1226,18 @@ const I18N = {
     planSummaryDistributor: "供电区",
     planSummaryPostcode: "邮编",
     planSummaryStatus: "状态",
+    planTimetableFixed: "固定 / 非时段",
+    planTimetableBuy: "买入",
+    planTimetableSell: "卖出",
+    planTimetableSpecial: "特殊",
+    planTimetableNone: "无",
+    planTimetableFreeUsage: "免费用电",
+    planTimetableDailySupply: "每日供电费",
+    planTimetableMetering: "Metering",
+    planTimetableControlledLoad: "Controlled load",
+    planTimetableSuperExport: "Super Export",
+    planTimetableTotalExport: "合计 {value}",
+    planTimetableZeroHero: "ZEROHERO 返现",
     notificationMatrixTab: "Time Window",
     notificationMatrixTitle: "Time Window",
     notificationMatrixIntro: "每个面板会按 Operation 和 Notification 分组展示规则，这样你可以更快区分自动执行的动作和提醒通知。Tesla 和水泵的自动控制都只在 Priority Scores 里统一管理，不在各个 time window 规则里单独修改。",
@@ -2765,18 +2779,57 @@ let currentLang = getLang();
 const _hashTab = location.hash.slice(1);
 const ALL_TABS = ["dashboard", "plan", "notificationMatrix", "rawData", "solplanetControl", "report", "monthlyReport", "database", "workerLogs", "operationTimeline", "workerFailureLog"];
 const SAJ_PROFILE_IDS = ["self_consumption", "time_of_use", "microgrid"];
-const PLAN_RATE_ROWS = [
-  { key: "daily_charge_aud_per_day", labelKey: "planRateDaily", unit: "$/day", better: "lower" },
-  { key: "peak_usage_aud_per_kwh", labelKey: "planRatePeak", unit: "$/kWh", better: "lower" },
-  { key: "off_peak_first_50_kwh_per_day_aud_per_kwh", labelKey: "planRateOffPeakFirst", unit: "$/kWh", better: "lower" },
-  { key: "off_peak_balance_aud_per_kwh", labelKey: "planRateOffPeakBalance", unit: "$/kWh", better: "lower" },
-  { key: "shoulder_usage_aud_per_kwh", labelKey: "planRateShoulder", unit: "$/kWh", better: "lower" },
-  { key: "controlled_load_aud_per_kwh", labelKey: "planRateControlledLoad", unit: "$/kWh", better: "lower" },
-  { key: "metering_charge_aud_per_day", labelKey: "planRateMetering", unit: "$/day", better: "lower" },
-  { key: "solar_feed_in_4pm_11pm_aud_per_kwh", labelKey: "planRateFitEvening", unit: "$/kWh", better: "higher" },
-  { key: "solar_feed_in_11pm_4pm_aud_per_kwh", labelKey: "planRateFitOther", unit: "$/kWh", better: "higher" },
-  { key: "super_export_top_up_aud_per_kwh", labelKey: "planRateSuperExportTopUp", unit: "$/kWh", better: "higher" },
-  { key: "zerohero_credit_aud_per_qualified_day", labelKey: "planRateZeroHeroCredit", unit: "$/day", better: "higher" },
+const PLAN_RATE_KEYS = {
+  daily: "daily_charge_aud_per_day",
+  peak: "peak_usage_aud_per_kwh",
+  free: "off_peak_first_50_kwh_per_day_aud_per_kwh",
+  shoulder: "shoulder_usage_aud_per_kwh",
+  controlledLoad: "controlled_load_aud_per_kwh",
+  metering: "metering_charge_aud_per_day",
+  fitEvening: "solar_feed_in_4pm_11pm_aud_per_kwh",
+  fitOther: "solar_feed_in_11pm_4pm_aud_per_kwh",
+  superExport: "super_export_top_up_aud_per_kwh",
+  zeroHero: "zerohero_credit_aud_per_qualified_day",
+};
+const PLAN_TIMETABLE_ROWS = [
+  { id: "fixed", labelKey: "planTimetableFixed", fixed: true },
+  { id: "0000-1100", window: "00:00-11:00", buy: PLAN_RATE_KEYS.shoulder, sell: PLAN_RATE_KEYS.fitOther },
+  {
+    id: "1100-1200",
+    window: "11:00-12:00",
+    buy: { zerohero_old: PLAN_RATE_KEYS.free, four4free: PLAN_RATE_KEYS.free, default: PLAN_RATE_KEYS.shoulder },
+    sell: PLAN_RATE_KEYS.fitOther,
+  },
+  { id: "1200-1400", window: "12:00-14:00", buy: PLAN_RATE_KEYS.free, sell: PLAN_RATE_KEYS.fitOther },
+  {
+    id: "1400-1500",
+    window: "14:00-15:00",
+    buy: { zerohero_new: PLAN_RATE_KEYS.free, four4free: PLAN_RATE_KEYS.free, default: PLAN_RATE_KEYS.shoulder },
+    sell: PLAN_RATE_KEYS.fitOther,
+  },
+  { id: "1500-1600", window: "15:00-16:00", buy: PLAN_RATE_KEYS.shoulder, sell: PLAN_RATE_KEYS.fitOther },
+  { id: "1600-1800", window: "16:00-18:00", buy: PLAN_RATE_KEYS.peak, sell: PLAN_RATE_KEYS.fitEvening },
+  {
+    id: "1800-2000",
+    window: "18:00-20:00",
+    buy: PLAN_RATE_KEYS.peak,
+    sell: PLAN_RATE_KEYS.fitEvening,
+    special: { zerohero_old: ["superExport", "zeroHero"], zerohero_new: ["superExport", "zeroHero"] },
+  },
+  {
+    id: "2000-2100",
+    window: "20:00-21:00",
+    buy: PLAN_RATE_KEYS.peak,
+    sell: PLAN_RATE_KEYS.fitEvening,
+    special: { zerohero_new: ["superExport", "zeroHero"] },
+  },
+  {
+    id: "2100-2300",
+    window: "21:00-23:00",
+    buy: PLAN_RATE_KEYS.peak,
+    sell: { zerohero_old: PLAN_RATE_KEYS.fitOther, default: PLAN_RATE_KEYS.fitEvening },
+  },
+  { id: "2300-2400", window: "23:00-24:00", buy: PLAN_RATE_KEYS.shoulder, sell: PLAN_RATE_KEYS.fitOther },
 ];
 function normalizeAppTab(tab) {
   const normalized = String(tab || "").trim();
@@ -3409,12 +3462,6 @@ function parsePlanNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-function formatPlanAud(value, digits = 0) {
-  const n = parsePlanNumber(value);
-  if (n === null) return "-";
-  return `$${n.toFixed(digits)}`;
-}
-
 function formatPlanRateValue(value, unit) {
   const n = parsePlanNumber(value);
   if (n === null) return "-";
@@ -3422,40 +3469,135 @@ function formatPlanRateValue(value, unit) {
   return `$${n.toFixed(5)}${suffix}`;
 }
 
-function getPlanRate(plan, key, column = "after_discount") {
-  return parsePlanNumber(plan?.rates?.[key]?.[column]);
+function formatPlanTimetableRateValue(value, unit) {
+  const n = parsePlanNumber(value);
+  if (n === null) return "-";
+  if (unit === "$/day") return `$${n.toFixed(3)}/day`;
+  const cents = n * 100;
+  const digits = Math.abs(cents) >= 10 ? 1 : 2;
+  return `${cents.toFixed(digits)}c/kWh`;
 }
 
-function getPlanRateWindow(plan, key) {
-  const rate = plan?.rates?.[key];
-  const parts = [];
-  if (rate?.time_window) parts.push(String(rate.time_window));
-  if (rate?.daily_cap_kwh) parts.push(t("planCapKwhPerDay", { value: rate.daily_cap_kwh }));
-  return parts.join(" · ");
+function getPlanRate(plan, key, column = "after_discount") {
+  return parsePlanNumber(plan?.rates?.[key]?.[column]);
 }
 
 function getPlanDisplayName(plan) {
   return String(plan?.display_name || plan?.name || plan?.id || "-");
 }
 
-function renderPlanMatrixCell(plan, row) {
-  const rate = plan?.rates?.[row.key];
-  const after = getPlanRate(plan, row.key, "after_discount");
-  const before = getPlanRate(plan, row.key, "before_discount");
-  if (!rate || after === null) {
-    return `<span class="plan-matrix-empty">${escapeHtml(t("planNotListed"))}</span>`;
+function getPlanTimetableGroup(plan) {
+  const text = `${plan?.id || ""} ${plan?.name || ""} ${plan?.display_name || ""}`.toLowerCase();
+  if (text.includes("four4free")) return "four4free";
+  if (text.includes("zerohero") && text.includes("new")) return "zerohero_new";
+  if (text.includes("zerohero") && text.includes("old")) return "zerohero_old";
+  return "default";
+}
+
+function getPlanTimetableRateKey(rule, group) {
+  if (!rule) return null;
+  if (typeof rule === "string") return rule;
+  return rule[group] || rule.default || null;
+}
+
+function getPlanTimetableSpecialCodes(row, group) {
+  const special = row?.special;
+  if (!special) return [];
+  if (Array.isArray(special)) return special;
+  return special[group] || special.default || [];
+}
+
+function clampPlanTone(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(1, n));
+}
+
+function getPlanTimetableToneValue(plan, row, group) {
+  if (row.fixed) {
+    const daily = getPlanRate(plan, PLAN_RATE_KEYS.daily);
+    return daily === null ? null : clampPlanTone((daily - 1.3) / 0.8);
   }
-  const value = formatPlanRateValue(after, row.unit);
-  const details = [];
-  if (before !== null && Math.abs(before - after) > 0.000001) {
-    details.push(`${t("planBeforeDiscount")} ${formatPlanRateValue(before, row.unit)}`);
-  }
-  const windowText = getPlanRateWindow(plan, row.key);
-  if (windowText) details.push(windowText);
+  const buyKey = getPlanTimetableRateKey(row.buy, group);
+  const buy = getPlanRate(plan, buyKey);
+  return buy === null ? null : clampPlanTone(buy / 0.6);
+}
+
+function getPlanTimetableCellAttributes(plan, row) {
+  const group = getPlanTimetableGroup(plan);
+  const tone = getPlanTimetableToneValue(plan, row, group);
+  if (tone === null) return `class="plan-timetable-td plan-timetable-td-neutral"`;
+  const hue = Math.round(142 - tone * 118);
+  const saturation = Math.round(42 + tone * 24);
+  const lightness = Math.round(96 - tone * 5);
+  const borderLightness = Math.round(76 - tone * 10);
+  return `class="plan-timetable-td" style="--plan-cell-bg: hsl(${hue} ${saturation}% ${lightness}%); --plan-cell-border: hsl(${hue} ${saturation}% ${borderLightness}%);"`;
+}
+
+function renderPlanTimetableLine(labelKey, valueText, className = "") {
   return `
-    <div class="plan-matrix-cell">
-      <strong>${escapeHtml(value)}</strong>
-      ${details.map((detail) => `<span>${escapeHtml(detail)}</span>`).join("")}
+    <div class="plan-timetable-line ${className}">
+      <span>${escapeHtml(t(labelKey))}</span>
+      <strong>${escapeHtml(valueText || "-")}</strong>
+    </div>
+  `;
+}
+
+function getPlanTimetableFixedLines(plan) {
+  return `
+    <div class="plan-timetable-cell">
+      ${renderPlanTimetableLine("planTimetableDailySupply", formatPlanTimetableRateValue(getPlanRate(plan, PLAN_RATE_KEYS.daily), "$/day"))}
+      ${renderPlanTimetableLine("planTimetableMetering", formatPlanTimetableRateValue(getPlanRate(plan, PLAN_RATE_KEYS.metering), "$/day"))}
+      ${renderPlanTimetableLine("planTimetableControlledLoad", formatPlanTimetableRateValue(getPlanRate(plan, PLAN_RATE_KEYS.controlledLoad), "$/kWh"))}
+    </div>
+  `;
+}
+
+function getPlanTimetableSpecials(plan, row, buyKey, sellKey, group) {
+  const specials = [];
+  const buyRate = plan?.rates?.[buyKey];
+  const buyAfter = getPlanRate(plan, buyKey);
+  if (buyKey === PLAN_RATE_KEYS.free && buyAfter === 0) {
+    const parts = [t("planTimetableFreeUsage")];
+    if (buyRate?.daily_cap_kwh) parts.push(t("planCapKwhPerDay", { value: buyRate.daily_cap_kwh }));
+    specials.push(parts.join(" · "));
+  }
+
+  for (const code of getPlanTimetableSpecialCodes(row, group)) {
+    if (code === "superExport") {
+      const topUp = getPlanRate(plan, PLAN_RATE_KEYS.superExport);
+      if (topUp === null) continue;
+      const sell = getPlanRate(plan, sellKey);
+      const topUpText = formatPlanTimetableRateValue(topUp, "$/kWh");
+      const totalText = sell !== null ? t("planTimetableTotalExport", { value: formatPlanTimetableRateValue(sell + topUp, "$/kWh") }) : "";
+      const cap = plan?.rates?.[PLAN_RATE_KEYS.superExport]?.daily_cap_kwh
+        ? t("planCapKwhPerDay", { value: plan.rates[PLAN_RATE_KEYS.superExport].daily_cap_kwh })
+        : "";
+      specials.push([`${t("planTimetableSuperExport")} +${topUpText}`, totalText, cap].filter(Boolean).join(" · "));
+    } else if (code === "zeroHero") {
+      const credit = getPlanRate(plan, PLAN_RATE_KEYS.zeroHero);
+      if (credit !== null) {
+        specials.push(`${t("planTimetableZeroHero")} ${formatPlanTimetableRateValue(credit, "$/day")}`);
+      }
+    }
+  }
+  return specials;
+}
+
+function renderPlanTimetableCell(plan, row) {
+  const group = getPlanTimetableGroup(plan);
+  if (row.fixed) return getPlanTimetableFixedLines(plan);
+
+  const buyKey = getPlanTimetableRateKey(row.buy, group);
+  const sellKey = getPlanTimetableRateKey(row.sell, group);
+  const buyText = formatPlanTimetableRateValue(getPlanRate(plan, buyKey), "$/kWh");
+  const sellText = formatPlanTimetableRateValue(getPlanRate(plan, sellKey), "$/kWh");
+  const specials = getPlanTimetableSpecials(plan, row, buyKey, sellKey, group);
+  return `
+    <div class="plan-timetable-cell">
+      ${renderPlanTimetableLine("planTimetableBuy", buyText, "plan-timetable-buy")}
+      ${renderPlanTimetableLine("planTimetableSell", sellText, "plan-timetable-sell")}
+      ${renderPlanTimetableLine("planTimetableSpecial", specials.length ? specials.join("; ") : t("planTimetableNone"), "plan-timetable-special")}
     </div>
   `;
 }
@@ -3476,50 +3618,15 @@ function renderPlanMatrix(plans) {
     `;
     return;
   }
-  matrixBody.innerHTML = PLAN_RATE_ROWS.map((row) => `
+  matrixBody.innerHTML = PLAN_TIMETABLE_ROWS.map((row) => `
     <tr>
       <th scope="row">
-        <strong>${escapeHtml(t(row.labelKey))}</strong>
-        <span>${escapeHtml(row.unit)}</span>
+        <strong>${escapeHtml(row.labelKey ? t(row.labelKey) : row.window)}</strong>
+        ${row.labelKey && row.window ? `<span>${escapeHtml(row.window)}</span>` : ""}
       </th>
-      ${plans.map((plan) => `<td>${renderPlanMatrixCell(plan, row)}</td>`).join("")}
+      ${plans.map((plan) => `<td ${getPlanTimetableCellAttributes(plan, row)}>${renderPlanTimetableCell(plan, row)}</td>`).join("")}
     </tr>
   `).join("");
-}
-
-function renderPlanRateRows(plan) {
-  return PLAN_RATE_ROWS.map((row) => {
-    const before = getPlanRate(plan, row.key, "before_discount");
-    const after = getPlanRate(plan, row.key, "after_discount");
-    const windowText = getPlanRateWindow(plan, row.key);
-    return `
-      <div class="plan-rate-row">
-        <div class="plan-rate-name">
-          <span>${escapeHtml(t(row.labelKey))}</span>
-          ${windowText ? `<small>${escapeHtml(windowText)}</small>` : ""}
-        </div>
-        <div class="plan-rate-values">
-          <span><em>${escapeHtml(t("planBeforeDiscount"))}</em>${escapeHtml(formatPlanRateValue(before, row.unit))}</span>
-          <span><em>${escapeHtml(t("planAfterDiscount"))}</em>${escapeHtml(formatPlanRateValue(after, row.unit))}</span>
-        </div>
-      </div>
-    `;
-  }).join("");
-}
-
-function renderPlanAnnualEstimate(plan) {
-  const annual = plan?.estimated_annual_price || {};
-  const lines = [];
-  if (annual.with_vpp_benefits_aud != null) {
-    lines.push(t("planAnnualWithVpp", { value: formatPlanAud(annual.with_vpp_benefits_aud, 0) }));
-  }
-  if (annual.without_vpp_benefits_aud != null) {
-    lines.push(t("planAnnualWithoutVpp", { value: formatPlanAud(annual.without_vpp_benefits_aud, 0) }));
-  }
-  if (annual.quote_aud != null) {
-    lines.push(t("planAnnualQuote", { value: formatPlanAud(annual.quote_aud, 0) }));
-  }
-  return lines.length ? lines.map((line) => `<span>${escapeHtml(line)}</span>`).join("") : "<span>-</span>";
 }
 
 function renderPlanChangeHistory(changes) {
@@ -3572,11 +3679,10 @@ function renderHomePlan(payload = stateCache.lastHomePlan) {
   const planMeta = document.getElementById("planMeta");
   const planUpdatedAt = document.getElementById("planUpdatedAt");
   const summaryGrid = document.getElementById("planSummaryGrid");
-  const cards = document.getElementById("planCards");
   const matrixBody = document.getElementById("planMatrixBody");
   const changeList = document.getElementById("planChangeList");
   const notes = document.getElementById("planNotes");
-  if (!summaryGrid || !cards || !matrixBody || !changeList) return;
+  if (!summaryGrid || !matrixBody || !changeList) return;
 
   const plans = Array.isArray(payload?.plans) ? payload.plans : [];
   const home = payload?.home || {};
@@ -3594,7 +3700,6 @@ function renderHomePlan(payload = stateCache.lastHomePlan) {
   if (!plans.length) {
     summaryGrid.innerHTML = `<div class="plan-empty">${escapeHtml(t("planNoData"))}</div>`;
     renderPlanMatrix([]);
-    cards.innerHTML = "";
     changeList.innerHTML = renderPlanChangeHistory([]);
     if (notes) notes.innerHTML = "";
     return;
@@ -3619,32 +3724,6 @@ function renderHomePlan(payload = stateCache.lastHomePlan) {
   `).join("");
 
   renderPlanMatrix(plans);
-
-  cards.innerHTML = plans.map((plan) => {
-    const benefits = Array.isArray(plan.benefits) ? plan.benefits : [];
-    return `
-      <article class="plan-rate-card">
-        <div class="plan-card-head">
-          <div>
-            <p class="plan-card-retailer">${escapeHtml(plan.retailer || "-")}</p>
-            <h3>${escapeHtml(plan.display_name || plan.name || "-")}</h3>
-            <p class="muted">${escapeHtml(plan.plan_type || "-")} · ${escapeHtml(plan.price_basis || "-")}</p>
-          </div>
-          <div class="plan-annual">${renderPlanAnnualEstimate(plan)}</div>
-        </div>
-        ${plan.discount_note ? `<p class="plan-card-note">${escapeHtml(plan.discount_note)}</p>` : ""}
-        <div class="plan-rate-list">${renderPlanRateRows(plan)}</div>
-        <div class="plan-benefits">
-          ${benefits.map((benefit) => `
-            <div class="plan-benefit">
-              <strong>${escapeHtml(benefit.label || "-")}</strong>
-              <span>${escapeHtml(benefit.description || "")}</span>
-            </div>
-          `).join("")}
-        </div>
-      </article>
-    `;
-  }).join("");
 
   changeList.innerHTML = renderPlanChangeHistory(payload?.rate_change_history);
 

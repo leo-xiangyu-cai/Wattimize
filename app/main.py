@@ -616,9 +616,9 @@ def _compute_static_asset_version() -> str:
 def _render_index_html() -> str:
     index_file = static_dir / "index.html"
     html = index_file.read_text(encoding="utf-8")
-    version = static_asset_version or "dev"
-    html = html.replace("/static/styles.css", f"/static/styles.css?v={version}")
-    html = html.replace("/static/app.js", f"/static/app.js?v={version}")
+    version = _compute_static_asset_version() or static_asset_version or "dev"
+    html = re.sub(r"/static/styles\.css(?:\?v=[^\"']*)?", f"/static/styles.css?v={version}", html)
+    html = re.sub(r"/static/app\.js(?:\?v=[^\"']*)?", f"/static/app.js?v={version}", html)
     return html
 collector_endpoint_state: dict[str, dict[str, dict[str, object]]] = {
     "saj": {

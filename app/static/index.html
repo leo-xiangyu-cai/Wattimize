@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dashboard</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260527-zerohero-ui" />
+    <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <main class="page">
@@ -125,28 +125,21 @@
 
         <section class="card plan-matrix-card">
           <div class="section-header">
-            <h2 data-i18n="planMatrixTitle">Plan Matrix</h2>
-            <span class="muted" data-i18n="planMatrixHint">Rows are charge types or time windows; columns are plans.</span>
+            <h2 data-i18n="planMatrixTitle">Plan Timetable</h2>
+            <span class="muted" data-i18n="planMatrixHint">Cell tint follows buy price: green is lower, orange is higher.</span>
           </div>
           <div class="table-wrap">
             <table class="plan-matrix-table">
               <thead>
                 <tr id="planMatrixHead">
-                  <th data-i18n="planMatrixType">Type / window</th>
+                  <th data-i18n="planMatrixType">Time</th>
                 </tr>
               </thead>
               <tbody id="planMatrixBody"></tbody>
             </table>
           </div>
         </section>
-
-        <section class="card plan-rates-card">
-          <div class="section-header">
-            <h2 data-i18n="planRatesTitle">Rates</h2>
-            <span class="muted" data-i18n="planRatesHint">Four plan records are shown without a comparison table.</span>
-          </div>
-          <div id="planCards" class="plan-card-grid"></div>
-        </section>
+        <div id="planCards" hidden aria-hidden="true"></div>
 
         <section class="card plan-change-card">
           <div class="section-header">
@@ -799,6 +792,6 @@
     <script src="/static/vendor/dagre.min.js"></script>
     <script src="/static/vendor/x6.min.js"></script>
     <script src="/static/energy-flow-diagram.js"></script>
-    <script src="/static/app.js?v=20260527-zerohero-ui"></script>
+    <script src="/static/app.js"></script>
   </body>
 </html>
