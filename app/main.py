@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import mimetypes
 import os
 import re
 import sqlite3
@@ -21,7 +22,7 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import Response
+from starlette.responses import FileResponse, Response
 
 from app.billing import (
     apply_bill_actuals_to_daily_reports,
@@ -1303,7 +1304,6 @@ REQUIRED_FLOW_METRICS: dict[str, tuple[str, ...]] = {
     ),
     "solplanet": (
         "pv_w",
-        "grid_w",
         "battery_w",
         "load_w",
         "battery_soc_percent",
@@ -9094,12 +9094,9 @@ def _build_solplanet_energy_flow_from_endpoint_map(
         load_w = abs(inverter_pac_w)
         load_source = "calc:abs(getdevdata_device_2.pac)[meter_offline_estimate]"
 
-    if grid_w is None and load_w is not None and pv_w is not None and battery_w is not None:
-        # When meter is unavailable, infer grid net power from split load and known PV/battery.
-        battery_discharge_w = max(battery_w, 0)
-        battery_charge_w = max(-battery_w, 0)
-        grid_w = load_w + battery_charge_w - pv_w - battery_discharge_w
-        grid_source = "calc:load + battery_charge - pv - battery_discharge"
+    # Do not infer Solplanet grid power when the meter endpoint is unavailable.
+    # Inverter/battery-derived estimates can mistake internal battery charging
+    # or stale local CGI data for whole-home grid import.
 
     balance_w: float | None = None
     balanced: bool | None = None
@@ -9210,7 +9207,7 @@ def _build_solplanet_energy_flow_from_endpoint_map(
             "notes": [
                 "solplanet_pv_w_prefer_ppv",
                 f"solplanet_load_w_source:{load_source}",
-                "solplanet_grid_w_uses_meter_data_pac_only",
+                "solplanet_grid_w_requires_valid_meter_data_pac",
                 f"solplanet_grid_w_source:{grid_source}",
                 f"solplanet_meter_data_valid:{str(meter_data_valid).lower()}",
                 "solplanet_battery_w_uses_battery_pb",
@@ -9322,6 +9319,11 @@ def _build_combined_grid_candidate(
     }
 
 
+def _combined_grid_candidate_has_direct_source(candidate: dict[str, object]) -> bool:
+    source = str(candidate.get("source") or "").strip().lower()
+    return bool(source) and source != "unavailable" and not source.startswith("calc:")
+
+
 def _select_combined_grid_candidate(candidates: list[dict[str, object]]) -> dict[str, object]:
     available_candidates = [item for item in candidates if _to_number(item.get("grid_w")) is not None]
     if not available_candidates:
@@ -9333,12 +9335,15 @@ def _select_combined_grid_candidate(candidates: list[dict[str, object]]) -> dict
             "abs_balance_w": None,
         }
 
+    selection_pool = [
+        item for item in available_candidates if _combined_grid_candidate_has_direct_source(item)
+    ] or available_candidates
     default_candidate = next(
-        (item for item in available_candidates if str(item.get("system") or "") == "saj"),
-        available_candidates[0],
+        (item for item in selection_pool if str(item.get("system") or "") == "saj"),
+        selection_pool[0],
     )
     scoreable_candidates = [
-        item for item in available_candidates if _to_number(item.get("abs_balance_w")) is not None
+        item for item in selection_pool if _to_number(item.get("abs_balance_w")) is not None
     ]
     if not scoreable_candidates:
         return default_candidate
@@ -12681,7 +12686,11 @@ async def _collector_loop() -> None:
                     ),
                     error_text=combined_reason,
                 )
-            _collector_mark_finish("combined", combined_started_monotonic)
+            _collector_mark_finish(
+                "combined",
+                combined_started_monotonic,
+                round_result=round_results.get("combined"),
+            )
         except Exception as exc:  # noqa: BLE001
             _append_worker_failure_log(
                 "combined",
@@ -13419,6 +13428,34 @@ async def electricity_bills() -> dict[str, object]:
     payload = await asyncio.to_thread(load_bills_index, BILLS_DIR)
     payload["updated_at"] = datetime.now(UTC).isoformat()
     return payload
+
+
+@app.get("/api/bills/artifact")
+async def electricity_bill_artifact(path: str = Query(description="Bill artifact path from /api/bills")) -> FileResponse:
+    requested = str(path or "").strip()
+    index = await asyncio.to_thread(load_bills_index, BILLS_DIR)
+    allowed_paths: set[str] = set()
+    for item in index.get("bills", []):
+        if not isinstance(item, dict):
+            continue
+        for key in ("source_pdf", "extracted_text"):
+            value = item.get(key)
+            if isinstance(value, str) and value:
+                allowed_paths.add(value)
+    if requested not in allowed_paths:
+        raise HTTPException(status_code=404, detail="Bill artifact not found")
+
+    artifact_path = (BILLS_DIR / requested).resolve()
+    bills_root = BILLS_DIR.resolve()
+    if bills_root not in artifact_path.parents or not artifact_path.is_file():
+        raise HTTPException(status_code=404, detail="Bill artifact not found")
+    media_type = mimetypes.guess_type(artifact_path.name)[0] or "application/octet-stream"
+    return FileResponse(
+        artifact_path,
+        media_type=media_type,
+        filename=artifact_path.name,
+        content_disposition_type="inline",
+    )
 
 
 @app.post("/api/bills/upload")

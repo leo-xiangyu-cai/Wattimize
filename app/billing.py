@@ -255,9 +255,30 @@ def parse_bill_upload(raw: bytes, *, filename: str) -> tuple[dict[str, Any], str
     return bill, text
 
 
-def _safe_file_stem(value: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip(".-")
+def _clean_file_stem(value: object) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "")).strip(".-")
+
+
+def _safe_file_stem(value: object) -> str:
+    cleaned = _clean_file_stem(value)
     return cleaned or "bill"
+
+
+def _bill_artifact_stem(bill: dict[str, Any], *, filename: str) -> str:
+    period = bill.get("billing_period") if isinstance(bill.get("billing_period"), dict) else {}
+    period_start = _clean_file_stem(period.get("start"))
+    period_end = _clean_file_stem(period.get("end"))
+    invoice = _clean_file_stem(bill.get("invoice_number"))
+
+    if period_start and period_end:
+        date_stem = period_start if period_start == period_end else f"{period_start}_to_{period_end}"
+        return f"{date_stem}_invoice-{invoice}" if invoice else date_stem
+
+    issue_date = _clean_file_stem(bill.get("issue_date"))
+    if issue_date:
+        return f"{issue_date}_invoice-{invoice}" if invoice else issue_date
+
+    return _safe_file_stem(invoice or Path(filename).stem)
 
 
 def load_bills_index(bills_dir: Path) -> dict[str, Any]:
@@ -291,10 +312,10 @@ def save_bill_artifacts(
     text_dir = bills_dir / TEXT_BILLS_DIRNAME
     raw_dir.mkdir(parents=True, exist_ok=True)
     text_dir.mkdir(parents=True, exist_ok=True)
-    invoice = _safe_file_stem(str(bill.get("invoice_number") or Path(filename).stem))
+    artifact_stem = _bill_artifact_stem(bill, filename=filename)
     extension = ".pdf" if filename.lower().endswith(".pdf") or raw[:4] == b"%PDF" else ".txt"
-    raw_path = raw_dir / f"{invoice}{extension}"
-    text_path = text_dir / f"{invoice}.txt"
+    raw_path = raw_dir / f"{artifact_stem}{extension}"
+    text_path = text_dir / f"{artifact_stem}.txt"
     raw_path.write_bytes(raw)
     text_path.write_text(text, encoding="utf-8")
 

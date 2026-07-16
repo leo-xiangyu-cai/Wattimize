@@ -707,7 +707,7 @@ const I18N = {
     reportDailyCostFixedDetail: "daily supply + metering",
     reportDailyCostImportDetail: "peak {peak} · shoulder {shoulder} · free {free}",
     reportDailyCostCreditDetail: "feed-in {fit} · super export {superExport}",
-    reportDailyCostZeroHeroDetail: "{status} · import {importKwh} · coverage {coverage}",
+    reportDailyCostZeroHeroDetail: "{status} · red {redWindows} · yellow {yellowWindows} · coverage {coverage}",
     reportDailyCostQualified: "qualified",
     reportDailyCostNotQualified: "not qualified",
     reportDailyCostInsufficient: "insufficient data",
@@ -717,10 +717,13 @@ const I18N = {
     reportBillUploaded: "Bill {invoice} uploaded · updated {days} reports",
     reportBillUploadFailed: "Bill upload failed: {error}",
     reportBillNoFile: "Choose a PDF bill first.",
+    reportBillListBtn: "Bills",
+    reportBillListLoading: "Loading bills...",
+    reportBillListEmpty: "No uploaded bills",
+    reportBillListFailed: "Bills unavailable: {error}",
     reportCalendarTitle: "Report Calendar",
     reportCalendarMeta: "{month} · generated reports {count}/{days}",
     reportCalendarLoading: "Loading report index...",
-    reportCalendarHint: "Today loads live from raw data. Saved days load immediately; past days without a report will be generated on click.",
     reportCalendarSaved: "Saved",
     reportCalendarNoData: "No data",
     reportCalendarLive: "Live",
@@ -728,6 +731,8 @@ const I18N = {
     reportCalendarPending: "Not ready",
     reportCalendarChecking: "Checking",
     reportCalendarGenerating: "Generating",
+    reportCalendarBillActual: "Bill actual",
+    reportCalendarBillActualWithInvoice: "Bill actual ({invoice})",
     reportTodayLiveMeta: "Live report for {day} · raw data",
     reportCalendarPrevMonth: "Previous month",
     reportCalendarNextMonth: "Next month",
@@ -1796,7 +1801,7 @@ const I18N = {
     reportDailyCostFixedDetail: "日供电费 + 计量费",
     reportDailyCostImportDetail: "peak {peak} · shoulder {shoulder} · free {free}",
     reportDailyCostCreditDetail: "feed-in {fit} · super export {superExport}",
-    reportDailyCostZeroHeroDetail: "{status} · import {importKwh} · coverage {coverage}",
+    reportDailyCostZeroHeroDetail: "{status} · 红色 {redWindows} · 黄色 {yellowWindows} · 覆盖 {coverage}",
     reportDailyCostQualified: "已达标",
     reportDailyCostNotQualified: "未达标",
     reportDailyCostInsufficient: "数据不足",
@@ -1806,10 +1811,13 @@ const I18N = {
     reportBillUploaded: "账单 {invoice} 已上传 · 更新 {days} 条日报",
     reportBillUploadFailed: "账单上传失败：{error}",
     reportBillNoFile: "请先选择 PDF 账单。",
+    reportBillListBtn: "账单",
+    reportBillListLoading: "正在加载账单...",
+    reportBillListEmpty: "暂无已上传账单",
+    reportBillListFailed: "账单列表不可用：{error}",
     reportCalendarTitle: "日报日历",
     reportCalendarMeta: "{month} · 已生成日报 {count}/{days}",
     reportCalendarLoading: "正在加载日报索引...",
-    reportCalendarHint: "今天直接加载实时原始数据；已有日报的日期会直接加载，过去但未生成的日期点击后会立即生成并保存。",
     reportCalendarSaved: "已保存",
     reportCalendarNoData: "无数据",
     reportCalendarLive: "实时",
@@ -1817,6 +1825,8 @@ const I18N = {
     reportCalendarPending: "未就绪",
     reportCalendarChecking: "检查中",
     reportCalendarGenerating: "生成中",
+    reportCalendarBillActual: "账单实付",
+    reportCalendarBillActualWithInvoice: "账单实付（{invoice}）",
     reportTodayLiveMeta: "{day} 的实时日报 · 使用原始数据",
     reportCalendarPrevMonth: "上个月",
     reportCalendarNextMonth: "下个月",
@@ -2978,6 +2988,12 @@ const reportCalendarState = {
   loadingIndex: false,
   loadingDay: "",
   statusText: "",
+};
+const reportBillsState = {
+  items: [],
+  loaded: false,
+  loading: false,
+  error: "",
 };
 const monthlyReportState = {
   month: initialReportDayParts ? initialReportDayParts.monthIndex + 1 : new Date().getMonth() + 1,
@@ -8718,6 +8734,12 @@ function localDateTextFromDate(date) {
   return `${y}-${m}-${day}`;
 }
 
+function dateFromLocalDateText(dayText) {
+  const parts = localDateParts(dayText);
+  if (!parts) return null;
+  return new Date(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0);
+}
+
 function getReportMonthInfo() {
   return getMonthInfo(reportCalendarState.month, reportCalendarState.monthYear);
 }
@@ -8746,6 +8768,46 @@ function getReportMonthCompletedDayCount(info = getReportMonthInfo()) {
     if (dayText < today) count += 1;
   }
   return count;
+}
+
+function getReportBillActualMeta(report) {
+  const billActualCost =
+    report?.bill_actual_cost && typeof report.bill_actual_cost === "object" ? report.bill_actual_cost : null;
+  const hasBillActual = Boolean(
+    report?.has_bill_actual_cost ||
+      billActualCost?.status === "bill_allocated" ||
+      Number.isFinite(Number(billActualCost?.actual_daily_cost_aud)),
+  );
+  return {
+    hasBillActual,
+    invoice: String(report?.bill_actual_invoice_number || billActualCost?.invoice_number || ""),
+  };
+}
+
+function invalidateReportCalendarMonthsForBill(bill) {
+  const period = bill?.billing_period && typeof bill.billing_period === "object" ? bill.billing_period : {};
+  const startDate = dateFromLocalDateText(period.start);
+  const endDate = dateFromLocalDateText(period.end);
+  if (!startDate || !endDate || startDate > endDate) return;
+
+  const invoice = String(bill?.invoice_number || "");
+  const cursor = new Date(startDate.getTime());
+  let guard = 0;
+  while (cursor <= endDate && guard < 370) {
+    const dayText = localDateTextFromDate(cursor);
+    const monthKey = dayText.slice(0, 7);
+    reportCalendarState.loadedMonths.delete(monthKey);
+    const existing = reportCalendarState.availableDays.get(dayText);
+    if (existing) {
+      reportCalendarState.availableDays.set(dayText, {
+        ...existing,
+        has_bill_actual_cost: true,
+        bill_actual_invoice_number: invoice,
+      });
+    }
+    cursor.setDate(cursor.getDate() + 1);
+    guard += 1;
+  }
 }
 
 function getMonthlyReportMonthInfo() {
@@ -9382,8 +9444,14 @@ async function loadMonthlyReport() {
 }
 
 function setReportCalendarVisible(visible) {
+  const calendarColumn = document.getElementById("reportCalendarColumn");
   const calendarPanel = document.getElementById("reportCalendarPanel");
   const filterBar = document.getElementById("samplingFilterBar");
+  if (calendarColumn) {
+    calendarColumn.hidden = !visible;
+    calendarColumn.classList.toggle("hidden", !visible);
+    calendarColumn.setAttribute("aria-hidden", visible ? "false" : "true");
+  }
   if (calendarPanel) {
     calendarPanel.hidden = !visible;
     calendarPanel.classList.toggle("hidden", !visible);
@@ -9413,11 +9481,13 @@ function renderReportCalendar() {
   const savedDays = Array.from(reportCalendarState.availableDays.keys()).filter((day) => day.startsWith(monthKey)).length;
   setText("reportCalendarTitle", info.display);
   setText("reportCalendarMeta", t("reportCalendarMeta", { month: monthKey, count: savedDays, days: completedDays }));
-  setText(
-    "reportCalendarStatus",
-    reportCalendarState.statusText ||
-      (reportCalendarState.loadingIndex ? t("reportCalendarLoading") : t("reportCalendarHint")),
-  );
+  const statusMessage = reportCalendarState.statusText || (reportCalendarState.loadingIndex ? t("reportCalendarLoading") : "");
+  const statusEl = document.getElementById("reportCalendarStatus");
+  if (statusEl) {
+    statusEl.hidden = !statusMessage;
+    statusEl.classList.toggle("hidden", !statusMessage);
+    statusEl.textContent = statusMessage || "";
+  }
 
   const prevBtn = document.getElementById("reportCalendarPrevBtn");
   const nextBtn = document.getElementById("reportCalendarNextBtn");
@@ -9477,12 +9547,17 @@ function renderReportCalendar() {
     const report = reportCalendarState.availableDays.get(dayText);
     const hasReport = Boolean(report);
     const noDataReport = hasReport && getDailyReportStatus(report) === "no_data";
+    const billActualMeta = getReportBillActualMeta(report);
+    const billActualText = billActualMeta.invoice
+      ? t("reportCalendarBillActualWithInvoice", { invoice: billActualMeta.invoice })
+      : t("reportCalendarBillActual");
     const live = dayText === today;
     const unavailable = dayText > today;
     const loading = reportCalendarState.loadingDay === dayText;
     const classes = [
       "report-calendar-day",
       hasReport ? (noDataReport ? "no-data-report" : "has-report") : "missing-report",
+      billActualMeta.hasBillActual ? "has-bill-actual" : "",
       live ? "is-live" : "",
       unavailable ? "is-unavailable" : "",
       dayText === reportCalendarState.selectedDay ? "is-selected" : "",
@@ -9501,12 +9576,30 @@ function renderReportCalendar() {
           : monthLoaded
             ? t("reportCalendarMissing")
             : t("reportCalendarChecking");
+    const statusKind = loading
+      ? "loading"
+      : live
+        ? "live"
+      : unavailable
+        ? "pending"
+        : hasReport
+          ? (noDataReport ? "no-data" : "saved")
+          : monthLoaded
+            ? "missing"
+            : "checking";
     const disabled = unavailable || loading || reportCalendarState.loadingIndex || Boolean(reportCalendarState.loadingDay);
-    const dayLabel = `${dayText} ${statusText}`;
+    const dayLabel = `${dayText} ${statusText}${billActualMeta.hasBillActual ? ` - ${billActualText}` : ""}`;
     cells.push(`
       <button type="button" class="${classes}" data-report-day="${escapeHtml(dayText)}" aria-label="${escapeHtml(dayLabel)}" title="${escapeHtml(dayLabel)}" ${disabled ? "disabled" : ""}>
         <span class="report-calendar-day-number">${day}</span>
-        <span class="report-calendar-day-status" title="${escapeHtml(statusText)}">${escapeHtml(statusText)}</span>
+        <span class="report-calendar-day-status-row">
+          <span class="report-calendar-day-status-icon is-${escapeHtml(statusKind)}" aria-hidden="true" title="${escapeHtml(statusText)}"></span>
+          ${
+            billActualMeta.hasBillActual
+              ? `<span class="report-calendar-bill-marker" aria-hidden="true" title="${escapeHtml(billActualText)}">$</span>`
+              : ""
+          }
+        </span>
       </button>
     `);
   }
@@ -9619,6 +9712,110 @@ function renderDailyReportEmpty(message, rangeLabel) {
   renderSamplingTotals(null, "overall", rangeLabel, { metaText: message });
   renderSamplingDailyCost(null);
   renderSamplingZeroHeroHistory({ items: [] });
+}
+
+function reportBillArtifactUrl(path) {
+  return `/api/bills/artifact?path=${encodeURIComponent(String(path || ""))}`;
+}
+
+function reportBillFileName(path) {
+  const text = String(path || "");
+  return text.split("/").filter(Boolean).pop() || text || "-";
+}
+
+function formatReportBillName(bill) {
+  const period = bill?.billing_period && typeof bill.billing_period === "object" ? bill.billing_period : {};
+  const start = String(period.start || "");
+  const end = String(period.end || "");
+  const invoice = String(bill?.invoice_number || "");
+  const dateText = start && end ? (start === end ? start : `${start} to ${end}`) : "";
+  if (dateText && invoice) return `${dateText} · ${invoice}`;
+  if (dateText) return dateText;
+  if (invoice) return invoice;
+  return reportBillFileName(bill?.source_pdf || bill?.extracted_text || bill?.source_filename);
+}
+
+function setReportBillMenuVisible(visible) {
+  const menu = document.getElementById("reportBillMenu");
+  const button = document.getElementById("reportBillListBtn");
+  if (menu) {
+    menu.hidden = !visible;
+    menu.classList.toggle("hidden", !visible);
+    menu.setAttribute("aria-hidden", visible ? "false" : "true");
+  }
+  if (button) button.setAttribute("aria-expanded", visible ? "true" : "false");
+}
+
+function renderReportBillMenu() {
+  const menu = document.getElementById("reportBillMenu");
+  if (!menu) return;
+  if (reportBillsState.loading) {
+    menu.innerHTML = `<p class="report-bill-menu-message">${escapeHtml(t("reportBillListLoading"))}</p>`;
+    return;
+  }
+  if (reportBillsState.error) {
+    menu.innerHTML = `<p class="report-bill-menu-message is-error">${escapeHtml(
+      t("reportBillListFailed", { error: reportBillsState.error }),
+    )}</p>`;
+    return;
+  }
+  const bills = [...(reportBillsState.items || [])].reverse();
+  if (!bills.length) {
+    menu.innerHTML = `<p class="report-bill-menu-message">${escapeHtml(t("reportBillListEmpty"))}</p>`;
+    return;
+  }
+  menu.innerHTML = bills
+    .map((bill, index) => {
+      const sourcePath = String(bill?.source_pdf || bill?.extracted_text || "");
+      const textPath = String(bill?.extracted_text || "");
+      const name = formatReportBillName(bill);
+      const fileName = reportBillFileName(sourcePath || textPath);
+      return `
+        <button type="button" class="report-bill-menu-item" role="menuitem" data-bill-index="${index}" ${sourcePath || textPath ? "" : "disabled"}>
+          <span class="report-bill-menu-item-name">${escapeHtml(name)}</span>
+          <span class="report-bill-menu-item-file">${escapeHtml(fileName)}</span>
+        </button>
+      `;
+    })
+    .join("");
+  menu.querySelectorAll("[data-bill-index]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const index = Number(button.getAttribute("data-bill-index"));
+      const bill = bills[index];
+      const sourcePath = String(bill?.source_pdf || bill?.extracted_text || "");
+      if (!sourcePath) return;
+      window.open(reportBillArtifactUrl(sourcePath), "_blank", "noopener");
+      setReportBillMenuVisible(false);
+    });
+  });
+}
+
+async function loadReportBillsMenu({ force = false } = {}) {
+  if (reportBillsState.loading) return;
+  if (!force && reportBillsState.loaded) {
+    renderReportBillMenu();
+    return;
+  }
+  reportBillsState.loading = true;
+  reportBillsState.error = "";
+  renderReportBillMenu();
+  try {
+    const payload = await fetchJson("/api/bills", { timeoutMs: 10000 });
+    reportBillsState.items = Array.isArray(payload?.bills) ? payload.bills : [];
+    reportBillsState.loaded = true;
+  } catch (err) {
+    reportBillsState.error = formatApiErrorMessage(err);
+  } finally {
+    reportBillsState.loading = false;
+    renderReportBillMenu();
+  }
+}
+
+async function toggleReportBillMenu() {
+  const menu = document.getElementById("reportBillMenu");
+  const nextVisible = !menu || menu.classList.contains("hidden");
+  setReportBillMenuVisible(nextVisible);
+  if (nextVisible) await loadReportBillsMenu();
 }
 
 async function selectReportDay(day, { generateIfMissing = false } = {}) {
@@ -11111,11 +11308,7 @@ function renderSamplingDailyCost(dailyCost, billActualCost = null) {
   const samples = Number(dailyCost.samples || 0);
   const hasBillActual = billActualCost && typeof billActualCost === "object" && Number.isFinite(Number(billActualCost.actual_daily_cost_aud));
   const actualTotal = hasBillActual ? Number(billActualCost.actual_daily_cost_aud) : null;
-  const deltaAud = hasBillActual
-    ? Number.isFinite(Number(billActualCost.delta_aud))
-      ? Number(billActualCost.delta_aud)
-      : total - actualTotal
-    : null;
+  const deltaAud = hasBillActual ? total - actualTotal : null;
   const actualItems = hasBillActual && billActualCost.line_items && typeof billActualCost.line_items === "object"
     ? billActualCost.line_items
     : {};
@@ -11130,6 +11323,8 @@ function renderSamplingDailyCost(dailyCost, billActualCost = null) {
   const zeroHeroCoverageText = Number.isFinite(zeroHeroCoverage)
     ? `${formatTrimmedDecimal(zeroHeroCoverage * 100, 0)}%`
     : "-";
+  const zeroHeroRedWindows = Math.max(0, Math.round(Number(zeroHero.net_import_windows || 0)));
+  const zeroHeroYellowWindows = Math.max(0, Math.round(Number(zeroHero.mixed_export_windows || 0)));
   const deltaTone = (value) => {
     if (!hasBillActual || !Number.isFinite(Number(value))) return "is-muted";
     if (Math.abs(Number(value)) < 0.01) return "is-even";
@@ -11176,7 +11371,8 @@ function renderSamplingDailyCost(dailyCost, billActualCost = null) {
       label: t("reportDailyCostZeroHero"),
       detail: t("reportDailyCostZeroHeroDetail", {
         status: dailyCostZeroHeroStatusText(zeroHero),
-        importKwh: formatDailyCostKwh(zeroHero.import_kwh),
+        redWindows: Number.isFinite(zeroHeroRedWindows) ? String(zeroHeroRedWindows) : "-",
+        yellowWindows: Number.isFinite(zeroHeroYellowWindows) ? String(zeroHeroYellowWindows) : "-",
         coverage: zeroHeroCoverageText,
       }),
       estimated: -zeroHeroCreditAud,
@@ -15526,12 +15722,15 @@ async function loadDailyReport({ generateIfMissing = false } = {}) {
       renderDailyReportEmpty(message, range.label);
       return;
     }
+    const billActualMeta = getReportBillActualMeta({ bill_actual_cost: payload.bill_actual_cost || null });
     reportCalendarState.availableDays.set(day, {
       report_day_local: payload.report_day_local || day,
       timezone_name: payload.timezone_name || "",
       generated_at_utc: payload.generated_at_utc || "",
       sample_count: payload.samples?.total || 0,
       report_status: payload.report_status || "",
+      has_bill_actual_cost: billActualMeta.hasBillActual,
+      bill_actual_invoice_number: billActualMeta.invoice,
     });
     reportCalendarState.statusText = "";
     const usageBySystem = payload.usage_by_system || {};
@@ -15629,8 +15828,10 @@ async function loadDailyReport({ generateIfMissing = false } = {}) {
 
 function setReportBillUploadBusy(busy) {
   const button = document.getElementById("reportBillChooseBtn");
+  const listButton = document.getElementById("reportBillListBtn");
   const input = document.getElementById("reportBillFileInput");
   if (button) button.disabled = Boolean(busy);
+  if (listButton) listButton.disabled = Boolean(busy);
   if (input) input.disabled = Boolean(busy);
 }
 
@@ -15652,6 +15853,9 @@ async function uploadReportBillFile(file) {
     const invoice = payload?.bill?.invoice_number || "-";
     const updatedDays = Number(payload?.daily_report_update?.updated_daily_reports || 0);
     setText("reportBillUploadStatus", t("reportBillUploaded", { invoice, days: updatedDays }));
+    invalidateReportCalendarMonthsForBill(payload?.bill || null);
+    await loadReportBillsMenu({ force: true });
+    await loadReportIndexForVisibleMonth({ force: true });
     await loadDailyReport({ generateIfMissing: false });
   } catch (err) {
     setText("reportBillUploadStatus", t("reportBillUploadFailed", { error: formatApiErrorMessage(err) }));
@@ -15666,6 +15870,7 @@ async function loadReportView({ generateIfMissing = true } = {}) {
   setReportCalendarVisible(true);
   setReportCalendarMonthFromDay(reportCalendarState.selectedDay || getLocalDateText(-1));
   renderReportCalendar();
+  void loadReportBillsMenu();
   await loadReportIndexForVisibleMonth();
   await loadDailyReport({ generateIfMissing });
 }
@@ -16371,6 +16576,10 @@ bindClickIfPresent("reportBillChooseBtn", () => {
   const input = document.getElementById("reportBillFileInput");
   if (input) input.click();
 });
+bindClickIfPresent("reportBillListBtn", (event) => {
+  event.stopPropagation();
+  void toggleReportBillMenu();
+});
 bindChangeIfPresent("reportBillFileInput", (event) => {
   const file = event?.target?.files?.[0] || null;
   void uploadReportBillFile(file);
@@ -16915,6 +17124,9 @@ window.addEventListener("resize", () => {
 document.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
+  if (!target.closest("#reportBillMenu") && !target.closest("#reportBillListBtn")) {
+    setReportBillMenuVisible(false);
+  }
   const mobileActionNode = target.closest("[data-mobile-action]");
   const mobileAction = mobileActionNode?.getAttribute("data-mobile-action");
   if (mobileAction === "solplanet-pin") {

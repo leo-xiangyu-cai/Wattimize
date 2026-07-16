@@ -1002,9 +1002,13 @@ select {
 .sampling-overview-grid #samplingFilterBar,
 .sampling-overview-grid .report-calendar-panel {
   margin-top: 0;
-  height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+.sampling-overview-grid .sampling-chart-card,
+.sampling-overview-grid #samplingFilterBar {
+  height: 100%;
 }
 
 .sampling-top-filters {
@@ -1054,6 +1058,131 @@ select {
   align-content: start;
 }
 
+.sampling-overview-grid .report-calendar-column {
+  display: grid;
+  grid-column: 2;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+.sampling-overview-grid .report-calendar-panel,
+.sampling-overview-grid .sampling-daily-cost {
+  min-height: 0;
+}
+
+.sampling-overview-grid .sampling-daily-cost {
+  align-self: stretch;
+  height: 100%;
+  margin-top: 0;
+  overflow: auto;
+}
+
+.sampling-overview-grid .sampling-daily-cost-summary {
+  gap: 5px;
+}
+
+.sampling-overview-grid .sampling-daily-cost-metric {
+  padding: 6px;
+}
+
+.sampling-overview-grid .sampling-daily-cost-metric-value {
+  font-size: 16px;
+}
+
+.sampling-overview-grid .sampling-daily-cost-row {
+  grid-template-columns: minmax(92px, 1fr) repeat(3, minmax(52px, 0.6fr));
+  gap: 5px;
+  padding: 6px;
+}
+
+.sampling-overview-grid .sampling-daily-cost-row-head {
+  font-size: 9px;
+}
+
+.sampling-overview-grid .sampling-daily-cost-component-name,
+.sampling-overview-grid .sampling-daily-cost-amount {
+  font-size: 11px;
+}
+
+.sampling-overview-grid .sampling-daily-cost-component-detail {
+  font-size: 9.5px;
+}
+
+.report-calendar-column .report-calendar-panel {
+  overflow: hidden;
+  padding: 10px;
+  border-radius: 14px;
+}
+
+.report-calendar-column .report-calendar-head {
+  grid-template-columns: 32px minmax(0, 1fr) 32px;
+  gap: 6px;
+}
+
+.report-calendar-column .report-calendar-head .btn {
+  min-width: 32px;
+  min-height: 38px;
+  border-radius: 10px;
+  font-size: 15px;
+}
+
+.report-calendar-column .report-calendar-title {
+  font-size: 13px;
+}
+
+.report-calendar-column .report-calendar-meta,
+.report-calendar-column .report-calendar-status {
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.report-calendar-column .report-calendar-weekdays {
+  margin-top: 8px;
+}
+
+.report-calendar-column .report-calendar-weekdays,
+.report-calendar-column .report-calendar-grid {
+  gap: 3px;
+}
+
+.report-calendar-column .report-calendar-grid {
+  margin-top: 5px;
+}
+
+.report-calendar-column .report-calendar-empty,
+.report-calendar-column .report-calendar-day {
+  min-height: 34px;
+}
+
+.report-calendar-column .report-calendar-day {
+  gap: 2px;
+  padding: 4px 2px;
+  border-radius: 7px;
+}
+
+.report-calendar-column .report-calendar-day-number {
+  font-size: 13px;
+}
+
+.report-calendar-column .report-calendar-day-status-row {
+  min-height: 12px;
+}
+
+.report-calendar-column .report-calendar-day-status-icon {
+  width: 12px;
+  height: 12px;
+  border-width: 1.4px;
+}
+
+.report-calendar-column .report-calendar-bill-marker {
+  width: 12px;
+  height: 12px;
+  font-size: 7.5px;
+}
+
 .sampling-overview-grid #samplingFilterBar > label {
   min-height: auto;
 }
@@ -1087,6 +1216,7 @@ select {
 }
 
 .report-bill-upload-toolbar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1103,6 +1233,89 @@ select {
   flex: 0 0 auto;
   padding: 7px 10px;
   white-space: nowrap;
+}
+
+.report-bill-list-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 9px;
+  white-space: nowrap;
+}
+
+.report-bill-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 6px;
+  z-index: 40;
+  display: grid;
+  gap: 4px;
+  width: min(360px, calc(100vw - 32px));
+  max-height: 320px;
+  padding: 6px;
+  overflow: auto;
+  border: 1px solid rgba(31, 122, 82, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow:
+    0 14px 30px rgba(27, 54, 39, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.report-bill-menu-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid rgba(31, 122, 82, 0.1);
+  border-radius: 8px;
+  background: rgba(245, 250, 247, 0.92);
+  color: #20342a;
+  cursor: pointer;
+  text-align: left;
+}
+
+.report-bill-menu-item:hover:not(:disabled),
+.report-bill-menu-item:focus-visible {
+  border-color: rgba(31, 122, 82, 0.28);
+  background: rgba(231, 248, 237, 0.96);
+}
+
+.report-bill-menu-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.report-bill-menu-item-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-bill-menu-item-file,
+.report-bill-menu-message {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #65786d;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-bill-menu-message {
+  padding: 8px 9px;
+}
+
+.report-bill-menu-message.is-error {
+  color: #b42318;
 }
 
 .report-bill-upload-status {
@@ -1218,19 +1431,88 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
-.report-calendar-day-status {
-  display: block;
+.report-calendar-day-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
   max-width: 100%;
+  min-height: 14px;
   min-width: 0;
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1.15;
-  letter-spacing: 0;
+}
+
+.report-calendar-day-status-icon {
+  position: relative;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid currentColor;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
   color: #5c7266;
-  overflow: hidden;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  pointer-events: none;
+}
+
+.report-calendar-day-status-icon.is-saved::after {
+  position: absolute;
+  left: 50%;
+  top: 48%;
+  width: 6px;
+  height: 3px;
+  border-bottom: 2px solid currentColor;
+  border-left: 2px solid currentColor;
+  content: "";
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.report-calendar-day-status-icon.is-no-data::before,
+.report-calendar-day-status-icon.is-no-data::after,
+.report-calendar-day-status-icon.is-missing::before,
+.report-calendar-day-status-icon.is-missing::after {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 7px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+}
+
+.report-calendar-day-status-icon.is-no-data::before,
+.report-calendar-day-status-icon.is-missing::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.report-calendar-day-status-icon.is-no-data::after,
+.report-calendar-day-status-icon.is-missing::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.report-calendar-day-status-icon.is-live::after {
+  position: absolute;
+  inset: 3px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+}
+
+.report-calendar-day-status-icon.is-pending::after,
+.report-calendar-day-status-icon.is-checking::after {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.report-calendar-day-status-icon.is-loading {
+  border-top-color: transparent;
+  animation: report-calendar-spin 0.7s linear infinite;
 }
 
 .report-calendar-day.has-report {
@@ -1238,8 +1520,30 @@ select {
   background: linear-gradient(180deg, #e7f8ed, #d4f0df);
 }
 
-.report-calendar-day.has-report .report-calendar-day-status {
+.report-calendar-day.has-report .report-calendar-day-status-icon {
   color: #1f7a52;
+}
+
+.report-calendar-day.has-bill-actual {
+  border-color: rgba(36, 106, 178, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.86),
+    inset 0 0 0 1px rgba(36, 106, 178, 0.16);
+}
+
+.report-calendar-bill-marker {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 999px;
+  background: #246ab2;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 900;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .report-calendar-day.no-data-report {
@@ -1251,7 +1555,7 @@ select {
   border-color: rgba(180, 35, 24, 0.62);
 }
 
-.report-calendar-day.no-data-report .report-calendar-day-status {
+.report-calendar-day.no-data-report .report-calendar-day-status-icon {
   color: #b42318;
 }
 
@@ -1260,7 +1564,7 @@ select {
   background: linear-gradient(180deg, #fff8e8, #fff0cc);
 }
 
-.report-calendar-day.missing-report .report-calendar-day-status {
+.report-calendar-day.missing-report .report-calendar-day-status-icon {
   color: #9a6318;
 }
 
@@ -1269,13 +1573,17 @@ select {
   background: linear-gradient(180deg, #eef6ff, #dceeff);
 }
 
-.report-calendar-day.is-live .report-calendar-day-status {
+.report-calendar-day.is-live .report-calendar-day-status-icon {
   color: #246ab2;
 }
 
 .report-calendar-day.is-unavailable {
   border-color: rgba(107, 127, 114, 0.18);
   background: linear-gradient(180deg, #f5f7f6, #ecefeb);
+  color: #7b8a80;
+}
+
+.report-calendar-day.is-unavailable .report-calendar-day-status-icon {
   color: #7b8a80;
 }
 
@@ -1293,8 +1601,14 @@ select {
   background: linear-gradient(180deg, #eef6ff, #dceeff);
 }
 
-.report-calendar-day.is-loading .report-calendar-day-status {
+.report-calendar-day.is-loading .report-calendar-day-status-icon {
   color: #246ab2;
+}
+
+@keyframes report-calendar-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .report-no-data-status {
@@ -2390,6 +2704,11 @@ select {
   min-height: 390px;
 }
 
+.sampling-overview-grid .sampling-totals-card {
+  align-self: start;
+  height: auto;
+}
+
 .sampling-totals-card {
   margin-top: 12px;
 }
@@ -2399,7 +2718,7 @@ select {
   padding: 8px 6px 6px;
   border-radius: 10px;
   background: linear-gradient(180deg, rgba(250, 252, 250, 0.78), rgba(246, 250, 247, 0.38));
-  flex: 1 1 auto;
+  flex: 0 0 auto;
 }
 
 .sampling-totals-chart {
@@ -2990,6 +3309,10 @@ select {
 
   .sampling-overview-grid {
     grid-template-columns: 1fr;
+  }
+
+  .sampling-overview-grid .report-calendar-column {
+    grid-column: 1;
   }
 
   .worker-logs-filters {

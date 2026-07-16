@@ -61,9 +61,9 @@ echo "Stopping local docker compose services before deployment..."
 stop_local_compose
 
 if remote_container_running; then
-  echo "NAS container is already running; skipping database push and treating this as a code-only refresh."
+  echo "NAS container is already running; skipping database/bill artifact push and treating this as a code-only refresh."
 elif [[ "${skip_db_push}" -eq 1 ]]; then
-  echo "Database push disabled by SKIP_DB_PUSH/NO_DB_PUSH; preserving NAS database."
+  echo "Database/bill artifact push disabled by SKIP_DB_PUSH/NO_DB_PUSH; preserving NAS data."
 else
   bash "${SCRIPT_DIR}/push-db-to-nas.sh"
 fi

@@ -131,9 +131,9 @@ curl -s http://<wattimize-host>:18000/api/saj/entities/core | jq
 
 Use `make status` any time to check whether local or NAS is currently running and whether each side has a SQLite database file.
 
-`make dev` now switches execution to local: if local is not already running, it stops the NAS container, pulls the NAS SQLite database into `./data/`, and then starts local `docker compose`. If local is already running, it treats the command as a local code refresh and skips database sync. When `sqlite3` is available, the downloaded database must pass `PRAGMA quick_check` before it replaces the existing local database. After the containers start, the script waits for the local collector status endpoint to become healthy before returning.
+`make dev` now switches execution to local: if local is not already running, it stops the NAS container, pulls the NAS SQLite database and uploaded bill artifacts into `./data/`, and then starts local `docker compose`. If local is already running, it treats the command as a local code refresh and skips data sync. When `sqlite3` is available, the downloaded database must pass `PRAGMA quick_check` before it replaces the existing local database. After the containers start, the script waits for the local collector status endpoint to become healthy before returning.
 
-To start local dev without pulling the NAS database, use:
+To start local dev without pulling the NAS database or bill artifacts, use:
 
 ```bash
 make dev SKIP_DB_PULL=1
@@ -153,10 +153,10 @@ Build and deploy to TerraMaster NAS over SSH:
 make nas-deploy
 ```
 
-`make nas-deploy` now stops local `docker compose` services first. If the NAS container is not already running, it pushes the local SQLite database to the NAS before deploying. If the NAS container is already running, it treats the command as a code-only refresh and skips database sync.
+`make nas-deploy` now stops local `docker compose` services first. If the NAS container is not already running, it pushes the local SQLite database and uploaded bill artifacts to the NAS before deploying. If the NAS container is already running, it treats the command as a code-only refresh and skips data sync.
 Every NAS deploy also uploads `data/home-plan/electricity-plans.json` to `${NAS_DATA_DIR}/home-plan/electricity-plans.json`, which is mounted in the container as `/app/data/home-plan/electricity-plans.json` for the Plan tab.
 
-To deploy code to the NAS without pushing the local database, use:
+To deploy code to the NAS without pushing the local database or bill artifacts, use:
 
 ```bash
 make nas-deploy SKIP_DB_PUSH=1
@@ -222,7 +222,7 @@ First-run configuration:
 - The `History` tab combines range selection with an energy breakdown card, a power timeline chart, a combined SAJ/Solplanet SOC chart, a total usable remaining-energy chart, a Tesla SOC chart, a pool-pump on/off timeline, a live 5-minute Zero Hero export-window observation card, and a selected-day `18:00-20:00` matrix of all 24 five-minute export windows, color-coded for net import, mixed import/net export, and pure export.
 - The `Report` tab reuses the History presentation but reads a persisted daily snapshot. The backend generates the completed local day at midnight, immediately backfills yesterday after an upgrade when needed, and stores precomputed usage, daily electricity cost, chart series, Zero Hero windows, and paginable sample rows for fast reads.
 - Daily report cost uses the bill-derived GloBird ZEROHERO rates in `data/home-plan/electricity-plans.json`, including fixed charges, import time windows, feed-in credits, Super Export top-up, and the estimated ZEROHERO day credit. The Report tab displays estimated cost, uploaded-bill actual cost, and the estimate-vs-bill delta in one compact breakdown.
-- Electricity bill uploads are accepted through the Report tab or `POST /api/bills/upload`. Uploaded PDF/text artifacts are stored under `data/home-plan/bills/`, parsed into `bills-index.json`, and allocated back into matching daily reports as `_bill_actual_cost`.
+- Electricity bill uploads are accepted through the Report tab or `POST /api/bills/upload`. Uploaded PDF/text artifacts are stored under `data/home-plan/bills/` with parsed billing-period date filenames, parsed into `bills-index.json`, and allocated back into matching daily reports as `_bill_actual_cost`.
 - To audit or backfill persisted daily report cost fields without starting the app, run `PYTHONPYCACHEPREFIX=/tmp/wattimize-pycache python3.12 scripts/audit-daily-report-costs.py` for a read-only comparison, or add `--write` to update missing/mismatched `_daily_cost` payloads. Stop any Wattimize service that uses `data/wattimize.sqlite3` before running a write-mode DB audit/backfill.
 - `GET /api/storage/samples?system=combined` now includes `tesla_charge_power_w` and `pool_pump_power_w` so frontend charts can separate home load from Tesla/pool-pump overlays.
 - The frontend can export, import, view backup status, and manually trigger a full SQLite backup from the Database tab.

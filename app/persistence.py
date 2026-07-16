@@ -101,6 +101,8 @@ MONTHLY_REPORT_STATUS_NO_DATA = "no_data"
 ELECTRICITY_PLAN_CURRENT_BILLED_ID = "globird-zerohero-old-current"
 ELECTRICITY_PLAN_HISTORICAL_BILLED_ID = "globird-zerohero-old-before-2026-07-01"
 DAILY_COST_ZEROHERO_IMPORT_THRESHOLD_KWH = 0.00001
+DAILY_COST_ZEROHERO_WINDOW_MINUTES = 5
+COMBINED_GRID_BALANCE_TOLERANCE_W = 100.0
 
 
 @dataclass(frozen=True)
@@ -531,6 +533,64 @@ def _json_loads(value: str | None, *, default: object) -> object:
         return json.loads(value)
     except json.JSONDecodeError:
         return default
+
+
+def _number_or_none(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
+def _is_direct_power_source(value: object) -> bool:
+    source = str(value or "").strip().lower()
+    return bool(source) and source != "unavailable" and not source.startswith("calc:")
+
+
+def _resolve_combined_grid_w(metrics_map: dict[str, object], fallback_grid_w: object) -> float | None:
+    candidates: list[dict[str, object]] = []
+    for system in ("saj", "solplanet"):
+        grid_w = _number_or_none(metrics_map.get(f"{system}_grid_w"))
+        if grid_w is None:
+            continue
+        balance_w = _number_or_none(metrics_map.get(f"{system}_grid_balance_w"))
+        candidates.append(
+            {
+                "system": system,
+                "grid_w": grid_w,
+                "source": str(metrics_map.get(f"{system}_grid_source") or "unavailable"),
+                "abs_balance_w": abs(balance_w) if balance_w is not None else None,
+            }
+        )
+    if not candidates:
+        return _number_or_none(fallback_grid_w)
+
+    selection_pool = [item for item in candidates if _is_direct_power_source(item.get("source"))] or candidates
+    default_candidate = next(
+        (item for item in selection_pool if str(item.get("system") or "") == "saj"),
+        selection_pool[0],
+    )
+    scoreable_candidates = [
+        item for item in selection_pool if _number_or_none(item.get("abs_balance_w")) is not None
+    ]
+    if not scoreable_candidates:
+        return _number_or_none(default_candidate.get("grid_w"))
+
+    best_candidate = min(
+        scoreable_candidates,
+        key=lambda item: float(_number_or_none(item.get("abs_balance_w")) or 0.0),
+    )
+    default_score = _number_or_none(default_candidate.get("abs_balance_w"))
+    best_score = _number_or_none(best_candidate.get("abs_balance_w"))
+    if (
+        str(best_candidate.get("system") or "") != str(default_candidate.get("system") or "")
+        and default_score is not None
+        and best_score is not None
+        and default_score - best_score <= COMBINED_GRID_BALANCE_TOLERANCE_W
+    ):
+        return _number_or_none(default_candidate.get("grid_w"))
+    return _number_or_none(best_candidate.get("grid_w"))
 
 
 def _extract_pool_pump_power_last_updated(payload: object) -> str | None:
@@ -2259,11 +2319,12 @@ def _load_power_rows(
                 payload = _json_loads(row[5], default={})
                 metrics = payload.get("metrics")
                 metrics_map = metrics if isinstance(metrics, dict) else {}
+                grid_w = _resolve_combined_grid_w(metrics_map, row[2]) if system == "combined" else row[2]
                 result.append(
                     (
                         float(row[0]),
                         row[1],
-                        row[2],
+                        grid_w,
                         row[3],
                         row[4],
                         metrics_map.get("tesla_charge_power_w"),
@@ -2473,12 +2534,95 @@ def _iter_interval_cost_segments(
         current = segment_end
 
 
+def _local_minute_bucket_start_utc(current_utc: datetime, *, local_tz: object, bucket_minutes: int) -> datetime:
+    safe_minutes = max(1, min(60, int(bucket_minutes)))
+    local_current = current_utc.astimezone(local_tz)
+    minute_of_day = local_current.hour * 60 + local_current.minute
+    bucket_minute = (minute_of_day // safe_minutes) * safe_minutes
+    bucket_local = datetime.combine(
+        local_current.date(),
+        time(hour=bucket_minute // 60, minute=bucket_minute % 60),
+        tzinfo=local_tz,
+    )
+    return bucket_local.astimezone(UTC)
+
+
+def _next_local_minute_bucket_boundary_after(
+    current_utc: datetime,
+    *,
+    local_tz: object,
+    bucket_minutes: int,
+) -> datetime:
+    safe_minutes = max(1, min(60, int(bucket_minutes)))
+    local_current = current_utc.astimezone(local_tz)
+    minute_of_day = local_current.hour * 60 + local_current.minute
+    next_bucket_minute = ((minute_of_day // safe_minutes) + 1) * safe_minutes
+    boundary_day = local_current.date() + timedelta(days=next_bucket_minute // (24 * 60))
+    minute_in_day = next_bucket_minute % (24 * 60)
+    boundary_local = datetime.combine(
+        boundary_day,
+        time(hour=minute_in_day // 60, minute=minute_in_day % 60),
+        tzinfo=local_tz,
+    )
+    boundary_utc = boundary_local.astimezone(UTC)
+    if boundary_utc.timestamp() <= current_utc.timestamp() + 0.000001:
+        return current_utc + timedelta(minutes=safe_minutes)
+    return boundary_utc
+
+
+def _iter_local_minute_bucket_segments(
+    *,
+    start_utc: datetime,
+    duration_seconds: float,
+    local_tz: object,
+    bucket_minutes: int,
+):
+    current = start_utc.astimezone(UTC)
+    interval_end = current + timedelta(seconds=max(0.0, duration_seconds))
+    while current < interval_end:
+        bucket_start = _local_minute_bucket_start_utc(
+            current,
+            local_tz=local_tz,
+            bucket_minutes=bucket_minutes,
+        )
+        next_boundary = _next_local_minute_bucket_boundary_after(
+            current,
+            local_tz=local_tz,
+            bucket_minutes=bucket_minutes,
+        )
+        segment_end = min(interval_end, next_boundary)
+        if segment_end <= current:
+            break
+        yield bucket_start, (segment_end - current).total_seconds()
+        current = segment_end
+
+
 def _round_kwh(value_wh: float) -> float:
     return round(value_wh / 1000.0, 4)
 
 
 def _round_aud(value: float) -> float:
     return round(value, 4)
+
+
+def _refresh_bill_actual_cost_estimate(
+    bill_actual_cost: object,
+    usage_payload: dict[str, object],
+) -> dict[str, object] | None:
+    if not isinstance(bill_actual_cost, dict):
+        return None
+    refreshed = dict(bill_actual_cost)
+    daily_cost = usage_payload.get("_daily_cost")
+    daily_cost_map = daily_cost if isinstance(daily_cost, dict) else {}
+    estimated_total = _number_or_none(daily_cost_map.get("total_daily_cost_aud"))
+    actual_total = _number_or_none(refreshed.get("actual_daily_cost_aud"))
+    if estimated_total is None:
+        refreshed["estimated_daily_cost_aud"] = None
+        refreshed["delta_aud"] = None
+        return refreshed
+    refreshed["estimated_daily_cost_aud"] = _round_aud(estimated_total)
+    refreshed["delta_aud"] = _round_aud(estimated_total - actual_total) if actual_total is not None else None
+    return refreshed
 
 
 def _integrate_daily_cost_rows(
@@ -2583,6 +2727,7 @@ def _integrate_daily_cost_rows(
     super_export_window_wh = 0.0
     zerohero_import_wh = 0.0
     zerohero_observed_seconds = 0.0
+    zerohero_window_buckets: dict[float, dict[str, float]] = {}
 
     for current_row, next_row in zip(rows, rows[1:]):
         ts = float(current_row[0])
@@ -2607,6 +2752,21 @@ def _integrate_daily_cost_rows(
                 zerohero_observed_seconds += segment_seconds
                 if grid > 0:
                     zerohero_import_wh += grid * segment_seconds / 3600.0
+                for bucket_start_utc, bucket_seconds in _iter_local_minute_bucket_segments(
+                    start_utc=segment_start_utc,
+                    duration_seconds=segment_seconds,
+                    local_tz=local_tz,
+                    bucket_minutes=DAILY_COST_ZEROHERO_WINDOW_MINUTES,
+                ):
+                    bucket = zerohero_window_buckets.setdefault(
+                        bucket_start_utc.timestamp(),
+                        {"import_wh": 0.0, "export_wh": 0.0, "observed_seconds": 0.0},
+                    )
+                    bucket["observed_seconds"] += bucket_seconds
+                    if grid > 0:
+                        bucket["import_wh"] += grid * bucket_seconds / 3600.0
+                    elif grid < 0:
+                        bucket["export_wh"] += (-grid) * bucket_seconds / 3600.0
             if grid > 0:
                 segment_import_wh = grid * segment_seconds / 3600.0
                 if _time_in_window(local_segment_start, free_import_window):
@@ -2657,10 +2817,23 @@ def _integrate_daily_cost_rows(
     )
     zerohero_import_kwh = zerohero_import_wh / 1000.0
     zerohero_has_enough_data = zerohero_coverage_ratio is not None and zerohero_coverage_ratio >= 0.95
+    zerohero_net_import_windows = 0
+    zerohero_mixed_export_windows = 0
+    zerohero_net_import_wh = 0.0
+    for bucket in zerohero_window_buckets.values():
+        bucket_import_kwh = float(bucket.get("import_wh") or 0.0) / 1000.0
+        bucket_export_kwh = float(bucket.get("export_wh") or 0.0) / 1000.0
+        has_import = bucket_import_kwh > DAILY_COST_ZEROHERO_IMPORT_THRESHOLD_KWH
+        net_import_kwh = bucket_import_kwh - bucket_export_kwh
+        if has_import and net_import_kwh > DAILY_COST_ZEROHERO_IMPORT_THRESHOLD_KWH:
+            zerohero_net_import_windows += 1
+            zerohero_net_import_wh += max(net_import_kwh, 0.0) * 1000.0
+        elif has_import:
+            zerohero_mixed_export_windows += 1
     zerohero_qualified = (
         zerohero_rate > 0
         and zerohero_has_enough_data
-        and zerohero_import_kwh <= DAILY_COST_ZEROHERO_IMPORT_THRESHOLD_KWH
+        and zerohero_net_import_windows == 0
     )
     zerohero_credit_aud = zerohero_rate if zerohero_qualified else 0.0
     if zerohero_rate <= 0:
@@ -2721,6 +2894,11 @@ def _integrate_daily_cost_rows(
                 "qualified": zerohero_qualified,
                 "status": zerohero_status,
                 "import_kwh": round(zerohero_import_kwh, 5),
+                "net_import_kwh": round(zerohero_net_import_wh / 1000.0, 5),
+                "net_import_windows": int(zerohero_net_import_windows),
+                "mixed_export_windows": int(zerohero_mixed_export_windows),
+                "window_minutes": DAILY_COST_ZEROHERO_WINDOW_MINUTES,
+                "qualification_basis": "no_net_import_5min_windows",
                 "coverage_ratio": round(zerohero_coverage_ratio, 4) if zerohero_coverage_ratio is not None else None,
                 "credit_aud": _round_aud(zerohero_credit_aud),
                 "import_threshold_kwh": DAILY_COST_ZEROHERO_IMPORT_THRESHOLD_KWH,
@@ -3242,7 +3420,20 @@ def save_daily_report(
         report.period_end_epoch = end_at.timestamp()
         report.generated_at_utc = generated_at.isoformat()
         report.generated_at_epoch = generated_at.timestamp()
+        existing_usage_payload = _json_loads(report.usage_json, default={})
+        existing_bill_actual_cost = (
+            existing_usage_payload.get("_bill_actual_cost")
+            if isinstance(existing_usage_payload, dict)
+            else None
+        )
         usage_payload = dict(usage_by_system or {})
+        if isinstance(existing_bill_actual_cost, dict) and "_bill_actual_cost" not in usage_payload:
+            refreshed_bill_actual_cost = _refresh_bill_actual_cost_estimate(
+                existing_bill_actual_cost,
+                usage_payload,
+            )
+            if refreshed_bill_actual_cost is not None:
+                usage_payload["_bill_actual_cost"] = refreshed_bill_actual_cost
         if phase_battery is not None:
             usage_payload["_phase_battery"] = phase_battery
         report.usage_json = _json_dumps_full(usage_payload) or "{}"
@@ -3250,44 +3441,53 @@ def save_daily_report(
         report.zero_hero_json = _json_dumps_full(zero_hero_history) or "{}"
 
         session.execute(delete(DailyReportSampleRow).where(DailyReportSampleRow.report_day_local == day_text))
-        source_rows = select(
-            literal(day_text),
-            AssembledFlowSnapshotRow.id,
-            AssembledFlowSnapshotRow.system,
-            AssembledFlowSnapshotRow.assembled_at_utc,
-            AssembledFlowSnapshotRow.assembled_at_epoch,
-            AssembledFlowSnapshotRow.source,
-            AssembledFlowSnapshotRow.pv_w,
-            AssembledFlowSnapshotRow.grid_w,
-            AssembledFlowSnapshotRow.battery_w,
-            AssembledFlowSnapshotRow.load_w,
-            AssembledFlowSnapshotRow.battery_soc_percent,
-            AssembledFlowSnapshotRow.inverter_status,
-            AssembledFlowSnapshotRow.balance_w,
-        ).where(
-            AssembledFlowSnapshotRow.assembled_at_epoch >= start_at.timestamp(),
-            AssembledFlowSnapshotRow.assembled_at_epoch < end_at.timestamp(),
-        )
-        session.execute(
-            insert(DailyReportSampleRow).from_select(
-                [
-                    "report_day_local",
-                    "source_snapshot_id",
-                    "system",
-                    "sampled_at_utc",
-                    "sampled_at_epoch",
-                    "source",
-                    "pv_w",
-                    "grid_w",
-                    "battery_w",
-                    "load_w",
-                    "battery_soc_percent",
-                    "inverter_status",
-                    "balance_w",
-                ],
-                source_rows,
+        source_rows = session.execute(
+            select(
+                literal(day_text),
+                AssembledFlowSnapshotRow.id,
+                AssembledFlowSnapshotRow.system,
+                AssembledFlowSnapshotRow.assembled_at_utc,
+                AssembledFlowSnapshotRow.assembled_at_epoch,
+                AssembledFlowSnapshotRow.source,
+                AssembledFlowSnapshotRow.pv_w,
+                AssembledFlowSnapshotRow.grid_w,
+                AssembledFlowSnapshotRow.battery_w,
+                AssembledFlowSnapshotRow.load_w,
+                AssembledFlowSnapshotRow.battery_soc_percent,
+                AssembledFlowSnapshotRow.inverter_status,
+                AssembledFlowSnapshotRow.balance_w,
+                AssembledFlowSnapshotRow.flow_json,
+            ).where(
+                AssembledFlowSnapshotRow.assembled_at_epoch >= start_at.timestamp(),
+                AssembledFlowSnapshotRow.assembled_at_epoch < end_at.timestamp(),
             )
-        )
+        ).all()
+        sample_rows = []
+        for row in source_rows:
+            row_system = str(row[2])
+            payload = _json_loads(row[13], default={})
+            metrics = payload.get("metrics") if isinstance(payload, dict) else None
+            metrics_map = metrics if isinstance(metrics, dict) else {}
+            grid_w = _resolve_combined_grid_w(metrics_map, row[7]) if row_system == "combined" else row[7]
+            sample_rows.append(
+                {
+                    "report_day_local": row[0],
+                    "source_snapshot_id": row[1],
+                    "system": row_system,
+                    "sampled_at_utc": row[3],
+                    "sampled_at_epoch": row[4],
+                    "source": row[5],
+                    "pv_w": row[6],
+                    "grid_w": grid_w,
+                    "battery_w": row[8],
+                    "load_w": row[9],
+                    "battery_soc_percent": row[10],
+                    "inverter_status": row[11],
+                    "balance_w": row[12],
+                }
+            )
+        if sample_rows:
+            session.execute(insert(DailyReportSampleRow), sample_rows)
         report.sample_count = int(
             session.scalar(
                 select(func.count()).select_from(DailyReportSampleRow).where(
@@ -3304,6 +3504,7 @@ def save_daily_report(
         "sample_count": sample_count,
         "report_status": _daily_report_status(sample_count),
     }
+
 
 
 def get_daily_report(
@@ -3429,16 +3630,27 @@ def list_daily_reports(
             rows = session.scalars(stmt.order_by(desc(DailyReportRow.report_day_local)).limit(safe_limit)).all()
     except SQLAlchemyError:
         return []
-    return [
-        {
-            "report_day_local": str(row.report_day_local),
-            "timezone_name": str(row.timezone_name),
-            "generated_at_utc": str(row.generated_at_utc),
-            "sample_count": int(row.sample_count or 0),
-            "report_status": _daily_report_status(int(row.sample_count or 0)),
-        }
-        for row in rows
-    ]
+    items: list[dict[str, object]] = []
+    for row in rows:
+        usage_payload = _json_loads(row.usage_json, default={})
+        bill_actual_cost = usage_payload.get("_bill_actual_cost") if isinstance(usage_payload, dict) else None
+        has_bill_actual_cost = isinstance(bill_actual_cost, dict) and (
+            "actual_daily_cost_aud" in bill_actual_cost or bill_actual_cost.get("status") == "bill_allocated"
+        )
+        items.append(
+            {
+                "report_day_local": str(row.report_day_local),
+                "timezone_name": str(row.timezone_name),
+                "generated_at_utc": str(row.generated_at_utc),
+                "sample_count": int(row.sample_count or 0),
+                "report_status": _daily_report_status(int(row.sample_count or 0)),
+                "has_bill_actual_cost": has_bill_actual_cost,
+                "bill_actual_invoice_number": str(bill_actual_cost.get("invoice_number") or "")
+                if isinstance(bill_actual_cost, dict)
+                else "",
+            }
+        )
+    return items
 
 
 MONTHLY_REPORT_ENERGY_KEYS: tuple[str, ...] = (
@@ -4532,11 +4744,13 @@ def get_series_samples(
         pool_pump_power_last_updated = None
         pool_pump_available = None
         pool_pump_unavailable_reason = None
+        metrics_map: dict[str, object] = {}
         if system == "combined":
             payload = _json_loads(row[7], default={})
             if isinstance(payload, dict):
                 metrics = payload.get("metrics")
                 if isinstance(metrics, dict):
+                    metrics_map = metrics
                     tesla_battery_soc_percent = metrics.get("tesla_battery_soc_percent")
                     tesla_charge_power_w = metrics.get("tesla_charge_power_w")
                     pool_pump_power_w = metrics.get("pool_pump_power_w")
@@ -4555,12 +4769,13 @@ def get_series_samples(
                         tesla_item = display_items.get("tesla_soc")
                         if isinstance(tesla_item, dict):
                             tesla_battery_soc_percent = tesla_item.get("value")
+        grid_w = _resolve_combined_grid_w(metrics_map, row[3]) if system == "combined" else row[3]
         items.append(
             {
                 "sampled_at_utc": row[0],
                 "sampled_at_epoch": row[1],
                 "pv_w": row[2],
-                "grid_w": row[3],
+                "grid_w": grid_w,
                 "battery_w": row[4],
                 "load_w": row[5],
                 "battery_soc_percent": row[6],
@@ -4877,7 +5092,7 @@ def list_zero_hero_window_history(
                     "grid_export_wh": round(observed_grid_export_kwh * 1000.0, 2),
                     "has_import": has_import,
                     "has_export": has_export,
-                    "breaks_zero_import": has_import,
+                    "breaks_zero_import": state == "import",
                     "has_partial_coverage": has_partial_coverage,
                 }
             )

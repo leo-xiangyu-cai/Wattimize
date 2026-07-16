@@ -238,6 +238,11 @@
               <div id="reportBillUploadToolbar" class="report-bill-upload-toolbar hidden" hidden aria-hidden="true">
                 <input id="reportBillFileInput" type="file" accept="application/pdf,.pdf,text/plain,.txt" hidden />
                 <button id="reportBillChooseBtn" type="button" class="btn secondary report-bill-upload-btn" data-i18n="reportBillChooseBtn">Upload bill</button>
+                <button id="reportBillListBtn" type="button" class="btn secondary report-bill-list-btn" aria-expanded="false" aria-haspopup="menu">
+                  <span data-i18n="reportBillListBtn">Bills</span>
+                  <span aria-hidden="true">▾</span>
+                </button>
+                <div id="reportBillMenu" class="report-bill-menu hidden" hidden aria-hidden="true" role="menu"></div>
                 <span id="reportBillUploadStatus" class="report-bill-upload-status muted" aria-live="polite"></span>
               </div>
               <span id="samplingUpdatedAt" class="muted">-</span>
@@ -254,7 +259,6 @@
               <div class="sampling-totals-chart-wrap">
                 <div id="samplingTotalsChartCanvas" class="sampling-totals-chart"></div>
               </div>
-              <div id="samplingDailyCost" class="sampling-daily-cost hidden" hidden aria-hidden="true"></div>
               <div class="sampling-phase-battery">
                 <div class="sampling-phase-battery-head">
                   <h4 data-i18n="samplingPhaseBatteryTitle">Stage-End Battery Remaining</h4>
@@ -280,18 +284,21 @@
               </label>
               <div id="samplingRangeInputContainer"></div>
             </div>
-            <div id="reportCalendarPanel" class="report-calendar-panel hidden" hidden aria-live="polite">
-              <div class="report-calendar-head">
-                <button id="reportCalendarPrevBtn" type="button" class="btn secondary" aria-label="Previous month">&#x2039;</button>
-                <div>
-                  <p id="reportCalendarTitle" class="report-calendar-title">-</p>
-                  <p id="reportCalendarMeta" class="report-calendar-meta muted">-</p>
+            <div id="reportCalendarColumn" class="report-calendar-column hidden" hidden aria-hidden="true">
+              <div id="reportCalendarPanel" class="report-calendar-panel hidden" hidden aria-live="polite">
+                <div class="report-calendar-head">
+                  <button id="reportCalendarPrevBtn" type="button" class="btn secondary" aria-label="Previous month">&#x2039;</button>
+                  <div>
+                    <p id="reportCalendarTitle" class="report-calendar-title">-</p>
+                    <p id="reportCalendarMeta" class="report-calendar-meta muted">-</p>
+                  </div>
+                  <button id="reportCalendarNextBtn" type="button" class="btn secondary" aria-label="Next month">&#x203A;</button>
                 </div>
-                <button id="reportCalendarNextBtn" type="button" class="btn secondary" aria-label="Next month">&#x203A;</button>
+                <div id="reportCalendarWeekdays" class="report-calendar-weekdays"></div>
+                <div id="reportCalendarGrid" class="report-calendar-grid"></div>
+                <p id="reportCalendarStatus" class="report-calendar-status muted" hidden>-</p>
               </div>
-              <div id="reportCalendarWeekdays" class="report-calendar-weekdays"></div>
-              <div id="reportCalendarGrid" class="report-calendar-grid"></div>
-              <p id="reportCalendarStatus" class="report-calendar-status muted">-</p>
+              <div id="samplingDailyCost" class="sampling-daily-cost hidden" hidden aria-hidden="true"></div>
             </div>
           </div>
           <section class="sampling-chart-card sampling-power-card">

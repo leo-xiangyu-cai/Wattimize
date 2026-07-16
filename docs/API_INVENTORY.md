@@ -1,6 +1,6 @@
 # API Inventory
 
-Last updated: 2026-07-13
+Last updated: 2026-07-16
 
 This file tracks all backend APIs and their current usage status.
 
@@ -50,6 +50,17 @@ Status values:
 
 ### Plan tab
 - `GET /api/home-plan/electricity-plans`
+
+### Report tab
+- `GET /api/reports/daily`
+- `GET /api/reports/daily/index`
+- `POST /api/reports/daily/generate`
+- `GET /api/reports/monthly/index`
+- `GET /api/reports/monthly`
+- `POST /api/reports/monthly/generate`
+- `GET /api/bills`
+- `GET /api/bills/artifact`
+- `POST /api/bills/upload`
 
 ### Solplanet Raw tab
 - `GET /api/solplanet/cgi/getdev-device-2`

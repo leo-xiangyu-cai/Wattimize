@@ -38,7 +38,7 @@ wait_for_local_healthcheck() {
 }
 
 if local_container_running; then
-  echo "Local docker compose service is already running; skipping database pull and refreshing local containers only."
+  echo "Local docker compose service is already running; skipping database/bill artifact pull and refreshing local containers only."
   if remote_container_running; then
     stop_remote_container
   fi
@@ -50,11 +50,11 @@ else
   fi
 
   if [[ "${skip_db_pull}" -eq 1 ]]; then
-    echo "Database pull disabled by SKIP_DB_PULL/NO_DB_PULL; preserving local database."
+    echo "Database/bill artifact pull disabled by SKIP_DB_PULL/NO_DB_PULL; preserving local data."
   elif [[ "${remote_was_running}" -eq 1 ]] || remote_db_exists; then
     bash "${SCRIPT_DIR}/pull-nas-db.sh"
   else
-    echo "No remote runtime or remote database found; skipping database pull."
+    echo "No remote runtime or remote database found; skipping database/bill artifact pull."
   fi
 fi
 

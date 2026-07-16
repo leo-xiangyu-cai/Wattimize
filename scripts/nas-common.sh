@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export COPYFILE_DISABLE="${COPYFILE_DISABLE:-1}"
+
 NAS_HOST="${NAS_HOST:-tnas.local}"
 NAS_PORT="${NAS_PORT:-9222}"
 NAS_USER="${NAS_USER:-leo-cai}"
@@ -16,6 +18,7 @@ TZ_VALUE="${TZ_VALUE:-Asia/Shanghai}"
 DOCKER_BIN="${DOCKER_BIN:-/Volume1/@apps/DockerEngine/dockerd/bin/docker}"
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
 LOCAL_DB_PATH="${LOCAL_DB_PATH:-data/wattimize.sqlite3}"
+LOCAL_BILLS_PATH="${LOCAL_BILLS_PATH:-data/home-plan/bills}"
 LOCAL_COMPOSE_SERVICE="${LOCAL_COMPOSE_SERVICE:-wattimize-api}"
 
 SSH_TARGET="${NAS_USER}@${NAS_HOST}"
@@ -24,6 +27,15 @@ DB_BASENAME="$(basename "${LOCAL_DB_PATH}")"
 LOCAL_DB_DIR="$(cd "$(dirname "${LOCAL_DB_PATH}")" && pwd)"
 LOCAL_DB_FILE="${LOCAL_DB_DIR}/${DB_BASENAME}"
 REMOTE_DB_FILE="${NAS_DATA_DIR}/${DB_BASENAME}"
+LOCAL_BILLS_PARENT_INPUT="$(dirname "${LOCAL_BILLS_PATH}")"
+LOCAL_BILLS_BASENAME="$(basename "${LOCAL_BILLS_PATH}")"
+if [[ -d "${LOCAL_BILLS_PARENT_INPUT}" ]]; then
+  LOCAL_BILLS_PARENT_DIR="$(cd "${LOCAL_BILLS_PARENT_INPUT}" && pwd)"
+else
+  LOCAL_BILLS_PARENT_DIR="${LOCAL_BILLS_PARENT_INPUT}"
+fi
+LOCAL_BILLS_DIR="${LOCAL_BILLS_PARENT_DIR}/${LOCAL_BILLS_BASENAME}"
+REMOTE_BILLS_DIR="${NAS_DATA_DIR}/home-plan/bills"
 
 remote_exec() {
   ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "$@"
