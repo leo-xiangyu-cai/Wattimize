@@ -152,6 +152,7 @@ SYSTEM_PREFIXES: dict[str, tuple[str, ...]] = {
 }
 BALANCE_TOLERANCE_W = 100.0
 TESLA_ASSUMED_CHARGING_VOLTAGE_V = 240.0
+TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A = 5
 TESLA_CONTROL_FEEDBACK_KV_PREFIX = "ui.tesla_control_feedback."
 TESLA_CONTROL_FEEDBACK_PENDING_TIMEOUT_SECONDS = 15.0
 TESLA_CONTROL_FEEDBACK_SUCCESS_TTL_SECONDS = 4.0
@@ -5920,8 +5921,10 @@ def _calculate_tesla_grid_support_target(
     step_a = _to_number(charge_state.get("current_step_amps"))
     if min_a is None or max_a is None or float(max_a) <= 0:
         return off
-    min_i = max(int(round(float(min_a))), 1)
+    min_i = max(int(round(float(min_a))), TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A)
     max_i = int(round(float(max_a)))
+    if max_i < min_i:
+        return off
     step_i = max(int(round(float(step_a or 1.0))), 1)
     effective_grid_cap_w = float(target_grid_max_w) if target_grid_max_w is not None else TESLA_GRID_SUPPORT_TARGET_MAX_W
     raw_amps = (effective_grid_cap_w - base_grid_w) / TESLA_ASSUMED_CHARGING_VOLTAGE_V
@@ -5952,8 +5955,10 @@ def _calculate_tesla_target_for_power_budget(
     step_a = _to_number(charge_state.get("current_step_amps"))
     if min_a is None or max_a is None or float(max_a) <= 0:
         return off
-    min_i = max(int(round(float(min_a))), 1)
+    min_i = max(int(round(float(min_a))), TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A)
     max_i = int(round(float(max_a)))
+    if max_i < min_i:
+        return off
     step_i = max(int(round(float(step_a or 1.0))), 1)
     raw_amps = float(target_power_w) / TESLA_ASSUMED_CHARGING_VOLTAGE_V
     if raw_amps < float(min_i):
@@ -5977,8 +5982,10 @@ def _calculate_tesla_max_power_target(charge_state: dict[str, object]) -> dict[s
     step_a = _to_number(charge_state.get("current_step_amps"))
     if min_a is None or max_a is None or float(max_a) <= 0:
         return off
-    min_i = max(int(round(float(min_a))), 1)
+    min_i = max(int(round(float(min_a))), TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A)
     max_i = int(round(float(max_a)))
+    if max_i < min_i:
+        return off
     step_i = max(int(round(float(step_a or 1.0))), 1)
     snapped = (max_i // step_i) * step_i
     clamped = max(min_i, min(max_i, snapped))
@@ -6000,6 +6007,11 @@ def _choose_tesla_solar_surplus_target_from_options(
     base_grid_without_tesla_w: float,
     charge_current_options_a: tuple[int, ...],
 ) -> dict[str, object]:
+    effective_options_a = tuple(
+        amps
+        for amps in charge_current_options_a
+        if amps >= TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A
+    )
     candidates: list[dict[str, object]] = [
         {
             "mode": "off",
@@ -6014,7 +6026,7 @@ def _choose_tesla_solar_surplus_target_from_options(
                 "tesla_power_w": float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V,
                 "predicted_grid_w": base_grid_without_tesla_w + (float(amps) * TESLA_ASSUMED_CHARGING_VOLTAGE_V),
             }
-            for amps in charge_current_options_a
+            for amps in effective_options_a
         ],
     ]
     valid_candidates = [

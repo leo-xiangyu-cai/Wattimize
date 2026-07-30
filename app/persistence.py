@@ -88,17 +88,16 @@ DAILY_REPORT_BATTERY_MIN_DISCHARGE_SOC_PERCENT = {
 }
 DAILY_REPORT_PHASE_BATTERY_STAGES: tuple[dict[str, object], ...] = (
     {"id": "overnight_shoulder", "titleKey": "notificationMatrixWindowOvernightTitle", "endHour": 11},
-    {"id": "free_energy", "titleKey": "notificationMatrixWindowFreeEnergyTitle", "endHour": 14},
-    {"id": "after_free_shoulder", "titleKey": "notificationMatrixWindowAfterFreeShoulderTitle", "endHour": 18},
-    {"id": "export_window", "titleKey": "notificationMatrixWindowExportTitle", "endHour": 20},
-    {"id": "post_export_peak", "titleKey": "notificationMatrixWindowPostExportPeakTitle", "endHour": 23},
+    {"id": "free_energy", "titleKey": "notificationMatrixWindowFreeEnergyTitle", "endHour": 15},
+    {"id": "after_free_shoulder", "titleKey": "notificationMatrixWindowAfterFreeShoulderTitle", "endHour": 16},
+    {"id": "export_window", "titleKey": "notificationMatrixWindowExportTitle", "endHour": 23},
 )
 DAILY_REPORT_PHASE_BATTERY_SAMPLE_TOLERANCE_SECONDS = 15 * 60
 DAILY_REPORT_STATUS_SAVED = "saved"
 DAILY_REPORT_STATUS_NO_DATA = "no_data"
 MONTHLY_REPORT_STATUS_SAVED = "saved"
 MONTHLY_REPORT_STATUS_NO_DATA = "no_data"
-ELECTRICITY_PLAN_CURRENT_BILLED_ID = "globird-zerohero-old-current"
+ELECTRICITY_PLAN_CURRENT_BILLED_ID = "globird-four4free-quote"
 ELECTRICITY_PLAN_HISTORICAL_BILLED_ID = "globird-zerohero-old-before-2026-07-01"
 DAILY_COST_ZEROHERO_IMPORT_THRESHOLD_KWH = 0.00001
 DAILY_COST_ZEROHERO_WINDOW_MINUTES = 5
@@ -3946,25 +3945,25 @@ def _monthly_report_build_recommendations(
             "hero_window_import",
             severity="high" if net_import_windows > 0 or hero_import_kwh >= 0.5 else "medium",
             confidence="high" if coverage_ratio >= 0.8 else "medium",
-            title_en="Hero Window import needs attention",
-            title_zh="Hero Window 购电需要处理",
+            title_en="Export Window import needs attention",
+            title_zh="外送窗口购电需要处理",
             finding_en=(
-                f"This month has {import_observed_windows} Hero Window 5-minute windows with grid import, "
+                f"This month has {import_observed_windows} Export Window 5-minute windows with grid import, "
                 f"including {net_import_windows} net-import windows."
             ),
             finding_zh=(
-                f"本月 Hero Window 有 {import_observed_windows} 个 5 分钟窗口出现电网购电，"
+                f"本月外送窗口有 {import_observed_windows} 个 5 分钟窗口出现电网购电，"
                 f"其中 {net_import_windows} 个是净购电窗口。"
             ),
-            action_en="Keep more usable battery before 18:00, and avoid Tesla or pool-pump load between 17:00 and 20:00 unless export headroom is already secure.",
-            action_zh="建议 18:00 前保留更多可用电池，并避免 17:00-20:00 安排 Tesla 或水泵运行，除非上网余量已经很充足。",
-            impact_en=f"Estimated avoidable Hero Window import/loss: about {_monthly_report_kwh_text(hero_import_kwh)} before tariff pricing.",
-            impact_zh=f"估算可减少的 Hero Window 购电/损失约 {_monthly_report_kwh_text(hero_import_kwh)}，后续接入电价后可换算金额。",
+            action_en="Keep more usable battery before 16:00, and avoid Tesla or pool-pump load during 16:00-23:00 unless export headroom is already secure.",
+            action_zh="建议 16:00 前保留更多可用电池，并避免 16:00-23:00 安排 Tesla 或水泵运行，除非上网余量已经很充足。",
+            impact_en=f"Estimated avoidable Export Window import/loss: about {_monthly_report_kwh_text(hero_import_kwh)} before tariff pricing.",
+            impact_zh=f"估算可减少的外送窗口购电/损失约 {_monthly_report_kwh_text(hero_import_kwh)}，后续接入电价后可换算金额。",
             evidence=[
                 {"label": _monthly_report_localized("Import-observed windows", "出现购电窗口"), "value": import_observed_windows},
                 {"label": _monthly_report_localized("Net-import windows", "净购电窗口"), "value": net_import_windows},
                 {"label": _monthly_report_localized("Mixed export windows", "有购电但净上网窗口"), "value": mixed_export_windows},
-                {"label": _monthly_report_localized("Hero import energy", "Hero 窗口购电量"), "value": _monthly_report_kwh_text(hero_import_kwh)},
+                {"label": _monthly_report_localized("Export-window import energy", "外送窗口购电量"), "value": _monthly_report_kwh_text(hero_import_kwh)},
             ],
         )
 
@@ -3984,8 +3983,8 @@ def _monthly_report_build_recommendations(
                 f"收费时段购电约 {_monthly_report_kwh_text(paid_import)}，Tesla 和水泵合计用电 "
                 f"{_monthly_report_kwh_text(flexible_load)}。"
             ),
-            action_en="Prefer 11:00-14:00 for pool pump and opportunistic Tesla charging, then use solar-surplus hours before drawing paid grid energy.",
-            action_zh="优先把水泵和可机会充电的 Tesla 放到 11:00-14:00，其次使用光伏富余时段，减少收费时段购电。",
+            action_en="Prefer 11:00-15:00 for pool pump and opportunistic Tesla charging, then use solar-surplus hours before drawing paid grid energy.",
+            action_zh="优先把水泵和可机会充电的 Tesla 放到 11:00-15:00，其次使用光伏富余时段，减少收费时段购电。",
             impact_en=f"Potentially shift roughly {_monthly_report_kwh_text(shiftable_kwh)} away from paid import windows.",
             impact_zh=f"粗略估算可把约 {_monthly_report_kwh_text(shiftable_kwh)} 从收费购电时段迁走。",
             evidence=[
@@ -4055,18 +4054,18 @@ def _monthly_report_build_recommendations(
             "pre_hero_battery_reserve",
             severity="high" if weak_import_kwh >= 0.5 else "medium",
             confidence="medium",
-            title_en="Pre-Hero battery reserve is too low on import days",
-            title_zh="出现购电的日期里，Hero 前电池余量偏低",
-            finding_en=f"{len(weak_battery_days)} import-affected days had less than 6 kWh usable battery around 18:00.",
-            finding_zh=f"有 {len(weak_battery_days)} 个受购电影响的日期在 18:00 左右可用电池低于 6 kWh。",
-            action_en="Raise the pre-Hero reserve target or stop flexible loads earlier on days where the 18:00 usable battery forecast is below 6 kWh.",
-            action_zh="建议在 18:00 预测可用电量低于 6 kWh 时，提高 Hero 前保电目标，或更早停止可调负载。",
-            impact_en=f"Those low-reserve days account for about {_monthly_report_kwh_text(weak_import_kwh)} Hero import.",
-            impact_zh=f"这些低余量日期对应的 Hero 购电约 {_monthly_report_kwh_text(weak_import_kwh)}。",
+            title_en="Pre-export battery reserve is too low on import days",
+            title_zh="出现购电的日期里，外送前电池余量偏低",
+            finding_en=f"{len(weak_battery_days)} import-affected days had less than 6 kWh usable battery around 16:00.",
+            finding_zh=f"有 {len(weak_battery_days)} 个受购电影响的日期在 16:00 左右可用电池低于 6 kWh。",
+            action_en="Raise the pre-export reserve target or stop flexible loads earlier on days where the 16:00 usable battery forecast is below 6 kWh.",
+            action_zh="建议在 16:00 预测可用电量低于 6 kWh 时，提高外送前保电目标，或更早停止可调负载。",
+            impact_en=f"Those low-reserve days account for about {_monthly_report_kwh_text(weak_import_kwh)} Export Window import.",
+            impact_zh=f"这些低余量日期对应的外送窗口购电约 {_monthly_report_kwh_text(weak_import_kwh)}。",
             evidence=[
                 {"label": _monthly_report_localized("Low-reserve import days", "低余量且购电日期"), "value": len(weak_battery_days)},
                 {"label": _monthly_report_localized("Reserve threshold", "余量阈值"), "value": "6 kWh"},
-                {"label": _monthly_report_localized("Hero import on these days", "这些日期 Hero 购电"), "value": _monthly_report_kwh_text(weak_import_kwh)},
+                {"label": _monthly_report_localized("Export-window import on these days", "这些日期外送窗口购电"), "value": _monthly_report_kwh_text(weak_import_kwh)},
             ],
         )
 
@@ -4093,7 +4092,7 @@ def _monthly_report_build_recommendations(
             impact_zh=f"本月可实际迁移的用电机会粗估约 {_monthly_report_kwh_text(shift_opportunity)}。",
             evidence=[
                 {"label": _monthly_report_localized("Solar self-consumption", "光伏自用率"), "value": _monthly_report_percent_text(self_consumption_ratio)},
-                {"label": _monthly_report_localized("Export outside Hero window", "非 Hero 上网"), "value": _monthly_report_kwh_text(export_other)},
+                {"label": _monthly_report_localized("Export outside Export Window", "外送窗口外上网"), "value": _monthly_report_kwh_text(export_other)},
                 {"label": _monthly_report_localized("Paid import", "收费购电"), "value": _monthly_report_kwh_text(paid_import)},
             ],
         )
@@ -4105,15 +4104,15 @@ def _monthly_report_build_recommendations(
             confidence="high",
             title_en="Data coverage limits recommendation accuracy",
             title_zh="数据覆盖率会影响建议准确性",
-            finding_en=f"Energy coverage is {_monthly_report_percent_text(coverage_ratio)} and Hero Window no-data windows total {no_data_windows}.",
-            finding_zh=f"电量统计覆盖率为 {_monthly_report_percent_text(coverage_ratio)}，Hero Window 无数据窗口共 {no_data_windows} 个。",
+            finding_en=f"Energy coverage is {_monthly_report_percent_text(coverage_ratio)} and Export Window no-data windows total {no_data_windows}.",
+            finding_zh=f"电量统计覆盖率为 {_monthly_report_percent_text(coverage_ratio)}，外送窗口无数据窗口共 {no_data_windows} 个。",
             action_en="Check collector uptime and inverter/API connectivity before tuning control thresholds from this report.",
             action_zh="在根据本报告调整控制阈值前，建议先检查采集器运行和逆变器/API 连接稳定性。",
             impact_en="Better coverage improves the confidence of cost and load-shifting estimates.",
             impact_zh="提高覆盖率后，电费估算和负载迁移建议会更可靠。",
             evidence=[
                 {"label": _monthly_report_localized("Coverage", "覆盖率"), "value": _monthly_report_percent_text(coverage_ratio)},
-                {"label": _monthly_report_localized("No-data Hero windows", "Hero 无数据窗口"), "value": no_data_windows},
+                {"label": _monthly_report_localized("No-data Export windows", "外送窗口无数据"), "value": no_data_windows},
             ],
         )
 
@@ -4124,8 +4123,8 @@ def _monthly_report_build_recommendations(
             confidence="medium",
             title_en="No major monthly issue detected",
             title_zh="本月暂未发现明显问题",
-            finding_en="Hero Window import, paid import, base load anomalies, and data quality are within the current rule thresholds.",
-            finding_zh="Hero Window 购电、收费购电、基础负载异常和数据质量都在当前规则阈值内。",
+            finding_en="Export Window import, paid import, base load anomalies, and data quality are within the current rule thresholds.",
+            finding_zh="外送窗口购电、收费购电、基础负载异常和数据质量都在当前规则阈值内。",
             action_en="Keep the current automation strategy and revisit after more data or tariff pricing is configured.",
             action_zh="可以先保持当前自动化策略，等数据更多或接入电价后再进一步优化。",
             impact_en="No immediate change is recommended.",
@@ -4196,8 +4195,8 @@ def build_monthly_report_analysis(
             local_timezone_name=local_timezone_name,
             recent_day_anchor_local=zero_anchor_day,
             now_utc=effective_now_utc if is_current_month else period_end_local.astimezone(UTC),
-            window_start_hour=int(grid_export_window_start_hour or 18),
-            window_end_hour=int(grid_export_window_end_hour or 20),
+            window_start_hour=int(grid_export_window_start_hour or 16),
+            window_end_hour=int(grid_export_window_end_hour or 23),
             window_minutes=zero_hero_window_minutes,
         )
     else:
@@ -4205,8 +4204,8 @@ def build_monthly_report_analysis(
             "system": "combined",
             "timezone": str(local_tz),
             "days": 0,
-            "window_start_hour": int(grid_export_window_start_hour or 18),
-            "window_end_hour": int(grid_export_window_end_hour or 20),
+            "window_start_hour": int(grid_export_window_start_hour or 16),
+            "window_end_hour": int(grid_export_window_end_hour or 23),
             "window_minutes": zero_hero_window_minutes,
             "window_count_per_day": 0,
             "anchor_day_local": month_start.isoformat(),
@@ -4923,8 +4922,8 @@ def list_zero_hero_window_history(
     local_timezone_name: str | None = None,
     recent_day_anchor_local: date | None = None,
     now_utc: datetime | None = None,
-    window_start_hour: int = 18,
-    window_end_hour: int = 20,
+    window_start_hour: int = 16,
+    window_end_hour: int = 23,
     window_minutes: int = 5,
 ) -> dict[str, object]:
     safe_days = max(1, min(31, int(days)))
