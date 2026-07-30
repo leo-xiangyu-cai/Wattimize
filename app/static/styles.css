@@ -321,6 +321,28 @@ select {
   box-shadow: 0 18px 48px rgba(31, 73, 51, 0.12);
 }
 
+#solplanetPinModal .modal-card {
+  width: min(760px, 100%);
+}
+
+.solplanet-plan-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.solplanet-plan-editor fieldset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 0;
+}
+
+.solplanet-plan-editor legend {
+  padding: 0 6px;
+  font-weight: 700;
+  color: var(--text);
+}
+
 .report-loading-modal {
   z-index: 1200;
   background: rgba(20, 35, 28, 0.46);
@@ -694,6 +716,10 @@ select {
   margin-top: 0;
 }
 
+.sampling-status-grid .sampling-pump-status-card {
+  grid-column: 1 / -1;
+}
+
 .sampling-status-grid .section-header {
   gap: 8px;
 }
@@ -703,7 +729,46 @@ select {
 }
 
 .sampling-pump-status-wrap {
-  height: 230px;
+  height: 260px;
+}
+
+.sampling-pump-status-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 8px;
+}
+
+.sampling-pump-status-metric {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(49, 74, 62, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.sampling-pump-status-metric-label {
+  margin: 0 0 5px;
+  color: #5c7266;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sampling-pump-status-metric-value {
+  margin: 0;
+  color: #22342c;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.sampling-pump-status-metric-detail {
+  margin: 4px 0 0;
+  color: #6b7f72;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .sampling-status-grid .sampling-zero-hero-history-card {
@@ -784,6 +849,12 @@ select {
   border: 1px dashed rgba(31, 122, 82, 0.18);
   background: rgba(255, 255, 255, 0.58);
   color: #5c7266;
+}
+
+@media (max-width: 480px) {
+  .sampling-pump-status-summary {
+    grid-template-columns: 1fr;
+  }
 }
 
 .sampling-zero-hero-history-list {
@@ -3259,6 +3330,10 @@ select {
     grid-template-columns: 1fr;
   }
 
+  .sampling-pump-status-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .sampling-power-timeline-wrap {
     height: 420px;
     min-height: 420px;
@@ -5328,6 +5403,11 @@ td {
 .efd-node.efd-node-tesla .tesla-current-trigger:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+.efd-node.efd-node-tesla .tesla-location-value {
+  font-size: 12px;
+  line-height: 1.1;
 }
 
 .tesla-current-modal-field {

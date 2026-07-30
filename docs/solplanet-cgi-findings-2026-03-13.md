@@ -111,9 +111,49 @@ Interpretation:
 
 ## Write Endpoint Findings
 
-### `POST /setting.cgi`
+### `POST /setting.cgi` with `setdefine` action
 
-This endpoint exists and responds, but the correct request body format was not identified.
+Later direct testing confirmed the working write shape:
+
+```json
+{
+  "device": 4,
+  "action": "setdefine",
+  "value": {
+    "Pin": 10000,
+    "Pout": 10000,
+    "Sun": [184610818, 268500739, 336569603, 0, 0, 0],
+    "Mon": [184610818, 268500739, 336569603, 0, 0, 0]
+  }
+}
+```
+
+Important details:
+
+- The `value` object should be a full `getdefine.cgi`-style payload, preserving `Pin`, `Pout`, and all seven day arrays.
+- Slot encoding uses four bytes: `[hour, minute, duration_minutes, mode]`.
+- Mode `2` is the charge/buy window.
+- Mode `3` is the discharge/sell window.
+- The duration byte is limited to `0..255`, so a `16:00-23:00` discharge window must be split across multiple slots.
+- Wattimize uses two Solplanet discharge slots for the export window:
+  - `16:00-20:15`, duration `255`
+  - `20:15-23:00`, duration `165`
+
+## Wattimize Control Logic
+
+The backend now exposes Solplanet manual control for `Pin`, `Pout`, and daily slots, and the export-window worker can automatically manage `Pout`.
+
+The automatic export policy is:
+
+- `16:00-21:00`: sell at `10kW` only up to an early cap of `8.5kWh`, and only when usable battery is above the `20kWh` comfort reserve.
+- `21:00-23:00`: attempt to reach the `18.5kWh` daily export target without crossing the `18kWh` hard reserve.
+- After reaching `18.5kWh`: sell only surplus above the `20kWh` comfort reserve.
+- Outside `16:00-23:00`: force `Pout = 0`.
+- At or below `18kWh` usable battery: force `Pout = 0`.
+
+### Historical failed attempts
+
+Before the `setdefine` action shape was identified, these `setting.cgi` attempts did not work.
 
 Tried:
 
@@ -137,10 +177,10 @@ error : setting_handler
 - Some requests hung until timeout with no useful response
 - After every attempt, `GET /getdefine.cgi` still returned `Pin = 10000`
 
-Conclusion:
+Historical conclusion:
 
 - `setting.cgi` is almost certainly the write path used by the device/app family
-- The body format or required companion parameters are still wrong
+- The body format or required companion parameters were still wrong in these attempts
 - No successful write to `8000W` was achieved
 
 ## Endpoint Probing Summary
@@ -183,9 +223,9 @@ Did not exist / returned 404:
    - a cookie/session established elsewhere
    - a different serialization of `plan`
 
-## Most Useful Next Step
+## Historical Next Step
 
-The fastest way to reverse the write format is likely:
+Before the working `setdefine` shape was found, the fastest way to reverse the write format was:
 
 1. Change the Friday charge power from `10000W` to `8000W` using the official app.
 2. Immediately re-read:
@@ -203,9 +243,9 @@ That will confirm whether:
 
 ## Bottom Line
 
-As of this investigation:
+As of the original investigation:
 
 - Read path is confirmed
 - Current Friday 11:00 charge setup is visible through CGI
 - Current charge power is still `10000W`
-- No direct CGI write attempt succeeded in changing it to `8000W`
+- The early direct CGI write attempts did not succeed in changing it to `8000W`

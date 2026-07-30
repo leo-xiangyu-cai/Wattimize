@@ -249,5 +249,8 @@ class SolplanetCgiClient:
     async def set_value(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._post_json("setting.cgi", payload)
 
+    async def set_definition(self, value: dict[str, Any]) -> dict[str, Any]:
+        return await self.set_value({"device": 4, "action": "setdefine", "value": value})
+
     async def aclose(self) -> None:
         await self._client.aclose()

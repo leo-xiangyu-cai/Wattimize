@@ -178,7 +178,7 @@ POOL_PUMP_OVERNIGHT_RESTART_COOLDOWN_SECONDS = 15 * 60
 POOL_PUMP_OVERNIGHT_STATE_KEY = "operation_state.pool_pump_overnight"
 POOL_PUMP_OFF_PERIOD_MORNING_START_HOUR = 5
 POOL_PUMP_OFF_PERIOD_MORNING_END_HOUR = 11
-POOL_PUMP_OFF_PERIOD_AFTERNOON_START_HOUR = 14
+POOL_PUMP_OFF_PERIOD_AFTERNOON_START_HOUR = 15
 POOL_PUMP_OFF_PERIOD_AFTERNOON_END_HOUR = 23
 POOL_PUMP_AUTO_CONTROL_STATE_KEY = "pool_pump.auto_control_enabled"
 POOL_PUMP_FORCE_MIN_RUNTIME_HOURS_STATE_KEY = "pool_pump.force_min_runtime_hours"
@@ -202,7 +202,7 @@ TESLA_POST_EXPORT_FORECAST_WINDOW_END_HOUR = 11
 TESLA_POST_EXPORT_FORECAST_HISTORY_DAYS = 3
 TESLA_POST_EXPORT_FORECAST_MIN_COVERAGE_RATIO = 0.5
 FREE_ENERGY_WINDOW_START_HOUR = 11
-FREE_ENERGY_WINDOW_END_HOUR = 14
+FREE_ENERGY_WINDOW_END_HOUR = 15
 PRIORITY_BUSINESS_DAY_START_HOUR = 11
 TESLA_PRIORITY_TARGET_SOC_PERCENT = 80.0
 TESLA_PRIORITY_MIN_SOC_PERCENT = 10.0
@@ -217,12 +217,12 @@ POOL_PUMP_PRIORITY_TIME_WEIGHTS: tuple[tuple[str, int, int, float], ...] = (
     ("night", 23, 11, 2.0),
 )
 FREE_ENERGY_WINDOW_SELF_CONSUMPTION_START_MINUTE = 50
-AFTER_FREE_SHOULDER_WINDOW_START_HOUR = 14
+AFTER_FREE_SHOULDER_WINDOW_START_HOUR = 15
 AFTER_FREE_SHOULDER_WINDOW_END_HOUR = 16
 AFTER_FREE_PEAK_WINDOW_START_HOUR = 16
 AFTER_FREE_PEAK_WINDOW_END_HOUR = 18
-EXPORT_WINDOW_START_HOUR = 18
-EXPORT_WINDOW_END_HOUR = 20
+EXPORT_WINDOW_START_HOUR = 16
+EXPORT_WINDOW_END_HOUR = 23
 POST_EXPORT_PEAK_WINDOW_START_HOUR = 20
 POST_EXPORT_PEAK_WINDOW_END_HOUR = 23
 OVERNIGHT_SHOULDER_WINDOW_START_HOUR = 23
@@ -230,6 +230,17 @@ OVERNIGHT_SHOULDER_WINDOW_END_HOUR = 11
 OVERNIGHT_BUDGET_TARGET_HOUR = OVERNIGHT_SHOULDER_WINDOW_END_HOUR
 EXPORT_WINDOW_BATTERY_SOFT_DISCHARGE_TARGET_W = 7_500.0
 EXPORT_WINDOW_BATTERY_HARD_DISCHARGE_LIMIT_W = 10_000.0
+SOLPLANET_EXPORT_MONITOR_TARGET_KWH = 18.5
+SOLPLANET_EXPORT_MONITOR_EARLY_CAP_KWH = 8.5
+SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH = 18.0
+SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH = 20.0
+SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W = 10_000.0
+SOLPLANET_EXPORT_MONITOR_LATE_START_HOUR = 21
+SOLPLANET_EXPORT_MONITOR_FEED_IN_AUD_PER_KWH = 0.08
+SOLPLANET_EXPORT_MONITOR_POST_EXPORT_IMPORT_AUD_PER_KWH = 0.375
+SOLPLANET_EXPORT_MONITOR_DISCHARGE_SLOT_INDEXES = (1, 2)
+SOLPLANET_EXPORT_MONITOR_CONTROL_MIN_INTERVAL_SECONDS = 60.0
+SOLPLANET_EXPORT_MONITOR_STOP_VERIFY_INTERVAL_SECONDS = 5 * 60.0
 ZERO_HERO_WINDOW_MINUTES = 5
 SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_HIGH_SOC_PERCENT = 50.0
 SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_LOW_SOC_PERCENT = 20.0
@@ -240,7 +251,6 @@ TESLA_SOLAR_SURPLUS_STOP_SOLPLANET_SOC_PERCENT = 90.0
 TESLA_SOLAR_SURPLUS_MIN_EXPORT_W = 150.0
 SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT = 20.0
 SOLPLANET_LOW_AVAILABLE_CAPACITY_NOTIFICATION_THRESHOLD_KWH = 25.0
-BATTERY_FULL_NOTIFICATION_SOC_PERCENT = 100.0
 SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLDS_WH: tuple[float, ...] = (5_000.0, 9_000.0)
 TESLA_CURRENT_MISMATCH_RESTART_MIN_DELTA_A = 2.0
 TESLA_CURRENT_MISMATCH_RESTART_COOLDOWN_SECONDS = 300.0
@@ -248,9 +258,6 @@ WORKER_PENDING_LOG_TIMEOUT_SECONDS = 60.0
 SAMPLE_PERSIST_MAX_ATTEMPTS = 5
 SAMPLE_PERSIST_ATTEMPT_TIMEOUT_SECONDS = 5.0
 SAMPLE_PERSIST_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (0.2, 0.5, 1.0, 2.0)
-BATTERY_FULL_NOTIFICATION_STATE_PREFIX = "notification_state."
-SAJ_BATTERY_FULL_ACTIVE_KEY = f"{BATTERY_FULL_NOTIFICATION_STATE_PREFIX}saj_battery_full_active"
-SOLPLANET_BATTERY_FULL_ACTIVE_KEY = f"{BATTERY_FULL_NOTIFICATION_STATE_PREFIX}solplanet_battery_full_active"
 TESLA_LOG_SYSTEM = "tesla"
 TESLA_OBSERVATION_SERVICE = "tesla"
 SAJ_COLLECTION_SERVICE = "saj_collection"
@@ -268,9 +275,7 @@ OVERNIGHT_SHOULDER_SERVICE = "overnight_shoulder"
 WINDOW_CHECK_SERVICES: tuple[str, ...] = (
     WINDOW_CHECK_FREE_ENERGY_SERVICE,
     WINDOW_CHECK_AFTER_FREE_SHOULDER_SERVICE,
-    WINDOW_CHECK_AFTER_FREE_PEAK_SERVICE,
     WINDOW_CHECK_EXPORT_WINDOW_SERVICE,
-    WINDOW_CHECK_POST_EXPORT_PEAK_SERVICE,
 )
 WORKER_SUMMARY_SERVICES: tuple[tuple[str, str], ...] = (
     ("saj", SAJ_COLLECTION_SERVICE),
@@ -294,26 +299,12 @@ TIME_WINDOW_RULE_DEFINITIONS: tuple[dict[str, str], ...] = (
     {"code": "pool_pump_free_energy_control", "window": "free_energy", "kind": "operation"},
     {"code": "pool_pump_off_period_control", "window": "pump_off_period", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "after_free_shoulder", "kind": "operation"},
-    {"code": "saj_profile_self_consumption", "window": "after_free_peak", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "export_window", "kind": "operation"},
-    {"code": "saj_profile_self_consumption", "window": "post_export_peak", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "overnight_shoulder", "kind": "operation"},
     {"code": "tesla_overnight_shoulder_control", "window": "overnight_shoulder", "kind": "operation"},
     {"code": "pool_pump_overnight_control", "window": "overnight_shoulder", "kind": "operation"},
     {"code": "tesla_after_free_shoulder_control", "window": "after_free_shoulder", "kind": "operation"},
-    {"code": "tesla_after_free_peak_control", "window": "after_free_peak", "kind": "operation"},
-    {"code": "solplanet_low_available_capacity", "window": "after_free_shoulder", "kind": "notification"},
-    {"code": "solplanet_low_available_capacity", "window": "after_free_peak", "kind": "notification"},
-    {"code": "solplanet_low_battery", "window": "export_window", "kind": "notification"},
     {"code": "grid_import_started", "window": "export_window", "kind": "notification"},
-    {"code": "solar_surplus_export_energy_reached_5000", "window": "export_window", "kind": "notification"},
-    {"code": "solar_surplus_export_energy_reached_9000", "window": "export_window", "kind": "notification"},
-    {"code": "solplanet_low_battery_post_export_peak", "window": "post_export_peak", "kind": "notification"},
-    {"code": "grid_import_started_post_export_peak", "window": "post_export_peak", "kind": "notification"},
-    {"code": "saj_battery_watch_50_percent", "window": "overnight_shoulder", "kind": "notification"},
-    {"code": "saj_battery_watch_20_percent", "window": "overnight_shoulder", "kind": "notification"},
-    {"code": "saj_battery_full", "window": "always", "kind": "notification"},
-    {"code": "solplanet_battery_full", "window": "always", "kind": "notification"},
 )
 TIME_WINDOW_RULE_CODES: tuple[str, ...] = tuple(dict.fromkeys(item["code"] for item in TIME_WINDOW_RULE_DEFINITIONS))
 TIME_WINDOW_RULE_WINDOWS_BY_CODE: dict[str, tuple[str, ...]] = {
@@ -457,13 +448,6 @@ MANUAL_OPERATION_DEFINITIONS: tuple[dict[str, object], ...] = (
     },
 )
 
-
-def _solar_surplus_export_energy_notification_code(threshold_wh: float) -> str:
-    return f"solar_surplus_export_energy_reached_{int(round(threshold_wh))}"
-
-
-def _is_solar_surplus_export_energy_notification_code(code: object) -> bool:
-    return str(code or "").strip().startswith("solar_surplus_export_energy_reached_")
 
 app = FastAPI(title="Wattimize API", version="0.1.0")
 static_dir = Path(__file__).parent / "static"
@@ -1474,6 +1458,7 @@ class SolplanetSlotPayload(BaseModel):
     enabled: bool | None = Field(default=None)
     hour: int | None = Field(default=None, ge=0, le=23)
     minute: int | None = Field(default=None, ge=0, le=59)
+    duration_minutes: int | None = Field(default=None, ge=0, le=255)
     power: int | None = Field(default=None, ge=0, le=255)
     mode: int | None = Field(default=None, ge=0, le=255)
 
@@ -2144,6 +2129,8 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
     tesla_observation_map = tesla_observation if isinstance(tesla_observation, dict) else {}
     tesla_charging_obj = tesla_observation_map.get("charging")
     tesla_charging_map = tesla_charging_obj if isinstance(tesla_charging_obj, dict) else {}
+    tesla_location_obj = tesla_observation_map.get("location")
+    tesla_location_map = tesla_location_obj if isinstance(tesla_location_obj, dict) else {}
     tesla_control_state = tesla_raw.get("control_state")
     tesla_control_state_map = tesla_control_state if isinstance(tesla_control_state, dict) else {}
     tesla_control_feedback = _resolve_tesla_control_feedback(tesla_control_state_map)
@@ -2212,6 +2199,22 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
                 "total_capacity_kwh": TESLA_BATTERY_CAPACITY_KWH,
                 "current_energy_kwh": tesla_current_energy_kwh,
                 "remaining_to_full_kwh": tesla_remaining_to_full_kwh,
+            },
+            "location": {
+                "state": tesla_location_map.get("state") or metrics.get("tesla_location_state"),
+                "status": tesla_location_map.get("status") or metrics.get("tesla_location_status"),
+                "at_home": (
+                    tesla_location_map.get("at_home")
+                    if "at_home" in tesla_location_map
+                    else metrics.get("tesla_at_home")
+                ),
+                "auto_control_allowed": (
+                    tesla_location_map.get("auto_control_allowed")
+                    if "auto_control_allowed" in tesla_location_map
+                    else metrics.get("tesla_auto_control_allowed_by_location")
+                ),
+                "auto_control_block_reason": tesla_location_map.get("auto_control_block_reason"),
+                "entity": tesla_location_map.get("entity"),
             },
             "control": {
                 "available": tesla_control_state_map.get("available"),
@@ -2881,6 +2884,61 @@ def _pick_best_state(states: list[dict[str, object]], scorer: Callable[[dict[str
     return best_state
 
 
+def _pick_tesla_location_entity(states: list[dict[str, object]]) -> dict[str, object] | None:
+    def _score(state: dict[str, object]) -> int:
+        entity_id = str(state.get("entity_id", ""))
+        domain, _ = _split_entity_id(entity_id)
+        if domain != "device_tracker":
+            return 0
+        haystack = _tesla_haystack(state)
+        if "tesla" not in haystack:
+            return 0
+        score = 120
+        if "location" in haystack:
+            score += 180
+        if entity_id.lower().endswith("_location"):
+            score += 90
+        if "vehicle" in haystack or "car" in haystack:
+            score += 20
+        attrs = state.get("attributes")
+        attrs_map = attrs if isinstance(attrs, dict) else {}
+        if str(attrs_map.get("source_type") or "").strip().lower() == "gps":
+            score += 40
+        if "latitude" in attrs_map and "longitude" in attrs_map:
+            score += 30
+        if "route" in haystack:
+            score -= 220
+        return max(score, 0)
+
+    return _pick_best_state(states, _score)
+
+
+def _build_tesla_location_state(states: list[dict[str, object]]) -> dict[str, object]:
+    location_state = _pick_tesla_location_entity(states)
+    compact_entity = _compact_raw_ha_state(location_state)
+    raw_state = str((location_state or {}).get("state") or "").strip()
+    normalized_state = raw_state.lower()
+    if normalized_state == "home":
+        status = "home"
+        at_home: bool | None = True
+    elif not normalized_state or normalized_state in ("unknown", "unavailable", "none"):
+        status = "unknown"
+        at_home = None
+    else:
+        status = "non_home"
+        at_home = False
+    return {
+        "state": raw_state or None,
+        "status": status,
+        "at_home": at_home,
+        "auto_control_allowed": at_home is True,
+        "auto_control_block_reason": None
+        if at_home is True
+        else ("tesla_location_not_home" if at_home is False else "tesla_location_unavailable"),
+        "entity": compact_entity,
+    }
+
+
 def _pick_tesla_charge_switch(states: list[dict[str, object]]) -> dict[str, object] | None:
     def _score(state: dict[str, object]) -> int:
         entity_id = str(state.get("entity_id", ""))
@@ -3302,6 +3360,7 @@ def _build_tesla_observation_payload(states: list[dict[str, object]]) -> dict[st
     control_state = _build_tesla_control_state(states)
     battery_level_state = _pick_tesla_battery_level_entity(states)
     charge_completion_state = _pick_tesla_charge_completion_entity(states)
+    location_state = _build_tesla_location_state(states)
     charge_current_sensor = control_state.get("charge_current_sensor_entity")
     charge_current_number = control_state.get("charge_current_number_entity")
     charge_voltage_entity = control_state.get("charge_voltage_entity")
@@ -3335,6 +3394,7 @@ def _build_tesla_observation_payload(states: list[dict[str, object]]) -> dict[st
         "charge_voltage_entity": charge_voltage_entity,
         "power_entity": control_state.get("power_entity"),
         "charge_completion_entity": _compact_raw_ha_state(charge_completion_state),
+        "location_entity": location_state.get("entity"),
     }
     observed_count = sum(1 for item in observed_entities.values() if isinstance(item, dict) and item.get("entity_id"))
 
@@ -3359,6 +3419,7 @@ def _build_tesla_observation_payload(states: list[dict[str, object]]) -> dict[st
             "minutes_to_full": _to_number(charge_completion.get("minutes_to_full")),
             "completion_at": charge_completion.get("completion_at"),
         },
+        "location": location_state,
         "control_mode": control_state.get("control_mode"),
         "observed_entity_count": observed_count,
         "entities": observed_entities,
@@ -3535,17 +3596,13 @@ def _overnight_shoulder_window_key(now_local: datetime) -> str:
     return (now_local - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
-def _tesla_midday_window_mode(now_local: datetime) -> Literal["free_energy", "after_free_shoulder", "after_free_peak", "export_window", "post_export_peak", "off"]:
+def _tesla_midday_window_mode(now_local: datetime) -> Literal["free_energy", "after_free_shoulder", "export_window", "off"]:
     if _is_within_free_energy_window(now_local):
         return "free_energy"
     if _is_within_after_free_shoulder_window(now_local):
         return "after_free_shoulder"
-    if _is_within_after_free_peak_window(now_local):
-        return "after_free_peak"
     if _is_within_export_window(now_local):
         return "export_window"
-    if _is_within_post_export_peak_window(now_local):
-        return "post_export_peak"
     return "off"
 
 
@@ -4655,26 +4712,6 @@ def _worker_window_name(payload: dict[str, object]) -> str:
 
 def _worker_notification_trigger_text(notification_map: dict[str, object]) -> str:
     code = str(notification_map.get("code") or "unknown").strip()
-    if code in ("saj_battery_full", "solplanet_battery_full"):
-        return (
-            f"soc={_fmt_result_number(notification_map.get('current_soc_percent'), 0, '%')}, "
-            f"threshold={_fmt_result_number(notification_map.get('threshold_soc_percent'), 0, '%')}"
-        )
-    if code in ("solplanet_low_battery", "solplanet_low_battery_post_export_peak"):
-        return (
-            f"solplanet_soc={_fmt_result_number(notification_map.get('current_soc_percent'), 0, '%')}, "
-            f"threshold={_fmt_result_number(notification_map.get('threshold_soc_percent'), 0, '%')}"
-            + (
-                f", tariff={_fmt_result_number(notification_map.get('tariff_p_per_kwh'), 1, 'p/kWh')}"
-                if notification_map.get("tariff_p_per_kwh") is not None
-                else ""
-            )
-        )
-    if code == "solplanet_low_available_capacity":
-        return (
-            f"solplanet_available_capacity={_fmt_result_number(notification_map.get('current_capacity_kwh'), 1, 'kWh')}, "
-            f"threshold={_fmt_result_number(notification_map.get('threshold_kwh'), 1, 'kWh')}"
-        )
     if code in ("grid_import_started", "grid_import_started_post_export_peak"):
         return (
             f"grid_import={_fmt_result_number(notification_map.get('current_grid_import_w'), 0, 'W')}"
@@ -4683,16 +4720,6 @@ def _worker_notification_trigger_text(notification_map: dict[str, object]) -> st
                 if notification_map.get("tariff_p_per_kwh") is not None
                 else ""
             )
-        )
-    if _is_solar_surplus_export_energy_notification_code(code):
-        return (
-            f"window_export={_fmt_result_number(notification_map.get('current_export_total_kwh'), 3, 'kWh')}, "
-            f"threshold={_fmt_result_number(notification_map.get('threshold_kwh'), 3, 'kWh')}"
-        )
-    if code in ("saj_battery_watch_50_percent", "saj_battery_watch_20_percent"):
-        return (
-            f"saj_soc={_fmt_result_number(notification_map.get('current_soc_percent'), 0, '%')}, "
-            f"threshold={_fmt_result_number(notification_map.get('threshold_soc_percent'), 0, '%')}"
         )
     return str(notification_map.get("message") or code)
 
@@ -5222,29 +5249,6 @@ def _dashboard_notification_item(entry: dict[str, object]) -> dict[str, object]:
     }
 
 
-async def _load_battery_full_active_state() -> dict[str, bool]:
-    kv_map = await asyncio.to_thread(
-        get_realtime_kv_by_prefix,
-        storage_db_path,
-        prefix=BATTERY_FULL_NOTIFICATION_STATE_PREFIX,
-    )
-    return {
-        "saj": bool((kv_map.get(SAJ_BATTERY_FULL_ACTIVE_KEY) or {}).get("value")),
-        "solplanet": bool((kv_map.get(SOLPLANET_BATTERY_FULL_ACTIVE_KEY) or {}).get("value")),
-    }
-
-
-async def _store_battery_full_active_state(*, saj_full_active: bool, solplanet_full_active: bool) -> None:
-    await asyncio.to_thread(
-        upsert_realtime_kv,
-        storage_db_path,
-        [
-            (SAJ_BATTERY_FULL_ACTIVE_KEY, json.dumps(bool(saj_full_active)), "worker"),
-            (SOLPLANET_BATTERY_FULL_ACTIVE_KEY, json.dumps(bool(solplanet_full_active)), "worker"),
-        ],
-    )
-
-
 async def _load_pool_pump_overnight_state() -> dict[str, object]:
     kv_map = await asyncio.to_thread(
         get_realtime_kv_by_prefix,
@@ -5522,6 +5526,314 @@ def _update_solar_surplus_export_energy_tracking(
         ],
         "threshold_notified_map": normalized_threshold_notified_map,
     }
+
+
+def _build_solplanet_export_monitor(
+    *,
+    metrics_map: dict[str, object],
+    now_local: datetime,
+    export_tracking: dict[str, object],
+    current_grid_import_w: float,
+    current_grid_export_w: float,
+) -> dict[str, object]:
+    usable_reference = _combined_usable_battery_reference(metrics_map)
+    usable_total_kwh = _to_number(usable_reference.get("usable_battery_total_kwh"))
+    usable_by_system = usable_reference.get("usable_battery_by_system_kwh")
+    usable_by_system_map = usable_by_system if isinstance(usable_by_system, dict) else {}
+    exported_kwh = max(_to_number(export_tracking.get("total_export_kwh")) or 0.0, 0.0)
+    remaining_to_early_cap_kwh = max(SOLPLANET_EXPORT_MONITOR_EARLY_CAP_KWH - exported_kwh, 0.0)
+    remaining_to_target_kwh = max(SOLPLANET_EXPORT_MONITOR_TARGET_KWH - exported_kwh, 0.0)
+    after_target_export_kwh = max(exported_kwh - SOLPLANET_EXPORT_MONITOR_TARGET_KWH, 0.0)
+    earned_aud = exported_kwh * SOLPLANET_EXPORT_MONITOR_FEED_IN_AUD_PER_KWH
+    remaining_daily_charge_offset_kwh = remaining_to_target_kwh
+    current_hour = now_local.hour
+    in_early_phase = EXPORT_WINDOW_START_HOUR <= current_hour < SOLPLANET_EXPORT_MONITOR_LATE_START_HOUR
+    in_late_phase = SOLPLANET_EXPORT_MONITOR_LATE_START_HOUR <= current_hour < EXPORT_WINDOW_END_HOUR
+    phase = "early_cap" if in_early_phase else ("late_target" if in_late_phase else "outside_export_window")
+
+    reserve_state = "unknown"
+    surplus_above_floor_kwh: float | None = None
+    surplus_above_comfort_kwh: float | None = None
+    if usable_total_kwh is not None:
+        surplus_above_floor_kwh = round(usable_total_kwh - SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH, 4)
+        surplus_above_comfort_kwh = round(usable_total_kwh - SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH, 4)
+        if usable_total_kwh <= SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH:
+            reserve_state = "below_floor"
+        elif usable_total_kwh < SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH:
+            reserve_state = "between_floor_and_comfort"
+        else:
+            reserve_state = "above_comfort"
+
+    recommended_pout_w = 0.0
+    target_sell_kwh = 0.0
+    recommendation = "observe_only"
+    reason = "battery_state_unavailable"
+    if usable_total_kwh is not None:
+        if usable_total_kwh <= SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH:
+            recommendation = "stop"
+            reason = "reserve_floor_reached"
+        elif in_early_phase:
+            target_sell_kwh = min(
+                remaining_to_early_cap_kwh,
+                max((surplus_above_comfort_kwh or 0.0), 0.0),
+            )
+            if remaining_to_early_cap_kwh <= 0.0:
+                recommendation = "hold_until_late_phase"
+                reason = "early_export_cap_reached"
+            elif target_sell_kwh > 0.0:
+                recommendation = "sell"
+                reason = "early_cap_available_above_comfort_reserve"
+                recommended_pout_w = SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
+            else:
+                recommendation = "hold"
+                reason = "comfort_reserve_not_available"
+        elif in_late_phase:
+            if remaining_to_target_kwh > 0.0:
+                target_sell_kwh = min(
+                    remaining_to_target_kwh,
+                    max((surplus_above_floor_kwh or 0.0), 0.0),
+                )
+                if target_sell_kwh > 0.0:
+                    recommendation = "sell"
+                    reason = "late_phase_target_not_reached_above_floor_reserve"
+                    recommended_pout_w = SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
+                else:
+                    recommendation = "stop"
+                    reason = "daily_target_unreachable_without_floor_breach"
+            elif usable_total_kwh > SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH:
+                target_sell_kwh = max((surplus_above_comfort_kwh or 0.0), 0.0)
+                recommendation = "sell_surplus"
+                reason = "daily_target_reached_sell_only_above_comfort_reserve"
+                recommended_pout_w = SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
+            else:
+                recommendation = "stop"
+                reason = "daily_target_reached_keep_comfort_reserve"
+        else:
+            recommendation = "stop"
+            reason = "outside_export_window"
+
+    minutes_to_target_at_recommended_power = None
+    if recommended_pout_w > 0.0 and target_sell_kwh > 0.0:
+        minutes_to_target_at_recommended_power = round((target_sell_kwh / (recommended_pout_w / 1000.0)) * 60.0, 1)
+    projected_usable_after_target_kwh = (
+        round(max(usable_total_kwh - target_sell_kwh, 0.0), 4)
+        if usable_total_kwh is not None
+        else None
+    )
+    avoid_import_loss_aud_per_kwh = (
+        SOLPLANET_EXPORT_MONITOR_POST_EXPORT_IMPORT_AUD_PER_KWH
+        - SOLPLANET_EXPORT_MONITOR_FEED_IN_AUD_PER_KWH
+    )
+    return {
+        "enabled": True,
+        "mode": "monitor_only",
+        "phase": phase,
+        "recommendation": recommendation,
+        "reason": reason,
+        "recommended_pout_w": round(recommended_pout_w, 1),
+        "target_pout_w": SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W,
+        "exported_kwh": round(exported_kwh, 4),
+        "earned_aud": round(earned_aud, 4),
+        "daily_export_target_kwh": SOLPLANET_EXPORT_MONITOR_TARGET_KWH,
+        "early_export_cap_kwh": SOLPLANET_EXPORT_MONITOR_EARLY_CAP_KWH,
+        "remaining_to_early_cap_kwh": round(remaining_to_early_cap_kwh, 4),
+        "remaining_to_daily_target_kwh": round(remaining_to_target_kwh, 4),
+        "after_target_export_kwh": round(after_target_export_kwh, 4),
+        "remaining_daily_charge_offset_aud": round(
+            remaining_daily_charge_offset_kwh * SOLPLANET_EXPORT_MONITOR_FEED_IN_AUD_PER_KWH,
+            4,
+        ),
+        "reserve_floor_kwh": SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH,
+        "comfort_floor_kwh": SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH,
+        "reserve_state": reserve_state,
+        "usable_battery_total_kwh": usable_total_kwh,
+        "usable_battery_by_system_kwh": {
+            "saj": _to_number(usable_by_system_map.get("saj")),
+            "solplanet": _to_number(usable_by_system_map.get("solplanet")),
+        },
+        "surplus_above_floor_kwh": surplus_above_floor_kwh,
+        "surplus_above_comfort_kwh": surplus_above_comfort_kwh,
+        "target_sell_kwh": round(target_sell_kwh, 4),
+        "projected_usable_after_target_kwh": projected_usable_after_target_kwh,
+        "minutes_to_target_at_recommended_power": minutes_to_target_at_recommended_power,
+        "current_grid_import_w": round(current_grid_import_w, 1),
+        "current_grid_export_w": round(current_grid_export_w, 1),
+        "feed_in_aud_per_kwh": SOLPLANET_EXPORT_MONITOR_FEED_IN_AUD_PER_KWH,
+        "post_export_import_aud_per_kwh": SOLPLANET_EXPORT_MONITOR_POST_EXPORT_IMPORT_AUD_PER_KWH,
+        "avoid_import_loss_aud_per_kwh": round(avoid_import_loss_aud_per_kwh, 4),
+        "guardrails": {
+            "do_not_sell_below_floor_kwh": SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH,
+            "normal_keep_comfort_floor_kwh": SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH,
+            "early_phase_end_hour": SOLPLANET_EXPORT_MONITOR_LATE_START_HOUR,
+            "export_window_end_hour": EXPORT_WINDOW_END_HOUR,
+        },
+    }
+
+
+def _solplanet_day_key_for_local_date(dt_local: datetime) -> str:
+    return {
+        0: "Mon",
+        1: "Tus",
+        2: "Wen",
+        3: "Thu",
+        4: "Fri",
+        5: "Sat",
+        6: "Sun",
+    }[dt_local.weekday()]
+
+
+def _solplanet_export_monitor_desired_pout(monitor: dict[str, object] | None, now_local: datetime) -> tuple[int, str]:
+    if not _is_within_export_window(now_local):
+        return 0, "outside_export_window"
+    monitor_map = monitor if isinstance(monitor, dict) else {}
+    recommendation = str(monitor_map.get("recommendation") or "").strip()
+    reserve_state = str(monitor_map.get("reserve_state") or "").strip()
+    if recommendation in ("sell", "sell_surplus") and reserve_state != "below_floor":
+        return int(SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W), recommendation
+    return 0, recommendation or "monitor_not_selling"
+
+
+def _solplanet_export_monitor_discharge_slots() -> list[int]:
+    start_minutes = EXPORT_WINDOW_START_HOUR * 60
+    end_minutes = EXPORT_WINDOW_END_HOUR * 60
+    remaining_minutes = max(end_minutes - start_minutes, 0)
+    current_minutes = start_minutes
+    encoded_slots: list[int] = []
+    while remaining_minutes > 0:
+        duration_minutes = min(remaining_minutes, 255)
+        encoded_slots.append(
+            _solplanet_encode_slot(
+                hour=current_minutes // 60,
+                minute=current_minutes % 60,
+                duration_minutes=duration_minutes,
+                mode=3,
+            )
+        )
+        current_minutes += duration_minutes
+        remaining_minutes -= duration_minutes
+    return encoded_slots
+
+
+async def _apply_solplanet_export_monitor_control(
+    *,
+    monitor: dict[str, object] | None,
+    now_local: datetime,
+    combined_status: dict[str, object],
+) -> dict[str, object]:
+    desired_pout, desired_reason = _solplanet_export_monitor_desired_pout(monitor, now_local)
+    now_utc = datetime.now(UTC)
+    state = combined_status.get("solplanet_export_monitor_control")
+    state_map = state if isinstance(state, dict) else {}
+    last_desired_pout = _to_number(state_map.get("desired_pout_w"))
+    last_checked_at_text = str(state_map.get("checked_at_utc") or "").strip()
+    elapsed_since_check_s: float | None = None
+    if last_checked_at_text:
+        try:
+            last_checked_at = datetime.fromisoformat(last_checked_at_text.replace("Z", "+00:00"))
+            if last_checked_at.tzinfo is None:
+                last_checked_at = last_checked_at.replace(tzinfo=UTC)
+            elapsed_since_check_s = max((now_utc - last_checked_at.astimezone(UTC)).total_seconds(), 0.0)
+        except ValueError:
+            elapsed_since_check_s = None
+
+    target_changed = last_desired_pout is None or int(last_desired_pout) != desired_pout
+    min_interval_elapsed = (
+        elapsed_since_check_s is None
+        or elapsed_since_check_s >= SOLPLANET_EXPORT_MONITOR_CONTROL_MIN_INTERVAL_SECONDS
+    )
+    stop_verify_elapsed = (
+        elapsed_since_check_s is None
+        or elapsed_since_check_s >= SOLPLANET_EXPORT_MONITOR_STOP_VERIFY_INTERVAL_SECONDS
+    )
+    previous_action = state_map.get("action")
+    previous_action_map = previous_action if isinstance(previous_action, dict) else {}
+    previous_confirmed_at_target = (
+        int(last_desired_pout or -1) == desired_pout
+        and str(previous_action_map.get("reason") or "").strip() == "already_at_target"
+    )
+    should_check_live = (
+        target_changed
+        or (desired_pout > 0 and min_interval_elapsed)
+        or (desired_pout == 0 and (stop_verify_elapsed or not previous_confirmed_at_target))
+    )
+
+    base_result: dict[str, object] = {
+        "mode": "auto_control",
+        "desired_pout_w": desired_pout,
+        "desired_reason": desired_reason,
+        "checked_live": False,
+        "action": {"type": "noop", "reason": "recently_checked"},
+    }
+    if not should_check_live:
+        return base_result
+
+    try:
+        schedule = await _solplanet_get_schedule_live()
+        current_pout = int(_to_number(schedule.get("Pout")) or 0)
+        day_key = _solplanet_day_key_for_local_date(now_local)
+        update_payload: dict[str, object] = {}
+        if current_pout != desired_pout:
+            update_payload["Pout"] = desired_pout
+
+        current_slots = _solplanet_day_slots(schedule.get(day_key))
+        target_discharge_slots = _solplanet_export_monitor_discharge_slots()
+        if desired_pout > 0 and any(
+            current_slots[slot_index] != target_slot
+            for slot_index, target_slot in zip(SOLPLANET_EXPORT_MONITOR_DISCHARGE_SLOT_INDEXES, target_discharge_slots)
+        ):
+            next_slots = list(current_slots)
+            for slot_index, target_slot in zip(SOLPLANET_EXPORT_MONITOR_DISCHARGE_SLOT_INDEXES, target_discharge_slots):
+                next_slots[slot_index] = target_slot
+            update_payload[day_key] = next_slots
+
+        result = dict(base_result)
+        result.update(
+            {
+                    "checked_live": True,
+                    "day_key": day_key,
+                    "current_pout_w": current_pout,
+                    "target_discharge_slots": [
+                        _solplanet_decode_slot(target_slot)
+                        for target_slot in target_discharge_slots
+                    ],
+                    "schedule_slot_changed": day_key in update_payload,
+                }
+            )
+        if not update_payload:
+            result["action"] = {"type": "noop", "reason": "already_at_target"}
+            combined_status["solplanet_export_monitor_control"] = {
+                **result,
+                "checked_at_utc": now_utc.isoformat(),
+            }
+            return result
+
+        write_result = await _solplanet_set_schedule_payload(update_payload, current_schedule=schedule)
+        result["action"] = {
+            "type": "apply",
+            "reason": desired_reason,
+            "payload": update_payload,
+        }
+        result["write_response"] = write_result.get("response") if isinstance(write_result, dict) else None
+        combined_status["solplanet_export_monitor_control"] = {
+            **result,
+            "checked_at_utc": now_utc.isoformat(),
+            "applied_at_utc": now_utc.isoformat(),
+        }
+        return result
+    except Exception as exc:  # noqa: BLE001
+        result = dict(base_result)
+        result.update(
+            {
+                "checked_live": True,
+                "action": {"type": "failed", "reason": desired_reason},
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        )
+        combined_status["solplanet_export_monitor_control"] = {
+            **result,
+            "checked_at_utc": now_utc.isoformat(),
+        }
+        return result
 
 
 def _current_zero_hero_window_bounds(now_local: datetime) -> tuple[datetime, datetime]:
@@ -6025,12 +6337,19 @@ async def _run_pool_pump_free_energy_control_check(
 def _tesla_observation_charge_state(observation: dict[str, object]) -> dict[str, object]:
     charging = observation.get("charging")
     charging_map = charging if isinstance(charging, dict) else {}
+    location = observation.get("location")
+    location_map = location if isinstance(location, dict) else {}
     return {
         "enabled": charging_map.get("enabled"),
         "requested_enabled": charging_map.get("requested_enabled"),
         "cable_connected": charging_map.get("cable_connected"),
         "connection_state": charging_map.get("connection_state"),
         "status_text": charging_map.get("status_text"),
+        "location_state": location_map.get("state"),
+        "location_status": location_map.get("status"),
+        "at_home": location_map.get("at_home"),
+        "auto_control_allowed_by_location": location_map.get("auto_control_allowed"),
+        "auto_control_location_block_reason": location_map.get("auto_control_block_reason"),
         "current_amps": _to_number(charging_map.get("current_amps")),
         "configured_current_amps": _to_number(charging_map.get("configured_current_amps")),
         "min_current_amps": _to_number(charging_map.get("min_current_amps")),
@@ -6039,6 +6358,15 @@ def _tesla_observation_charge_state(observation: dict[str, object]) -> dict[str,
         "voltage_v": _to_number(charging_map.get("voltage_v")),
         "power_w": _to_number(charging_map.get("power_w")) or 0.0,
     }
+
+
+def _tesla_auto_control_location_block_reason(charge_state: dict[str, object]) -> str | None:
+    if charge_state.get("at_home") is True:
+        return None
+    reason = str(charge_state.get("auto_control_location_block_reason") or "").strip()
+    if reason:
+        return reason
+    return "tesla_location_unavailable"
 
 
 def _export_window_fast_guard_snapshot() -> dict[str, object]:
@@ -6147,6 +6475,8 @@ async def _run_export_window_fast_guard(
     tesla_observation = _build_tesla_observation_payload(states)
     charge_state = _tesla_observation_charge_state(tesla_observation)
     result["tesla_state_before"] = charge_state
+    tesla_location_block_reason = _tesla_auto_control_location_block_reason(charge_state)
+    result["tesla_auto_control_location_block_reason"] = tesla_location_block_reason
 
     metrics = solplanet_flow.get("metrics")
     metrics_map = metrics if isinstance(metrics, dict) else {}
@@ -6215,7 +6545,13 @@ async def _run_export_window_fast_guard(
 
         charging_enabled = bool(charge_state.get("enabled"))
         charge_requested_enabled = bool(charge_state.get("requested_enabled"))
-        if tesla_auto_control_enabled and (charging_enabled or charge_requested_enabled):
+        connection_state = str(charge_state.get("connection_state") or "").strip().lower()
+        if (
+            tesla_auto_control_enabled
+            and tesla_location_block_reason is None
+            and connection_state != "unplugged"
+            and (charging_enabled or charge_requested_enabled)
+        ):
             await _tesla_set_charging(False)
             _append_worker_action(result, {"type": "stop_charging", "reason": "export_window_fast_guard"})
 
@@ -6323,12 +6659,19 @@ async def _run_midday_window_check(
         result["tesla_state_before"] = charge_state
         charging_enabled = bool(charge_state.get("enabled"))
         charge_requested_enabled = bool(charge_state.get("requested_enabled"))
+        tesla_location_block_reason = _tesla_auto_control_location_block_reason(charge_state)
+        result["tesla_auto_control_location_block_reason"] = tesla_location_block_reason
 
         if window_mode == "off":
             combined_status = collector_status.setdefault("combined", {})
             combined_status["grid_import_active"] = False
             combined_status["peak_price_grid_import_active"] = False
             combined_status["solar_surplus_export_last_tracked_at"] = None
+            result["solplanet_export_monitor_control"] = await _apply_solplanet_export_monitor_control(
+                monitor=None,
+                now_local=now_local,
+                combined_status=combined_status,
+            )
             result["decision"] = {
                 "mode": "observe_only",
                 "charge_current_amps": 0,
@@ -6360,6 +6703,12 @@ async def _run_midday_window_check(
         connection_state = str(charge_state.get("connection_state") or "").strip().lower()
         status_text = str(charge_state.get("status_text") or "").strip().lower()
         combined_status = collector_status.setdefault("combined", {})
+        if window_mode != "export_window":
+            result["solplanet_export_monitor_control"] = await _apply_solplanet_export_monitor_control(
+                monitor=None,
+                now_local=now_local,
+                combined_status=combined_status,
+            )
 
         if window_mode == "export_window":
             pv_w = _to_number(metrics_map.get("pv_w"))
@@ -6417,6 +6766,29 @@ async def _run_midday_window_check(
                 now_local=now_local,
                 current_grid_export_w=current_grid_export_w,
             )
+            result["export_window"]["solplanet_export_monitor"] = _build_solplanet_export_monitor(
+                metrics_map=metrics_map,
+                now_local=now_local,
+                export_tracking=result["solar_surplus_export_tracking"],
+                current_grid_import_w=current_grid_import_w,
+                current_grid_export_w=current_grid_export_w,
+            )
+            result["export_window"]["solplanet_export_monitor_control"] = await _apply_solplanet_export_monitor_control(
+                monitor=result["export_window"]["solplanet_export_monitor"],
+                now_local=now_local,
+                combined_status=combined_status,
+            )
+            control_action = (
+                result["export_window"]["solplanet_export_monitor_control"].get("action")
+                if isinstance(result["export_window"].get("solplanet_export_monitor_control"), dict)
+                else None
+            )
+            if isinstance(control_action, dict) and control_action.get("type") == "apply":
+                _append_worker_action(result, {
+                    "type": "set_solplanet_export",
+                    "reason": control_action.get("reason"),
+                    "desired_pout_w": result["export_window"]["solplanet_export_monitor_control"].get("desired_pout_w"),
+                })
 
         if tesla_rule_code:
             if connection_state == "unplugged":
@@ -6430,33 +6802,25 @@ async def _run_midday_window_check(
                 status = "skipped"
                 return result
 
+            if tesla_location_block_reason is not None:
+                result["decision"] = {
+                    "mode": "observe_only",
+                    "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
+                    "predicted_grid_w": round(float(grid_w), 1),
+                }
+                result["decision_reason"] = tesla_location_block_reason
+                result["action"] = {"type": "noop", "reason": tesla_location_block_reason}
+                status = "noop"
+                return result
+
         if window_mode == "post_export_peak":
             solplanet_soc_percent = _to_number(metrics_map.get("battery2_soc_percent"))
             combined_status = collector_status.setdefault("combined", {})
             result["post_export_peak"] = {
                 "tariff_p_per_kwh": POST_EXPORT_PEAK_WINDOW_TARIFF_P_PER_KWH,
                 "solplanet_soc_percent": solplanet_soc_percent,
-                "low_battery_alarm_threshold_soc_percent": SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT,
                 "resume_window_schedule": _window_schedule_text("overnight_shoulder"),
             }
-            if (
-                solplanet_soc_percent is not None
-                and solplanet_soc_percent < SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT
-                and _is_time_window_rule_enabled(enabled_map, "solplanet_low_battery_post_export_peak")
-            ):
-                _append_worker_notification(result, {
-                    "level": "warning",
-                    "code": "solplanet_low_battery_post_export_peak",
-                    "target": "solplanet_battery",
-                    "window": _window_schedule_text("post_export_peak"),
-                    "tariff_p_per_kwh": POST_EXPORT_PEAK_WINDOW_TARIFF_P_PER_KWH,
-                    "threshold_soc_percent": SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT,
-                    "current_soc_percent": round(solplanet_soc_percent, 1),
-                    "message": (
-                        "Solplanet battery SOC is below 20% during the post-export peak window; "
-                        "raise an early warning to avoid expensive grid import."
-                    ),
-                })
             was_importing = bool(combined_status.get("peak_price_grid_import_active"))
             is_importing = current_grid_import_w > 0.0
             if (
@@ -6478,6 +6842,18 @@ async def _run_midday_window_check(
                 })
             combined_status["peak_price_grid_import_active"] = is_importing
             active_or_requested = charging_enabled or charge_requested_enabled
+            if connection_state == "unplugged":
+                result["decision"] = {
+                    "mode": "observe_only",
+                    "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
+                    "predicted_grid_w": round(float(grid_w), 1),
+                    "resume_window_schedule": _window_schedule_text("overnight_shoulder"),
+                }
+                result["decision_reason"] = "tesla_unplugged"
+                result["action"] = {"type": "noop", "reason": "tesla_unplugged"}
+                status = "noop"
+                return result
+
             if not tesla_auto_control_enabled:
                 result["decision"] = {
                     "mode": "observe_only",
@@ -6487,6 +6863,18 @@ async def _run_midday_window_check(
                 }
                 result["decision_reason"] = "tesla_auto_control_disabled"
                 result["action"] = {"type": "noop", "reason": "tesla_auto_control_disabled"}
+                status = "noop"
+                return result
+
+            if tesla_location_block_reason is not None:
+                result["decision"] = {
+                    "mode": "observe_only",
+                    "charge_current_amps": int(round(current_configured_amps)) if current_configured_amps is not None else 0,
+                    "predicted_grid_w": round(float(grid_w), 1),
+                    "resume_window_schedule": _window_schedule_text("overnight_shoulder"),
+                }
+                result["decision_reason"] = tesla_location_block_reason
+                result["action"] = {"type": "noop", "reason": tesla_location_block_reason}
                 status = "noop"
                 return result
 
@@ -6525,24 +6913,6 @@ async def _run_midday_window_check(
                     "battery2_energy_kwh": "solplanet_battery_energy",
                 },
             }
-            if (
-                solplanet_available_capacity_kwh is not None
-                and solplanet_available_capacity_kwh < SOLPLANET_LOW_AVAILABLE_CAPACITY_NOTIFICATION_THRESHOLD_KWH
-                and _is_time_window_rule_enabled(enabled_map, "solplanet_low_available_capacity")
-            ):
-                _append_worker_notification(result, {
-                    "level": "alarm",
-                    "code": "solplanet_low_available_capacity",
-                    "target": "solplanet_battery_capacity",
-                    "window": _window_schedule_text("after_free_shoulder"),
-                    "threshold_kwh": SOLPLANET_LOW_AVAILABLE_CAPACITY_NOTIFICATION_THRESHOLD_KWH,
-                    "current_capacity_kwh": round(solplanet_available_capacity_kwh, 1),
-                    "message": (
-                        "Solplanet available battery capacity is below 25kWh during the after-free shoulder window; "
-                        "keep enough energy for the export peak window."
-                    ),
-                })
-
             active_or_requested = charging_enabled or charge_requested_enabled
             should_start = solplanet_soc_percent >= TESLA_SOLAR_SURPLUS_START_SOLPLANET_SOC_PERCENT
             should_stop = solplanet_soc_percent < TESLA_SOLAR_SURPLUS_STOP_SOLPLANET_SOC_PERCENT
@@ -6627,24 +6997,6 @@ async def _run_midday_window_check(
                     "battery2_energy_kwh": "solplanet_battery_energy",
                 },
             }
-            if (
-                solplanet_available_capacity_kwh is not None
-                and solplanet_available_capacity_kwh < SOLPLANET_LOW_AVAILABLE_CAPACITY_NOTIFICATION_THRESHOLD_KWH
-                and _is_time_window_rule_enabled(enabled_map, "solplanet_low_available_capacity")
-            ):
-                _append_worker_notification(result, {
-                    "level": "alarm",
-                    "code": "solplanet_low_available_capacity",
-                    "target": "solplanet_battery_capacity",
-                    "window": _window_schedule_text("after_free_peak"),
-                    "threshold_kwh": SOLPLANET_LOW_AVAILABLE_CAPACITY_NOTIFICATION_THRESHOLD_KWH,
-                    "current_capacity_kwh": round(solplanet_available_capacity_kwh, 1),
-                    "message": (
-                        "Solplanet available battery capacity is below 25kWh during the after-free peak window; "
-                        "keep enough energy for the export peak window."
-                    ),
-                })
-
             active_or_requested = charging_enabled or charge_requested_enabled
             should_start = solplanet_soc_percent >= TESLA_SOLAR_SURPLUS_START_SOLPLANET_SOC_PERCENT
             should_stop = solplanet_soc_percent < TESLA_SOLAR_SURPLUS_STOP_SOLPLANET_SOC_PERCENT
@@ -6761,22 +7113,6 @@ async def _run_midday_window_check(
                 },
             }
             result["export_window"] = export_window_map
-            if (
-                solplanet_soc_percent < SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT
-                and _is_time_window_rule_enabled(enabled_map, "solplanet_low_battery")
-            ):
-                _append_worker_notification(result, {
-                    "level": "warning",
-                    "code": "solplanet_low_battery",
-                    "target": "solplanet_battery",
-                    "window": _window_schedule_text("export_window"),
-                    "threshold_soc_percent": SOLPLANET_LOW_BATTERY_NOTIFICATION_SOC_PERCENT,
-                    "current_soc_percent": round(solplanet_soc_percent, 1),
-                    "message": (
-                        "Solplanet battery SOC is below 20% during the export window; keep one reminder in worklog "
-                        "until notification handling is implemented."
-                    ),
-                })
             was_importing = bool(combined_status.get("grid_import_active"))
             is_importing = current_grid_import_w > 0.0
             if is_importing and not was_importing and _is_time_window_rule_enabled(enabled_map, "grid_import_started"):
@@ -6799,35 +7135,29 @@ async def _run_midday_window_check(
                 current_grid_export_w=current_grid_export_w,
             )
             result["solar_surplus_export_tracking"] = export_tracking
-            previous_total_export_wh = float(export_tracking["total_export_wh"]) - float(export_tracking["added_export_wh"])
-            threshold_notified_map = combined_status.get("solar_surplus_export_threshold_notified_map")
-            if not isinstance(threshold_notified_map, dict):
-                threshold_notified_map = {}
-            for threshold_wh in SOLAR_SURPLUS_EXPORT_ENERGY_NOTIFICATION_THRESHOLDS_WH:
-                threshold_key = str(int(round(threshold_wh)))
-                if (
-                    previous_total_export_wh < threshold_wh
-                    and float(export_tracking["total_export_wh"]) >= threshold_wh
-                    and not bool(threshold_notified_map.get(threshold_key))
-                    and _is_time_window_rule_enabled(enabled_map, _solar_surplus_export_energy_notification_code(threshold_wh))
-                ):
-                    _append_worker_notification(result, {
-                        "level": "alarm",
-                        "code": _solar_surplus_export_energy_notification_code(threshold_wh),
-                        "target": f"grid_export_energy_{threshold_key}",
-                        "window": _window_schedule_text("export_window"),
-                        "current_export_total_wh": round(float(export_tracking["total_export_wh"]), 1),
-                        "current_export_total_kwh": round(float(export_tracking["total_export_wh"]) / 1000.0, 4),
-                        "threshold_wh": threshold_wh,
-                        "threshold_kwh": round(threshold_wh / 1000.0, 3),
-                        "message": (
-                            "Exported energy during the export window reached the configured "
-                            "threshold; add one alarm reminder to worklog."
-                        ),
-                    })
-                    threshold_notified_map[threshold_key] = True
-            combined_status["solar_surplus_export_threshold_notified_map"] = threshold_notified_map
-            combined_status["solar_surplus_export_threshold_notified"] = any(threshold_notified_map.values())
+            export_window_map["solplanet_export_monitor"] = _build_solplanet_export_monitor(
+                metrics_map=metrics_map,
+                now_local=now_local,
+                export_tracking=export_tracking,
+                current_grid_import_w=current_grid_import_w,
+                current_grid_export_w=current_grid_export_w,
+            )
+            export_window_map["solplanet_export_monitor_control"] = await _apply_solplanet_export_monitor_control(
+                monitor=export_window_map["solplanet_export_monitor"],
+                now_local=now_local,
+                combined_status=combined_status,
+            )
+            control_action = (
+                export_window_map["solplanet_export_monitor_control"].get("action")
+                if isinstance(export_window_map.get("solplanet_export_monitor_control"), dict)
+                else None
+            )
+            if isinstance(control_action, dict) and control_action.get("type") == "apply":
+                _append_worker_action(result, {
+                    "type": "set_solplanet_export",
+                    "reason": control_action.get("reason"),
+                    "desired_pout_w": export_window_map["solplanet_export_monitor_control"].get("desired_pout_w"),
+                })
             priority_snapshot = await _build_device_priority_snapshot(combined_flow, now_local=now_local)
             result["priority_snapshot"] = priority_snapshot
             tesla_priority_map = (
@@ -6876,6 +7206,7 @@ async def _run_midday_window_check(
             )
             tesla_force_support_needed = bool(
                 tesla_auto_control_enabled
+                and tesla_location_block_reason is None
                 and tesla_ready
                 and solplanet_soc_percent is not None
                 and tesla_priority_map
@@ -6935,6 +7266,7 @@ async def _run_midday_window_check(
             }
             export_window_map["tesla_support"] = {
                 "auto_control_enabled": tesla_auto_control_enabled,
+                "location_block_reason": tesla_location_block_reason,
                 "ready": tesla_ready,
                 "priority_score": round(tesla_priority_score, 1),
                 "tesla_soc_percent": _to_number(tesla_priority_map.get("soc_percent")),
@@ -6984,7 +7316,12 @@ async def _run_midday_window_check(
                     "reasons": hard_guard_reasons,
                 }
                 result["decision_reason"] = "export_window_hard_guard_triggered"
-                if tesla_auto_control_enabled and (charging_enabled or charge_requested_enabled):
+                if (
+                    tesla_auto_control_enabled
+                    and tesla_location_block_reason is None
+                    and tesla_ready
+                    and (charging_enabled or charge_requested_enabled)
+                ):
                     await _tesla_set_charging(False)
                     _append_worker_action(result, {"type": "stop_charging", "reason": "export_window_hard_guard"})
                 if pool_pump_auto_control_enabled and pump_enabled:
@@ -7065,7 +7402,7 @@ async def _run_midday_window_check(
                 }
                 result["decision_reason"] = "export_window_no_minimum_support_needed"
 
-            if tesla_auto_control_enabled:
+            if tesla_auto_control_enabled and tesla_location_block_reason is None and tesla_ready:
                 if tesla_allocated:
                     desired_amps = int(tesla_target.get("charge_current_amps") or 0)
                     configured_matches_desired = (
@@ -7421,50 +7758,7 @@ async def _run_saj_battery_watch_check(
             combined_status["saj_battery_watch_20_notified"] = False
         combined_status["saj_battery_watch_window_key"] = window_key
 
-        notified_50 = bool(combined_status.get("saj_battery_watch_50_notified"))
-        notified_20 = bool(combined_status.get("saj_battery_watch_20_notified"))
         result["window_key"] = window_key
-        result["notification_state"] = {
-            "reminder_50_sent": notified_50,
-            "reminder_20_sent": notified_20,
-        }
-
-        if (
-            saj_soc_percent <= SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_HIGH_SOC_PERCENT
-            and not notified_50
-            and _is_time_window_rule_enabled(enabled_map, "saj_battery_watch_50_percent")
-        ):
-            _append_worker_notification(result, {
-                "level": "warning",
-                "code": "saj_battery_watch_50_percent",
-                "target": "saj_battery",
-                "window": _window_schedule_text("overnight_shoulder"),
-                "threshold_soc_percent": SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_HIGH_SOC_PERCENT,
-                "current_soc_percent": round(saj_soc_percent, 1),
-                "message": "SAJ battery SOC reached 50% during the overnight shoulder window.",
-            })
-            combined_status["saj_battery_watch_50_notified"] = True
-
-        if (
-            saj_soc_percent <= SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_LOW_SOC_PERCENT
-            and not notified_20
-            and _is_time_window_rule_enabled(enabled_map, "saj_battery_watch_20_percent")
-        ):
-            _append_worker_notification(result, {
-                "level": "alarm",
-                "code": "saj_battery_watch_20_percent",
-                "target": "saj_battery",
-                "window": _window_schedule_text("overnight_shoulder"),
-                "threshold_soc_percent": SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_LOW_SOC_PERCENT,
-                "current_soc_percent": round(saj_soc_percent, 1),
-                "message": "SAJ battery SOC reached 20% during the overnight shoulder window.",
-            })
-            combined_status["saj_battery_watch_20_notified"] = True
-
-        result["notification_state"] = {
-            "reminder_50_sent": bool(combined_status.get("saj_battery_watch_50_notified")),
-            "reminder_20_sent": bool(combined_status.get("saj_battery_watch_20_notified")),
-        }
         tesla_rule_code = "tesla_overnight_shoulder_control"
         tesla_rule_enabled = tesla_auto_control_enabled
         pool_pump_rule_code = "pool_pump_overnight_control"
@@ -7579,6 +7873,8 @@ async def _run_saj_battery_watch_check(
         connection_state = str(charge_state.get("connection_state") or "").strip().lower()
         status_text = str(charge_state.get("status_text") or "").strip().lower()
         active_or_requested = charging_enabled or charge_requested_enabled
+        tesla_location_block_reason = _tesla_auto_control_location_block_reason(charge_state)
+        result["tesla_auto_control_location_block_reason"] = tesla_location_block_reason
 
         tesla_block_reason: str | None = None
         if not tesla_rule_enabled:
@@ -7587,6 +7883,8 @@ async def _run_saj_battery_watch_check(
             tesla_block_reason = "tesla_unplugged"
         elif status_text in ("disconnected", "unknown", "unavailable"):
             tesla_block_reason = "tesla_not_ready"
+        elif tesla_location_block_reason is not None:
+            tesla_block_reason = tesla_location_block_reason
 
         pump_schedule_active = _is_hour_in_window(
             now_local.hour,
@@ -8455,100 +8753,6 @@ async def _run_pool_pump_overnight_control_check(
         result["log_error_text"] = error_text
 
 
-async def _run_battery_full_notification_check(
-    combined_flow: dict[str, object] | None,
-    *,
-    round_id: str | None = None,
-    requested_at_utc: str | None = None,
-) -> dict[str, object]:
-    requested_at_utc = str(requested_at_utc or "").strip() or datetime.now(UTC).isoformat()
-    now_local, timezone_name = _tesla_grid_support_now_local()
-    result: dict[str, object] = {
-        "executed_at_utc": datetime.now(UTC).isoformat(),
-        "evaluated_at_local": now_local.isoformat(),
-        "timezone": timezone_name,
-        "window_active": True,
-        "window_mode": "always",
-        "window_schedule": "always",
-        "target": "battery_full_watch",
-        "threshold_soc_percent": BATTERY_FULL_NOTIFICATION_SOC_PERCENT,
-    }
-    status = "noop"
-    ok = True
-    error_text: str | None = None
-    try:
-        enabled_map = await _load_time_window_rule_enabled_map()
-        result["rule_enabled_map"] = enabled_map
-        metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
-        metrics_map = metrics if isinstance(metrics, dict) else {}
-        saj_soc_percent = _to_number(metrics_map.get("battery1_soc_percent"))
-        solplanet_soc_percent = _to_number(metrics_map.get("battery2_soc_percent"))
-        result["battery1_soc_percent"] = saj_soc_percent
-        result["battery2_soc_percent"] = solplanet_soc_percent
-        if saj_soc_percent is None and solplanet_soc_percent is None:
-            result["skipped"] = "combined_battery_soc_unavailable"
-            status = "skipped"
-            return result
-
-        persisted_state = await _load_battery_full_active_state()
-        saj_full_now = saj_soc_percent is not None and saj_soc_percent >= BATTERY_FULL_NOTIFICATION_SOC_PERCENT
-        solplanet_full_now = (
-            solplanet_soc_percent is not None and solplanet_soc_percent >= BATTERY_FULL_NOTIFICATION_SOC_PERCENT
-        )
-        saj_full_prev = bool(persisted_state.get("saj"))
-        solplanet_full_prev = bool(persisted_state.get("solplanet"))
-
-        if saj_full_now and not saj_full_prev and _is_time_window_rule_enabled(enabled_map, "saj_battery_full"):
-            _append_worker_notification(result, {
-                "level": "info",
-                "code": "saj_battery_full",
-                "target": "saj_battery",
-                "window": "always",
-                "threshold_soc_percent": BATTERY_FULL_NOTIFICATION_SOC_PERCENT,
-                "current_soc_percent": round(saj_soc_percent or 0.0, 1),
-                "message": "SAJ battery reached 100% SOC.",
-            })
-        if (
-            solplanet_full_now
-            and not solplanet_full_prev
-            and _is_time_window_rule_enabled(enabled_map, "solplanet_battery_full")
-        ):
-            _append_worker_notification(result, {
-                "level": "info",
-                "code": "solplanet_battery_full",
-                "target": "solplanet_battery",
-                "window": "always",
-                "threshold_soc_percent": BATTERY_FULL_NOTIFICATION_SOC_PERCENT,
-                "current_soc_percent": round(solplanet_soc_percent or 0.0, 1),
-                "message": "Solplanet battery reached 100% SOC.",
-            })
-
-        await _store_battery_full_active_state(
-            saj_full_active=saj_full_now,
-            solplanet_full_active=solplanet_full_now,
-        )
-        result["notification_state"] = {
-            "saj_full_previous": saj_full_prev,
-            "saj_full": saj_full_now,
-            "solplanet_full_previous": solplanet_full_prev,
-            "solplanet_full": solplanet_full_now,
-        }
-        result["decision"] = {"mode": "observe_only"}
-        result["action"] = {"type": "noop", "reason": "watching_battery_full_soc"}
-        status = "noop"
-        return result
-    except Exception as exc:  # noqa: BLE001
-        ok = False
-        status = "failed"
-        error_text = f"{type(exc).__name__}: {exc}"
-        result["error"] = error_text
-        raise
-    finally:
-        result["log_ok"] = ok
-        result["log_status"] = status
-        result["log_error_text"] = error_text
-
-
 async def _run_tesla_home_assistant_collection(
     combined_flow: dict[str, object] | None = None,
     *,
@@ -9404,6 +9608,8 @@ def _build_combined_flow_payload(
     tesla_charging_map = tesla_charging if isinstance(tesla_charging, dict) else {}
     tesla_battery = tesla_observation_map.get("battery")
     tesla_battery_map = tesla_battery if isinstance(tesla_battery, dict) else {}
+    tesla_location = tesla_observation_map.get("location")
+    tesla_location_map = tesla_location if isinstance(tesla_location, dict) else {}
     tesla_charge_power_w = _to_number(tesla_charging_map.get("power_w"))
     tesla_current_amps = _to_number(tesla_charging_map.get("current_amps"))
     tesla_configured_current_amps = _to_number(tesla_charging_map.get("configured_current_amps"))
@@ -9411,6 +9617,10 @@ def _build_combined_flow_payload(
     tesla_connection_state = str(tesla_charging_map.get("connection_state") or "").strip() or None
     tesla_requested_enabled = tesla_charging_map.get("requested_enabled")
     tesla_cable_connected = tesla_charging_map.get("cable_connected")
+    tesla_location_state = str(tesla_location_map.get("state") or "").strip() or None
+    tesla_location_status = str(tesla_location_map.get("status") or "").strip() or None
+    tesla_at_home = tesla_location_map.get("at_home")
+    tesla_auto_control_allowed_by_location = tesla_location_map.get("auto_control_allowed")
     pool_pump_control = pool_pump_state.get("control") if isinstance(pool_pump_state, dict) else None
     pool_pump_metrics = pool_pump_state.get("metrics") if isinstance(pool_pump_state, dict) else None
     pool_pump_power_w = _to_number(pool_pump_metrics.get("power_w")) if isinstance(pool_pump_metrics, dict) else None
@@ -9559,6 +9769,10 @@ def _build_combined_flow_payload(
         "tesla_connection_state": tesla_connection_state,
         "tesla_charge_requested_enabled": tesla_requested_enabled,
         "tesla_cable_connected": tesla_cable_connected,
+        "tesla_location_state": tesla_location_state,
+        "tesla_location_status": tesla_location_status,
+        "tesla_at_home": tesla_at_home,
+        "tesla_auto_control_allowed_by_location": tesla_auto_control_allowed_by_location,
         "pool_pump_power_w": pool_pump_power_w,
         "pool_pump_power_stale": pool_pump_power_stale,
         "pool_pump_power_age_seconds": pool_pump_power_age_seconds,
@@ -10717,8 +10931,13 @@ async def _saj_apply_slot(
     }
 
 
-def _solplanet_encode_slot(*, hour: int, minute: int, power: int, mode: int) -> int:
-    return ((hour & 0xFF) << 24) | ((minute & 0xFF) << 16) | ((power & 0xFF) << 8) | (mode & 0xFF)
+def _solplanet_encode_slot(*, hour: int, minute: int, duration_minutes: int, mode: int) -> int:
+    return ((hour & 0xFF) << 24) | ((minute & 0xFF) << 16) | ((duration_minutes & 0xFF) << 8) | (mode & 0xFF)
+
+
+def _solplanet_slot_end_time_text(hour: int, minute: int, duration_minutes: int) -> str:
+    total_minutes = ((hour * 60) + minute + duration_minutes) % (24 * 60)
+    return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
 
 
 def _solplanet_decode_slot(raw: object) -> dict[str, object]:
@@ -10729,22 +10948,26 @@ def _solplanet_decode_slot(raw: object) -> dict[str, object]:
             "enabled": False,
             "hour": 0,
             "minute": 0,
+            "duration_minutes": 0,
             "power": 0,
             "mode": 0,
             "time_text": "00:00",
+            "end_time_text": "00:00",
         }
     hour = (value >> 24) & 0xFF
     minute = (value >> 16) & 0xFF
-    power = (value >> 8) & 0xFF
+    duration_minutes = (value >> 8) & 0xFF
     mode = value & 0xFF
     return {
         "encoded": value,
         "enabled": True,
         "hour": hour,
         "minute": minute,
-        "power": power,
+        "duration_minutes": duration_minutes,
+        "power": duration_minutes,
         "mode": mode,
         "time_text": f"{hour:02d}:{minute:02d}",
+        "end_time_text": _solplanet_slot_end_time_text(hour, minute, duration_minutes),
     }
 
 
@@ -10778,7 +11001,7 @@ def _build_solplanet_control_state(schedule: dict[str, object]) -> dict[str, obj
         },
         "days": days,
         "raw_schedule": schedule,
-        "encoding_note": "slot encoding uses byte layout [hour, minute, power, mode]; inferred from local schedule data.",
+        "encoding_note": "slot encoding uses byte layout [hour, minute, duration_minutes, mode]; legacy field power mirrors duration_minutes for compatibility.",
     }
 
 
@@ -10795,14 +11018,46 @@ async def _solplanet_get_schedule_live() -> dict[str, object]:
     return normalized
 
 
-async def _solplanet_set_schedule_payload(payload: dict[str, object]) -> dict[str, object]:
+def _solplanet_merge_schedule_payload(
+    current_schedule: dict[str, object],
+    payload: dict[str, object],
+) -> dict[str, object]:
+    merged: dict[str, object] = {
+        "Pin": int(_to_number(current_schedule.get("Pin")) or 0),
+        "Pout": int(_to_number(current_schedule.get("Pout")) or 0),
+    }
+    for day in SOLPLANET_DAY_KEYS:
+        merged[day] = _solplanet_day_slots(current_schedule.get(day))
+
+    for key, value in payload.items():
+        if key in {"Pin", "Pout"}:
+            merged[key] = int(_to_number(value) or 0)
+        elif key in SOLPLANET_DAY_KEYS:
+            merged[key] = _validate_solplanet_day_slots(value if isinstance(value, list) else [])
+        else:
+            merged[key] = value
+    return merged
+
+
+async def _solplanet_set_schedule_payload(
+    payload: dict[str, object],
+    *,
+    current_schedule: dict[str, object] | None = None,
+) -> dict[str, object]:
     _ensure_solplanet_configured()
+    define_payload = _solplanet_merge_schedule_payload(
+        current_schedule or await _solplanet_get_schedule_live(),
+        payload,
+    )
     response = await asyncio.wait_for(
-        solplanet_client.set_value(payload),
+        solplanet_client.set_definition(define_payload),
         timeout=settings.solplanet_request_timeout_seconds,
     )
     _reset_solplanet_caches()
-    return response if isinstance(response, dict) else {}
+    return {
+        "response": response if isinstance(response, dict) else {},
+        "request_payload": {"device": 4, "action": "setdefine", "value": define_payload},
+    }
 
 
 def _validate_solplanet_day_slots(slots: list[int]) -> list[int]:
@@ -11094,6 +11349,10 @@ COMBINED_REALTIME_METRIC_KEYS: tuple[str, ...] = (
     "tesla_connection_state",
     "tesla_charge_requested_enabled",
     "tesla_cable_connected",
+    "tesla_location_state",
+    "tesla_location_status",
+    "tesla_at_home",
+    "tesla_auto_control_allowed_by_location",
     "pool_pump_power_w",
     "pool_pump_power_stale",
     "pool_pump_available",
@@ -11123,6 +11382,8 @@ def _build_combined_realtime_kv_rows(flow: dict[str, object]) -> list[tuple[str,
     observation = observation_obj if isinstance(observation_obj, dict) else {}
     charging_obj = observation.get("charging")
     charging = charging_obj if isinstance(charging_obj, dict) else {}
+    location_obj = observation.get("location")
+    location = location_obj if isinstance(location_obj, dict) else {}
 
     for key in ("available", "control_mode", "charging_enabled", "charge_requested_enabled", "can_start", "can_stop"):
         if key in control_state:
@@ -11133,6 +11394,9 @@ def _build_combined_realtime_kv_rows(flow: dict[str, object]) -> list[tuple[str,
     for key in ("enabled", "min_current_amps", "max_current_amps", "current_step_amps", "status_text", "voltage_v"):
         if key in charging:
             _append_kv_row(rows, f"combined.raw.tesla.observation.charging.{key}", charging.get(key))
+    for key in ("state", "status", "at_home", "auto_control_allowed", "auto_control_block_reason", "entity"):
+        if key in location:
+            _append_kv_row(rows, f"combined.raw.tesla.observation.location.{key}", location.get(key))
 
     pool_pump_obj = raw_map.get("pool_pump")
     pool_pump = pool_pump_obj if isinstance(pool_pump_obj, dict) else {}
@@ -11321,6 +11585,14 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
                     kv_map, system=system, key="metrics.tesla_charge_requested_enabled"
                 ),
                 "tesla_cable_connected": _kv_value(kv_map, system=system, key="metrics.tesla_cable_connected"),
+                "tesla_location_state": _kv_value(kv_map, system=system, key="metrics.tesla_location_state"),
+                "tesla_location_status": _kv_value(kv_map, system=system, key="metrics.tesla_location_status"),
+                "tesla_at_home": _kv_value(kv_map, system=system, key="metrics.tesla_at_home"),
+                "tesla_auto_control_allowed_by_location": _kv_value(
+                    kv_map,
+                    system=system,
+                    key="metrics.tesla_auto_control_allowed_by_location",
+                ),
                 "pool_pump_power_w": _to_number(_kv_value(kv_map, system=system, key="metrics.pool_pump_power_w")),
                 "pool_pump_power_stale": _kv_value(kv_map, system=system, key="metrics.pool_pump_power_stale"),
                 "pool_pump_available": _kv_value(kv_map, system=system, key="metrics.pool_pump_available"),
@@ -11393,6 +11665,18 @@ def _build_flow_from_kv(system: str, kv_map: dict[str, dict[str, object]]) -> di
                         "voltage_v": _to_number(
                             _kv_value(kv_map, system=system, key="raw.tesla.observation.charging.voltage_v")
                         ),
+                    },
+                    "location": {
+                        "state": metrics.get("tesla_location_state"),
+                        "status": metrics.get("tesla_location_status"),
+                        "at_home": metrics.get("tesla_at_home"),
+                        "auto_control_allowed": metrics.get("tesla_auto_control_allowed_by_location"),
+                        "auto_control_block_reason": _kv_value(
+                            kv_map,
+                            system=system,
+                            key="raw.tesla.observation.location.auto_control_block_reason",
+                        ),
+                        "entity": _kv_value(kv_map, system=system, key="raw.tesla.observation.location.entity"),
                     },
                     "control_mode": _kv_value(kv_map, system=system, key="raw.tesla.observation.control_mode"),
                 },
@@ -11972,14 +12256,6 @@ def _worker_control_result_text(
         extra_parts = []
         for notification_map in notification_list:
             code = str(notification_map.get("code") or "warning")
-            if code in ("saj_battery_watch_50_percent", "saj_battery_watch_20_percent"):
-                extra_parts.append(
-                    "notification "
-                    f"{code}: "
-                    f"saj_soc={_fmt_result_number(notification_map.get('current_soc_percent'), 0, '%')}, "
-                    f"threshold={_fmt_result_number(notification_map.get('threshold_soc_percent'), 0, '%')}"
-                )
-                continue
             extra_parts.append(f"notification {code}")
         if payload.get("tesla_rule_code"):
             extra_parts.append(
@@ -12181,31 +12457,6 @@ def _worker_control_result_text(
             extra_parts.append(f"detail {action_type} ({steps_text})")
         for notification_map in notification_list:
             code = str(notification_map.get("code") or "warning")
-            if code == "solplanet_low_battery":
-                extra_parts.append(
-                    "notification "
-                    f"{code}: "
-                    f"solplanet_soc={_fmt_result_number(notification_map.get('current_soc_percent'), 0, '%')}, "
-                    f"threshold={_fmt_result_number(notification_map.get('threshold_soc_percent'), 0, '%')}"
-                )
-                continue
-            if code == "solplanet_low_battery_post_export_peak":
-                extra_parts.append(
-                    "notification "
-                    f"{code}: "
-                    f"solplanet_soc={_fmt_result_number(notification_map.get('current_soc_percent'), 0, '%')}, "
-                    f"threshold={_fmt_result_number(notification_map.get('threshold_soc_percent'), 0, '%')}, "
-                    f"tariff={_fmt_result_number(notification_map.get('tariff_p_per_kwh'), 1, 'p/kWh')}"
-                )
-                continue
-            if code == "solplanet_low_available_capacity":
-                extra_parts.append(
-                    "notification "
-                    f"{code}: "
-                    f"solplanet_available_capacity={_fmt_result_number(notification_map.get('current_capacity_kwh'), 1, 'kWh')}, "
-                    f"threshold={_fmt_result_number(notification_map.get('threshold_kwh'), 1, 'kWh')}"
-                )
-                continue
             if code == "grid_import_started":
                 extra_parts.append(
                     "notification "
@@ -12219,14 +12470,6 @@ def _worker_control_result_text(
                     f"{code}: "
                     f"grid_import={_fmt_result_number(notification_map.get('current_grid_import_w'), 0, 'W')}, "
                     f"tariff={_fmt_result_number(notification_map.get('tariff_p_per_kwh'), 1, 'p/kWh')}"
-                )
-                continue
-            if _is_solar_surplus_export_energy_notification_code(code):
-                extra_parts.append(
-                    "notification "
-                    f"{code}: "
-                    f"window_export={_fmt_result_number(notification_map.get('current_export_total_kwh'), 3, 'kWh')}, "
-                    f"threshold={_fmt_result_number(notification_map.get('threshold_kwh'), 3, 'kWh')}"
                 )
                 continue
             extra_parts.append(f"notification {code}")
@@ -12340,7 +12583,6 @@ async def _persist_worker_summary_logs(
     pool_pump_off_period_result: dict[str, object] | None,
     saj_watch_result: dict[str, object] | None,
     pool_pump_result: dict[str, object] | None,
-    battery_full_result: dict[str, object] | None,
 ) -> None:
     source = _select_worker_summary_source(
         midday_result,
@@ -12348,7 +12590,6 @@ async def _persist_worker_summary_logs(
         pool_pump_off_period_result,
         saj_watch_result,
         pool_pump_result,
-        battery_full_result,
     )
     all_notifications = _collect_worker_notifications(
         midday_result,
@@ -12356,7 +12597,6 @@ async def _persist_worker_summary_logs(
         pool_pump_off_period_result,
         saj_watch_result,
         pool_pump_result,
-        battery_full_result,
     )
     all_actions = _collect_worker_actions(
         midday_result,
@@ -12364,11 +12604,10 @@ async def _persist_worker_summary_logs(
         pool_pump_off_period_result,
         saj_watch_result,
         pool_pump_result,
-        battery_full_result,
     )
     all_decision_reasons = [
         str(item.get("decision_reason") or "").strip()
-        for item in (midday_result, pool_pump_free_energy_result, pool_pump_off_period_result, saj_watch_result, pool_pump_result, battery_full_result)
+        for item in (midday_result, pool_pump_free_energy_result, pool_pump_off_period_result, saj_watch_result, pool_pump_result)
         if isinstance(item, dict) and str(item.get("decision_reason") or "").strip()
     ]
     notification_status, notification_ok, notification_payload, notification_error_text = _build_notification_summary_payload(
@@ -12407,7 +12646,7 @@ async def _persist_worker_summary_logs(
         actions=all_actions,
         check_sources=[
             item
-            for item in (midday_result, pool_pump_free_energy_result, pool_pump_off_period_result, saj_watch_result, pool_pump_result, battery_full_result)
+            for item in (midday_result, pool_pump_free_energy_result, pool_pump_off_period_result, saj_watch_result, pool_pump_result)
             if isinstance(item, dict)
         ],
     )
@@ -12725,14 +12964,19 @@ async def _collector_loop() -> None:
                 ),
                 error_text=f"{type(exc).__name__}: {exc}",
             )
+        midday_window_result: dict[str, object] | None = None
+        pool_pump_free_energy_result: dict[str, object] | None = None
+        saj_battery_watch_result: dict[str, object] | None = None
+        pool_pump_overnight_result: dict[str, object] | None = None
+        combined_flow_for_window: dict[str, object] | None = None
         try:
-            midday_window_result: dict[str, object] | None = None
-            pool_pump_free_energy_result: dict[str, object] | None = None
-            saj_battery_watch_result: dict[str, object] | None = None
-            pool_pump_overnight_result: dict[str, object] | None = None
-            battery_full_notification_result: dict[str, object] | None = None
+            combined_flow_for_window, combined_window_source = await _resolve_combined_source_flow(
+                "combined",
+                round_results.get("combined", {}) if isinstance(round_results.get("combined"), dict) else {},
+            )
+            collector_status.setdefault("combined", {})["last_window_source"] = combined_window_source
             midday_window_result = await _run_midday_window_check_serialized(
-                round_results.get("combined", {}).get("flow") if isinstance(round_results.get("combined"), dict) else None,
+                combined_flow_for_window,
                 tesla_observation_result,
                 round_id=round_id,
                 requested_at_utc=round_started_at_utc,
@@ -12753,7 +12997,7 @@ async def _collector_loop() -> None:
 
         try:
             pool_pump_free_energy_result = await _run_pool_pump_free_energy_control_check(
-                round_results.get("combined", {}).get("flow") if isinstance(round_results.get("combined"), dict) else None,
+                combined_flow_for_window,
                 midday_window_result,
                 round_id=round_id,
                 requested_at_utc=round_started_at_utc,
@@ -12827,26 +13071,6 @@ async def _collector_loop() -> None:
             }
 
         try:
-            battery_full_notification_result = await _run_battery_full_notification_check(
-                round_results.get("combined", {}).get("flow") if isinstance(round_results.get("combined"), dict) else None,
-                round_id=round_id,
-                requested_at_utc=round_started_at_utc,
-            )
-            collector_status.setdefault("combined", {})["last_battery_full_notification_check"] = (
-                battery_full_notification_result
-            )
-        except Exception as battery_full_exc:  # noqa: BLE001
-            _append_worker_failure_log(
-                "combined",
-                stage="battery_full_notification",
-                error=battery_full_exc,
-            )
-            collector_status.setdefault("combined", {})["last_battery_full_notification_check"] = {
-                "error": f"{type(battery_full_exc).__name__}: {battery_full_exc}",
-                "executed_at": datetime.now(UTC).isoformat(),
-            }
-
-        try:
             summary_started_monotonic = monotonic()
             await _persist_worker_summary_logs(
                 round_id=round_id,
@@ -12857,7 +13081,6 @@ async def _collector_loop() -> None:
                 pool_pump_off_period_result=pool_pump_off_period_result,
                 saj_watch_result=saj_battery_watch_result,
                 pool_pump_result=pool_pump_overnight_result,
-                battery_full_result=battery_full_notification_result,
             )
         except Exception as summary_exc:  # noqa: BLE001
             _append_worker_failure_log(
@@ -15467,7 +15690,7 @@ async def put_solplanet_control_limits(payload: SolplanetLimitsPayload) -> dict[
             request_payload=payload.model_dump(mode="json"),
             previous_state={"state": _build_solplanet_control_state(previous_schedule)},
         )
-        cgi_write = await _solplanet_set_schedule_payload(update_payload)
+        cgi_write = await _solplanet_set_schedule_payload(update_payload, current_schedule=previous_schedule)
         state_payload: dict[str, object] | None = None
         readback_error: str | None = None
         try:
@@ -15539,7 +15762,7 @@ async def put_solplanet_day_schedule(day: str, payload: SolplanetDaySchedulePayl
             previous_state={"state": _build_solplanet_control_state(previous_schedule)},
         )
         request_payload = {day_key: slots}
-        cgi_write = await _solplanet_set_schedule_payload(request_payload)
+        cgi_write = await _solplanet_set_schedule_payload(request_payload, current_schedule=previous_schedule)
         schedule = await _solplanet_get_schedule_live()
         result = {
             "ok": True,
@@ -15597,10 +15820,20 @@ async def put_solplanet_day_schedule_slot(day: str, slot: int, payload: Solplane
         payload.enabled is None
         and payload.hour is None
         and payload.minute is None
+        and payload.duration_minutes is None
         and payload.power is None
         and payload.mode is None
     ):
         raise HTTPException(status_code=400, detail="No fields to update")
+    if (
+        payload.duration_minutes is not None
+        and payload.power is not None
+        and payload.duration_minutes != payload.power
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="duration_minutes and legacy power must match when both are provided",
+        )
     try:
         previous_schedule = await _solplanet_get_schedule_live()
         operation_run_id = await _start_operation_history_run(
@@ -15615,13 +15848,24 @@ async def put_solplanet_day_schedule_slot(day: str, slot: int, payload: Solplane
         if enabled:
             hour = int(current_decoded["hour"]) if payload.hour is None else payload.hour
             minute = int(current_decoded["minute"]) if payload.minute is None else payload.minute
-            power = int(current_decoded["power"]) if payload.power is None else payload.power
+            duration_minutes = (
+                int(current_decoded["duration_minutes"])
+                if payload.duration_minutes is None and payload.power is None
+                else payload.duration_minutes
+                if payload.duration_minutes is not None
+                else payload.power
+            )
             mode = int(current_decoded["mode"]) if payload.mode is None else payload.mode
-            day_slots[index] = _solplanet_encode_slot(hour=hour, minute=minute, power=power, mode=mode)
+            day_slots[index] = _solplanet_encode_slot(
+                hour=hour,
+                minute=minute,
+                duration_minutes=int(duration_minutes),
+                mode=mode,
+            )
         else:
             day_slots[index] = 0
         request_payload = {day_key: day_slots}
-        cgi_write = await _solplanet_set_schedule_payload(request_payload)
+        cgi_write = await _solplanet_set_schedule_payload(request_payload, current_schedule=previous_schedule)
         latest = await _solplanet_get_schedule_live()
         result = {
             "ok": True,
@@ -15682,7 +15926,7 @@ async def put_solplanet_raw_setting(payload: SolplanetRawSettingPayload) -> dict
             request_payload=payload.model_dump(mode="json"),
             previous_state={"state": _build_solplanet_control_state(previous_schedule)},
         )
-        cgi_write = await _solplanet_set_schedule_payload(payload.payload)
+        cgi_write = await _solplanet_set_schedule_payload(payload.payload, current_schedule=previous_schedule)
         schedule = await _solplanet_get_schedule_live()
         result = {
             "ok": True,

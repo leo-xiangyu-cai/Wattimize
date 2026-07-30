@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dashboard</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260729-four4free-notification-trim" />
   </head>
   <body>
     <main class="page">
@@ -349,13 +349,14 @@
                 <h3 data-i18n="samplingPumpStatusTitle">Pool Pump Status</h3>
               </div>
               <p id="samplingPumpStatusMeta" class="muted">-</p>
+              <div id="samplingPumpStatusSummary" class="sampling-pump-status-summary"></div>
               <div class="sampling-chart-wrap sampling-pump-status-wrap">
                 <div id="samplingPumpStatusCanvas" class="sampling-chart"></div>
               </div>
             </section>
-            <section class="sampling-chart-card sampling-zero-hero-history-card">
+            <section id="samplingZeroHeroHistoryCard" class="sampling-chart-card sampling-zero-hero-history-card">
               <div class="section-header">
-                <h3 data-i18n="samplingZeroHeroHistoryTitle">18:00-20:00 Export Window Review</h3>
+                <h3 data-i18n="samplingZeroHeroHistoryTitle">16:00-23:00 Export Window Review</h3>
                 <span id="samplingZeroHeroHistoryBadge" class="sampling-zero-hero-badge">-</span>
               </div>
               <p id="samplingZeroHeroHistoryMeta" class="muted">-</p>
@@ -364,7 +365,7 @@
           </div>
           <section id="samplingZeroHeroCurrentCard" class="sampling-chart-card sampling-zero-hero-card">
             <div class="section-header">
-              <h3 data-i18n="samplingZeroHeroTitle">Current 5-Minute Zero Hero Window</h3>
+              <h3 data-i18n="samplingZeroHeroTitle">Current 5-Minute Export Window</h3>
               <span id="samplingZeroHeroBadge" class="sampling-zero-hero-badge">-</span>
             </div>
             <p id="samplingZeroHeroMeta" class="muted">-</p>
@@ -433,7 +434,7 @@
             </section>
             <section class="monthly-report-panel">
               <div class="section-header">
-                <h3 data-i18n="monthlyReportHeroTitle">Hero Window</h3>
+                <h3 data-i18n="monthlyReportHeroTitle">Export Window</h3>
               </div>
               <div id="monthlyReportHeroBody" class="monthly-report-metric-list"></div>
             </section>
@@ -617,23 +618,46 @@
           <button id="solplanetPinModalCloseBtn" class="btn secondary" type="button" data-i18n="closeBtn">Close</button>
         </div>
         <p id="solplanetPinModalMeta" class="muted" data-i18n="solplanetDashboardPinModalIntro">
-          Set the current Solplanet charging limit (Pin) to verify manual control first.
+          Adjust Solplanet buy/sell power and schedule.
         </p>
-        <div class="config-form">
-          <label data-i18n="solplanetDashboardPinCurrentLabel">
-            Current Pin (W)
-            <input id="solplanetPinCurrentValue" type="text" value="-" readonly />
-          </label>
-          <label data-i18n="solplanetDashboardPinTargetLabel">
-            Target Pin (W)
-            <input id="solplanetPinTargetInput" type="number" min="0" max="20000" step="100" value="0" />
-          </label>
+        <div class="solplanet-plan-editor">
+          <fieldset>
+            <legend data-i18n="solplanetDashboardBuyTitle">Buy / charge</legend>
+            <div class="config-form">
+              <label data-i18n="solplanetDashboardBuyPowerLabel">
+                Buy power Pin (W)
+                <input id="solplanetPinTargetInput" type="number" min="0" max="20000" step="100" value="0" />
+              </label>
+              <label data-i18n="solplanetDashboardBuyStartLabel">
+                Buy start
+                <input id="solplanetChargeStartInput" type="time" value="11:00" />
+              </label>
+              <label data-i18n="solplanetDashboardBuyEndLabel">
+                Buy end
+                <input id="solplanetChargeEndInput" type="time" value="15:00" />
+              </label>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend data-i18n="solplanetDashboardSellTitle">Sell / discharge</legend>
+            <div class="config-form">
+              <label data-i18n="solplanetDashboardSellPowerLabel">
+                Sell power Pout (W)
+                <input id="solplanetPoutTargetInput" type="number" min="0" max="20000" step="100" value="0" />
+              </label>
+              <label data-i18n="solplanetDashboardSellStartLabel">
+                Sell start
+                <input id="solplanetDischargeStartInput" type="time" value="18:00" />
+              </label>
+              <label data-i18n="solplanetDashboardSellEndLabel">
+                Sell end
+                <input id="solplanetDischargeEndInput" type="time" value="21:00" />
+              </label>
+            </div>
+          </fieldset>
         </div>
         <p id="solplanetPinModalStatus" class="muted">-</p>
         <div class="config-actions">
-          <button id="solplanetPinPreset0Btn" class="btn secondary" type="button">0W</button>
-          <button id="solplanetPinPreset3000Btn" class="btn secondary" type="button">3000W</button>
-          <button id="solplanetPinPreset5000Btn" class="btn secondary" type="button">5000W</button>
           <button id="solplanetPinApplyBtn" class="btn" type="button" data-i18n="solplanetDashboardPinApplyBtn">Apply Pin</button>
         </div>
       </div>
@@ -807,6 +831,6 @@
     <script src="/static/vendor/dagre.min.js"></script>
     <script src="/static/vendor/x6.min.js"></script>
     <script src="/static/energy-flow-diagram.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260729-four4free-notification-trim"></script>
   </body>
 </html>
