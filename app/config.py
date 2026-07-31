@@ -39,6 +39,7 @@ CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS = 60
 CONST_DETAIL_RETENTION_MONTHS = 2
 CONST_WEATHER_LAT = -33.8688  # Default: Sydney, NSW, Australia
 CONST_WEATHER_LON = 151.2093
+CONST_SOLPLANET_EXPORT_RESERVE_FLOOR_KWH = 18.0
 CONFIG_TABLE_NAME = "app_config"
 CONFIG_SINGLETON_KEY = "global"
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "wattimize.sqlite3"
@@ -65,6 +66,7 @@ class Settings:
     detail_retention_months: int
     weather_lat: float
     weather_lon: float
+    solplanet_export_reserve_floor_kwh: float
 
 
 def _parse_float(value: object, default: float) -> float:
@@ -190,6 +192,7 @@ def _env_values() -> dict[str, object]:
         "detail_retention_months": os.getenv("WATTIMIZE_DETAIL_RETENTION_MONTHS", "").strip(),
         "weather_lat": os.getenv("WATTIMIZE_WEATHER_LAT", "").strip(),
         "weather_lon": os.getenv("WATTIMIZE_WEATHER_LON", "").strip(),
+        "solplanet_export_reserve_floor_kwh": os.getenv("WATTIMIZE_SOLPLANET_EXPORT_RESERVE_FLOOR_KWH", "").strip(),
     }
 
 
@@ -223,6 +226,13 @@ def _build_settings(raw: dict[str, object]) -> Settings:
         ),
         weather_lat=_parse_float(raw.get("weather_lat"), CONST_WEATHER_LAT),
         weather_lon=_parse_float(raw.get("weather_lon"), CONST_WEATHER_LON),
+        solplanet_export_reserve_floor_kwh=max(
+            0.0,
+            _parse_float(
+                raw.get("solplanet_export_reserve_floor_kwh"),
+                CONST_SOLPLANET_EXPORT_RESERVE_FLOOR_KWH,
+            ),
+        ),
     )
 
 
@@ -252,6 +262,7 @@ def settings_to_dict(settings: Settings) -> dict[str, object]:
         "detail_retention_months": settings.detail_retention_months,
         "weather_lat": settings.weather_lat,
         "weather_lon": settings.weather_lon,
+        "solplanet_export_reserve_floor_kwh": settings.solplanet_export_reserve_floor_kwh,
     }
 
 

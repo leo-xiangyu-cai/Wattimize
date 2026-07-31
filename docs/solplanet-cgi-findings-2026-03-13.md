@@ -141,15 +141,16 @@ Important details:
 
 ## Wattimize Control Logic
 
-The backend now exposes Solplanet manual control for `Pin`, `Pout`, and daily slots, and the export-window worker can automatically manage `Pout`.
+The backend now exposes Solplanet manual control for `Pin`, `Pout`, and daily slots, and the export-window worker can automatically manage active discharge/sell slots.
 
 The automatic export policy is:
 
-- `16:00-21:00`: sell at `10kW` only up to an early cap of `8.5kWh`, and only when usable battery is above the `20kWh` comfort reserve.
-- `21:00-23:00`: attempt to reach the `18.5kWh` daily export target without crossing the `18kWh` hard reserve.
-- After reaching `18.5kWh`: sell only surplus above the `20kWh` comfort reserve.
-- Outside `16:00-23:00`: force `Pout = 0`.
-- At or below `18kWh` usable battery: force `Pout = 0`.
+- `16:00-18:00`: sell at `10kW` only while usable battery remains above the `35kWh` pre-peak reserve.
+- `18:00-21:00`: hold the active discharge/sell slot outside the current time so evening home-load peaks can use the battery naturally.
+- `21:00-23:00`: attempt to reach the `18.5kWh` daily export target only above the dynamic reserve: configured hard reserve plus current home load projected through `23:00`.
+- After reaching `18.5kWh`: sell only surplus above `max(20kWh comfort reserve, dynamic load reserve)`.
+- Outside `16:00-23:00`: remove the active discharge/sell slot instead of lowering `Pout`.
+- At or below `18kWh` usable battery: remove the active discharge/sell slot instead of lowering `Pout`.
 
 ### Historical failed attempts
 

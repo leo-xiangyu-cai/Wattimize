@@ -35,6 +35,7 @@ from app.config import (
     ALLOWED_SAMPLE_INTERVAL_SECONDS,
     CONST_DETAIL_RETENTION_MONTHS,
     CONST_SAJ_SAMPLE_INTERVAL_SECONDS,
+    CONST_SOLPLANET_EXPORT_RESERVE_FLOOR_KWH,
     CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS,
     Settings,
     get_config_path,
@@ -198,6 +199,12 @@ BATTERY_MIN_DISCHARGE_SOC_PERCENT = {
 TESLA_OVERNIGHT_FORCE_MAX_CHARGE_BELOW_SOC_PERCENT_DEFAULT = 45.0
 TESLA_OVERNIGHT_SHOULDER_MIN_SOLPLANET_SOC_PERCENT = BATTERY_MIN_DISCHARGE_SOC_PERCENT["solplanet"]
 TESLA_OVERNIGHT_SHOULDER_MIN_AVAILABLE_KWH = 1.0
+TESLA_OVERNIGHT_MIN_EFFECTIVE_CHARGE_CURRENT_A = 12
+TESLA_OVERNIGHT_MIN_EFFECTIVE_CHARGE_DURATION_HOURS = 0.5
+TESLA_OVERNIGHT_SOLAR_ASSIST_START_HOUR = 23
+TESLA_OVERNIGHT_SOLAR_ASSIST_END_HOUR = 11
+TESLA_OVERNIGHT_SOLAR_ASSIST_MIN_EXCESS_W = 150.0
+TESLA_OVERNIGHT_SOLAR_ASSIST_MAX_GRID_IMPORT_W = BALANCE_TOLERANCE_W
 TESLA_POST_EXPORT_FORECAST_WINDOW_START_HOUR = 20
 TESLA_POST_EXPORT_FORECAST_WINDOW_END_HOUR = 11
 TESLA_POST_EXPORT_FORECAST_HISTORY_DAYS = 3
@@ -232,10 +239,11 @@ OVERNIGHT_BUDGET_TARGET_HOUR = OVERNIGHT_SHOULDER_WINDOW_END_HOUR
 EXPORT_WINDOW_BATTERY_SOFT_DISCHARGE_TARGET_W = 7_500.0
 EXPORT_WINDOW_BATTERY_HARD_DISCHARGE_LIMIT_W = 10_000.0
 SOLPLANET_EXPORT_MONITOR_TARGET_KWH = 18.5
-SOLPLANET_EXPORT_MONITOR_EARLY_CAP_KWH = 8.5
-SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH = 18.0
+SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH = CONST_SOLPLANET_EXPORT_RESERVE_FLOOR_KWH
+SOLPLANET_EXPORT_MONITOR_PRE_PEAK_RESERVE_KWH = 35.0
 SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH = 20.0
 SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W = 10_000.0
+SOLPLANET_EXPORT_MONITOR_PRE_PEAK_END_HOUR = 18
 SOLPLANET_EXPORT_MONITOR_LATE_START_HOUR = 21
 SOLPLANET_EXPORT_MONITOR_FEED_IN_AUD_PER_KWH = 0.08
 SOLPLANET_EXPORT_MONITOR_POST_EXPORT_IMPORT_AUD_PER_KWH = 0.375
@@ -1372,6 +1380,11 @@ class ConfigPayload(BaseModel):
     detail_retention_months: int = Field(default=CONST_DETAIL_RETENTION_MONTHS)
     weather_lat: float | None = Field(default=None)
     weather_lon: float | None = Field(default=None)
+    solplanet_export_reserve_floor_kwh: float = Field(
+        default=CONST_SOLPLANET_EXPORT_RESERVE_FLOOR_KWH,
+        ge=0,
+        le=100,
+    )
 
 
 class SolplanetDiscoverPayload(BaseModel):
@@ -2122,6 +2135,10 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
     else:
         display = _build_combined_display(metrics)
     energy_reference = _combined_usable_battery_reference(metrics)
+    energy_reference["solplanet_export_reserve_floor_kwh"] = max(
+        float(settings.solplanet_export_reserve_floor_kwh),
+        0.0,
+    )
     raw_obj = flow.get("raw")
     raw_map = raw_obj if isinstance(raw_obj, dict) else {}
     tesla_raw_obj = raw_map.get("tesla")
@@ -4009,6 +4026,12 @@ def _operation_reason_label(reason: object, *, lang: Literal["zh", "en"] = "zh")
         return "Shared overnight power budget unavailable" if lang == "en" else "夜间共享功率预算不可用"
     if code == "overnight_tesla_priority_allocated_shared_power":
         return "Shared overnight power allocated to Tesla by priority" if lang == "en" else "夜间共享功率已按优先级分配给 Tesla"
+    if code == "overnight_tesla_morning_solar_assist":
+        return (
+            "Solar assist allows Tesla overnight charging"
+            if lang == "en"
+            else "夜间/早晨太阳能已接管，允许 Tesla 夜间规则充电"
+        )
     if code == "overnight_remaining_shared_power_allocated_to_tesla":
         return "Remaining overnight power allocated to Tesla" if lang == "en" else "夜间剩余功率已分配给 Tesla"
     if code == "overnight_shared_power_allocated_to_pool_pump_first":
@@ -4021,6 +4044,18 @@ def _operation_reason_label(reason: object, *, lang: Literal["zh", "en"] = "zh")
         return "Shared overnight power allocated to Tesla first" if lang == "en" else "夜间共享功率优先分配给 Tesla"
     if code == "overnight_shared_power_insufficient_for_tesla":
         return "Shared overnight power insufficient for Tesla" if lang == "en" else "夜间共享功率不足以给 Tesla 充电"
+    if code == "overnight_tesla_below_min_effective_charge_current":
+        return (
+            "Tesla overnight allocation below effective charge-current threshold"
+            if lang == "en"
+            else "夜间 Tesla 分配低于有效充电电流门槛"
+        )
+    if code == "overnight_tesla_below_min_effective_charge_duration":
+        return (
+            "Tesla overnight allocation below effective charge-duration threshold"
+            if lang == "en"
+            else "夜间 Tesla 分配低于有效充电时长门槛"
+        )
     if code == "overnight_shared_power_insufficient_for_pool_pump":
         return "Shared overnight power insufficient for pool pump" if lang == "en" else "夜间共享功率不足以带动水泵"
     if code == "allocated_shared_power":
@@ -4449,12 +4484,35 @@ def _operation_reason_why_summary(
                     if lang == "en"
                     else f"Tesla 电量 {tesla_soc} 低于夜间强制充电阈值 {threshold_soc}，因此先给 Tesla 分配了强制充电。"
                 )
+            if tesla_map.get("morning_solar_assist"):
+                solar_map = details_map.get("morning_solar_assist") if isinstance(details_map.get("morning_solar_assist"), dict) else {}
+                solar_excess = _operation_reason_fmt_w(solar_map.get("solar_excess_without_tesla_w"))
+                grid_import = _operation_reason_fmt_w(solar_map.get("grid_import_w"))
+                return (
+                    f"Solar was covering base home load with {solar_excess} excess and grid import at {grid_import}, so Tesla was allowed to use the overnight rule."
+                    if lang == "en"
+                    else f"太阳能已覆盖基础家庭负载，剩余 {solar_excess}，购电 {grid_import}，因此允许 Tesla 继续走夜间规则充电。"
+                )
             return (
                 "Tesla won, or inherited, the overnight shared-power allocation after priority ordering."
                 if lang == "en"
                 else "Tesla 在夜间共享功率排序后获胜，或承接到了剩余功率分配。"
             )
         if action_type == "stop_charging":
+            if tesla_map.get("allocation_block_reason") == "overnight_tesla_below_min_effective_charge_current":
+                min_amps = _operation_reason_fmt_amps(tesla_map.get("min_effective_charge_current_amps"))
+                return (
+                    f"Tesla's overnight shared-power allocation was below the effective charging threshold ({min_amps}), so charging was stopped."
+                    if lang == "en"
+                    else f"Tesla 分到的夜间共享功率低于有效充电门槛（{min_amps}），因此停止充电。"
+                )
+            if tesla_map.get("allocation_block_reason") == "overnight_tesla_below_min_effective_charge_duration":
+                min_hours = _operation_reason_fmt_hours(tesla_map.get("min_effective_charge_duration_hours"))
+                return (
+                    f"Tesla's remaining overnight charge window was below the effective duration threshold ({min_hours}), so charging was stopped."
+                    if lang == "en"
+                    else f"Tesla 剩余夜间充电窗口低于有效时长门槛（{min_hours}），因此停止充电。"
+                )
             return (
                 "Tesla was not allocated overnight shared power after forced reservations and priority ordering, so charging was stopped."
                 if lang == "en"
@@ -4589,20 +4647,30 @@ def _operation_reason_math_summary(
     if check_name == "overnight_shoulder" and target != "pool_pump":
         overnight_map = details_map.get("overnight_allocation") if isinstance(details_map.get("overnight_allocation"), dict) else {}
         tesla_map = overnight_map.get("tesla") if isinstance(overnight_map.get("tesla"), dict) else {}
+        solar_map = details_map.get("morning_solar_assist") if isinstance(details_map.get("morning_solar_assist"), dict) else {}
         shared_power = _operation_reason_fmt_w(overnight_map.get("available_device_power_w"))
         tesla_power = _operation_reason_fmt_w(tesla_map.get("power_w"))
         amps = _operation_reason_fmt_amps(tesla_map.get("charge_current_amps"))
+        min_amps = _operation_reason_fmt_amps(tesla_map.get("min_effective_charge_current_amps"))
+        hours_to_target = _operation_reason_fmt_hours(overnight_map.get("hours_to_target"))
+        min_hours = _operation_reason_fmt_hours(tesla_map.get("min_effective_charge_duration_hours"))
+        solar_excess = _operation_reason_fmt_w(solar_map.get("solar_excess_without_tesla_w"))
+        grid_import = _operation_reason_fmt_w(solar_map.get("grid_import_w"))
         remaining = _operation_reason_fmt_w(overnight_map.get("remaining_unallocated_power_w"))
         tesla_soc = _operation_reason_fmt_pct(details_map.get("tesla_soc_percent"))
         threshold = _operation_reason_fmt_pct(details_map.get("tesla_force_max_charge_threshold_soc_percent"))
         if lang == "en":
             return (
                 f"Tesla SOC {tesla_soc} vs force threshold {threshold}; shared available power {shared_power}; "
-                f"Tesla target {amps} / {tesla_power}; remaining unallocated {remaining}"
+                f"Tesla target {amps} / {tesla_power}; effective minimum {min_amps} for {min_hours}; "
+                f"hours to target {hours_to_target}; solar excess {solar_excess}, grid import {grid_import}; "
+                f"remaining unallocated {remaining}"
             )
         return (
             f"Tesla 电量 {tesla_soc}，强制阈值 {threshold}；夜间可分配功率 {shared_power}；"
-            f"Tesla 目标 {amps} / {tesla_power}；剩余未分配 {remaining}"
+            f"Tesla 目标 {amps} / {tesla_power}；有效门槛 {min_amps} 持续 {min_hours}；"
+            f"距目标时间 {hours_to_target}；太阳能剩余 {solar_excess}，购电 {grid_import}；"
+            f"剩余未分配 {remaining}"
         )
 
     if check_name == "overnight_shoulder" and target == "pool_pump":
@@ -5542,24 +5610,54 @@ def _build_solplanet_export_monitor(
     usable_by_system = usable_reference.get("usable_battery_by_system_kwh")
     usable_by_system_map = usable_by_system if isinstance(usable_by_system, dict) else {}
     exported_kwh = max(_to_number(export_tracking.get("total_export_kwh")) or 0.0, 0.0)
-    remaining_to_early_cap_kwh = max(SOLPLANET_EXPORT_MONITOR_EARLY_CAP_KWH - exported_kwh, 0.0)
     remaining_to_target_kwh = max(SOLPLANET_EXPORT_MONITOR_TARGET_KWH - exported_kwh, 0.0)
     after_target_export_kwh = max(exported_kwh - SOLPLANET_EXPORT_MONITOR_TARGET_KWH, 0.0)
     earned_aud = exported_kwh * SOLPLANET_EXPORT_MONITOR_FEED_IN_AUD_PER_KWH
     remaining_daily_charge_offset_kwh = remaining_to_target_kwh
     current_hour = now_local.hour
-    in_early_phase = EXPORT_WINDOW_START_HOUR <= current_hour < SOLPLANET_EXPORT_MONITOR_LATE_START_HOUR
+    in_pre_peak_phase = EXPORT_WINDOW_START_HOUR <= current_hour < SOLPLANET_EXPORT_MONITOR_PRE_PEAK_END_HOUR
+    in_peak_hold_phase = SOLPLANET_EXPORT_MONITOR_PRE_PEAK_END_HOUR <= current_hour < SOLPLANET_EXPORT_MONITOR_LATE_START_HOUR
     in_late_phase = SOLPLANET_EXPORT_MONITOR_LATE_START_HOUR <= current_hour < EXPORT_WINDOW_END_HOUR
-    phase = "early_cap" if in_early_phase else ("late_target" if in_late_phase else "outside_export_window")
+    phase = (
+        "pre_peak_surplus"
+        if in_pre_peak_phase
+        else ("peak_hold" if in_peak_hold_phase else ("late_target" if in_late_phase else "outside_export_window"))
+    )
+    reserve_floor_kwh = max(float(settings.solplanet_export_reserve_floor_kwh), 0.0)
+    current_home_load_w = _to_number(metrics_map.get("load_w"))
+    minutes_since_midnight = now_local.hour * 60 + now_local.minute + (now_local.second / 60.0)
+    remaining_export_window_hours = max(
+        ((EXPORT_WINDOW_END_HOUR * 60) - minutes_since_midnight) / 60.0,
+        0.0,
+    )
+    projected_home_load_to_export_end_kwh = (
+        round(max(current_home_load_w, 0.0) / 1000.0 * remaining_export_window_hours, 4)
+        if current_home_load_w is not None
+        else None
+    )
+    late_dynamic_reserve_floor_kwh = (
+        round(reserve_floor_kwh + projected_home_load_to_export_end_kwh, 4)
+        if projected_home_load_to_export_end_kwh is not None
+        else reserve_floor_kwh
+    )
 
     reserve_state = "unknown"
     surplus_above_floor_kwh: float | None = None
+    surplus_above_pre_peak_reserve_kwh: float | None = None
     surplus_above_comfort_kwh: float | None = None
+    surplus_above_late_dynamic_reserve_kwh: float | None = None
     if usable_total_kwh is not None:
-        surplus_above_floor_kwh = round(usable_total_kwh - SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH, 4)
+        surplus_above_floor_kwh = round(usable_total_kwh - reserve_floor_kwh, 4)
+        surplus_above_pre_peak_reserve_kwh = round(
+            usable_total_kwh - SOLPLANET_EXPORT_MONITOR_PRE_PEAK_RESERVE_KWH,
+            4,
+        )
         surplus_above_comfort_kwh = round(usable_total_kwh - SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH, 4)
-        if usable_total_kwh <= SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH:
+        surplus_above_late_dynamic_reserve_kwh = round(usable_total_kwh - late_dynamic_reserve_floor_kwh, 4)
+        if usable_total_kwh <= reserve_floor_kwh:
             reserve_state = "below_floor"
+        elif usable_total_kwh < SOLPLANET_EXPORT_MONITOR_PRE_PEAK_RESERVE_KWH and in_pre_peak_phase:
+            reserve_state = "below_pre_peak_reserve"
         elif usable_total_kwh < SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH:
             reserve_state = "between_floor_and_comfort"
         else:
@@ -5570,45 +5668,48 @@ def _build_solplanet_export_monitor(
     recommendation = "observe_only"
     reason = "battery_state_unavailable"
     if usable_total_kwh is not None:
-        if usable_total_kwh <= SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH:
+        if usable_total_kwh <= reserve_floor_kwh:
             recommendation = "stop"
             reason = "reserve_floor_reached"
-        elif in_early_phase:
-            target_sell_kwh = min(
-                remaining_to_early_cap_kwh,
-                max((surplus_above_comfort_kwh or 0.0), 0.0),
-            )
-            if remaining_to_early_cap_kwh <= 0.0:
-                recommendation = "hold_until_late_phase"
-                reason = "early_export_cap_reached"
-            elif target_sell_kwh > 0.0:
+        elif in_pre_peak_phase:
+            target_sell_kwh = max((surplus_above_pre_peak_reserve_kwh or 0.0), 0.0)
+            if target_sell_kwh > 0.0:
                 recommendation = "sell"
-                reason = "early_cap_available_above_comfort_reserve"
+                reason = "pre_peak_surplus_above_35kwh_reserve"
                 recommended_pout_w = SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
             else:
                 recommendation = "hold"
-                reason = "comfort_reserve_not_available"
+                reason = "pre_peak_35kwh_reserve_not_available"
+        elif in_peak_hold_phase:
+            recommendation = "hold_until_late_phase"
+            reason = "evening_peak_reserve_period"
         elif in_late_phase:
             if remaining_to_target_kwh > 0.0:
                 target_sell_kwh = min(
                     remaining_to_target_kwh,
-                    max((surplus_above_floor_kwh or 0.0), 0.0),
+                    max((surplus_above_late_dynamic_reserve_kwh or 0.0), 0.0),
                 )
                 if target_sell_kwh > 0.0:
                     recommendation = "sell"
-                    reason = "late_phase_target_not_reached_above_floor_reserve"
+                    reason = "late_phase_target_not_reached_above_dynamic_load_reserve"
                     recommended_pout_w = SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
                 else:
                     recommendation = "stop"
-                    reason = "daily_target_unreachable_without_floor_breach"
-            elif usable_total_kwh > SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH:
-                target_sell_kwh = max((surplus_above_comfort_kwh or 0.0), 0.0)
-                recommendation = "sell_surplus"
-                reason = "daily_target_reached_sell_only_above_comfort_reserve"
-                recommended_pout_w = SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
+                    reason = "daily_target_unreachable_without_dynamic_load_reserve_breach"
             else:
-                recommendation = "stop"
-                reason = "daily_target_reached_keep_comfort_reserve"
+                surplus_after_target_floor_kwh = max(
+                    usable_total_kwh
+                    - max(SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH, late_dynamic_reserve_floor_kwh),
+                    0.0,
+                )
+                if surplus_after_target_floor_kwh > 0.0:
+                    target_sell_kwh = surplus_after_target_floor_kwh
+                    recommendation = "sell_surplus"
+                    reason = "daily_target_reached_sell_only_above_dynamic_load_reserve"
+                    recommended_pout_w = SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
+                else:
+                    recommendation = "stop"
+                    reason = "daily_target_reached_keep_dynamic_load_reserve"
         else:
             recommendation = "stop"
             reason = "outside_export_window"
@@ -5636,16 +5737,19 @@ def _build_solplanet_export_monitor(
         "exported_kwh": round(exported_kwh, 4),
         "earned_aud": round(earned_aud, 4),
         "daily_export_target_kwh": SOLPLANET_EXPORT_MONITOR_TARGET_KWH,
-        "early_export_cap_kwh": SOLPLANET_EXPORT_MONITOR_EARLY_CAP_KWH,
-        "remaining_to_early_cap_kwh": round(remaining_to_early_cap_kwh, 4),
         "remaining_to_daily_target_kwh": round(remaining_to_target_kwh, 4),
         "after_target_export_kwh": round(after_target_export_kwh, 4),
         "remaining_daily_charge_offset_aud": round(
             remaining_daily_charge_offset_kwh * SOLPLANET_EXPORT_MONITOR_FEED_IN_AUD_PER_KWH,
             4,
         ),
-        "reserve_floor_kwh": SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH,
+        "reserve_floor_kwh": reserve_floor_kwh,
+        "pre_peak_reserve_floor_kwh": SOLPLANET_EXPORT_MONITOR_PRE_PEAK_RESERVE_KWH,
         "comfort_floor_kwh": SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH,
+        "current_home_load_w": round(current_home_load_w, 1) if current_home_load_w is not None else None,
+        "remaining_export_window_hours": round(remaining_export_window_hours, 4),
+        "projected_home_load_to_export_end_kwh": projected_home_load_to_export_end_kwh,
+        "late_dynamic_reserve_floor_kwh": late_dynamic_reserve_floor_kwh,
         "reserve_state": reserve_state,
         "usable_battery_total_kwh": usable_total_kwh,
         "usable_battery_by_system_kwh": {
@@ -5653,7 +5757,9 @@ def _build_solplanet_export_monitor(
             "solplanet": _to_number(usable_by_system_map.get("solplanet")),
         },
         "surplus_above_floor_kwh": surplus_above_floor_kwh,
+        "surplus_above_pre_peak_reserve_kwh": surplus_above_pre_peak_reserve_kwh,
         "surplus_above_comfort_kwh": surplus_above_comfort_kwh,
+        "surplus_above_late_dynamic_reserve_kwh": surplus_above_late_dynamic_reserve_kwh,
         "target_sell_kwh": round(target_sell_kwh, 4),
         "projected_usable_after_target_kwh": projected_usable_after_target_kwh,
         "minutes_to_target_at_recommended_power": minutes_to_target_at_recommended_power,
@@ -5663,8 +5769,11 @@ def _build_solplanet_export_monitor(
         "post_export_import_aud_per_kwh": SOLPLANET_EXPORT_MONITOR_POST_EXPORT_IMPORT_AUD_PER_KWH,
         "avoid_import_loss_aud_per_kwh": round(avoid_import_loss_aud_per_kwh, 4),
         "guardrails": {
-            "do_not_sell_below_floor_kwh": SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH,
+            "do_not_sell_below_floor_kwh": reserve_floor_kwh,
+            "pre_peak_sell_only_above_kwh": SOLPLANET_EXPORT_MONITOR_PRE_PEAK_RESERVE_KWH,
             "normal_keep_comfort_floor_kwh": SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH,
+            "late_phase_dynamic_floor": "reserve_floor_kwh + current_home_load_w projected to export_window_end_hour",
+            "pre_peak_phase_end_hour": SOLPLANET_EXPORT_MONITOR_PRE_PEAK_END_HOUR,
             "early_phase_end_hour": SOLPLANET_EXPORT_MONITOR_LATE_START_HOUR,
             "export_window_end_hour": EXPORT_WINDOW_END_HOUR,
         },
@@ -5694,13 +5803,25 @@ def _solplanet_export_monitor_desired_pout(monitor: dict[str, object] | None, no
     return 0, recommendation or "monitor_not_selling"
 
 
-def _solplanet_export_monitor_discharge_slots() -> list[int]:
+def _solplanet_export_monitor_slot_end_minutes(now_local: datetime, *, should_sell: bool) -> int:
     start_minutes = EXPORT_WINDOW_START_HOUR * 60
     end_minutes = EXPORT_WINDOW_END_HOUR * 60
+    if not _is_within_export_window(now_local):
+        return start_minutes
+    if should_sell:
+        next_hour_minutes = (now_local.hour + 1) * 60
+        return max(start_minutes, min(next_hour_minutes, end_minutes))
+    current_hour_minutes = now_local.hour * 60
+    return max(start_minutes, min(current_hour_minutes, end_minutes))
+
+
+def _solplanet_export_monitor_discharge_slots(now_local: datetime, *, should_sell: bool) -> list[int]:
+    start_minutes = EXPORT_WINDOW_START_HOUR * 60
+    end_minutes = _solplanet_export_monitor_slot_end_minutes(now_local, should_sell=should_sell)
     remaining_minutes = max(end_minutes - start_minutes, 0)
     current_minutes = start_minutes
     encoded_slots: list[int] = []
-    while remaining_minutes > 0:
+    while remaining_minutes > 0 and len(encoded_slots) < len(SOLPLANET_EXPORT_MONITOR_DISCHARGE_SLOT_INDEXES):
         duration_minutes = min(remaining_minutes, 255)
         encoded_slots.append(
             _solplanet_encode_slot(
@@ -5712,6 +5833,8 @@ def _solplanet_export_monitor_discharge_slots() -> list[int]:
         )
         current_minutes += duration_minutes
         remaining_minutes -= duration_minutes
+    while len(encoded_slots) < len(SOLPLANET_EXPORT_MONITOR_DISCHARGE_SLOT_INDEXES):
+        encoded_slots.append(0)
     return encoded_slots
 
 
@@ -5773,12 +5896,14 @@ async def _apply_solplanet_export_monitor_control(
         current_pout = int(_to_number(schedule.get("Pout")) or 0)
         day_key = _solplanet_day_key_for_local_date(now_local)
         update_payload: dict[str, object] = {}
-        if current_pout != desired_pout:
-            update_payload["Pout"] = desired_pout
+        target_pout = int(SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W)
+        if current_pout != target_pout:
+            update_payload["Pout"] = target_pout
 
         current_slots = _solplanet_day_slots(schedule.get(day_key))
-        target_discharge_slots = _solplanet_export_monitor_discharge_slots()
-        if desired_pout > 0 and any(
+        should_sell = desired_pout > 0
+        target_discharge_slots = _solplanet_export_monitor_discharge_slots(now_local, should_sell=should_sell)
+        if any(
             current_slots[slot_index] != target_slot
             for slot_index, target_slot in zip(SOLPLANET_EXPORT_MONITOR_DISCHARGE_SLOT_INDEXES, target_discharge_slots)
         ):
@@ -5790,16 +5915,18 @@ async def _apply_solplanet_export_monitor_control(
         result = dict(base_result)
         result.update(
             {
-                    "checked_live": True,
-                    "day_key": day_key,
-                    "current_pout_w": current_pout,
-                    "target_discharge_slots": [
-                        _solplanet_decode_slot(target_slot)
-                        for target_slot in target_discharge_slots
-                    ],
-                    "schedule_slot_changed": day_key in update_payload,
-                }
-            )
+                "checked_live": True,
+                "day_key": day_key,
+                "current_pout_w": current_pout,
+                "target_pout_w": target_pout,
+                "slot_control": "extend_to_next_hour" if should_sell else "end_before_current_hour",
+                "target_discharge_slots": [
+                    _solplanet_decode_slot(target_slot)
+                    for target_slot in target_discharge_slots
+                ],
+                "schedule_slot_changed": day_key in update_payload,
+            }
+        )
         if not update_payload:
             result["action"] = {"type": "noop", "reason": "already_at_target"}
             combined_status["solplanet_export_monitor_control"] = {
@@ -7880,6 +8007,7 @@ async def _run_saj_battery_watch_check(
         result["tesla_state_before"] = charge_state
         charging_enabled = bool(charge_state.get("enabled"))
         charge_requested_enabled = bool(charge_state.get("requested_enabled"))
+        tesla_charge_power_w = max(float(charge_state.get("power_w") or 0.0), 0.0)
         current_configured_amps = _to_number(charge_state.get("configured_current_amps"))
         current_actual_amps = _to_number(charge_state.get("current_amps"))
         connection_state = str(charge_state.get("connection_state") or "").strip().lower()
@@ -7935,11 +8063,55 @@ async def _run_saj_battery_watch_check(
             tesla_force_max_charge_threshold_soc_percent = TESLA_OVERNIGHT_FORCE_MAX_CHARGE_BELOW_SOC_PERCENT_DEFAULT
         result["tesla_soc_percent"] = tesla_soc_percent
         result["tesla_force_max_charge_threshold_soc_percent"] = tesla_force_max_charge_threshold_soc_percent
+        result["tesla_overnight_min_effective_charge_current_amps"] = TESLA_OVERNIGHT_MIN_EFFECTIVE_CHARGE_CURRENT_A
+        result["tesla_overnight_min_effective_charge_duration_hours"] = TESLA_OVERNIGHT_MIN_EFFECTIVE_CHARGE_DURATION_HOURS
         result["pool_pump_runtime_24h_hours"] = pool_pump_runtime_24h_hours
         result["pool_pump_force_min_runtime_hours"] = pool_pump_force_min_runtime_hours
         budget_map = (result.get("overnight_shoulder_tesla") or {}).get("energy_budget")
         budget_info = budget_map if isinstance(budget_map, dict) else {}
         pump_power_w = _to_number(budget_info.get("pool_pump_power_w")) or POOL_PUMP_ASSUMED_POWER_W
+        pv_w = _to_number(metrics_map.get("pv_w"))
+        load_w = _to_number(metrics_map.get("load_w"))
+        grid_w = _to_number(metrics_map.get("grid_w"))
+        home_load_without_tesla_w = (
+            max(float(load_w) - tesla_charge_power_w, 0.0)
+            if load_w is not None
+            else None
+        )
+        solar_excess_without_tesla_w = (
+            max(float(pv_w) - float(home_load_without_tesla_w), 0.0)
+            if pv_w is not None and home_load_without_tesla_w is not None
+            else None
+        )
+        current_grid_import_w = max(float(grid_w), 0.0) if grid_w is not None else None
+        morning_solar_window_active = _is_hour_in_window(
+            now_local.hour,
+            TESLA_OVERNIGHT_SOLAR_ASSIST_START_HOUR,
+            TESLA_OVERNIGHT_SOLAR_ASSIST_END_HOUR,
+        )
+        morning_solar_assist_active = bool(
+            morning_solar_window_active
+            and solar_excess_without_tesla_w is not None
+            and solar_excess_without_tesla_w >= TESLA_OVERNIGHT_SOLAR_ASSIST_MIN_EXCESS_W
+            and (
+                current_grid_import_w is None
+                or current_grid_import_w <= TESLA_OVERNIGHT_SOLAR_ASSIST_MAX_GRID_IMPORT_W
+            )
+        )
+        result["morning_solar_assist"] = {
+            "window_active": morning_solar_window_active,
+            "active": morning_solar_assist_active,
+            "start_hour": TESLA_OVERNIGHT_SOLAR_ASSIST_START_HOUR,
+            "end_hour": TESLA_OVERNIGHT_SOLAR_ASSIST_END_HOUR,
+            "pv_w": round(pv_w, 1) if pv_w is not None else None,
+            "load_w": round(load_w, 1) if load_w is not None else None,
+            "tesla_charge_power_w": round(tesla_charge_power_w, 1),
+            "home_load_without_tesla_w": round(home_load_without_tesla_w, 1) if home_load_without_tesla_w is not None else None,
+            "solar_excess_without_tesla_w": round(solar_excess_without_tesla_w, 1) if solar_excess_without_tesla_w is not None else None,
+            "min_excess_w": TESLA_OVERNIGHT_SOLAR_ASSIST_MIN_EXCESS_W,
+            "grid_import_w": round(current_grid_import_w, 1) if current_grid_import_w is not None else None,
+            "max_grid_import_w": TESLA_OVERNIGHT_SOLAR_ASSIST_MAX_GRID_IMPORT_W,
+        }
         tesla_candidate_enabled = tesla_block_reason is None
         pump_candidate_enabled = bool(
             pool_pump_auto_control_enabled
@@ -7993,15 +8165,39 @@ async def _run_saj_battery_watch_check(
                     remaining_alloc_power_w - float(force_max_target.get("tesla_power_w") or 0.0),
                     0.0,
                 )
+        tesla_allocation_block_reason: str | None = None
         for device in normal_devices:
             if device == "tesla":
-                candidate_target = _calculate_tesla_target_for_power_budget(charge_state, remaining_alloc_power_w)
+                tesla_candidate_power_budget_w = remaining_alloc_power_w
+                if morning_solar_assist_active and solar_excess_without_tesla_w is not None:
+                    tesla_candidate_power_budget_w += max(float(solar_excess_without_tesla_w), 0.0)
+                candidate_target = _calculate_tesla_target_for_power_budget(charge_state, tesla_candidate_power_budget_w)
                 if str(candidate_target.get("mode") or "").strip().lower() == "charge":
-                    tesla_target = candidate_target
-                    remaining_alloc_power_w = max(
-                        remaining_alloc_power_w - float(candidate_target.get("tesla_power_w") or 0.0),
-                        0.0,
-                    )
+                    candidate_amps = int(candidate_target.get("charge_current_amps") or 0)
+                    if (
+                        candidate_amps < TESLA_OVERNIGHT_MIN_EFFECTIVE_CHARGE_CURRENT_A
+                        and not morning_solar_assist_active
+                    ):
+                        tesla_allocation_block_reason = "overnight_tesla_below_min_effective_charge_current"
+                    elif (
+                        shared_hours_to_target is not None
+                        and shared_hours_to_target < TESLA_OVERNIGHT_MIN_EFFECTIVE_CHARGE_DURATION_HOURS
+                        and not morning_solar_assist_active
+                    ):
+                        tesla_allocation_block_reason = "overnight_tesla_below_min_effective_charge_duration"
+                    else:
+                        tesla_target = candidate_target
+                        tesla_target_power_w = float(candidate_target.get("tesla_power_w") or 0.0)
+                        solar_assist_power_w = (
+                            max(float(solar_excess_without_tesla_w), 0.0)
+                            if morning_solar_assist_active and solar_excess_without_tesla_w is not None
+                            else 0.0
+                        )
+                        shared_power_used_w = max(tesla_target_power_w - solar_assist_power_w, 0.0)
+                        remaining_alloc_power_w = max(
+                            remaining_alloc_power_w - shared_power_used_w,
+                            0.0,
+                        )
             else:
                 if remaining_alloc_power_w >= pump_power_w:
                     pool_pump_target_mode = "run"
@@ -8032,7 +8228,14 @@ async def _run_saj_battery_watch_check(
             "tesla": {
                 "candidate_enabled": tesla_candidate_enabled,
                 "block_reason": tesla_block_reason,
+                "allocation_block_reason": tesla_allocation_block_reason,
                 "force_max_charge": tesla_force_max_charge,
+                "morning_solar_assist": morning_solar_assist_active,
+                "morning_solar_assist_power_w": round(solar_excess_without_tesla_w, 1)
+                if morning_solar_assist_active and solar_excess_without_tesla_w is not None
+                else 0.0,
+                "min_effective_charge_current_amps": TESLA_OVERNIGHT_MIN_EFFECTIVE_CHARGE_CURRENT_A,
+                "min_effective_charge_duration_hours": TESLA_OVERNIGHT_MIN_EFFECTIVE_CHARGE_DURATION_HOURS,
                 "target_mode": str(tesla_target.get("mode") or "off"),
                 "charge_current_amps": int(tesla_target.get("charge_current_amps") or 0),
                 "power_w": round(float(tesla_target.get("tesla_power_w") or 0.0), 1),
@@ -8098,6 +8301,8 @@ async def _run_saj_battery_watch_check(
             }
             if tesla_force_max_charge:
                 result["decision_reason"] = "overnight_tesla_force_max_charge_below_45_soc"
+            elif morning_solar_assist_active:
+                result["decision_reason"] = "overnight_tesla_morning_solar_assist"
             else:
                 result["decision_reason"] = (
                     "overnight_tesla_priority_allocated_shared_power"
@@ -8152,7 +8357,11 @@ async def _run_saj_battery_watch_check(
             else (
                 "overnight_shared_power_allocated_to_pool_pump_first"
                 if pool_pump_allocated and allocation_order and allocation_order[0] == "pool_pump"
-                else "overnight_shared_power_insufficient_for_tesla"
+                else (
+                    tesla_allocation_block_reason
+                    if tesla_allocation_block_reason is not None
+                    else "overnight_shared_power_insufficient_for_tesla"
+                )
             )
         )
         if active_or_requested:
@@ -14689,6 +14898,7 @@ async def config_status() -> dict[str, object]:
         "saj_sample_interval_seconds": sample_interval_seconds,
         "solplanet_sample_interval_seconds": solplanet_sample_interval_seconds,
         "detail_retention_months": settings.detail_retention_months,
+        "solplanet_export_reserve_floor_kwh": settings.solplanet_export_reserve_floor_kwh,
     }
 
 

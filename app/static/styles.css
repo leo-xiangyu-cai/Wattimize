@@ -1591,6 +1591,18 @@ select {
   background: linear-gradient(180deg, #e7f8ed, #d4f0df);
 }
 
+.report-calendar-day.has-report.is-zerohero-legacy {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(31, 122, 82, 0.16) 0,
+      rgba(31, 122, 82, 0.16) 3px,
+      transparent 3px,
+      transparent 9px
+    ),
+    linear-gradient(180deg, #e7f8ed, #d4f0df);
+}
+
 .report-calendar-day.has-report .report-calendar-day-status-icon {
   color: #1f7a52;
 }
@@ -3843,6 +3855,38 @@ td {
   min-height: 640px;
 }
 
+.dashboard-reserve-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin: 10px 0 4px;
+  padding: 8px 10px;
+  border: 1px solid rgba(99, 130, 111, 0.22);
+  border-radius: 8px;
+  background: #f8fbf7;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.dashboard-reserve-label {
+  font-weight: 800;
+}
+
+.dashboard-reserve-input-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-weight: 700;
+}
+
+.dashboard-reserve-input-label input {
+  width: 82px;
+  min-width: 0;
+  padding: 6px 7px;
+}
+
 .flow-system-card-combined {
   position: relative;
 }
@@ -5470,6 +5514,10 @@ td {
   margin-top: 6px;
   font-size: 24px;
   color: #1f7a52;
+}
+
+.efd-node.efd-node-id-combined-usableBatteryNode .node-state {
+  font-size: 12px;
 }
 
 .efd-node.efd-node-tesla .soc-wrap {

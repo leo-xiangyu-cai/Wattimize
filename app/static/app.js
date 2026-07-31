@@ -104,6 +104,7 @@ const I18N = {
     configPruneRetentionFailed: "Detailed history cleanup failed: {error}",
     configWeatherLatLabel: "Weather Latitude",
     configWeatherLonLabel: "Weather Longitude",
+    configExportReserveFloorLabel: "Solplanet export reserve",
     configWeatherLatPlaceholder: "e.g. -33.8688 (Sydney)",
     configWeatherLonPlaceholder: "e.g. 151.2093 (Sydney)",
     configHaUrlPlaceholder: "http://<home-assistant-host>:8123",
@@ -124,6 +125,13 @@ const I18N = {
     configSaved: "Saved",
     configSaveFailed: "Save failed: {error}",
     configMustSaveFirst: "Configuration is not complete yet. Complete setup first.",
+    dashboardReserveFloorLabel: "Export reserve",
+    dashboardReserveFloorInputLabel: "Keep",
+    dashboardReserveFloorSaveBtn: "Save",
+    dashboardReserveFloorDisplay: "Reserve {value} before selling",
+    dashboardReserveFloorSaving: "Saving...",
+    dashboardReserveFloorSaved: "Saved",
+    dashboardReserveFloorSaveFailed: "Save failed: {error}",
     weatherTitle: "Solar Weather Forecast",
     weatherSolarLabel: "Solar",
     weatherYesterday: "Yesterday",
@@ -719,6 +727,8 @@ const I18N = {
     reportCalendarGenerating: "Generating",
     reportCalendarBillActual: "Bill actual",
     reportCalendarBillActualWithInvoice: "Bill actual ({invoice})",
+    reportCalendarPlanFour4Free: "FOUR4FREE",
+    reportCalendarPlanZeroHeroLegacy: "Old ZEROHERO",
     reportTodayLiveMeta: "Live report for {day} · raw data",
     reportCalendarPrevMonth: "Previous month",
     reportCalendarNextMonth: "Next month",
@@ -1202,6 +1212,7 @@ const I18N = {
     configPruneRetentionFailed: "详细数据清理失败: {error}",
     configWeatherLatLabel: "天气纬度",
     configWeatherLonLabel: "天气经度",
+    configExportReserveFloorLabel: "Solplanet 卖电保留线",
     configWeatherLatPlaceholder: "例如 -33.8688（悉尼）",
     configWeatherLonPlaceholder: "例如 151.2093（悉尼）",
     configHaUrlPlaceholder: "http://<home-assistant-host>:8123",
@@ -1222,6 +1233,13 @@ const I18N = {
     configSaved: "保存成功",
     configSaveFailed: "保存失败: {error}",
     configMustSaveFirst: "当前配置还不完整，请先完成配置",
+    dashboardReserveFloorLabel: "卖电保留线",
+    dashboardReserveFloorInputLabel: "保留",
+    dashboardReserveFloorSaveBtn: "保存",
+    dashboardReserveFloorDisplay: "卖电前保留 {value}",
+    dashboardReserveFloorSaving: "保存中...",
+    dashboardReserveFloorSaved: "已保存",
+    dashboardReserveFloorSaveFailed: "保存失败: {error}",
     weatherTitle: "太阳能天气预报",
     weatherSolarLabel: "日照",
     weatherYesterday: "昨天",
@@ -1817,6 +1835,8 @@ const I18N = {
     reportCalendarGenerating: "生成中",
     reportCalendarBillActual: "账单实付",
     reportCalendarBillActualWithInvoice: "账单实付（{invoice}）",
+    reportCalendarPlanFour4Free: "FOUR4FREE",
+    reportCalendarPlanZeroHeroLegacy: "旧 ZEROHERO",
     reportTodayLiveMeta: "{day} 的实时日报 · 使用原始数据",
     reportCalendarPrevMonth: "上个月",
     reportCalendarNextMonth: "下个月",
@@ -2583,6 +2603,7 @@ const SOLPLANET_DASHBOARD_FIELD_MAP = {
 };
 const stateCache = {
   lastSummary: readCachedDashboardSummary(),
+  lastConfig: null,
   lastTimeWindowRules: null,
   lastCollectorStatus: null,
   lastNotificationSummary: null,
@@ -2857,6 +2878,7 @@ const samplingRangeState = {
 };
 const initialReportDay = getLocalDateText();
 const initialReportDayParts = localDateParts(initialReportDay);
+const REPORT_CALENDAR_FOUR4FREE_START_DAY = "2026-07-28";
 const reportCalendarState = {
   selectedDay: initialReportDay,
   month: initialReportDayParts ? initialReportDayParts.monthIndex + 1 : new Date().getMonth() + 1,
@@ -3882,6 +3904,7 @@ function setDatabaseRowDetailModalVisible(visible) {
 }
 
 function fillConfigForm(payload = {}) {
+  stateCache.lastConfig = payload && typeof payload === "object" ? payload : {};
   document.getElementById("cfgHaUrl").value = payload.ha_url || "";
   document.getElementById("cfgHaToken").value = payload.ha_token || "";
   document.getElementById("cfgDongleHost").value = payload.solplanet_dongle_host || "";
@@ -3901,6 +3924,7 @@ function fillConfigForm(payload = {}) {
   );
   if (payload.weather_lat != null) document.getElementById("cfgWeatherLat").value = payload.weather_lat;
   if (payload.weather_lon != null) document.getElementById("cfgWeatherLon").value = payload.weather_lon;
+  renderDashboardReserveFloorControl(null, payload);
   cacheSajProfileFromConfig(payload);
 }
 
@@ -3937,6 +3961,9 @@ function buildConfigPayloadFromForm() {
   const sajInterval = Number(document.getElementById("cfgSajSampleIntervalSeconds").value);
   const solplanetInterval = Number(document.getElementById("cfgSolplanetSampleIntervalSeconds").value);
   const detailRetentionMonths = Number(document.getElementById("cfgDetailRetentionMonths").value);
+  const reserveFloorKwh = toFiniteNumber(document.getElementById("combinedReserveFloorInput")?.value)
+    ?? toFiniteNumber(stateCache.lastConfig?.solplanet_export_reserve_floor_kwh)
+    ?? 18;
   return {
     ha_url: document.getElementById("cfgHaUrl").value.trim(),
     ha_token: document.getElementById("cfgHaToken").value.trim(),
@@ -3948,6 +3975,7 @@ function buildConfigPayloadFromForm() {
     detail_retention_months: CONFIG_DETAIL_RETENTION_OPTIONS.includes(detailRetentionMonths) ? detailRetentionMonths : 2,
     weather_lat: parseFloat(document.getElementById("cfgWeatherLat").value) || null,
     weather_lon: parseFloat(document.getElementById("cfgWeatherLon").value) || null,
+    solplanet_export_reserve_floor_kwh: reserveFloorKwh,
   };
 }
 
@@ -4594,6 +4622,7 @@ function buildCombinedDiagramSpec() {
         position: layout.nodes.usableBattery,
         lines: [
           { id: "combined-usableBatteryValue", className: "node-value", text: "-" },
+          { id: "combined-usableBatteryReserve", className: "node-state muted", text: "-" },
         ],
       },
       {
@@ -6264,6 +6293,60 @@ function renderCombinedUsableBatteryNode(combinedFlow) {
       : null;
   }
   setText("combined-usableBatteryValue", formatEnergyReferenceValue(usableBatteryKwh));
+  renderDashboardReserveFloorControl(combinedFlow);
+}
+
+function dashboardReserveFloorFromSource(combinedFlow = null, configPayload = null) {
+  return toFiniteNumber(configPayload?.solplanet_export_reserve_floor_kwh)
+    ?? toFiniteNumber(combinedFlow?.energy_reference?.solplanet_export_reserve_floor_kwh)
+    ?? toFiniteNumber(stateCache.lastConfig?.solplanet_export_reserve_floor_kwh)
+    ?? 18;
+}
+
+function renderDashboardReserveFloorControl(combinedFlow = null, configPayload = null) {
+  const reserveFloorKwh = dashboardReserveFloorFromSource(combinedFlow, configPayload);
+  const formatted = formatSamplingKwh(reserveFloorKwh, 1);
+  setText("combined-usableBatteryReserve", t("dashboardReserveFloorDisplay", { value: formatted }));
+  setText("combinedReserveFloorDisplay", t("dashboardReserveFloorDisplay", { value: formatted }));
+  const input = document.getElementById("combinedReserveFloorInput");
+  if (input && document.activeElement !== input) {
+    input.value = String(Number.isInteger(reserveFloorKwh) ? reserveFloorKwh : reserveFloorKwh.toFixed(1));
+  }
+}
+
+async function saveDashboardReserveFloor() {
+  const input = document.getElementById("combinedReserveFloorInput");
+  const statusEl = document.getElementById("combinedReserveFloorStatus");
+  const button = document.getElementById("combinedReserveFloorSaveBtn");
+  const reserveFloorKwh = toFiniteNumber(input?.value);
+  if (reserveFloorKwh === null || reserveFloorKwh < 0 || reserveFloorKwh > 100) {
+    if (statusEl) statusEl.textContent = t("dashboardReserveFloorSaveFailed", { error: "0-100 kWh" });
+    return;
+  }
+  if (statusEl) statusEl.textContent = t("dashboardReserveFloorSaving");
+  if (button) button.disabled = true;
+  try {
+    const current = await fetchJson("/api/config", { timeoutMs: 5000 });
+    const payload = {
+      ...current,
+      solplanet_export_reserve_floor_kwh: reserveFloorKwh,
+    };
+    const result = await fetchJson("/api/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      timeoutMs: 10000,
+    });
+    stateCache.lastConfig = result;
+    fillConfigForm(result);
+    renderDashboardReserveFloorControl(stateCache.lastSummary?.combinedFlow || null, result);
+    if (statusEl) statusEl.textContent = t("dashboardReserveFloorSaved");
+    void loadCurrentTab();
+  } catch (err) {
+    if (statusEl) statusEl.textContent = t("dashboardReserveFloorSaveFailed", { error: String(err) });
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function renderTeslaControlButton(teslaInfo = null) {
@@ -8622,6 +8705,17 @@ function getReportBillActualMeta(report) {
   };
 }
 
+function getReportCalendarPlanLabel(dayText) {
+  if (!localDateParts(dayText)) return "";
+  return dayText >= REPORT_CALENDAR_FOUR4FREE_START_DAY
+    ? t("reportCalendarPlanFour4Free")
+    : t("reportCalendarPlanZeroHeroLegacy");
+}
+
+function isReportCalendarLegacyZeroHeroDay(dayText) {
+  return localDateParts(dayText) && dayText < REPORT_CALENDAR_FOUR4FREE_START_DAY;
+}
+
 function invalidateReportCalendarMonthsForBill(bill) {
   const period = bill?.billing_period && typeof bill.billing_period === "object" ? bill.billing_period : {};
   const startDate = dateFromLocalDateText(period.start);
@@ -9385,6 +9479,8 @@ function renderReportCalendar() {
     const report = reportCalendarState.availableDays.get(dayText);
     const hasReport = Boolean(report);
     const noDataReport = hasReport && getDailyReportStatus(report) === "no_data";
+    const planLabel = hasReport && !noDataReport ? getReportCalendarPlanLabel(dayText) : "";
+    const isLegacyZeroHero = hasReport && !noDataReport && isReportCalendarLegacyZeroHeroDay(dayText);
     const billActualMeta = getReportBillActualMeta(report);
     const billActualText = billActualMeta.invoice
       ? t("reportCalendarBillActualWithInvoice", { invoice: billActualMeta.invoice })
@@ -9395,6 +9491,7 @@ function renderReportCalendar() {
     const classes = [
       "report-calendar-day",
       hasReport ? (noDataReport ? "no-data-report" : "has-report") : "missing-report",
+      isLegacyZeroHero ? "is-zerohero-legacy" : "",
       billActualMeta.hasBillActual ? "has-bill-actual" : "",
       live ? "is-live" : "",
       unavailable ? "is-unavailable" : "",
@@ -9426,7 +9523,7 @@ function renderReportCalendar() {
             ? "missing"
             : "checking";
     const disabled = unavailable || loading || reportCalendarState.loadingIndex || Boolean(reportCalendarState.loadingDay);
-    const dayLabel = `${dayText} ${statusText}${billActualMeta.hasBillActual ? ` - ${billActualText}` : ""}`;
+    const dayLabel = `${dayText} ${statusText}${planLabel ? ` - ${planLabel}` : ""}${billActualMeta.hasBillActual ? ` - ${billActualText}` : ""}`;
     cells.push(`
       <button type="button" class="${classes}" data-report-day="${escapeHtml(dayText)}" aria-label="${escapeHtml(dayLabel)}" title="${escapeHtml(dayLabel)}" ${disabled ? "disabled" : ""}>
         <span class="report-calendar-day-number">${day}</span>
@@ -16595,6 +16692,15 @@ bindClickIfPresent("combined-teslaChargingToggleBtn", () => {
 bindClickIfPresent("configBtn", () => {
   void openConfigModal();
 });
+bindClickIfPresent("combinedReserveFloorSaveBtn", () => {
+  void saveDashboardReserveFloor();
+});
+bindKeydownIfPresent("combinedReserveFloorInput", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    void saveDashboardReserveFloor();
+  }
+});
 
 bindClickIfPresent("tabDashboard", () => {
   setActiveTab("dashboard");
@@ -16885,6 +16991,11 @@ function bindInputIfPresent(id, handler) {
 function bindChangeIfPresent(id, handler) {
   const el = document.getElementById(id);
   if (el) el.addEventListener("change", handler);
+}
+
+function bindKeydownIfPresent(id, handler) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("keydown", handler);
 }
 
 bindClickIfPresent("sajModeApplyBtn", () => {
