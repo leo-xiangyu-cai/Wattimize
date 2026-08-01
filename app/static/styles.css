@@ -6012,24 +6012,23 @@ td {
 
 @media (max-width: 700px) {
   body {
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   .page {
-    height: 100svh;
-    min-height: 0;
+    min-height: 100svh;
+    height: auto;
     padding: 5px;
     gap: 4px;
-    grid-template-rows: auto auto minmax(0, 1fr);
-    overflow: hidden;
+    grid-template-rows: none;
+    grid-auto-rows: max-content;
+    align-content: start;
+    overflow: visible;
   }
 
   .topbar {
-    gap: 4px;
-    flex-direction: row;
-    align-items: stretch;
-    padding: 4px;
-    border-radius: 10px;
+    display: none;
   }
 
   .topbar-actions {
@@ -6118,8 +6117,10 @@ td {
   .combined-flow-board {
     width: 100%;
     max-width: 100%;
-    height: 100%;
-    min-height: 0;
+    height: clamp(560px, calc(100svh - 92px), 820px);
+    height: clamp(560px, calc(100dvh - 92px), 820px);
+    min-height: clamp(560px, calc(100svh - 92px), 820px);
+    min-height: clamp(560px, calc(100dvh - 92px), 820px);
   }
 
   .inline-icon {
@@ -6156,7 +6157,13 @@ td {
   }
 
   #weatherWidget {
-    display: block;
+    display: none;
+  }
+
+  #dashboardView > .card > .section-header,
+  #dashboardView .flow-system-subtitle,
+  #dashboardView .flow-meta {
+    display: none;
   }
 
   #dashboardView .section-header {
@@ -6198,7 +6205,7 @@ td {
   .view {
     gap: 5px;
     min-height: 0;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .mobile-energy-card {
@@ -6220,20 +6227,20 @@ td {
     display: grid;
     min-height: 0;
     gap: 5px;
-    overflow: hidden;
+    overflow: visible;
   }
 
   #dashboardView > .card {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     min-height: 0;
-    height: 100%;
-    overflow: hidden;
+    height: auto;
+    overflow: visible;
   }
 
   #dashboardView .flow-compare-grid,
   #dashboardView .flow-system-card {
-    height: 100%;
+    height: auto;
   }
 
   .topbar-actions .lang-switch span,
@@ -6242,27 +6249,50 @@ td {
   }
 
   .dashboard-reserve-control {
-    margin: 4px 0 2px;
-    padding: 5px;
-    gap: 4px 5px;
-    font-size: 10px;
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    margin: 4px 0 0;
+    padding: 6px 8px;
+    gap: 6px;
+    font-size: 11px;
+    border-radius: 8px;
+    box-shadow: none;
+  }
+
+  .dashboard-reserve-control > div {
+    display: contents;
+  }
+
+  .dashboard-reserve-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+  }
+
+  #combinedReserveFloorDisplay,
+  #combinedReserveFloorSaveBtn,
+  #combinedReserveFloorStatus {
+    display: none;
   }
 
   .dashboard-reserve-input-label {
-    gap: 4px;
-  }
-
-  .dashboard-reserve-input-label input {
-    width: 58px;
-    min-height: 26px;
-    padding: 3px 5px;
+    gap: 5px;
+    margin-left: 2px;
     font-size: 11px;
   }
 
-  .dashboard-reserve-control .btn {
-    min-height: 26px;
-    padding: 3px 7px;
-    font-size: 10px;
+  .dashboard-reserve-input-label span:first-child {
+    display: none;
+  }
+
+  .dashboard-reserve-input-label input {
+    width: 54px;
+    min-height: 24px;
+    padding: 2px 6px;
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 700;
   }
 
   .flow-line-value {
@@ -6653,12 +6683,7 @@ td {
 
 @media (max-width: 700px) {
   .balance-formula {
-    font-size: 10px;
-    line-height: 1.45;
-    white-space: normal;
-    overflow-wrap: anywhere;
-    overflow-x: visible;
-    overflow-y: visible;
+    display: none;
   }
 }
 

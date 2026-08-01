@@ -64,14 +64,9 @@ Health and connectivity:
 Core SAJ metrics:
 - `GET /api/entities/core`
 
-SAJ control APIs:
-- `GET /api/saj/control/state`
-- `GET /api/saj/control/capabilities`
-- `PUT /api/saj/control/working-mode`
-- `PUT /api/saj/control/charge-slots/{slot}`
-- `PUT /api/saj/control/discharge-slots/{slot}`
-- `PUT /api/saj/control/toggles`
-- `PUT /api/saj/control/limits`
+SAJ manual control API:
+- `PUT /api/saj/manual-discharge-power`
+- `PUT /api/saj/self-consumption`
 
 Catalogs:
 - `GET /api/catalog/domains`

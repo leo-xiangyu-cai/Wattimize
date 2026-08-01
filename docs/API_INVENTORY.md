@@ -75,15 +75,8 @@ Status values:
 ### SAJ brand paths
 - `GET /api/saj/entities/core` (`candidate` for frontend migration)
 - `GET /api/saj/energy-flow` (`candidate` for frontend migration)
-- `GET /api/saj/control/state` (`used`)
-- `GET /api/saj/control/profile` (`used`)
-- `GET /api/saj/control/capabilities` (`used`)
-- `PUT /api/saj/control/profile` (`used`)
-- `PUT /api/saj/control/working-mode` (`used`)
-- `PUT /api/saj/control/charge-slots/{slot}` (`used`)
-- `PUT /api/saj/control/discharge-slots/{slot}` (`used`)
-- `PUT /api/saj/control/toggles` (`used`)
-- `PUT /api/saj/control/limits` (`used`)
+- `PUT /api/saj/manual-discharge-power` (`used`)
+- `PUT /api/saj/self-consumption` (`used`)
 
 ### Soulplanet brand paths
 - `GET /api/soulplanet/entities/core` (`candidate` for frontend migration)

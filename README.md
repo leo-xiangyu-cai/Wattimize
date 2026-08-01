@@ -59,16 +59,9 @@ curl -s http://<wattimize-host>:18000/api/config/status | jq
 curl -s http://<wattimize-host>:18000/api/ha/ping | jq
 curl -s http://<wattimize-host>:18000/api/energy-flow/saj | jq
 curl -s http://<wattimize-host>:18000/api/energy-flow/solplanet | jq
-curl -s http://<wattimize-host>:18000/api/saj/control/state | jq
-curl -s http://<wattimize-host>:18000/api/saj/control/profile | jq
-curl -s http://<wattimize-host>:18000/api/saj/control/capabilities | jq
 curl -s http://<wattimize-host>:18000/api/time-window-rules | jq
-curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/profile -H 'Content-Type: application/json' -d '{"profile_id":"time_of_use"}' | jq
-curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/working-mode -H 'Content-Type: application/json' -d '{"mode_code":1}' | jq
-curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/toggles -H 'Content-Type: application/json' -d '{"charging_control":true,"discharging_control":false,"charge_time_enable_mask":127,"discharge_time_enable_mask":127}' | jq
-curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/limits -H 'Content-Type: application/json' -d '{"battery_charge_power_limit":1100,"battery_discharge_power_limit":1100,"grid_max_charge_power":1100,"grid_max_discharge_power":1100}' | jq
-curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/charge-slots/1 -H 'Content-Type: application/json' -d '{"start_time":"01:00","end_time":"02:00","power_percent":25}' | jq
-curl -s -X PUT http://<wattimize-host>:18000/api/saj/control/discharge-slots/1 -H 'Content-Type: application/json' -d '{"start_time":"18:00","end_time":"20:00","power_percent":30}' | jq
+curl -s -X PUT http://<wattimize-host>:18000/api/saj/manual-discharge-power -H 'Content-Type: application/json' -d '{"power_w":2000}' | jq
+curl -s -X PUT http://<wattimize-host>:18000/api/saj/self-consumption | jq
 curl -s http://<wattimize-host>:18000/api/solplanet/control/state | jq
 curl -s -X POST http://<wattimize-host>:18000/api/solplanet/control/restart-api | jq
 curl -s -X PUT http://<wattimize-host>:18000/api/solplanet/control/limits -H 'Content-Type: application/json' -d '{"pin":10000,"pout":10000}' | jq

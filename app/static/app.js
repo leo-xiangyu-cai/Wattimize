@@ -2776,7 +2776,12 @@ const NOTIFICATION_MATRIX_WINDOWS = [
   },
 ];
 
+function isMobileViewport() {
+  return Boolean(window.matchMedia?.("(max-width: 700px)")?.matches);
+}
+
 function getLang() {
+  if (isMobileViewport()) return "en";
   const saved = localStorage.getItem("lang");
   if (saved === "en" || saved === "zh") return saved;
   const browserLang = (navigator.language || "").toLowerCase();
@@ -2922,6 +2927,7 @@ const databaseTransferState = {
 let databaseTransferTimerId = null;
 
 function getAutoRefreshSeconds() {
+  if (isMobileViewport()) return 0;
   const saved = Number(localStorage.getItem(AUTO_REFRESH_KEY));
   return AUTO_REFRESH_OPTIONS.includes(saved) ? saved : 30;
 }
@@ -3826,6 +3832,7 @@ function renderSystemLoadMeta(system) {
 }
 
 function applyTranslations() {
+  if (isMobileViewport()) currentLang = "en";
   document.documentElement.lang = currentLang === "zh" ? "zh-CN" : "en";
   const langSelect = document.getElementById("langSelect");
   if (langSelect) langSelect.value = currentLang;
@@ -5613,58 +5620,24 @@ function renderSajProfilePanel() {
   });
 }
 
+function sajControlApiRemovedMessage() {
+  return "Old SAJ control APIs have been removed. Use PUT /api/saj/manual-discharge-power or PUT /api/saj/self-consumption.";
+}
+
 async function loadSajProfile() {
-  try {
-    const payload = await fetchJson("/api/saj/control/profile", { timeoutMs: 8000 });
-    stateCache.lastSajProfile = payload;
-    renderSajProfilePanel();
-    renderSummary(stateCache.lastSummary || { combinedFlow: { metrics: {} } });
-  } catch (err) {
-    setText("sajProfileStatusText", t("sajProfileLoadFailed", { error: String(err) }));
-  }
+  stateCache.lastSajProfile = null;
+  renderSajProfilePanel();
+  setText("sajProfileStatusText", sajControlApiRemovedMessage());
+  setText("sajDashboardProfileStatusText", sajControlApiRemovedMessage());
 }
 
 async function applySajProfile(selectId = "sajProfileSelect") {
-  const primarySelect = document.getElementById(selectId);
-  const fallbackSelect = document.getElementById(selectId === "sajProfileSelect" ? "sajDashboardProfileSelect" : "sajProfileSelect");
-  const profileId = primarySelect?.value || fallbackSelect?.value || "self_consumption";
   const fromDashboardPopover = selectId === "sajDashboardProfileSelect";
-  try {
-    if (fromDashboardPopover) setSajDashboardProfilePopoverVisible(false);
-    const payload = await fetchJson("/api/saj/control/profile", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ profile_id: profileId }),
-      timeoutMs: 12000,
-    });
-    showSajActionSuccess(t("sajProfileApplySummary", { profile: sajProfileLabel(profileId) }), [
-      {
-        method: "PUT",
-        path: "/api/saj/control/profile",
-        purposeKey: "sajDebugPurposeSetProfile",
-      },
-    ]);
-    stateCache.lastSajProfile = payload.profile_state || payload;
-    stateCache.lastSajControl = payload;
-    try {
-      renderSajProfilePanel();
-      renderSajControlFromCache();
-      renderSummary(stateCache.lastSummary || { combinedFlow: { metrics: {} } });
-    } catch (renderErr) {
-      console.error("SAJ profile apply render failed", renderErr);
-    }
-  } catch (err) {
-    const errorText = t("sajProfileApplyFailed", { error: String(err) });
-    setText("sajProfileStatusText", errorText);
-    setText("sajDashboardProfileStatusText", errorText);
-    showSajActionError(errorText, [
-      {
-        method: "PUT",
-        path: "/api/saj/control/profile",
-        purposeKey: "sajDebugPurposeSetProfile",
-      },
-    ]);
-  }
+  if (fromDashboardPopover) setSajDashboardProfilePopoverVisible(false);
+  const errorText = sajControlApiRemovedMessage();
+  setText("sajProfileStatusText", errorText);
+  setText("sajDashboardProfileStatusText", errorText);
+  showSajActionError(errorText, []);
 }
 
 function setBalanceStatus(system, balanceW) {
@@ -6589,21 +6562,21 @@ function buildCombinedFlowMetrics(combinedFlow) {
 
 function formatCombinedGridSystemName(system) {
   if (system === "saj") return "SAJ";
-  if (system === "solplanet") return "Solplanet";
+  if (system === "solplanet") return "SoulPlanet";
   return system ? String(system) : "-";
 }
 
 function formatCombinedGridDiagnosticsTip(diagnostics) {
-  const candidates = (Array.isArray(diagnostics?.candidates) ? diagnostics.candidates : []).filter((candidate) => {
-    return toFiniteNumber(candidate?.grid_w) !== null;
-  });
+  const candidates = Array.isArray(diagnostics?.candidates) ? diagnostics.candidates : [];
   if (!candidates.length) return "";
-  const selectedSystem = typeof diagnostics?.selected_system === "string" ? diagnostics.selected_system : "";
   return candidates
     .map((candidate) => {
       const system = typeof candidate?.system === "string" ? candidate.system : "";
-      const selectedPrefix = system === selectedSystem ? "✓ " : "";
-      return `${selectedPrefix}${formatCombinedGridSystemName(system)}: ${formatSignedKwFromWatts(candidate?.grid_w)}`;
+      const gridW = toFiniteNumber(candidate?.grid_w);
+      const gridText = gridW === null
+        ? (currentLang === "zh" ? "不可用" : "unavailable")
+        : formatSignedKwFromWatts(gridW);
+      return `${formatCombinedGridSystemName(system)}: ${gridText}`;
     })
     .join("\n");
 }
@@ -6616,9 +6589,9 @@ function formatCombinedGridValueHtml(gridW, dataKind, diagnostics) {
     ? "查看 SAJ 和 Solplanet 电网来源值"
     : "View SAJ and Solplanet grid source values";
   return (
-    `<span class="combined-grid-value">` +
+    `<span class="combined-grid-value has-source-tip" tabindex="0" aria-label="${escapeHtml(label)}" data-source-tip="${escapeHtml(tipText)}">` +
     `${valueHtml}` +
-    `<span class="grid-source-tip has-source-tip" tabindex="0" role="img" aria-label="${escapeHtml(label)}" data-source-tip="${escapeHtml(tipText)}">!</span>` +
+    `<span class="grid-source-tip" role="img" aria-hidden="true">!</span>` +
     `</span>`
   );
 }
@@ -14385,37 +14358,16 @@ function renderSajControlFromCache() {
 }
 
 async function loadSajControl() {
-  try {
-    const payload = await fetchJson("/api/saj/control/state", { timeoutMs: 8000 });
-    stateCache.lastSajControl = payload;
-    renderSajControlFromCache();
-  } catch (err) {
-    setText("sajControlMeta", t("sajControlLoadFailed", { error: String(err) }));
-  }
+  setText("sajControlMeta", sajControlApiRemovedMessage());
 }
 
 async function applySajWorkingMode(modeCodeArg = null, summaryKey = "sajControlPopupWorkingModeSummary", purposeKey = "sajDebugPurposeSetMode") {
-  const fallbackModeCode = Number(document.getElementById("sajModeCodeInput")?.value || "0");
-  const modeCode = Number.isFinite(Number(modeCodeArg)) ? Number(modeCodeArg) : fallbackModeCode;
-  try {
-    const payload = await fetchJson("/api/saj/control/working-mode", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode_code: modeCode }),
-      timeoutMs: 10000,
-    });
-    stateCache.lastSajControl = payload;
-    renderSajControlFromCache();
-    showSajActionSuccess(t(summaryKey, { modeCode }), [
-      {
-        method: "PUT",
-        path: "/api/saj/control/working-mode",
-        purposeKey,
-      },
-    ]);
-  } catch (err) {
-    setText("sajControlMeta", t("sajControlApplyFailed", { error: String(err) }));
-  }
+  void modeCodeArg;
+  void summaryKey;
+  void purposeKey;
+  const errorText = sajControlApiRemovedMessage();
+  setText("sajControlMeta", errorText);
+  showSajActionError(errorText, []);
 }
 
 async function applySajInverterModeTarget() {
@@ -14424,158 +14376,48 @@ async function applySajInverterModeTarget() {
 }
 
 async function applySajSlot(kind) {
-  const slotInputId = kind === "charge" ? "sajChargeSlotInput" : "sajDischargeSlotInput";
-  const startInputId = kind === "charge" ? "sajChargeStartInput" : "sajDischargeStartInput";
-  const endInputId = kind === "charge" ? "sajChargeEndInput" : "sajDischargeEndInput";
-  const powerInputId = kind === "charge" ? "sajChargePowerInput" : "sajDischargePowerInput";
-  const dayMaskInputId = kind === "charge" ? "sajChargeDayMaskInput" : "sajDischargeDayMaskInput";
-  const slot = Number(document.getElementById(slotInputId)?.value || "1");
-  const start = document.getElementById(startInputId)?.value || "";
-  const end = document.getElementById(endInputId)?.value || "";
-  const power = Number(document.getElementById(powerInputId)?.value || "0");
-  const dayMask = Number(document.getElementById(dayMaskInputId)?.value || "127");
-  try {
-    const payload = await fetchJson(`/api/saj/control/${kind}-slots/${slot}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        start_time: start,
-        end_time: end,
-        power_percent: power,
-        day_mask: dayMask,
-      }),
-      timeoutMs: 12000,
-    });
-    stateCache.lastSajControl = payload;
-    renderSajControlFromCache();
-  } catch (err) {
-    setText("sajControlMeta", t("sajControlApplyFailed", { error: String(err) }));
-  }
+  void kind;
+  const errorText = sajControlApiRemovedMessage();
+  setText("sajControlMeta", errorText);
+  showSajActionError(errorText, []);
 }
 
 async function applySajToggles() {
-  const chargeEnableMask = Number(document.getElementById("sajChargeEnableMaskInput")?.value || "0");
-  const dischargeEnableMask = Number(document.getElementById("sajDischargeEnableMaskInput")?.value || "0");
-  const chargeSwitch = (document.getElementById("sajChargeSwitchInput")?.value || "off") === "on";
-  const dischargeSwitch = (document.getElementById("sajDischargeSwitchInput")?.value || "off") === "on";
-  try {
-    const payload = await fetchJson("/api/saj/control/toggles", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        charging_control: chargeSwitch,
-        discharging_control: dischargeSwitch,
-        charge_time_enable_mask: chargeEnableMask,
-        discharge_time_enable_mask: dischargeEnableMask,
-      }),
-      timeoutMs: 12000,
-    });
-    stateCache.lastSajControl = payload;
-    renderSajControlFromCache();
-  } catch (err) {
-    setText("sajControlMeta", t("sajControlApplyFailed", { error: String(err) }));
-  }
+  const errorText = sajControlApiRemovedMessage();
+  setText("sajControlMeta", errorText);
+  showSajActionError(errorText, []);
 }
 
 async function applySajEnableMasksOnly() {
-  const state = stateCache.lastSajControl?.control_state || stateCache.lastSajControl?.state;
-  const chargeEnableMask = clampMask7(document.getElementById("sajQuickChargeEnableMaskInput")?.value || "0");
-  const dischargeEnableMask = clampMask7(document.getElementById("sajQuickDischargeEnableMaskInput")?.value || "0");
-  mirrorQuickEnableMaskInputsToMain();
-
-  const edits = [];
-  const debugCalls = [
-    {
-      method: "PUT",
-      path: "/api/saj/control/toggles",
-      purposeKey: "sajDebugPurposeSetTogglesMask",
-    },
-  ];
-  for (const kind of ["charge", "discharge"]) {
-    const source = Array.isArray(state?.[kind]?.slots) ? state[kind].slots : [];
-    for (let slot = 1; slot <= 7; slot += 1) {
-      const original = source.find((item) => Number(item?.slot) === slot) || {};
-      const startId = `sajTable${kind}Slot${slot}StartInput`;
-      const endId = `sajTable${kind}Slot${slot}EndInput`;
-      const powerId = `sajTable${kind}Slot${slot}PowerInput`;
-      const dayMaskId = `sajTable${kind}Slot${slot}DayMaskInput`;
-      const startInput = document.getElementById(startId)?.value || "";
-      const endInput = document.getElementById(endId)?.value || "";
-      const powerRaw = document.getElementById(powerId)?.value || "";
-      const dayMaskRaw = document.getElementById(dayMaskId)?.value || "";
-
-      const payload = {};
-      if (startInput && startInput !== String(original.start_time || "")) payload.start_time = startInput;
-      if (endInput && endInput !== String(original.end_time || "")) payload.end_time = endInput;
-      if (powerRaw !== "") {
-        const powerValue = Math.max(0, Math.min(100, Math.trunc(Number(powerRaw))));
-        if (Number.isFinite(powerValue) && powerValue !== Number(original.power_percent)) {
-          payload.power_percent = powerValue;
-        }
-      }
-      if (dayMaskRaw !== "") {
-        const dayMaskValue = clampMask7(dayMaskRaw);
-        if (dayMaskValue !== clampMask7(original.day_mask)) payload.day_mask = dayMaskValue;
-      }
-      if (Object.keys(payload).length) {
-        edits.push({ kind, slot, payload });
-        debugCalls.push({
-          method: "PUT",
-          path: `/api/saj/control/${kind}-slots/${slot}`,
-          purposeKey: "sajDebugPurposeSetSlot",
-          purposeParams: { kind, slot },
-        });
-      }
-    }
-  }
-  try {
-    let payload = await fetchJson("/api/saj/control/toggles", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        charge_time_enable_mask: chargeEnableMask,
-        discharge_time_enable_mask: dischargeEnableMask,
-      }),
-      timeoutMs: 12000,
-    });
-    for (const edit of edits) {
-      payload = await fetchJson(`/api/saj/control/${edit.kind}-slots/${edit.slot}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(edit.payload),
-        timeoutMs: 12000,
-      });
-    }
-    stateCache.lastSajControl = payload;
-    renderSajControlFromCache();
-    showSajActionSuccess(t("sajControlPopupSaveSummary"), debugCalls);
-  } catch (err) {
-    setText("sajControlMeta", t("sajControlApplyFailed", { error: String(err) }));
-  }
+  const errorText = sajControlApiRemovedMessage();
+  setText("sajControlMeta", errorText);
+  showSajActionError(errorText, []);
 }
 
 async function applySajLimits() {
-  const batteryCharge = Number(document.getElementById("sajBatteryChargeLimitInput")?.value || "0");
-  const batteryDischarge = Number(document.getElementById("sajBatteryDischargeLimitInput")?.value || "0");
-  const gridCharge = Number(document.getElementById("sajGridChargeLimitInput")?.value || "0");
-  const gridDischarge = Number(document.getElementById("sajGridDischargeLimitInput")?.value || "0");
-  try {
-    const payload = await fetchJson("/api/saj/control/limits", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        battery_charge_power_limit: batteryCharge,
-        battery_discharge_power_limit: batteryDischarge,
-        grid_max_charge_power: gridCharge,
-        grid_max_discharge_power: gridDischarge,
-      }),
-      timeoutMs: 12000,
-    });
-    stateCache.lastSajControl = payload;
-    renderSajControlFromCache();
-  } catch (err) {
-    setText("sajControlMeta", t("sajControlApplyFailed", { error: String(err) }));
-  }
+  const errorText = sajControlApiRemovedMessage();
+  setText("sajControlMeta", errorText);
+  showSajActionError(errorText, []);
+}
+
+async function applySajManualDischargePower(powerW) {
+  const payload = await fetchJson("/api/saj/manual-discharge-power", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ power_w: powerW }),
+    timeoutMs: 15000,
+  });
+  stateCache.lastSajControl = payload;
+  return payload;
+}
+
+async function applySajSelfConsumption() {
+  const payload = await fetchJson("/api/saj/self-consumption", {
+    method: "PUT",
+    timeoutMs: 15000,
+  });
+  stateCache.lastSajControl = payload;
+  return payload;
 }
 
 const SOLPLANET_SCHEDULE_DAYS = ["Mon", "Tus", "Wen", "Thu", "Fri", "Sat", "Sun"];
@@ -16612,7 +16454,7 @@ function runAutoRefreshRound() {
 }
 
 function setAutoRefresh(seconds) {
-  const safeSeconds = AUTO_REFRESH_OPTIONS.includes(seconds) ? seconds : 30;
+  const safeSeconds = isMobileViewport() ? 0 : (AUTO_REFRESH_OPTIONS.includes(seconds) ? seconds : 30);
   autoRefreshSeconds = safeSeconds;
   localStorage.setItem(AUTO_REFRESH_KEY, String(safeSeconds));
 
@@ -16809,6 +16651,10 @@ bindKeydownIfPresent("combinedReserveFloorInput", (event) => {
     event.preventDefault();
     void saveDashboardReserveFloor();
   }
+});
+bindChangeIfPresent("combinedReserveFloorInput", () => {
+  if (!isMobileViewport()) return;
+  void saveDashboardReserveFloor();
 });
 
 bindClickIfPresent("tabDashboard", () => {

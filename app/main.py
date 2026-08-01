@@ -153,7 +153,7 @@ SYSTEM_PREFIXES: dict[str, tuple[str, ...]] = {
 }
 BALANCE_TOLERANCE_W = 100.0
 TESLA_ASSUMED_CHARGING_VOLTAGE_V = 240.0
-TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A = 5
+TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A = 12
 TESLA_CONTROL_FEEDBACK_KV_PREFIX = "ui.tesla_control_feedback."
 TESLA_CONTROL_FEEDBACK_PENDING_TIMEOUT_SECONDS = 15.0
 TESLA_CONTROL_FEEDBACK_SUCCESS_TTL_SECONDS = 4.0
@@ -199,11 +199,14 @@ BATTERY_MIN_DISCHARGE_SOC_PERCENT = {
 TESLA_OVERNIGHT_FORCE_MAX_CHARGE_BELOW_SOC_PERCENT_DEFAULT = 45.0
 TESLA_OVERNIGHT_SHOULDER_MIN_SOLPLANET_SOC_PERCENT = BATTERY_MIN_DISCHARGE_SOC_PERCENT["solplanet"]
 TESLA_OVERNIGHT_SHOULDER_MIN_AVAILABLE_KWH = 1.0
-TESLA_OVERNIGHT_MIN_EFFECTIVE_CHARGE_CURRENT_A = 12
+TESLA_OVERNIGHT_MIN_EFFECTIVE_CHARGE_CURRENT_A = TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A
 TESLA_OVERNIGHT_MIN_EFFECTIVE_CHARGE_DURATION_HOURS = 0.5
 TESLA_OVERNIGHT_SOLAR_ASSIST_START_HOUR = 23
 TESLA_OVERNIGHT_SOLAR_ASSIST_END_HOUR = 11
 TESLA_OVERNIGHT_SOLAR_ASSIST_MIN_EXCESS_W = 150.0
+TESLA_OVERNIGHT_SOLAR_ASSIST_MIN_HEADROOM_W = (
+    TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A * TESLA_ASSUMED_CHARGING_VOLTAGE_V + BALANCE_TOLERANCE_W
+)
 TESLA_OVERNIGHT_SOLAR_ASSIST_MAX_GRID_IMPORT_W = BALANCE_TOLERANCE_W
 TESLA_POST_EXPORT_FORECAST_WINDOW_START_HOUR = 20
 TESLA_POST_EXPORT_FORECAST_WINDOW_END_HOUR = 11
@@ -236,6 +239,16 @@ POST_EXPORT_PEAK_WINDOW_END_HOUR = 23
 OVERNIGHT_SHOULDER_WINDOW_START_HOUR = 23
 OVERNIGHT_SHOULDER_WINDOW_END_HOUR = 11
 OVERNIGHT_BUDGET_TARGET_HOUR = OVERNIGHT_SHOULDER_WINDOW_END_HOUR
+SAJ_MORNING_GRID_IMPORT_GUARD_START_HOUR = 5
+SAJ_MORNING_GRID_IMPORT_GUARD_END_HOUR = 9
+SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_W = 200.0
+SAJ_MORNING_GRID_IMPORT_GUARD_CLEAR_W = 100.0
+SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_CHECKS = 2
+SAJ_MORNING_GRID_IMPORT_GUARD_CLEAR_SECONDS = 5 * 60
+SAJ_MORNING_GRID_IMPORT_GUARD_START_SOC_PERCENT = 25.0
+SAJ_MORNING_GRID_IMPORT_GUARD_STOP_SOC_PERCENT = 20.0
+SAJ_MORNING_GRID_IMPORT_GUARD_DISCHARGE_POWER_W = 2_000
+SAJ_MORNING_GRID_IMPORT_GUARD_STATE_KEY = "operation_state.saj_morning_grid_import_guard"
 EXPORT_WINDOW_BATTERY_SOFT_DISCHARGE_TARGET_W = 7_500.0
 EXPORT_WINDOW_BATTERY_HARD_DISCHARGE_LIMIT_W = 10_000.0
 SOLPLANET_EXPORT_MONITOR_TARGET_KWH = 18.5
@@ -310,6 +323,7 @@ TIME_WINDOW_RULE_DEFINITIONS: tuple[dict[str, str], ...] = (
     {"code": "saj_profile_self_consumption", "window": "after_free_shoulder", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "export_window", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "overnight_shoulder", "kind": "operation"},
+    {"code": "saj_morning_grid_import_guard", "window": "overnight_shoulder", "kind": "operation"},
     {"code": "tesla_overnight_shoulder_control", "window": "overnight_shoulder", "kind": "operation"},
     {"code": "pool_pump_overnight_control", "window": "overnight_shoulder", "kind": "operation"},
     {"code": "tesla_after_free_shoulder_control", "window": "after_free_shoulder", "kind": "operation"},
@@ -348,67 +362,31 @@ MANUAL_OPERATION_DEFINITIONS: tuple[dict[str, object], ...] = (
         "config": {"confirmation_mode": "ha_state_refresh"},
     },
     {
-        "operation_code": "saj.manual.set_working_mode",
+        "operation_code": "saj.manual.set_discharge_power",
         "system": "saj",
-        "operation_type": "inverter_control",
-        "action": "set_working_mode",
-        "title": "SAJ Working Mode",
-        "input_schema": {"mode_code": "integer"},
+        "operation_type": "discharge_control",
+        "action": "set_discharge_power",
+        "title": "SAJ Manual Discharge Power",
+        "input_schema": {"power_w": "integer", "power_percent": "integer"},
         "output_schema": {"state": "object", "changed": "array"},
     },
     {
-        "operation_code": "saj.manual.apply_profile",
+        "operation_code": "saj.manual.set_self_consumption",
         "system": "saj",
         "operation_type": "inverter_control",
-        "action": "apply_profile",
-        "title": "SAJ Control Profile",
-        "input_schema": {"profile_id": "string"},
-        "output_schema": {"state": "object"},
-    },
-    {
-        "operation_code": "saj.manual.set_charge_slot",
-        "system": "saj",
-        "operation_type": "schedule_control",
-        "action": "set_charge_slot",
-        "title": "SAJ Charge Slot",
-        "input_schema": {"slot": "integer", "payload": "object"},
-        "output_schema": {"state": "object"},
-    },
-    {
-        "operation_code": "saj.manual.set_discharge_slot",
-        "system": "saj",
-        "operation_type": "schedule_control",
-        "action": "set_discharge_slot",
-        "title": "SAJ Discharge Slot",
-        "input_schema": {"slot": "integer", "payload": "object"},
-        "output_schema": {"state": "object"},
-    },
-    {
-        "operation_code": "saj.manual.set_toggles",
-        "system": "saj",
-        "operation_type": "inverter_control",
-        "action": "set_toggles",
-        "title": "SAJ Toggle Controls",
-        "input_schema": {"payload": "object"},
-        "output_schema": {"state": "object", "changed": "array"},
-    },
-    {
-        "operation_code": "saj.manual.set_limits",
-        "system": "saj",
-        "operation_type": "power_limit_control",
-        "action": "set_limits",
-        "title": "SAJ Power Limits",
-        "input_schema": {"payload": "object"},
-        "output_schema": {"state": "object", "changed": "array"},
-    },
-    {
-        "operation_code": "saj.manual.refresh_touch",
-        "system": "saj",
-        "operation_type": "maintenance",
-        "action": "refresh_touch",
-        "title": "SAJ Passive Control Refresh",
+        "action": "set_self_consumption",
+        "title": "SAJ Self Consumption",
         "input_schema": {},
-        "output_schema": {"state": "object", "entity_id": "string", "kept_state": "boolean"},
+        "output_schema": {"state": "object", "changed": "array"},
+    },
+    {
+        "operation_code": "saj.worker.morning_grid_import_guard",
+        "system": "saj",
+        "operation_type": "automation",
+        "action": "protect_morning_grid_import",
+        "title": "SAJ Morning Grid Import Guard",
+        "input_schema": {"grid_import_w": "number", "saj_soc_percent": "number"},
+        "output_schema": {"action": "object", "decision": "object"},
     },
     {
         "operation_code": "solplanet.manual.set_limits",
@@ -1434,33 +1412,14 @@ SOLPLANET_DAY_ALIAS = {
 }
 
 
-class SajWorkingModePayload(BaseModel):
-    mode_code: int = Field(..., ge=SAJ_MODE_MIN, le=SAJ_MODE_MAX)
-
-
-class SajProfilePayload(BaseModel):
-    profile_id: str = Field(...)
-
-
-class SajSlotPayload(BaseModel):
-    start_time: str | None = Field(default=None)
-    end_time: str | None = Field(default=None)
+class SajManualDischargePowerPayload(BaseModel):
+    power_w: int | None = Field(default=None, ge=0, le=SAJ_RATED_POWER_W)
     power_percent: int | None = Field(default=None, ge=0, le=100)
-    day_mask: int | None = Field(default=None, ge=SAJ_DAY_MASK_MIN, le=SAJ_DAY_MASK_MAX)
+    settle_seconds: float = Field(default=2.0, ge=0, le=10)
 
 
-class SajTogglePayload(BaseModel):
-    charging_control: bool | None = Field(default=None)
-    discharging_control: bool | None = Field(default=None)
-    charge_time_enable_mask: int | None = Field(default=None, ge=SAJ_DAY_MASK_MIN, le=SAJ_DAY_MASK_MAX)
-    discharge_time_enable_mask: int | None = Field(default=None, ge=SAJ_DAY_MASK_MIN, le=SAJ_DAY_MASK_MAX)
-
-
-class SajLimitsPayload(BaseModel):
-    battery_charge_power_limit: int | None = Field(default=None, ge=0, le=1100)
-    battery_discharge_power_limit: int | None = Field(default=None, ge=0, le=1100)
-    grid_max_charge_power: int | None = Field(default=None, ge=0, le=1100)
-    grid_max_discharge_power: int | None = Field(default=None, ge=0, le=1100)
+class SajSelfConsumptionPayload(BaseModel):
+    settle_seconds: float = Field(default=2.0, ge=0, le=10)
 
 
 class SolplanetLimitsPayload(BaseModel):
@@ -3608,6 +3567,15 @@ def _is_within_overnight_shoulder_window(now_local: datetime) -> bool:
     return _is_hour_in_window(hour, OVERNIGHT_SHOULDER_WINDOW_START_HOUR, OVERNIGHT_SHOULDER_WINDOW_END_HOUR)
 
 
+def _is_within_saj_morning_grid_import_guard_window(now_local: datetime) -> bool:
+    hour = now_local.hour
+    return _is_hour_in_window(
+        hour,
+        SAJ_MORNING_GRID_IMPORT_GUARD_START_HOUR,
+        SAJ_MORNING_GRID_IMPORT_GUARD_END_HOUR,
+    )
+
+
 def _overnight_shoulder_window_key(now_local: datetime) -> str:
     if now_local.hour >= OVERNIGHT_SHOULDER_WINDOW_START_HOUR:
         return now_local.strftime("%Y-%m-%d")
@@ -3771,21 +3739,27 @@ def _saj_target_profile_for_time(now_local: datetime) -> tuple[str, str]:
 async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str, bool] | None = None) -> dict[str, object]:
     desired_profile, desired_reason = _saj_target_profile_for_time(now_local)
     rule_code = _saj_profile_rule_code_for_time(now_local)
-    if not _is_time_window_rule_enabled(enabled_map, rule_code):
-        return {
-            "desired_profile": desired_profile,
-            "desired_reason": desired_reason,
-            "rule_code": rule_code,
-            "rule_enabled": False,
-            "action": "noop",
-            "reason": "rule_disabled",
-        }
     _, states_by_id = await _saj_control_states()
     control_state = _build_saj_control_state(states_by_id)
     profile_state = _build_saj_profile_state(control_state)
     selected_profile = str(profile_state.get("selected_profile") or "").strip()
     input_profile = str(profile_state.get("input_profile") or "").strip()
     actual_profile = str(profile_state.get("actual_profile") or "").strip()
+    if not _is_time_window_rule_enabled(enabled_map, rule_code):
+        return {
+            "desired_profile": desired_profile,
+            "desired_reason": desired_reason,
+            "rule_code": rule_code,
+            "rule_enabled": False,
+            "selected_profile": selected_profile or None,
+            "input_profile": input_profile or None,
+            "actual_profile": actual_profile or None,
+            "actual_profile_source": profile_state.get("actual_profile_source"),
+            "input_profile_source": profile_state.get("input_profile_source"),
+            "pending_remote_sync": bool(profile_state.get("pending_remote_sync")),
+            "action": "noop",
+            "reason": "rule_disabled",
+        }
     needs_apply = (
         selected_profile != desired_profile
         or input_profile != desired_profile
@@ -3807,20 +3781,10 @@ async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str
     if not needs_apply:
         return result
 
-    apply_result = await _saj_apply_profile(desired_profile)
-    updated_profile_state = apply_result.get("profile_state")
-    updated_profile_map = updated_profile_state if isinstance(updated_profile_state, dict) else {}
     result.update(
         {
-            "action": "apply_profile",
-            "applied_profile": desired_profile,
-            "selected_profile": updated_profile_map.get("selected_profile"),
-            "input_profile": updated_profile_map.get("input_profile"),
-            "actual_profile": updated_profile_map.get("actual_profile"),
-            "actual_profile_source": updated_profile_map.get("actual_profile_source"),
-            "input_profile_source": updated_profile_map.get("input_profile_source"),
-            "pending_remote_sync": bool(updated_profile_map.get("pending_remote_sync")),
-            "changed": apply_result.get("changed"),
+            "reason": "saj_automation_disabled",
+            "would_apply_profile": desired_profile,
         }
     )
     return result
@@ -4946,84 +4910,27 @@ def _operation_timeline_manual_text(run: dict[str, object], *, lang: Literal["zh
         base = "Restart backend collector" if lang == "en" else "重启后台采集器"
     elif operation_code == "solplanet.manual.restart_api":
         base = "Restart Solplanet API" if lang == "en" else "重启Solplanet接口"
-    elif operation_code == "saj.manual.set_working_mode":
-        mode_code = _to_number(request_map.get("mode_code"))
-        if mode_code is not None:
-            base = (
-                f"Set SAJ working mode to {int(round(mode_code))}"
-                if lang == "en"
-                else f"设置SAJ工作模式为{int(round(mode_code))}"
-            )
-        else:
-            base = "Set SAJ working mode" if lang == "en" else "设置SAJ工作模式"
-    elif operation_code == "saj.manual.apply_profile":
-        profile_id = str(request_map.get("profile_id") or "").strip()
-        if profile_id:
-            base = f"Apply SAJ profile ({profile_id})" if lang == "en" else f"应用SAJ配置({profile_id})"
-        else:
-            base = "Apply SAJ profile" if lang == "en" else "应用SAJ配置"
-    elif operation_code in ("saj.manual.set_charge_slot", "saj.manual.set_discharge_slot"):
-        slot_value = _to_number(request_map.get("slot"))
-        slot_text = f"#{int(round(slot_value))}" if slot_value is not None else ""
-        start_time = str(request_map.get("start_time") or "").strip()
-        end_time = str(request_map.get("end_time") or "").strip()
-        time_text = f"({start_time}-{end_time})" if start_time or end_time else ""
+    elif operation_code == "saj.manual.set_discharge_power":
+        power_w = _to_number(request_map.get("power_w"))
+        power_percent = _to_number(request_map.get("power_percent"))
         if lang == "en":
-            slot_kind = "charge" if operation_code.endswith("set_charge_slot") else "discharge"
-            base = f"Set SAJ {slot_kind} slot {slot_text}{time_text}".strip()
+            if power_w is not None:
+                base = f"Set SAJ manual discharge to {int(round(power_w))}W"
+            elif power_percent is not None:
+                base = f"Set SAJ manual discharge to {int(round(power_percent))}%"
+            else:
+                base = "Set SAJ manual discharge"
         else:
-            base = f"设置SAJ{'充电' if operation_code.endswith('set_charge_slot') else '放电'}时段{slot_text}{time_text}"
-    elif operation_code == "saj.manual.set_toggles":
-        parts: list[str] = []
-        charging_control = _to_bool(request_map.get("charging_control"))
-        if charging_control is not None:
-            parts.append(
-                f"charge control={'on' if charging_control else 'off'}"
-                if lang == "en"
-                else f"充电开关={'开' if charging_control else '关'}"
-            )
-        discharging_control = _to_bool(request_map.get("discharging_control"))
-        if discharging_control is not None:
-            parts.append(
-                f"discharge control={'on' if discharging_control else 'off'}"
-                if lang == "en"
-                else f"放电开关={'开' if discharging_control else '关'}"
-            )
-        charge_mask = _to_number(request_map.get("charge_time_enable_mask"))
-        if charge_mask is not None:
-            parts.append(
-                f"charge mask={int(round(charge_mask))}"
-                if lang == "en"
-                else f"充电掩码={int(round(charge_mask))}"
-            )
-        discharge_mask = _to_number(request_map.get("discharge_time_enable_mask"))
-        if discharge_mask is not None:
-            parts.append(
-                f"discharge mask={int(round(discharge_mask))}"
-                if lang == "en"
-                else f"放电掩码={int(round(discharge_mask))}"
-            )
-        if parts:
-            base = f"Set SAJ toggles ({', '.join(parts)})" if lang == "en" else f"设置SAJ开关({', '.join(parts)})"
-        else:
-            base = "Set SAJ toggles" if lang == "en" else "设置SAJ开关"
-    elif operation_code == "saj.manual.set_limits":
-        parts: list[str] = []
-        for key, label in (
-            ("battery_charge_power_limit", "battery charge" if lang == "en" else "电池充电"),
-            ("battery_discharge_power_limit", "battery discharge" if lang == "en" else "电池放电"),
-            ("grid_max_charge_power", "grid charge" if lang == "en" else "电网充电"),
-            ("grid_max_discharge_power", "grid discharge" if lang == "en" else "电网放电"),
-        ):
-            value = _to_number(request_map.get(key))
-            if value is not None:
-                parts.append(f"{label}={int(round(value))}%")
-        if parts:
-            base = f"Set SAJ power limits ({', '.join(parts)})" if lang == "en" else f"设置SAJ功率限制({', '.join(parts)})"
-        else:
-            base = "Set SAJ power limits" if lang == "en" else "设置SAJ功率限制"
-    elif operation_code == "saj.manual.refresh_touch":
-        base = "Refresh SAJ passive control" if lang == "en" else "刷新SAJ被动控制"
+            if power_w is not None:
+                base = f"设置SAJ手动放电为{int(round(power_w))}W"
+            elif power_percent is not None:
+                base = f"设置SAJ手动放电为{int(round(power_percent))}%"
+            else:
+                base = "设置SAJ手动放电"
+    elif operation_code == "saj.manual.set_self_consumption":
+        base = "Set SAJ self-consumption" if lang == "en" else "设置SAJ为自发自用"
+    elif operation_code == "saj.worker.morning_grid_import_guard":
+        base = "Run SAJ morning grid-import guard" if lang == "en" else "执行SAJ早晨防买电保护"
     elif operation_code == "solplanet.manual.set_limits":
         parts: list[str] = []
         pin = _to_number(request_map.get("pin"))
@@ -5356,6 +5263,25 @@ async def _load_pool_pump_free_energy_state() -> dict[str, object]:
     return {}
 
 
+async def _load_saj_morning_grid_import_guard_state() -> dict[str, object]:
+    kv_map = await asyncio.to_thread(
+        get_realtime_kv_by_prefix,
+        storage_db_path,
+        prefix=SAJ_MORNING_GRID_IMPORT_GUARD_STATE_KEY,
+    )
+    row = kv_map.get(SAJ_MORNING_GRID_IMPORT_GUARD_STATE_KEY)
+    value = (row or {}).get("value")
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 async def _store_pool_pump_overnight_state(state: dict[str, object]) -> None:
     await asyncio.to_thread(
         upsert_realtime_kv,
@@ -5372,6 +5298,16 @@ async def _store_pool_pump_free_energy_state(state: dict[str, object]) -> None:
         storage_db_path,
         [
             (POOL_PUMP_FREE_ENERGY_STATE_KEY, json.dumps(state, ensure_ascii=False), "worker"),
+        ],
+    )
+
+
+async def _store_saj_morning_grid_import_guard_state(state: dict[str, object]) -> None:
+    await asyncio.to_thread(
+        upsert_realtime_kv,
+        storage_db_path,
+        [
+            (SAJ_MORNING_GRID_IMPORT_GUARD_STATE_KEY, json.dumps(state, ensure_ascii=False), "worker"),
         ],
     )
 
@@ -7696,6 +7632,21 @@ async def _run_midday_window_check(
                     return result
 
         desired_amps = int(desired["charge_current_amps"])
+        if desired["mode"] != "off" and desired_amps < TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A:
+            result["decision"] = {
+                "mode": "off",
+                "charge_current_amps": 0,
+                "predicted_grid_w": round(base_grid_w, 1),
+            }
+            result["decision_reason"] = "calculated_amps_below_vehicle_minimum"
+            if charge_requested_enabled or charging_enabled:
+                await _tesla_set_charging(False)
+                result["action"] = {"type": "stop_charging"}
+                status = "applied"
+            else:
+                result["action"] = {"type": "noop", "reason": "already_stopped"}
+                status = "noop"
+            return result
         configured_matches_desired = (
             current_configured_amps is not None
             and int(round(current_configured_amps)) == desired_amps
@@ -7833,6 +7784,272 @@ async def _run_midday_window_check(
         result["log_ok"] = ok
         result["log_status"] = status
         result["log_error_text"] = error_text
+
+
+async def _run_saj_morning_grid_import_guard_check(
+    combined_flow: dict[str, object] | None,
+    *,
+    round_id: str | None = None,
+    requested_at_utc: str | None = None,
+) -> dict[str, object]:
+    requested_at_utc = str(requested_at_utc or "").strip() or datetime.now(UTC).isoformat()
+    started_monotonic = monotonic()
+    now_local, timezone_name = _tesla_grid_support_now_local()
+    window_active = _is_within_saj_morning_grid_import_guard_window(now_local)
+    result: dict[str, object] = {
+        "executed_at_utc": datetime.now(UTC).isoformat(),
+        "evaluated_at_local": now_local.isoformat(),
+        "timezone": timezone_name,
+        "window_active": window_active,
+        "window_mode": "saj_morning_grid_import_guard" if window_active else "off",
+        "window_schedule": (
+            f"{SAJ_MORNING_GRID_IMPORT_GUARD_START_HOUR:02d}:00-"
+            f"{SAJ_MORNING_GRID_IMPORT_GUARD_END_HOUR:02d}:00"
+        ),
+        "target": "saj_battery",
+        "thresholds": {
+            "trigger_grid_import_w": SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_W,
+            "trigger_checks": SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_CHECKS,
+            "clear_grid_import_w": SAJ_MORNING_GRID_IMPORT_GUARD_CLEAR_W,
+            "clear_seconds": SAJ_MORNING_GRID_IMPORT_GUARD_CLEAR_SECONDS,
+            "start_soc_percent": SAJ_MORNING_GRID_IMPORT_GUARD_START_SOC_PERCENT,
+            "stop_soc_percent": SAJ_MORNING_GRID_IMPORT_GUARD_STOP_SOC_PERCENT,
+            "discharge_power_w": SAJ_MORNING_GRID_IMPORT_GUARD_DISCHARGE_POWER_W,
+        },
+    }
+    status = "ok"
+    ok = True
+    error_text: str | None = None
+    try:
+        enabled_map = await _load_time_window_rule_enabled_map()
+        result["rule_enabled_map"] = enabled_map
+        rule_code = "saj_morning_grid_import_guard"
+        rule_enabled = _is_time_window_rule_enabled(enabled_map, rule_code)
+        result["rule_code"] = rule_code
+        result["rule_enabled"] = rule_enabled
+        persisted_state = await _load_saj_morning_grid_import_guard_state()
+        active = bool(persisted_state.get("active"))
+        high_import_checks = int(_to_number(persisted_state.get("high_import_checks")) or 0)
+        low_import_since_utc = str(persisted_state.get("low_import_since_utc") or "").strip()
+        last_action_at_utc = str(persisted_state.get("last_action_at_utc") or "").strip()
+
+        metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
+        metrics_map = metrics if isinstance(metrics, dict) else {}
+        grid_w = _to_number(metrics_map.get("grid_w"))
+        saj_soc_percent = _to_number(metrics_map.get("battery1_soc_percent"))
+        saj_battery_w = _to_number(metrics_map.get("battery1_w"))
+        saj_battery_discharging = bool(
+            saj_battery_w is not None and saj_battery_w >= POWER_FLOW_ACTIVE_THRESHOLD_W
+        )
+        current_grid_import_w = max(float(grid_w), 0.0) if grid_w is not None else None
+        result.update(
+            {
+                "grid_w": round(grid_w, 1) if grid_w is not None else None,
+                "current_grid_import_w": (
+                    round(current_grid_import_w, 1) if current_grid_import_w is not None else None
+                ),
+                "saj_soc_percent": saj_soc_percent,
+                "saj_battery_w": round(saj_battery_w, 1) if saj_battery_w is not None else None,
+                "saj_battery_discharging": saj_battery_discharging,
+                "state_before": {
+                    "active": active,
+                    "high_import_checks": high_import_checks,
+                    "low_import_since_utc": low_import_since_utc or None,
+                    "last_action_at_utc": last_action_at_utc or None,
+                },
+            }
+        )
+
+        now_utc = datetime.now(UTC)
+
+        def _state_payload(**updates: object) -> dict[str, object]:
+            next_state = {
+                "active": active,
+                "high_import_checks": high_import_checks,
+                "low_import_since_utc": low_import_since_utc,
+                "last_action_at_utc": last_action_at_utc,
+                "updated_at_utc": now_utc.isoformat(),
+            }
+            next_state.update(updates)
+            return next_state
+
+        if not rule_enabled:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "rule_disabled"}
+            result["decision_reason"] = "rule_disabled"
+            status = "noop"
+            if high_import_checks or low_import_since_utc:
+                await _store_saj_morning_grid_import_guard_state(
+                    _state_payload(high_import_checks=0, low_import_since_utc="")
+                )
+            return result
+
+        if grid_w is None or saj_soc_percent is None:
+            result["decision"] = {"mode": "observe_only"}
+            missing = []
+            if grid_w is None:
+                missing.append("combined_grid_w")
+            if saj_soc_percent is None:
+                missing.append("saj_soc_percent")
+            result["missing_metrics"] = missing
+            result["action"] = {"type": "noop", "reason": "missing_metrics"}
+            result["decision_reason"] = "missing_metrics"
+            status = "skipped"
+            return result
+
+        exit_reason: str | None = None
+        if active and not window_active:
+            exit_reason = "outside_morning_window"
+        elif active and saj_soc_percent <= SAJ_MORNING_GRID_IMPORT_GUARD_STOP_SOC_PERCENT:
+            exit_reason = "saj_soc_below_stop_threshold"
+
+        if active and exit_reason is None:
+            if current_grid_import_w is not None and current_grid_import_w < SAJ_MORNING_GRID_IMPORT_GUARD_CLEAR_W:
+                if not low_import_since_utc:
+                    low_import_since_utc = now_utc.isoformat()
+                try:
+                    low_import_since_dt = datetime.fromisoformat(low_import_since_utc.replace("Z", "+00:00"))
+                    if low_import_since_dt.tzinfo is None:
+                        low_import_since_dt = low_import_since_dt.replace(tzinfo=UTC)
+                    low_import_elapsed_seconds = max(
+                        (now_utc - low_import_since_dt.astimezone(UTC)).total_seconds(),
+                        0.0,
+                    )
+                except ValueError:
+                    low_import_elapsed_seconds = 0.0
+                result["low_import_elapsed_seconds"] = round(low_import_elapsed_seconds, 1)
+                if low_import_elapsed_seconds >= SAJ_MORNING_GRID_IMPORT_GUARD_CLEAR_SECONDS:
+                    exit_reason = "grid_import_clear_for_5_minutes"
+            elif low_import_since_utc:
+                low_import_since_utc = ""
+
+        if active and exit_reason is not None:
+            api_result = await put_saj_self_consumption(SajSelfConsumptionPayload(settle_seconds=2.0))
+            action = {
+                "type": "set_saj_self_consumption",
+                "reason": exit_reason,
+                "api_path": "/api/saj/self-consumption",
+                "api_result": api_result,
+            }
+            result["decision"] = {"mode": "stop_guard", "reason": exit_reason}
+            result["action"] = action
+            result["actions"] = [action]
+            result["decision_reason"] = exit_reason
+            last_action_at_utc = now_utc.isoformat()
+            await _store_saj_morning_grid_import_guard_state(
+                _state_payload(
+                    active=False,
+                    high_import_checks=0,
+                    low_import_since_utc="",
+                    last_action_at_utc=last_action_at_utc,
+                    last_stop_reason=exit_reason,
+                )
+            )
+            status = "applied"
+            return result
+
+        if active:
+            result["decision"] = {"mode": "keep_guard"}
+            result["action"] = {"type": "noop", "reason": "guard_active"}
+            result["decision_reason"] = "guard_active"
+            status = "noop"
+            await _store_saj_morning_grid_import_guard_state(
+                _state_payload(low_import_since_utc=low_import_since_utc)
+            )
+            return result
+
+        if not window_active:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "outside_morning_window"}
+            result["decision_reason"] = "outside_morning_window"
+            status = "outside_window"
+            await _store_saj_morning_grid_import_guard_state(
+                _state_payload(active=False, high_import_checks=0, low_import_since_utc="")
+            )
+            return result
+
+        if saj_soc_percent <= SAJ_MORNING_GRID_IMPORT_GUARD_START_SOC_PERCENT:
+            result["decision"] = {"mode": "observe_only"}
+            result["action"] = {"type": "noop", "reason": "saj_soc_not_above_start_threshold"}
+            result["decision_reason"] = "saj_soc_not_above_start_threshold"
+            status = "noop"
+            await _store_saj_morning_grid_import_guard_state(
+                _state_payload(active=False, high_import_checks=0, low_import_since_utc="")
+            )
+            return result
+
+        if current_grid_import_w is not None and current_grid_import_w > SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_W:
+            high_import_checks += 1
+        else:
+            high_import_checks = 0
+        result["high_import_checks"] = high_import_checks
+
+        if high_import_checks >= SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_CHECKS and not saj_battery_discharging:
+            api_result = await put_saj_manual_discharge_power(
+                SajManualDischargePowerPayload(
+                    power_w=SAJ_MORNING_GRID_IMPORT_GUARD_DISCHARGE_POWER_W,
+                    settle_seconds=2.0,
+                )
+            )
+            action = {
+                "type": "set_saj_manual_discharge_power",
+                "reason": "morning_grid_import_with_saj_energy",
+                "api_path": "/api/saj/manual-discharge-power",
+                "power_w": SAJ_MORNING_GRID_IMPORT_GUARD_DISCHARGE_POWER_W,
+                "api_result": api_result,
+            }
+            result["decision"] = {"mode": "start_guard", "power_w": SAJ_MORNING_GRID_IMPORT_GUARD_DISCHARGE_POWER_W}
+            result["action"] = action
+            result["actions"] = [action]
+            result["decision_reason"] = "morning_grid_import_with_saj_energy"
+            last_action_at_utc = now_utc.isoformat()
+            await _store_saj_morning_grid_import_guard_state(
+                _state_payload(
+                    active=True,
+                    high_import_checks=0,
+                    low_import_since_utc="",
+                    last_action_at_utc=last_action_at_utc,
+                    last_start_reason="morning_grid_import_with_saj_energy",
+                )
+            )
+            status = "applied"
+            return result
+
+        reason = "saj_already_discharging" if saj_battery_discharging else "waiting_for_second_import_check"
+        result["decision"] = {"mode": "observe_only"}
+        result["action"] = {"type": "noop", "reason": reason}
+        result["decision_reason"] = reason
+        status = "noop"
+        await _store_saj_morning_grid_import_guard_state(
+            _state_payload(
+                active=False,
+                high_import_checks=high_import_checks,
+                low_import_since_utc="",
+            )
+        )
+        return result
+    except Exception as exc:  # noqa: BLE001
+        status = "failed"
+        ok = False
+        error_text = f"{type(exc).__name__}: {exc}"
+        result["error"] = error_text
+        raise
+    finally:
+        result["log_status"] = status
+        result["log_ok"] = ok
+        if error_text:
+            result["log_error_text"] = error_text
+        await _persist_worker_control_log(
+            round_id=round_id,
+            system="saj",
+            service="saj_morning_grid_import_guard",
+            requested_at_utc=requested_at_utc,
+            started_monotonic=started_monotonic,
+            ok=ok,
+            status=status,
+            payload=result,
+            error_text=error_text,
+        )
 
 
 async def _run_saj_battery_watch_check(
@@ -8084,6 +8301,12 @@ async def _run_saj_battery_watch_check(
             else None
         )
         current_grid_import_w = max(float(grid_w), 0.0) if grid_w is not None else None
+        current_grid_export_w = max(-float(grid_w), 0.0) if grid_w is not None else None
+        solar_assist_headroom_w = (
+            float(current_grid_export_w) + tesla_charge_power_w
+            if current_grid_export_w is not None
+            else None
+        )
         morning_solar_window_active = _is_hour_in_window(
             now_local.hour,
             TESLA_OVERNIGHT_SOLAR_ASSIST_START_HOUR,
@@ -8093,6 +8316,8 @@ async def _run_saj_battery_watch_check(
             morning_solar_window_active
             and solar_excess_without_tesla_w is not None
             and solar_excess_without_tesla_w >= TESLA_OVERNIGHT_SOLAR_ASSIST_MIN_EXCESS_W
+            and solar_assist_headroom_w is not None
+            and solar_assist_headroom_w >= TESLA_OVERNIGHT_SOLAR_ASSIST_MIN_HEADROOM_W
             and (
                 current_grid_import_w is None
                 or current_grid_import_w <= TESLA_OVERNIGHT_SOLAR_ASSIST_MAX_GRID_IMPORT_W
@@ -8109,6 +8334,9 @@ async def _run_saj_battery_watch_check(
             "home_load_without_tesla_w": round(home_load_without_tesla_w, 1) if home_load_without_tesla_w is not None else None,
             "solar_excess_without_tesla_w": round(solar_excess_without_tesla_w, 1) if solar_excess_without_tesla_w is not None else None,
             "min_excess_w": TESLA_OVERNIGHT_SOLAR_ASSIST_MIN_EXCESS_W,
+            "grid_export_w": round(current_grid_export_w, 1) if current_grid_export_w is not None else None,
+            "headroom_w": round(solar_assist_headroom_w, 1) if solar_assist_headroom_w is not None else None,
+            "min_headroom_w": TESLA_OVERNIGHT_SOLAR_ASSIST_MIN_HEADROOM_W,
             "grid_import_w": round(current_grid_import_w, 1) if current_grid_import_w is not None else None,
             "max_grid_import_w": TESLA_OVERNIGHT_SOLAR_ASSIST_MAX_GRID_IMPORT_W,
         }
@@ -8174,10 +8402,7 @@ async def _run_saj_battery_watch_check(
                 candidate_target = _calculate_tesla_target_for_power_budget(charge_state, tesla_candidate_power_budget_w)
                 if str(candidate_target.get("mode") or "").strip().lower() == "charge":
                     candidate_amps = int(candidate_target.get("charge_current_amps") or 0)
-                    if (
-                        candidate_amps < TESLA_OVERNIGHT_MIN_EFFECTIVE_CHARGE_CURRENT_A
-                        and not morning_solar_assist_active
-                    ):
+                    if candidate_amps < TESLA_OVERNIGHT_MIN_EFFECTIVE_CHARGE_CURRENT_A:
                         tesla_allocation_block_reason = "overnight_tesla_below_min_effective_charge_current"
                     elif (
                         shared_hours_to_target is not None
@@ -11074,84 +11299,6 @@ async def _saj_set_switch(entity_id: str, enabled: bool) -> None:
     await ha_client.call_service("switch", service, {"entity_id": entity_id})
 
 
-async def _saj_touch_switch(entity_id: str) -> bool:
-    _, states_by_id = await _saj_control_states()
-    current = _entity_switch_value(states_by_id, entity_id)
-    if current is None:
-        raise HTTPException(status_code=400, detail=f"Switch unavailable or not boolean: {entity_id}")
-    # Force a readback-triggering edge while restoring original state.
-    await _saj_set_switch(entity_id, not current)
-    await _saj_set_switch(entity_id, current)
-    return current
-
-
-async def _persist_saj_target_profile(profile_id: str) -> None:
-    persisted = await asyncio.to_thread(save_settings, {"saj_target_profile": profile_id})
-    await _replace_runtime(persisted)
-
-
-async def _saj_apply_profile(profile_id: str) -> dict[str, object]:
-    normalized_profile = _normalize_saj_profile_id(profile_id)
-    if not normalized_profile:
-        raise HTTPException(status_code=400, detail=f"Unsupported SAJ profile: {profile_id}")
-
-    changed: list[dict[str, object]] = []
-    mode_code = SAJ_PROFILE_MODE_CODES[normalized_profile]
-    await _saj_set_number("number.saj_app_mode_input", mode_code)
-    changed.append({"entity_id": "number.saj_app_mode_input", "value": mode_code})
-
-    await _persist_saj_target_profile(normalized_profile)
-    _, states_by_id = await _saj_control_states()
-    control_state = _build_saj_control_state(states_by_id)
-    return {
-        "ok": True,
-        "profile_id": normalized_profile,
-        "changed": changed,
-        "profile_state": _build_saj_profile_state(control_state),
-        "state": control_state,
-    }
-
-
-async def _saj_apply_slot(
-    slot_kind: Literal["charge", "discharge"],
-    slot: int,
-    payload: SajSlotPayload,
-) -> dict[str, object]:
-    safe_slot = _validate_saj_slot(slot)
-    changed: list[dict[str, object]] = []
-
-    if payload.start_time is not None:
-        start_time = _validate_hhmm(payload.start_time, "start_time")
-        start_entity = f"text.saj_{slot_kind}{safe_slot}_start_time_time"
-        await _saj_set_text(start_entity, start_time)
-        changed.append({"entity_id": start_entity, "value": start_time})
-    if payload.end_time is not None:
-        end_time = _validate_hhmm(payload.end_time, "end_time")
-        end_entity = f"text.saj_{slot_kind}{safe_slot}_end_time_time"
-        await _saj_set_text(end_entity, end_time)
-        changed.append({"entity_id": end_entity, "value": end_time})
-    if payload.power_percent is not None:
-        power_entity = f"number.saj_{slot_kind}{safe_slot}_power_percent_input"
-        await _saj_set_number(power_entity, payload.power_percent)
-        changed.append({"entity_id": power_entity, "value": payload.power_percent})
-    if payload.day_mask is not None:
-        day_mask_entity = f"number.saj_{slot_kind}{safe_slot}_day_mask_input"
-        await _saj_set_number(day_mask_entity, payload.day_mask)
-        changed.append({"entity_id": day_mask_entity, "value": payload.day_mask})
-
-    if not changed:
-        raise HTTPException(status_code=400, detail="No fields to update")
-
-    _, states_by_id = await _saj_control_states()
-    return {
-        "ok": True,
-        "slot_kind": slot_kind,
-        "slot": safe_slot,
-        "changed": changed,
-        "state": _build_saj_control_state(states_by_id),
-    }
-
-
 def _solplanet_encode_slot(*, hour: int, minute: int, duration_minutes: int, mode: int) -> int:
     return ((hour & 0xFF) << 24) | ((minute & 0xFF) << 16) | ((duration_minutes & 0xFF) << 8) | (mode & 0xFF)
 
@@ -12802,6 +12949,7 @@ async def _persist_worker_summary_logs(
     midday_result: dict[str, object] | None,
     pool_pump_free_energy_result: dict[str, object] | None,
     pool_pump_off_period_result: dict[str, object] | None,
+    saj_morning_guard_result: dict[str, object] | None,
     saj_watch_result: dict[str, object] | None,
     pool_pump_result: dict[str, object] | None,
 ) -> None:
@@ -12809,6 +12957,7 @@ async def _persist_worker_summary_logs(
         midday_result,
         pool_pump_free_energy_result,
         pool_pump_off_period_result,
+        saj_morning_guard_result,
         saj_watch_result,
         pool_pump_result,
     )
@@ -12816,6 +12965,7 @@ async def _persist_worker_summary_logs(
         midday_result,
         pool_pump_free_energy_result,
         pool_pump_off_period_result,
+        saj_morning_guard_result,
         saj_watch_result,
         pool_pump_result,
     )
@@ -12823,12 +12973,20 @@ async def _persist_worker_summary_logs(
         midday_result,
         pool_pump_free_energy_result,
         pool_pump_off_period_result,
+        saj_morning_guard_result,
         saj_watch_result,
         pool_pump_result,
     )
     all_decision_reasons = [
         str(item.get("decision_reason") or "").strip()
-        for item in (midday_result, pool_pump_free_energy_result, pool_pump_off_period_result, saj_watch_result, pool_pump_result)
+        for item in (
+            midday_result,
+            pool_pump_free_energy_result,
+            pool_pump_off_period_result,
+            saj_morning_guard_result,
+            saj_watch_result,
+            pool_pump_result,
+        )
         if isinstance(item, dict) and str(item.get("decision_reason") or "").strip()
     ]
     notification_status, notification_ok, notification_payload, notification_error_text = _build_notification_summary_payload(
@@ -12867,7 +13025,14 @@ async def _persist_worker_summary_logs(
         actions=all_actions,
         check_sources=[
             item
-            for item in (midday_result, pool_pump_free_energy_result, pool_pump_off_period_result, saj_watch_result, pool_pump_result)
+            for item in (
+                midday_result,
+                pool_pump_free_energy_result,
+                pool_pump_off_period_result,
+                saj_morning_guard_result,
+                saj_watch_result,
+                pool_pump_result,
+            )
             if isinstance(item, dict)
         ],
     )
@@ -13187,6 +13352,7 @@ async def _collector_loop() -> None:
             )
         midday_window_result: dict[str, object] | None = None
         pool_pump_free_energy_result: dict[str, object] | None = None
+        saj_morning_guard_result: dict[str, object] | None = None
         saj_battery_watch_result: dict[str, object] | None = None
         pool_pump_overnight_result: dict[str, object] | None = None
         combined_flow_for_window: dict[str, object] | None = None
@@ -13254,6 +13420,24 @@ async def _collector_loop() -> None:
             }
 
         try:
+            saj_morning_guard_result = await _run_saj_morning_grid_import_guard_check(
+                combined_flow_for_window,
+                round_id=round_id,
+                requested_at_utc=round_started_at_utc,
+            )
+            collector_status.setdefault("combined", {})["last_saj_morning_grid_import_guard_check"] = saj_morning_guard_result
+        except Exception as saj_morning_guard_exc:  # noqa: BLE001
+            _append_worker_failure_log(
+                "combined",
+                stage="saj_morning_grid_import_guard",
+                error=saj_morning_guard_exc,
+            )
+            collector_status.setdefault("combined", {})["last_saj_morning_grid_import_guard_check"] = {
+                "error": f"{type(saj_morning_guard_exc).__name__}: {saj_morning_guard_exc}",
+                "executed_at": datetime.now(UTC).isoformat(),
+            }
+
+        try:
             saj_battery_watch_result = await _run_saj_battery_watch_check(
                 round_results.get("combined", {}).get("flow") if isinstance(round_results.get("combined"), dict) else None,
                 tesla_observation_result,
@@ -13300,6 +13484,7 @@ async def _collector_loop() -> None:
                 midday_result=midday_window_result,
                 pool_pump_free_energy_result=pool_pump_free_energy_result,
                 pool_pump_off_period_result=pool_pump_off_period_result,
+                saj_morning_guard_result=saj_morning_guard_result,
                 saj_watch_result=saj_battery_watch_result,
                 pool_pump_result=pool_pump_overnight_result,
             )
@@ -15191,41 +15376,6 @@ async def get_saj_raw_core_entities() -> dict[str, object]:
         )
 
 
-@app.get("/api/saj/control/state")
-async def get_saj_control_state() -> dict[str, object]:
-    _ensure_ha_configured()
-    try:
-        _, states_by_id = await _saj_control_states()
-        return {"system": "saj", "control_state": _build_saj_control_state(states_by_id)}
-    except httpx.HTTPStatusError as exc:
-        detail = {
-            "message": "Home Assistant API returned an error",
-            "status_code": exc.response.status_code,
-            "response": exc.response.text,
-        }
-        raise HTTPException(status_code=502, detail=detail) from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
-
-
-@app.get("/api/saj/control/profile")
-async def get_saj_control_profile() -> dict[str, object]:
-    _ensure_ha_configured()
-    try:
-        _, states_by_id = await _saj_control_states()
-        control_state = _build_saj_control_state(states_by_id)
-        return {"system": "saj", "profile_state": _build_saj_profile_state(control_state)}
-    except httpx.HTTPStatusError as exc:
-        detail = {
-            "message": "Home Assistant API returned an error",
-            "status_code": exc.response.status_code,
-            "response": exc.response.text,
-        }
-        raise HTTPException(status_code=502, detail=detail) from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
-
-
 @app.get("/api/tesla/control/state")
 async def get_tesla_control_state() -> dict[str, object]:
     _ensure_ha_configured()
@@ -15488,39 +15638,65 @@ async def put_pool_pump_force_min_runtime_hours(payload: PoolPumpForceMinRuntime
     }
 
 
-@app.get("/api/saj/control/capabilities")
-async def get_saj_control_capabilities() -> dict[str, object]:
+@app.put("/api/saj/manual-discharge-power")
+async def put_saj_manual_discharge_power(payload: SajManualDischargePowerPayload) -> dict[str, object]:
     _ensure_ha_configured()
-    try:
-        _, states_by_id = await _saj_control_states()
-        return {"system": "saj", "capabilities": _build_saj_control_capabilities(states_by_id)}
-    except httpx.HTTPStatusError as exc:
-        detail = {
-            "message": "Home Assistant API returned an error",
-            "status_code": exc.response.status_code,
-            "response": exc.response.text,
-        }
-        raise HTTPException(status_code=502, detail=detail) from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+    if (payload.power_w is None) == (payload.power_percent is None):
+        raise HTTPException(status_code=400, detail="Provide exactly one of power_w or power_percent")
 
+    if payload.power_percent is not None:
+        power_percent = int(payload.power_percent)
+        requested_power_w = int(round(SAJ_RATED_POWER_W * power_percent / 100.0))
+    else:
+        requested_power_w = int(payload.power_w or 0)
+        power_percent = int(round((requested_power_w / SAJ_RATED_POWER_W) * 100.0))
+        power_percent = max(0, min(100, power_percent))
 
-@app.put("/api/saj/control/working-mode")
-async def put_saj_working_mode(payload: SajWorkingModePayload) -> dict[str, object]:
-    _ensure_ha_configured()
     operation_run_id: int | None = None
+    request_payload = {
+        **payload.model_dump(mode="json"),
+        "resolved_power_percent": power_percent,
+        "resolved_power_w_estimate": int(round(SAJ_RATED_POWER_W * power_percent / 100.0)),
+        "slot": 1,
+        "start_time": "00:00",
+        "end_time": "23:59",
+        "day_mask": 127,
+        "mode_code": SAJ_PROFILE_MODE_CODES["time_of_use"],
+    }
+    changed: list[dict[str, object]] = []
     try:
         _, initial_states_by_id = await _saj_control_states()
         operation_run_id = await _start_operation_history_run(
-            "saj.manual.set_working_mode",
-            request_payload=payload.model_dump(mode="json"),
+            "saj.manual.set_discharge_power",
+            request_payload=request_payload,
             previous_state={"state": _build_saj_control_state(initial_states_by_id)},
         )
-        await _saj_set_number("number.saj_app_mode_input", payload.mode_code)
+
+        await _saj_set_number("number.saj_app_mode_input", SAJ_PROFILE_MODE_CODES["time_of_use"])
+        changed.append({"entity_id": "number.saj_app_mode_input", "value": SAJ_PROFILE_MODE_CODES["time_of_use"]})
+        await _saj_set_number("number.saj_discharge_time_enable_input", 1)
+        changed.append({"entity_id": "number.saj_discharge_time_enable_input", "value": 1})
+        await _saj_set_text("text.saj_discharge1_start_time_time", "00:00")
+        changed.append({"entity_id": "text.saj_discharge1_start_time_time", "value": "00:00"})
+        await _saj_set_text("text.saj_discharge1_end_time_time", "23:59")
+        changed.append({"entity_id": "text.saj_discharge1_end_time_time", "value": "23:59"})
+        await _saj_set_number("number.saj_discharge1_power_percent_input", power_percent)
+        changed.append({"entity_id": "number.saj_discharge1_power_percent_input", "value": power_percent})
+        await _saj_set_number("number.saj_discharge1_day_mask_input", 127)
+        changed.append({"entity_id": "number.saj_discharge1_day_mask_input", "value": 127})
+        await _saj_set_switch("switch.saj_discharging_control", True)
+        changed.append({"entity_id": "switch.saj_discharging_control", "value": True})
+
+        if payload.settle_seconds > 0:
+            await asyncio.sleep(float(payload.settle_seconds))
         _, states_by_id = await _saj_control_states()
         result = {
             "ok": True,
-            "changed": [{"entity_id": "number.saj_app_mode_input", "value": payload.mode_code}],
+            "system": "saj",
+            "requested_power_w": requested_power_w,
+            "resolved_power_percent": power_percent,
+            "resolved_power_w_estimate": int(round(SAJ_RATED_POWER_W * power_percent / 100.0)),
+            "changed": changed,
             "state": _build_saj_control_state(states_by_id),
         }
         await _update_operation_history_run(
@@ -15554,292 +15730,47 @@ async def put_saj_working_mode(payload: SajWorkingModePayload) -> dict[str, obje
         raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
 
 
-@app.put("/api/saj/control/profile")
-async def put_saj_control_profile(payload: SajProfilePayload) -> dict[str, object]:
+@app.put("/api/saj/self-consumption")
+async def put_saj_self_consumption(payload: SajSelfConsumptionPayload | None = None) -> dict[str, object]:
     _ensure_ha_configured()
+    payload = payload or SajSelfConsumptionPayload()
     operation_run_id: int | None = None
-    try:
-        _, initial_states_by_id = await _saj_control_states()
-        operation_run_id = await _start_operation_history_run(
-            "saj.manual.apply_profile",
-            request_payload=payload.model_dump(mode="json"),
-            previous_state={"state": _build_saj_control_state(initial_states_by_id)},
-        )
-        result = await _saj_apply_profile(payload.profile_id)
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_SUCCEEDED,
-            latest_state={"state": result.get("state")},
-            response_payload=result,
-            completed=True,
-        )
-        return result
-    except httpx.HTTPStatusError as exc:
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_FAILED,
-            error_text=f"Home Assistant API returned {exc.response.status_code}",
-            completed=True,
-        )
-        detail = {
-            "message": "Home Assistant API returned an error",
-            "status_code": exc.response.status_code,
-            "response": exc.response.text,
-        }
-        raise HTTPException(status_code=502, detail=detail) from exc
-    except httpx.HTTPError as exc:
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_FAILED,
-            error_text=f"Failed to reach Home Assistant: {exc}",
-            completed=True,
-        )
-        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
-
-
-@app.put("/api/saj/control/charge-slots/{slot}")
-async def put_saj_charge_slot(slot: int, payload: SajSlotPayload) -> dict[str, object]:
-    _ensure_ha_configured()
-    operation_run_id: int | None = None
-    try:
-        _, initial_states_by_id = await _saj_control_states()
-        operation_run_id = await _start_operation_history_run(
-            "saj.manual.set_charge_slot",
-            request_payload={"slot": slot, **payload.model_dump(mode="json")},
-            previous_state={"state": _build_saj_control_state(initial_states_by_id)},
-        )
-        result = await _saj_apply_slot("charge", slot, payload)
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_SUCCEEDED,
-            latest_state={"state": result.get("state")},
-            response_payload=result,
-            completed=True,
-        )
-        return result
-    except httpx.HTTPStatusError as exc:
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_FAILED,
-            error_text=f"Home Assistant API returned {exc.response.status_code}",
-            completed=True,
-        )
-        detail = {
-            "message": "Home Assistant API returned an error",
-            "status_code": exc.response.status_code,
-            "response": exc.response.text,
-        }
-        raise HTTPException(status_code=502, detail=detail) from exc
-    except httpx.HTTPError as exc:
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_FAILED,
-            error_text=f"Failed to reach Home Assistant: {exc}",
-            completed=True,
-        )
-        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
-
-
-@app.put("/api/saj/control/discharge-slots/{slot}")
-async def put_saj_discharge_slot(slot: int, payload: SajSlotPayload) -> dict[str, object]:
-    _ensure_ha_configured()
-    operation_run_id: int | None = None
-    try:
-        _, initial_states_by_id = await _saj_control_states()
-        operation_run_id = await _start_operation_history_run(
-            "saj.manual.set_discharge_slot",
-            request_payload={"slot": slot, **payload.model_dump(mode="json")},
-            previous_state={"state": _build_saj_control_state(initial_states_by_id)},
-        )
-        result = await _saj_apply_slot("discharge", slot, payload)
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_SUCCEEDED,
-            latest_state={"state": result.get("state")},
-            response_payload=result,
-            completed=True,
-        )
-        return result
-    except httpx.HTTPStatusError as exc:
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_FAILED,
-            error_text=f"Home Assistant API returned {exc.response.status_code}",
-            completed=True,
-        )
-        detail = {
-            "message": "Home Assistant API returned an error",
-            "status_code": exc.response.status_code,
-            "response": exc.response.text,
-        }
-        raise HTTPException(status_code=502, detail=detail) from exc
-    except httpx.HTTPError as exc:
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_FAILED,
-            error_text=f"Failed to reach Home Assistant: {exc}",
-            completed=True,
-        )
-        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
-
-
-@app.put("/api/saj/control/toggles")
-async def put_saj_control_toggles(payload: SajTogglePayload) -> dict[str, object]:
-    _ensure_ha_configured()
+    request_payload = {
+        **payload.model_dump(mode="json"),
+        "mode_code": SAJ_PROFILE_MODE_CODES["self_consumption"],
+        "discharging_control": False,
+    }
     changed: list[dict[str, object]] = []
-    operation_run_id: int | None = None
     try:
         _, initial_states_by_id = await _saj_control_states()
         operation_run_id = await _start_operation_history_run(
-            "saj.manual.set_toggles",
-            request_payload=payload.model_dump(mode="json"),
+            "saj.manual.set_self_consumption",
+            request_payload=request_payload,
             previous_state={"state": _build_saj_control_state(initial_states_by_id)},
         )
-        if payload.charging_control is not None:
-            await _saj_set_switch("switch.saj_charging_control", payload.charging_control)
-            changed.append({"entity_id": "switch.saj_charging_control", "value": payload.charging_control})
-        if payload.discharging_control is not None:
-            await _saj_set_switch("switch.saj_discharging_control", payload.discharging_control)
-            changed.append({"entity_id": "switch.saj_discharging_control", "value": payload.discharging_control})
-        if payload.charge_time_enable_mask is not None:
-            await _saj_set_number("number.saj_charge_time_enable_input", payload.charge_time_enable_mask)
-            changed.append(
-                {"entity_id": "number.saj_charge_time_enable_input", "value": payload.charge_time_enable_mask}
-            )
-        if payload.discharge_time_enable_mask is not None:
-            await _saj_set_number("number.saj_discharge_time_enable_input", payload.discharge_time_enable_mask)
-            changed.append(
-                {
-                    "entity_id": "number.saj_discharge_time_enable_input",
-                    "value": payload.discharge_time_enable_mask,
-                }
-            )
-        if not changed:
-            raise HTTPException(status_code=400, detail="No fields to update")
 
+        await _saj_set_number("number.saj_app_mode_input", SAJ_PROFILE_MODE_CODES["self_consumption"])
+        changed.append({"entity_id": "number.saj_app_mode_input", "value": SAJ_PROFILE_MODE_CODES["self_consumption"]})
+        await _saj_set_switch("switch.saj_discharging_control", False)
+        changed.append({"entity_id": "switch.saj_discharging_control", "value": False})
+
+        if payload.settle_seconds > 0:
+            await asyncio.sleep(float(payload.settle_seconds))
         _, states_by_id = await _saj_control_states()
-        result = {"ok": True, "changed": changed, "state": _build_saj_control_state(states_by_id)}
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_SUCCEEDED,
-            latest_state={"state": result.get("state")},
-            response_payload=result,
-            completed=True,
-        )
-        return result
-    except httpx.HTTPStatusError as exc:
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_FAILED,
-            error_text=f"Home Assistant API returned {exc.response.status_code}",
-            completed=True,
-        )
-        detail = {
-            "message": "Home Assistant API returned an error",
-            "status_code": exc.response.status_code,
-            "response": exc.response.text,
-        }
-        raise HTTPException(status_code=502, detail=detail) from exc
-    except httpx.HTTPError as exc:
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_FAILED,
-            error_text=f"Failed to reach Home Assistant: {exc}",
-            completed=True,
-        )
-        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
-
-
-@app.put("/api/saj/control/limits")
-async def put_saj_control_limits(payload: SajLimitsPayload) -> dict[str, object]:
-    _ensure_ha_configured()
-    changed: list[dict[str, object]] = []
-    operation_run_id: int | None = None
-    try:
-        _, initial_states_by_id = await _saj_control_states()
-        operation_run_id = await _start_operation_history_run(
-            "saj.manual.set_limits",
-            request_payload=payload.model_dump(mode="json"),
-            previous_state={"state": _build_saj_control_state(initial_states_by_id)},
-        )
-        if payload.battery_charge_power_limit is not None:
-            await _saj_set_number("number.saj_battery_charge_power_limit_input", payload.battery_charge_power_limit)
-            changed.append(
-                {"entity_id": "number.saj_battery_charge_power_limit_input", "value": payload.battery_charge_power_limit}
-            )
-        if payload.battery_discharge_power_limit is not None:
-            await _saj_set_number(
-                "number.saj_battery_discharge_power_limit_input",
-                payload.battery_discharge_power_limit,
-            )
-            changed.append(
-                {
-                    "entity_id": "number.saj_battery_discharge_power_limit_input",
-                    "value": payload.battery_discharge_power_limit,
-                }
-            )
-        if payload.grid_max_charge_power is not None:
-            await _saj_set_number("number.saj_grid_max_charge_power_input", payload.grid_max_charge_power)
-            changed.append({"entity_id": "number.saj_grid_max_charge_power_input", "value": payload.grid_max_charge_power})
-        if payload.grid_max_discharge_power is not None:
-            await _saj_set_number("number.saj_grid_max_discharge_power_input", payload.grid_max_discharge_power)
-            changed.append(
-                {"entity_id": "number.saj_grid_max_discharge_power_input", "value": payload.grid_max_discharge_power}
-            )
-        if not changed:
-            raise HTTPException(status_code=400, detail="No fields to update")
-        _, states_by_id = await _saj_control_states()
-        result = {"ok": True, "changed": changed, "state": _build_saj_control_state(states_by_id)}
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_SUCCEEDED,
-            latest_state={"state": result.get("state")},
-            response_payload=result,
-            completed=True,
-        )
-        return result
-    except httpx.HTTPStatusError as exc:
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_FAILED,
-            error_text=f"Home Assistant API returned {exc.response.status_code}",
-            completed=True,
-        )
-        detail = {
-            "message": "Home Assistant API returned an error",
-            "status_code": exc.response.status_code,
-            "response": exc.response.text,
-        }
-        raise HTTPException(status_code=502, detail=detail) from exc
-    except httpx.HTTPError as exc:
-        await _update_operation_history_run(
-            operation_run_id,
-            status=OPERATION_RUN_STATUS_FAILED,
-            error_text=f"Failed to reach Home Assistant: {exc}",
-            completed=True,
-        )
-        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
-
-
-@app.post("/api/saj/control/refresh-touch")
-async def post_saj_control_refresh_touch() -> dict[str, object]:
-    _ensure_ha_configured()
-    entity_id = "switch.saj_passive_charge_control"
-    operation_run_id: int | None = None
-    try:
-        _, initial_states_by_id = await _saj_control_states()
-        operation_run_id = await _start_operation_history_run(
-            "saj.manual.refresh_touch",
-            request_payload={},
-            previous_state={"state": _build_saj_control_state(initial_states_by_id)},
-        )
-        kept_state = await _saj_touch_switch(entity_id)
-        _, states_by_id = await _saj_control_states()
+        control_state = _build_saj_control_state(states_by_id)
         result = {
             "ok": True,
-            "entity_id": entity_id,
-            "kept_state": kept_state,
-            "state": _build_saj_control_state(states_by_id),
+            "system": "saj",
+            "profile_id": "self_consumption",
+            "mode_code": SAJ_PROFILE_MODE_CODES["self_consumption"],
+            "changed": changed,
+            "success_criteria": {
+                "mode_input_entity": "number.saj_app_mode_input",
+                "mode_sensor_entity": "sensor.saj_app_mode",
+                "discharging_control_entity": "switch.saj_discharging_control",
+                "battery_power_is_diagnostic_only": True,
+            },
+            "state": control_state,
         }
         await _update_operation_history_run(
             operation_run_id,
