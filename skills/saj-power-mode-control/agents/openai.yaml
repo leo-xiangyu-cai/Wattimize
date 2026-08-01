@@ -1,0 +1,4 @@
+interface:
+  display_name: "SAJ Power Mode Control"
+  short_description: "Control SAJ modes and power via HA"
+  default_prompt: "Use $saj-power-mode-control to adjust SAJ mode, passive discharge, TOU discharge slots, and validate Home Assistant readback before changing Wattimize APIs."
