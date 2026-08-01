@@ -6017,23 +6017,26 @@ td {
 
   .page {
     height: 100svh;
-    padding: 10px 10px 10px;
-    gap: 10px;
-    grid-template-rows: auto 1fr;
+    min-height: 0;
+    padding: 5px;
+    gap: 4px;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    overflow: hidden;
   }
 
   .topbar {
-    gap: 8px;
+    gap: 4px;
     flex-direction: row;
     align-items: stretch;
-    padding: 10px;
+    padding: 4px;
+    border-radius: 10px;
   }
 
   .topbar-actions {
     display: grid;
     width: 100%;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
+    gap: 4px;
   }
 
   .lang-switch,
@@ -6048,11 +6051,17 @@ td {
   #refreshBtn {
     width: 100%;
     min-width: 0;
+    height: 32px;
+    min-height: 32px;
+    padding: 4px 6px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1;
   }
 
   #configBtn,
   #refreshBtn {
-    min-height: 42px;
+    min-height: 32px;
   }
 
   .topbar-actions > .btn,
@@ -6061,11 +6070,13 @@ td {
   }
 
   .card {
-    padding: 10px;
+    padding: 6px;
+    border-radius: 10px;
   }
 
   h2 {
-    font-size: 22px;
+    font-size: 15px;
+    line-height: 1.1;
   }
 
   .tabs {
@@ -6075,20 +6086,28 @@ td {
 
   .tab-btn {
     flex: 0 0 auto;
-    padding: 8px 12px;
-    font-size: 13px;
+    padding: 4px 8px;
+    font-size: 10px;
+    line-height: 1.1;
   }
 
   .flow-board {
-    min-height: 460px;
+    min-height: 430px;
   }
 
   .flow-compare-grid {
+    min-height: 0;
+    margin-top: 4px;
     grid-template-columns: 1fr;
   }
 
   .flow-system-card {
-    padding: 6px;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+    min-height: 0;
+    padding: 5px;
+    overflow: hidden;
+    border-radius: 10px;
   }
 
   .flow-node {
@@ -6097,8 +6116,10 @@ td {
   }
 
   .combined-flow-board {
-    min-height: 560px;
-    grid-template-rows: 0.82fr 0.92fr 1.26fr;
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    min-height: 0;
   }
 
   .inline-icon {
@@ -6130,25 +6151,32 @@ td {
     width: 43%;
   }
 
-  #energyFlowCombined {
-    display: none;
-  }
-
   .mobile-flow-board {
-    display: block;
-    height: auto;
-    overflow: hidden;
+    display: none !important;
   }
 
   #weatherWidget {
-    display: none !important;
+    display: block;
   }
 
-  #dashboardView .section-header,
-  .flow-system-subtitle,
-  .flow-meta,
-  .mobile-energy-detail {
-    display: none !important;
+  #dashboardView .section-header {
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .flow-system-subtitle {
+    margin: 2px 2px 0;
+    font-size: 9px;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .flow-meta {
+    margin: 2px 2px 0;
+    min-height: 12px;
+    font-size: 9px;
   }
 
   .saj-profile-popover {
@@ -6160,13 +6188,17 @@ td {
   }
 
   .balance-formula {
-    display: none;
+    margin-top: 3px;
+    font-size: 9px;
+    line-height: 1.25;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .view {
-    gap: 10px;
+    gap: 5px;
     min-height: 0;
-    overflow: auto;
+    overflow: hidden;
   }
 
   .mobile-energy-card {
@@ -6185,11 +6217,18 @@ td {
   }
 
   #dashboardView {
+    display: grid;
+    min-height: 0;
+    gap: 5px;
     overflow: hidden;
   }
 
   #dashboardView > .card {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
     height: 100%;
+    overflow: hidden;
   }
 
   #dashboardView .flow-compare-grid,
@@ -6197,30 +6236,171 @@ td {
     height: 100%;
   }
 
-  #dashboardView > .card {
-    border: 0;
-    box-shadow: none;
-    background: transparent;
-    padding: 0;
-  }
-
-  #dashboardView .flow-system-card {
-    border: 0;
-    box-shadow: none;
-    background: transparent;
-    padding: 0;
-  }
-
-  #dashboardView .mobile-energy-card {
-    border: 0;
-    box-shadow: none;
-    background: transparent;
-    padding: 0;
-  }
-
   .topbar-actions .lang-switch span,
   .topbar-actions .refresh-switch span {
     display: none;
+  }
+
+  .dashboard-reserve-control {
+    margin: 4px 0 2px;
+    padding: 5px;
+    gap: 4px 5px;
+    font-size: 10px;
+  }
+
+  .dashboard-reserve-input-label {
+    gap: 4px;
+  }
+
+  .dashboard-reserve-input-label input {
+    width: 58px;
+    min-height: 26px;
+    padding: 3px 5px;
+    font-size: 11px;
+  }
+
+  .dashboard-reserve-control .btn {
+    min-height: 26px;
+    padding: 3px 7px;
+    font-size: 10px;
+  }
+
+  .flow-line-value {
+    padding: 5px 8px;
+    font-size: 17px;
+  }
+
+  .node-title {
+    gap: 5px;
+    font-size: 17px;
+  }
+
+  .node-value {
+    margin-top: 6px;
+    font-size: 28px;
+  }
+
+  .node-state,
+  .node-mini-value {
+    margin-top: 3px;
+    font-size: 15px;
+  }
+
+  .node-sub-value {
+    margin-top: 3px;
+    font-size: 18px;
+  }
+
+  .inline-icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+  }
+
+  .inline-icon svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .combined-flow-board .efd-node.efd-node-switchboard .node-title {
+    font-size: 22px;
+  }
+
+  .efd-node.efd-node-id-combined-usableBatteryNode,
+  .efd-node.efd-node-id-combined-poolPumpNode {
+    padding: 4px 6px;
+  }
+
+  .efd-node.efd-node-id-combined-usableBatteryNode .node-title,
+  .efd-node.efd-node-id-combined-poolPumpNode .node-title {
+    font-size: 14px;
+  }
+
+  .efd-node.efd-node-id-combined-usableBatteryNode .node-value,
+  .efd-node.efd-node-id-combined-poolPumpNode .node-value {
+    font-size: 23px;
+  }
+
+  .efd-node.efd-node-id-combined-usableBatteryNode .node-state,
+  .efd-node.efd-node-id-combined-poolPumpNode .node-state {
+    font-size: 13px;
+  }
+
+  .efd-node.efd-node-id-combined-poolPumpNode .pool-pump-control-btn {
+    min-height: 20px;
+    margin-top: 3px;
+    padding: 3px 6px;
+    font-size: 12px;
+  }
+
+  .efd-node.efd-node-tesla {
+    padding: 4px 6px 5px;
+  }
+
+  .efd-node.efd-node-tesla .node-title {
+    font-size: 15px;
+  }
+
+  .efd-node.efd-node-tesla .node-sub-value,
+  .efd-node.efd-node-tesla .node-mini-value,
+  .efd-node.efd-node-tesla .tesla-current-trigger {
+    font-size: 11px;
+  }
+
+  .efd-node.efd-node-tesla .tesla-control-btn {
+    min-height: 20px;
+    margin-top: 3px;
+    padding: 3px 6px;
+    font-size: 11px;
+  }
+
+  .efd-node.efd-node-tesla .soc-wrap {
+    inset: 25px 4px 5px;
+  }
+
+  .efd-node.efd-node-tesla .soc-value-inside {
+    padding: 4px 5px 6px;
+    font-size: 16px;
+  }
+
+  #combined-teslaSocValue {
+    font-size: 23px;
+  }
+
+  .efd-node.efd-node-id-combined-battery1Node,
+  .efd-node.efd-node-id-combined-battery2Node {
+    padding: 6px 8px 8px;
+    border-radius: 13px;
+  }
+
+  .efd-node.efd-node-id-combined-battery1Node .node-title,
+  .efd-node.efd-node-id-combined-battery2Node .node-title {
+    font-size: 16px;
+  }
+
+  .efd-node.efd-node-id-combined-battery1Node .soc-wrap,
+  .efd-node.efd-node-id-combined-battery2Node .soc-wrap {
+    min-height: 94px;
+    margin-top: 6px;
+  }
+
+  .efd-node.efd-node-id-combined-battery1Node .soc-value-inside,
+  .efd-node.efd-node-id-combined-battery2Node .soc-value-inside {
+    gap: 3px;
+    padding: 38px 7px 7px;
+    font-size: 26px;
+  }
+
+  .efd-node.efd-node-id-combined-battery1Node .soc-energy-inside,
+  .efd-node.efd-node-id-combined-battery2Node .soc-energy-inside,
+  .efd-node.efd-node-id-combined-battery1Node .soc-usable-inside,
+  .efd-node.efd-node-id-combined-battery2Node .soc-usable-inside,
+  .efd-node.efd-node-id-combined-battery1Node .soc-runtime-inside,
+  .efd-node.efd-node-id-combined-battery2Node .soc-runtime-inside,
+  .efd-node.efd-node-id-combined-battery1Node .soc-rate-inside,
+  .efd-node.efd-node-id-combined-battery2Node .soc-rate-inside {
+    font-size: 12px;
+    line-height: 1.1;
   }
 
   .mobile-energy-node {
@@ -6469,6 +6649,17 @@ td {
   white-space: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+@media (max-width: 700px) {
+  .balance-formula {
+    font-size: 10px;
+    line-height: 1.45;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    overflow-x: visible;
+    overflow-y: visible;
+  }
 }
 
 .combined-debug-panel {

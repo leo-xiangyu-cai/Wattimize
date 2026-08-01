@@ -4576,12 +4576,121 @@ function buildSystemDiagramSpec(system) {
 
 function buildCombinedDiagramSpec() {
   const layout = COMBINED_LAYOUT;
+  const compact = typeof window !== "undefined" && window.matchMedia?.("(max-width: 700px)")?.matches;
+  const rotatedViewport = {
+    width: COMBINED_DIAGRAM_VIEWPORT.height,
+    height: 1100,
+  };
+  const viewport = compact ? rotatedViewport : COMBINED_DIAGRAM_VIEWPORT;
+  const coordinateSystem = compact ? "top-left" : "bottom-left";
+  const desktopNodeSizes = {
+    source: { width: 176, height: 102 },
+    usableBattery: { width: 230, height: 102 },
+    switchboard: { width: 224, height: 152 },
+    compactLoad: COMBINED_COMPACT_LOAD_NODE_SIZE,
+    poolPump: COMBINED_COMPACT_LOAD_NODE_SIZE,
+    tesla: COMBINED_TESLA_NODE_SIZE,
+    battery: SAJ_COMBINED_BATTERY_NODE_SIZE,
+    inverter1: { width: 180, height: 108 },
+    inverter2: { width: 176, height: 120 },
+  };
+  const compactNodeSizes = {
+    ...desktopNodeSizes,
+    switchboard: { ...desktopNodeSizes.switchboard, width: 188 },
+    compactLoad: { ...COMBINED_COMPACT_LOAD_NODE_SIZE, height: 128 },
+    poolPump: { ...COMBINED_COMPACT_LOAD_NODE_SIZE, height: 128 },
+    tesla: { width: COMBINED_TESLA_NODE_SIZE.width, height: 154 },
+    battery: { ...SAJ_COMBINED_BATTERY_NODE_SIZE, height: 236 },
+    inverter1: { ...desktopNodeSizes.inverter1, width: 152 },
+    inverter2: { ...desktopNodeSizes.inverter2, width: 152 },
+  };
+  const rotateDesktopPoint = (point) => ({
+    x: point.y,
+    y: point.x,
+  });
+  const spreadRotatedPoint = (point) => {
+    if (!compact) return point;
+    const center = {
+      x: rotatedViewport.width / 2,
+      y: rotatedViewport.height / 2,
+    };
+    const xSpread = 0.94;
+    const ySpread = 0.74;
+    const xOffset = rotatedViewport.width * -0.049;
+    const yOffset = rotatedViewport.height * -0.082;
+    return {
+      x: center.x + ((point.x - center.x) * xSpread) + xOffset,
+      y: center.y + ((point.y - center.y) * ySpread) + yOffset,
+    };
+  };
+  const rotateDesktopNode = (point, desktopSize, renderSize = desktopSize) => {
+    const center = {
+      x: point.x + (desktopSize.width / 2),
+      y: point.y + (desktopSize.height / 2),
+    };
+    const rotatedCenter = spreadRotatedPoint(rotateDesktopPoint(center));
+    return {
+      x: Math.round(rotatedCenter.x - (renderSize.width / 2)),
+      y: Math.round(rotatedCenter.y - (renderSize.height / 2)),
+    };
+  };
+  const compactLabelNudges = {
+    gridToSwitchboard: { x: -64, y: -108 },
+    solarToInverter1: { x: -52, y: -102 },
+    switchboardToTotalLoad: { x: 72, y: 74 },
+    battery1ToInverter1: { x: -38, y: 150 },
+    battery2ToInverter2: { x: -40, y: -118 },
+  };
+  const rotateDesktopEdge = (edge, key = "") => {
+    const labelPosition = spreadRotatedPoint(rotateDesktopPoint(edge.labelPosition));
+    const nudge = compactLabelNudges[key] || { x: 0, y: 0 };
+    return {
+      ...edge,
+      points: edge.points.map((point) => spreadRotatedPoint(rotateDesktopPoint(point))),
+      labelPosition: {
+        x: labelPosition.x + nudge.x,
+        y: labelPosition.y + nudge.y,
+      },
+    };
+  };
+  const nodePositions = compact
+    ? {
+        solar: rotateDesktopNode(layout.nodes.solar, desktopNodeSizes.source),
+        grid: rotateDesktopNode(layout.nodes.grid, desktopNodeSizes.source),
+        usableBattery: rotateDesktopNode(layout.nodes.usableBattery, desktopNodeSizes.usableBattery),
+        switchboard: rotateDesktopNode(layout.nodes.switchboard, desktopNodeSizes.switchboard),
+        load: rotateDesktopNode(layout.nodes.load, desktopNodeSizes.compactLoad),
+        poolPump: rotateDesktopNode(layout.nodes.poolPump, desktopNodeSizes.poolPump),
+        tesla: rotateDesktopNode(layout.nodes.tesla, desktopNodeSizes.tesla, compactNodeSizes.tesla),
+        battery1: rotateDesktopNode(layout.nodes.battery1, desktopNodeSizes.battery),
+        inverter1: rotateDesktopNode(layout.nodes.inverter1, desktopNodeSizes.inverter1),
+        inverter2: rotateDesktopNode(layout.nodes.inverter2, desktopNodeSizes.inverter2),
+        battery2: rotateDesktopNode(layout.nodes.battery2, desktopNodeSizes.battery),
+      }
+    : layout.nodes;
+  const nodeSizes = compact
+    ? compactNodeSizes
+    : desktopNodeSizes;
+  const edgeLayout = compact
+    ? {
+        gridToSwitchboard: rotateDesktopEdge(layout.edges.gridToSwitchboard, "gridToSwitchboard"),
+        solarToInverter1: rotateDesktopEdge(layout.edges.solarToInverter1, "solarToInverter1"),
+        switchboardToTotalLoad: rotateDesktopEdge(layout.edges.switchboardToTotalLoad, "switchboardToTotalLoad"),
+        switchboardToTesla: rotateDesktopEdge(layout.edges.switchboardToTesla, "switchboardToTesla"),
+        switchboardToHomeLoad: rotateDesktopEdge(layout.edges.switchboardToHomeLoad, "switchboardToHomeLoad"),
+        switchboardToPoolPump: rotateDesktopEdge(layout.edges.switchboardToPoolPump, "switchboardToPoolPump"),
+        battery1ToInverter1: rotateDesktopEdge(layout.edges.battery1ToInverter1, "battery1ToInverter1"),
+        battery2ToInverter2: rotateDesktopEdge(layout.edges.battery2ToInverter2, "battery2ToInverter2"),
+        inverter1ToSwitchboard: rotateDesktopEdge(layout.edges.inverter1ToSwitchboard, "inverter1ToSwitchboard"),
+        inverter2ToSwitchboard: rotateDesktopEdge(layout.edges.inverter2ToSwitchboard, "inverter2ToSwitchboard"),
+      }
+    : layout.edges;
   return {
     layout: "explicit",
-    coordinateSystem: "bottom-left",
+    coordinateSystem,
     fixedViewport: true,
     showViewportFrame: false,
-    viewport: COMBINED_DIAGRAM_VIEWPORT,
+    viewport,
     nodes: [
       {
         id: "combined-gridNode",
@@ -4589,9 +4698,9 @@ function buildCombinedDiagramSpec() {
         icon: "grid",
         title: "Grid",
         titleKey: "gridTitle",
-        width: 176,
-        height: 102,
-        position: layout.nodes.grid,
+        width: nodeSizes.source.width,
+        height: nodeSizes.source.height,
+        position: nodePositions.grid,
         lines: [
           { id: "combined-gridPowerValue", className: "node-value", text: "-" },
           { id: "combined-gridState", className: "node-state muted", text: "idle" },
@@ -4603,9 +4712,9 @@ function buildCombinedDiagramSpec() {
         icon: "solar",
         title: "Solar",
         titleKey: "solarTitle",
-        width: 176,
-        height: 102,
-        position: layout.nodes.solar,
+        width: nodeSizes.source.width,
+        height: nodeSizes.source.height,
+        position: nodePositions.solar,
         lines: [
           { id: "combined-solarPowerValue", className: "node-value", text: "-" },
           { id: "combined-solarState", className: "node-state muted", text: "idle" },
@@ -4617,9 +4726,9 @@ function buildCombinedDiagramSpec() {
         icon: "battery",
         title: "Usable Battery",
         titleKey: "dashboardUsableBatteryTitle",
-        width: 230,
-        height: 102,
-        position: layout.nodes.usableBattery,
+        width: nodeSizes.usableBattery.width,
+        height: nodeSizes.usableBattery.height,
+        position: nodePositions.usableBattery,
         lines: [
           { id: "combined-usableBatteryValue", className: "node-value", text: "-" },
           { id: "combined-usableBatteryReserve", className: "node-state muted", text: "-" },
@@ -4631,9 +4740,9 @@ function buildCombinedDiagramSpec() {
         icon: "switchboard",
         title: "Switchboard",
         titleKey: "switchboardTitle",
-        width: 224,
-        height: 152,
-        position: layout.nodes.switchboard,
+        width: nodeSizes.switchboard.width,
+        height: nodeSizes.switchboard.height,
+        position: nodePositions.switchboard,
         lines: [],
       },
       {
@@ -4642,9 +4751,9 @@ function buildCombinedDiagramSpec() {
         icon: "load",
         title: "Home Load",
         titleKey: "loadTitle",
-        width: COMBINED_COMPACT_LOAD_NODE_SIZE.width,
-        height: COMBINED_COMPACT_LOAD_NODE_SIZE.height,
-        position: layout.nodes.load,
+        width: nodeSizes.compactLoad.width,
+        height: nodeSizes.compactLoad.height,
+        position: nodePositions.load,
         lines: [
           { id: "combined-loadPowerValue", className: "node-value", text: "-" },
         ],
@@ -4655,9 +4764,9 @@ function buildCombinedDiagramSpec() {
         icon: "pool-pump",
         title: "Pool Pump",
         titleKey: "poolPumpTitle",
-        width: COMBINED_COMPACT_LOAD_NODE_SIZE.width,
-        height: COMBINED_COMPACT_LOAD_NODE_SIZE.height,
-        position: layout.nodes.poolPump,
+        width: nodeSizes.poolPump.width,
+        height: nodeSizes.poolPump.height,
+        position: nodePositions.poolPump,
         lines: [
           { id: "combined-poolPumpPowerValue", className: "node-value", text: "-" },
           { id: "combined-poolPumpState", className: "node-state muted", text: "-" },
@@ -4670,9 +4779,9 @@ function buildCombinedDiagramSpec() {
         icon: "tesla",
         title: "Tesla",
         titleKey: "teslaChargingLabel",
-        width: COMBINED_TESLA_NODE_SIZE.width,
-        height: COMBINED_TESLA_NODE_SIZE.height,
-        position: layout.nodes.tesla,
+        width: nodeSizes.tesla.width,
+        height: nodeSizes.tesla.height,
+        position: nodePositions.tesla,
         lines: [
           {
             type: "soc",
@@ -4693,9 +4802,9 @@ function buildCombinedDiagramSpec() {
         side: "left",
         icon: "battery",
         title: "SAJ Battery",
-        width: SAJ_COMBINED_BATTERY_NODE_SIZE.width,
-        height: SAJ_COMBINED_BATTERY_NODE_SIZE.height,
-        position: layout.nodes.battery1,
+        width: nodeSizes.battery.width,
+        height: nodeSizes.battery.height,
+        position: nodePositions.battery1,
         lines: [
           {
             type: "soc",
@@ -4714,9 +4823,9 @@ function buildCombinedDiagramSpec() {
         side: "left",
         icon: "inverter",
         title: "SAJ Inverter",
-        width: 180,
-        height: 108,
-        position: layout.nodes.inverter1,
+        width: nodeSizes.inverter1.width,
+        height: nodeSizes.inverter1.height,
+        position: nodePositions.inverter1,
         lines: [
           { id: "combined-inverter1RatioValue", className: "node-value", text: "-" },
           { id: "combined-inverter1State", className: "node-state muted", text: "-" },
@@ -4728,9 +4837,9 @@ function buildCombinedDiagramSpec() {
         side: "right",
         icon: "inverter",
         title: "Solplanet Inverter",
-        width: 176,
-        height: 120,
-        position: layout.nodes.inverter2,
+        width: nodeSizes.inverter2.width,
+        height: nodeSizes.inverter2.height,
+        position: nodePositions.inverter2,
         lines: [
           { id: "combined-inverter2RatioValue", className: "node-value", text: "-" },
           { id: "combined-inverter2State", className: "node-state muted", text: "-" },
@@ -4742,9 +4851,9 @@ function buildCombinedDiagramSpec() {
         side: "right",
         icon: "battery",
         title: "Solplanet Battery",
-        width: SOLPLANET_COMBINED_BATTERY_NODE_SIZE.width,
-        height: SOLPLANET_COMBINED_BATTERY_NODE_SIZE.height,
-        position: layout.nodes.battery2,
+        width: nodeSizes.battery.width,
+        height: nodeSizes.battery.height,
+        position: nodePositions.battery2,
         lines: [
           {
             type: "soc",
@@ -4764,16 +4873,16 @@ function buildCombinedDiagramSpec() {
         source: "combined-gridNode",
         target: "combined-switchboardNode",
         labelId: "combined-flowLabelGridToSwitchboard",
-        points: layout.edges.gridToSwitchboard.points,
-        labelPosition: layout.edges.gridToSwitchboard.labelPosition,
+        points: edgeLayout.gridToSwitchboard.points,
+        labelPosition: edgeLayout.gridToSwitchboard.labelPosition,
       },
       {
         id: "combined-lineSolarToInverter1B",
         source: "combined-solarNode",
         target: "combined-inverter1Node",
         labelId: "combined-flowLabelSolarToInverter1",
-        points: layout.edges.solarToInverter1.points,
-        labelPosition: layout.edges.solarToInverter1.labelPosition,
+        points: edgeLayout.solarToInverter1.points,
+        labelPosition: edgeLayout.solarToInverter1.labelPosition,
       },
       {
         id: "combined-lineSwitchboardToTeslaB",
@@ -4782,36 +4891,36 @@ function buildCombinedDiagramSpec() {
         labelId: "combined-flowLabelSwitchboardToTesla",
         markerId: "combined-flowMarkerSwitchboardToTesla",
         markerClassName: "flow-edge-marker-disconnected",
-        points: layout.edges.switchboardToTesla.points,
-        labelPosition: layout.edges.switchboardToTesla.labelPosition,
-        lineCap: layout.edges.switchboardToTesla.lineCap,
-        lineJoin: layout.edges.switchboardToTesla.lineJoin,
-        tailUpperGapLength: layout.edges.switchboardToTesla.tailUpperGapLength,
-        tailRoundedCorner: layout.edges.switchboardToTesla.tailRoundedCorner,
+        points: edgeLayout.switchboardToTesla.points,
+        labelPosition: edgeLayout.switchboardToTesla.labelPosition,
+        lineCap: edgeLayout.switchboardToTesla.lineCap,
+        lineJoin: edgeLayout.switchboardToTesla.lineJoin,
+        tailUpperGapLength: edgeLayout.switchboardToTesla.tailUpperGapLength,
+        tailRoundedCorner: edgeLayout.switchboardToTesla.tailRoundedCorner,
       },
       {
         id: "combined-lineSwitchboardToHomeLoad",
         source: "combined-switchboardNode",
         target: "combined-loadNode",
         labelId: "combined-flowLabelSwitchboardToHomeLoad",
-        points: layout.edges.switchboardToHomeLoad.points,
-        labelPosition: layout.edges.switchboardToHomeLoad.labelPosition,
-        lineCap: layout.edges.switchboardToHomeLoad.lineCap,
-        lineJoin: layout.edges.switchboardToHomeLoad.lineJoin,
-        tailUpperGapLength: layout.edges.switchboardToHomeLoad.tailUpperGapLength,
-        tailRoundedCorner: layout.edges.switchboardToHomeLoad.tailRoundedCorner,
+        points: edgeLayout.switchboardToHomeLoad.points,
+        labelPosition: edgeLayout.switchboardToHomeLoad.labelPosition,
+        lineCap: edgeLayout.switchboardToHomeLoad.lineCap,
+        lineJoin: edgeLayout.switchboardToHomeLoad.lineJoin,
+        tailUpperGapLength: edgeLayout.switchboardToHomeLoad.tailUpperGapLength,
+        tailRoundedCorner: edgeLayout.switchboardToHomeLoad.tailRoundedCorner,
       },
       {
         id: "combined-lineSwitchboardToPoolPump",
         source: "combined-switchboardNode",
         target: "combined-poolPumpNode",
         labelId: "combined-flowLabelSwitchboardToPoolPump",
-        points: layout.edges.switchboardToPoolPump.points,
-        labelPosition: layout.edges.switchboardToPoolPump.labelPosition,
-        lineCap: layout.edges.switchboardToPoolPump.lineCap,
-        lineJoin: layout.edges.switchboardToPoolPump.lineJoin,
-        tailUpperGapLength: layout.edges.switchboardToPoolPump.tailUpperGapLength,
-        tailRoundedCorner: layout.edges.switchboardToPoolPump.tailRoundedCorner,
+        points: edgeLayout.switchboardToPoolPump.points,
+        labelPosition: edgeLayout.switchboardToPoolPump.labelPosition,
+        lineCap: edgeLayout.switchboardToPoolPump.lineCap,
+        lineJoin: edgeLayout.switchboardToPoolPump.lineJoin,
+        tailUpperGapLength: edgeLayout.switchboardToPoolPump.tailUpperGapLength,
+        tailRoundedCorner: edgeLayout.switchboardToPoolPump.tailRoundedCorner,
       },
       {
         id: "combined-lineSwitchboardToTotalLoad",
@@ -4821,42 +4930,42 @@ function buildCombinedDiagramSpec() {
         glowWidth: 28,
         lineWidth: 18,
         coreWidth: 6,
-        points: layout.edges.switchboardToTotalLoad.points,
-        labelPosition: layout.edges.switchboardToTotalLoad.labelPosition,
-        lineCap: layout.edges.switchboardToTotalLoad.lineCap,
-        lineJoin: layout.edges.switchboardToTotalLoad.lineJoin,
+        points: edgeLayout.switchboardToTotalLoad.points,
+        labelPosition: edgeLayout.switchboardToTotalLoad.labelPosition,
+        lineCap: edgeLayout.switchboardToTotalLoad.lineCap,
+        lineJoin: edgeLayout.switchboardToTotalLoad.lineJoin,
       },
       {
         id: "combined-lineBattery1ToInverter1",
         source: "combined-battery1Node",
         target: "combined-inverter1Node",
         labelId: "combined-flowLabelBattery1ToInverter1",
-        points: layout.edges.battery1ToInverter1.points,
-        labelPosition: layout.edges.battery1ToInverter1.labelPosition,
+        points: edgeLayout.battery1ToInverter1.points,
+        labelPosition: edgeLayout.battery1ToInverter1.labelPosition,
       },
       {
         id: "combined-lineBattery2ToInverter2",
         source: "combined-battery2Node",
         target: "combined-inverter2Node",
         labelId: "combined-flowLabelBattery2ToInverter2",
-        points: layout.edges.battery2ToInverter2.points,
-        labelPosition: layout.edges.battery2ToInverter2.labelPosition,
+        points: edgeLayout.battery2ToInverter2.points,
+        labelPosition: edgeLayout.battery2ToInverter2.labelPosition,
       },
       {
         id: "combined-lineInverter1ToSwitchboardB",
         source: "combined-inverter1Node",
         target: "combined-switchboardNode",
         labelId: "combined-flowLabelInverter1ToSwitchboard",
-        points: layout.edges.inverter1ToSwitchboard.points,
-        labelPosition: layout.edges.inverter1ToSwitchboard.labelPosition,
+        points: edgeLayout.inverter1ToSwitchboard.points,
+        labelPosition: edgeLayout.inverter1ToSwitchboard.labelPosition,
       },
       {
         id: "combined-lineInverter2ToSwitchboardB",
         source: "combined-inverter2Node",
         target: "combined-switchboardNode",
         labelId: "combined-flowLabelInverter2ToSwitchboard",
-        points: layout.edges.inverter2ToSwitchboard.points,
-        labelPosition: layout.edges.inverter2ToSwitchboard.labelPosition,
+        points: edgeLayout.inverter2ToSwitchboard.points,
+        labelPosition: edgeLayout.inverter2ToSwitchboard.labelPosition,
       },
     ],
   };
