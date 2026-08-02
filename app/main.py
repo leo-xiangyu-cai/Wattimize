@@ -227,7 +227,6 @@ POOL_PUMP_PRIORITY_TIME_WEIGHTS: tuple[tuple[str, int, int, float], ...] = (
     ("day", 11, 23, 1.0),
     ("night", 23, 11, 2.0),
 )
-FREE_ENERGY_WINDOW_SELF_CONSUMPTION_START_MINUTE = 50
 AFTER_FREE_SHOULDER_WINDOW_START_HOUR = 15
 AFTER_FREE_SHOULDER_WINDOW_END_HOUR = 16
 AFTER_FREE_PEAK_WINDOW_START_HOUR = 16
@@ -3724,15 +3723,7 @@ def _is_time_window_rule_enabled(enabled_map: dict[str, bool] | None, rule_code:
 
 def _saj_target_profile_for_time(now_local: datetime) -> tuple[str, str]:
     if _is_within_free_energy_window(now_local):
-        window_end_threshold = now_local.replace(
-            hour=FREE_ENERGY_WINDOW_END_HOUR - 1,
-            minute=FREE_ENERGY_WINDOW_SELF_CONSUMPTION_START_MINUTE,
-            second=0,
-            microsecond=0,
-        )
-        if now_local < window_end_threshold:
-            return "time_of_use", "free_energy_window_force_time_of_use"
-        return "self_consumption", "free_energy_window_last_10_minutes_force_self_consumption"
+        return "self_consumption", "free_energy_window_force_self_consumption"
     return "self_consumption", "outside_free_energy_window_force_self_consumption"
 
 
@@ -3761,8 +3752,7 @@ async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str
             "reason": "rule_disabled",
         }
     needs_apply = (
-        selected_profile != desired_profile
-        or input_profile != desired_profile
+        input_profile != desired_profile
         or (actual_profile != "" and actual_profile != desired_profile)
     )
     result: dict[str, object] = {
@@ -3781,10 +3771,32 @@ async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str
     if not needs_apply:
         return result
 
+    if desired_profile != "self_consumption":
+        result.update(
+            {
+                "reason": "unsupported_desired_profile",
+                "would_apply_profile": desired_profile,
+            }
+        )
+        return result
+
+    if input_profile == desired_profile and actual_profile and actual_profile != desired_profile:
+        result.update(
+            {
+                "reason": "pending_remote_sync",
+                "would_apply_profile": desired_profile,
+            }
+        )
+        return result
+
+    api_result = await put_saj_self_consumption(SajSelfConsumptionPayload(settle_seconds=2.0))
     result.update(
         {
-            "reason": "saj_automation_disabled",
-            "would_apply_profile": desired_profile,
+            "action": "applied",
+            "reason": "applied_self_consumption",
+            "applied_profile": desired_profile,
+            "api_path": "/api/saj/self-consumption",
+            "api_result": api_result,
         }
     )
     return result
