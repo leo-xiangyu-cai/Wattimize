@@ -7988,7 +7988,7 @@ function getNotificationMatrixSolplanetSoc(metrics, live, source = null) {
 
 function getNotificationMatrixSajProfileProgress(code, windowItem, currentWindowId, midday) {
   const guard = midday?.saj_profile_guard || {};
-  const expectedProfile = code === "saj_profile_free_energy" ? "time_of_use" : "self_consumption";
+  const expectedProfile = "self_consumption";
   const actualProfile = String(guard?.actual_profile || guard?.input_profile || guard?.selected_profile || "").trim();
   const selectedProfile = String(guard?.selected_profile || "").trim();
   const isCurrentWindow = currentWindowId === windowItem?.id;

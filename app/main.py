@@ -389,6 +389,15 @@ MANUAL_OPERATION_DEFINITIONS: tuple[dict[str, object], ...] = (
         "output_schema": {"action": "object", "decision": "object"},
     },
     {
+        "operation_code": "saj.worker.free_energy_slow_charge_hold",
+        "system": "saj",
+        "operation_type": "automation",
+        "action": "hold_free_energy_slow_charge",
+        "title": "SAJ Free Energy Slow Charge Hold",
+        "input_schema": {"battery_power_w": "number"},
+        "output_schema": {"state": "object", "changed": "array"},
+    },
+    {
         "operation_code": "solplanet.manual.set_limits",
         "system": "solplanet",
         "operation_type": "power_limit_control",
@@ -1387,6 +1396,7 @@ SAJ_DAY_MASK_MAX = 127
 SAJ_MODE_MIN = 0
 SAJ_MODE_MAX = 8
 SAJ_RATED_POWER_W = 5000
+SAJ_FREE_ENERGY_FALLBACK_CHARGE_LIMIT_W = 400
 SAJ_TIME_REGEX = re.compile(r"^(0[0-9]|1[0-9]|2[0-3]):([0-5][0-9])$")
 SAJ_PROFILE_IDS: tuple[str, ...] = ("self_consumption", "time_of_use", "microgrid")
 SAJ_PROFILE_MODE_CODES: dict[str, int] = {
@@ -3739,6 +3749,20 @@ async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str
     selected_profile = str(profile_state.get("selected_profile") or "").strip()
     input_profile = str(profile_state.get("input_profile") or "").strip()
     actual_profile = str(profile_state.get("actual_profile") or "").strip()
+    battery_state = control_state.get("battery")
+    battery_map = battery_state if isinstance(battery_state, dict) else {}
+    battery_power_w = _to_number(battery_map.get("power_w"))
+    discharge_state = control_state.get("discharge")
+    discharge_map = discharge_state if isinstance(discharge_state, dict) else {}
+    discharge_control_switch = discharge_map.get("control_switch")
+    free_energy_window_active = _is_within_free_energy_window(now_local)
+    saj_discharging = bool(battery_power_w is not None and battery_power_w >= POWER_FLOW_ACTIVE_THRESHOLD_W)
+    free_energy_fallback_needed = bool(
+        free_energy_window_active
+        and desired_profile == "self_consumption"
+        and input_profile == desired_profile
+        and saj_discharging
+    )
     if not _is_time_window_rule_enabled(enabled_map, rule_code):
         return {
             "desired_profile": desired_profile,
@@ -3751,12 +3775,18 @@ async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str
             "actual_profile_source": profile_state.get("actual_profile_source"),
             "input_profile_source": profile_state.get("input_profile_source"),
             "pending_remote_sync": bool(profile_state.get("pending_remote_sync")),
+            "battery_power_w": round(battery_power_w, 1) if battery_power_w is not None else None,
+            "discharge_control_switch": discharge_control_switch,
+            "saj_discharging": saj_discharging,
+            "free_energy_window_active": free_energy_window_active,
+            "free_energy_fallback_needed": free_energy_fallback_needed,
             "action": "noop",
             "reason": "rule_disabled",
         }
     needs_apply = (
         input_profile != desired_profile
-        or (actual_profile != "" and actual_profile != desired_profile)
+        or (not free_energy_window_active and actual_profile != "" and actual_profile != desired_profile)
+        or free_energy_fallback_needed
     )
     result: dict[str, object] = {
         "desired_profile": desired_profile,
@@ -3769,9 +3799,16 @@ async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str
         "actual_profile_source": profile_state.get("actual_profile_source"),
         "input_profile_source": profile_state.get("input_profile_source"),
         "pending_remote_sync": bool(profile_state.get("pending_remote_sync")),
+        "battery_power_w": round(battery_power_w, 1) if battery_power_w is not None else None,
+        "discharge_control_switch": discharge_control_switch,
+        "saj_discharging": saj_discharging,
+        "free_energy_window_active": free_energy_window_active,
+        "free_energy_fallback_needed": free_energy_fallback_needed,
         "action": "noop",
     }
     if not needs_apply:
+        if free_energy_window_active and desired_profile == "self_consumption":
+            result["reason"] = "free_energy_self_consumption_observe"
         return result
 
     if desired_profile != "self_consumption":
@@ -3779,6 +3816,19 @@ async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str
             {
                 "reason": "unsupported_desired_profile",
                 "would_apply_profile": desired_profile,
+            }
+        )
+        return result
+
+    if free_energy_fallback_needed:
+        api_result = await _apply_saj_free_energy_slow_charge_hold(settle_seconds=2.0)
+        result.update(
+            {
+                "action": "applied",
+                "reason": "self_consumption_still_discharging_apply_slow_charge_hold",
+                "applied_profile": desired_profile,
+                "api_path": "internal:_apply_saj_free_energy_slow_charge_hold",
+                "api_result": api_result,
             }
         )
         return result
@@ -15734,6 +15784,106 @@ async def put_saj_manual_discharge_power(payload: SajManualDischargePowerPayload
             "resolved_power_w_estimate": int(round(SAJ_RATED_POWER_W * power_percent / 100.0)),
             "changed": changed,
             "state": _build_saj_control_state(states_by_id),
+        }
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"state": result.get("state")},
+            response_payload=result,
+            completed=True,
+        )
+        return result
+    except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Home Assistant API returned {exc.response.status_code}",
+            completed=True,
+        )
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Home Assistant: {exc}",
+            completed=True,
+        )
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+async def _apply_saj_free_energy_slow_charge_hold(*, settle_seconds: float = 2.0) -> dict[str, object]:
+    _ensure_ha_configured()
+    operation_run_id: int | None = None
+    request_payload = {
+        "mode_code": SAJ_PROFILE_MODE_CODES["self_consumption"],
+        "charging_control": True,
+        "discharging_control": False,
+        "charge_time_enable": 1,
+        "discharge_time_enable": 0,
+        "battery_charge_power_limit_w": SAJ_FREE_ENERGY_FALLBACK_CHARGE_LIMIT_W,
+        "grid_max_charge_power_w": SAJ_FREE_ENERGY_FALLBACK_CHARGE_LIMIT_W,
+        "settle_seconds": settle_seconds,
+    }
+    changed: list[dict[str, object]] = []
+    try:
+        _, initial_states_by_id = await _saj_control_states()
+        operation_run_id = await _start_operation_history_run(
+            "saj.worker.free_energy_slow_charge_hold",
+            request_payload=request_payload,
+            previous_state={"state": _build_saj_control_state(initial_states_by_id)},
+        )
+
+        await _saj_set_number("number.saj_app_mode_input", SAJ_PROFILE_MODE_CODES["self_consumption"])
+        changed.append({"entity_id": "number.saj_app_mode_input", "value": SAJ_PROFILE_MODE_CODES["self_consumption"]})
+        await _saj_set_switch("switch.saj_discharging_control", False)
+        changed.append({"entity_id": "switch.saj_discharging_control", "value": False})
+        await _saj_set_number("number.saj_discharge_time_enable_input", 0)
+        changed.append({"entity_id": "number.saj_discharge_time_enable_input", "value": 0})
+        await _saj_set_switch("switch.saj_charging_control", True)
+        changed.append({"entity_id": "switch.saj_charging_control", "value": True})
+        await _saj_set_number("number.saj_charge_time_enable_input", 1)
+        changed.append({"entity_id": "number.saj_charge_time_enable_input", "value": 1})
+        await _saj_set_number("number.saj_battery_charge_power_limit_input", SAJ_FREE_ENERGY_FALLBACK_CHARGE_LIMIT_W)
+        changed.append(
+            {
+                "entity_id": "number.saj_battery_charge_power_limit_input",
+                "value": SAJ_FREE_ENERGY_FALLBACK_CHARGE_LIMIT_W,
+            }
+        )
+        await _saj_set_number("number.saj_grid_max_charge_power_input", SAJ_FREE_ENERGY_FALLBACK_CHARGE_LIMIT_W)
+        changed.append(
+            {
+                "entity_id": "number.saj_grid_max_charge_power_input",
+                "value": SAJ_FREE_ENERGY_FALLBACK_CHARGE_LIMIT_W,
+            }
+        )
+
+        if settle_seconds > 0:
+            await asyncio.sleep(float(settle_seconds))
+        _, states_by_id = await _saj_control_states()
+        control_state = _build_saj_control_state(states_by_id)
+        result = {
+            "ok": True,
+            "system": "saj",
+            "profile_id": "self_consumption",
+            "mode_code": SAJ_PROFILE_MODE_CODES["self_consumption"],
+            "hold_profile": "free_energy_slow_charge",
+            "changed": changed,
+            "success_criteria": {
+                "mode_input_entity": "number.saj_app_mode_input",
+                "charging_control_entity": "switch.saj_charging_control",
+                "discharging_control_entity": "switch.saj_discharging_control",
+                "charge_time_enable_entity": "number.saj_charge_time_enable_input",
+                "discharge_time_enable_entity": "number.saj_discharge_time_enable_input",
+                "battery_charge_power_limit_entity": "number.saj_battery_charge_power_limit_input",
+                "grid_max_charge_power_entity": "number.saj_grid_max_charge_power_input",
+            },
+            "state": control_state,
         }
         await _update_operation_history_run(
             operation_run_id,

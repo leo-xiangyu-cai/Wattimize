@@ -68,6 +68,20 @@ This is not necessarily a device fault. Each inverter is acting reasonably from 
 
 Control implication: do not use non-zero SAJ battery discharge power alone as proof that self-consumption mode failed. For self-consumption switching, judge success from `number.saj_app_mode_input`, `sensor.saj_app_mode`, and `switch.saj_discharging_control`; treat battery power as diagnostic context.
 
+## Free-energy self-consumption guard
+
+During the free-energy window (`11:00-15:00`), Wattimize first targets SAJ self-consumption and observes. If self-consumption is already the written target and `sensor.saj_battery_power` still shows active discharge (`>= 30W`), the worker applies a slow-charge hold that mirrors the locally verified app state:
+
+- `number.saj_app_mode_input = 0`
+- `switch.saj_discharging_control = off`
+- `number.saj_discharge_time_enable_input = 0`
+- `switch.saj_charging_control = on`
+- `number.saj_charge_time_enable_input = 1`
+- `number.saj_battery_charge_power_limit_input = 400`
+- `number.saj_grid_max_charge_power_input = 400`
+
+If self-consumption is not discharging, including when SAJ is already charging, the guard keeps self-consumption and does not apply the slow-charge hold.
+
 ## Morning grid-import guard
 
 The morning protection rule is intentionally simple and does not depend on Solplanet state. Its goal is to avoid buying grid power when SAJ still has usable energy.
