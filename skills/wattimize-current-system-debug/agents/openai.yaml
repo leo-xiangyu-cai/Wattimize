@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wattimize Current System Debug"
+  short_description: "Debug NAS live state read-only"
+  default_prompt: "Use $wattimize-current-system-debug to inspect the current NAS Wattimize state with read-only APIs, then compare the behavior against local source code without editing files or starting local services."

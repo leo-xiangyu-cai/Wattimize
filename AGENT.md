@@ -191,3 +191,5 @@ Dashboard mapping rule:
 ## 13) Local Skills
 
 - `skills/frontend-render-check`: Run the Wattimize UI locally, capture a full-page screenshot, and inspect browser console/request failures when validating rendered frontend results.
+- `skills/wattimize-current-system-debug`: Debug the currently running NAS deployment with read-only APIs first, then compare against local source code without starting a local service.
+- `skills/wattimize-nas-deploy`: Deploy code to the NAS with database continuity as the hard requirement; normal code deploys use `make nas-deploy SKIP_DB_PUSH=1` so the live NAS SQLite database and bill artifacts are not overwritten.
