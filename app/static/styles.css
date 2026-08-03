@@ -2810,12 +2810,20 @@ select {
   min-height: 60px;
 }
 
-.sampling-tesla-free-charge {
+.sampling-free-energy-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  margin: 8px 0 2px;
+}
+
+.sampling-tesla-free-charge,
+.sampling-free-energy-use {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin: 8px 0 2px;
+  min-width: 0;
   padding: 9px 10px;
   border: 1px solid rgba(220, 38, 38, 0.14);
   border-radius: 8px;
@@ -2823,21 +2831,31 @@ select {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
 }
 
+.sampling-free-energy-use {
+  border-color: rgba(47, 128, 93, 0.16);
+}
+
 .sampling-tesla-free-charge-title,
 .sampling-tesla-free-charge-meta,
 .sampling-tesla-free-charge-result strong,
-.sampling-tesla-free-charge-result span {
+.sampling-tesla-free-charge-result span,
+.sampling-free-energy-use-title,
+.sampling-free-energy-use-meta,
+.sampling-free-energy-use-empty {
   margin: 0;
 }
 
-.sampling-tesla-free-charge-title {
+.sampling-tesla-free-charge-title,
+.sampling-free-energy-use-title {
   color: #22342c;
   font-size: 13px;
   font-weight: 850;
 }
 
 .sampling-tesla-free-charge-meta,
-.sampling-tesla-free-charge-result span {
+.sampling-tesla-free-charge-result span,
+.sampling-free-energy-use-meta,
+.sampling-free-energy-use-empty {
   color: #6b8073;
   font-size: 11px;
 }
@@ -2853,6 +2871,27 @@ select {
   color: #b91c1c;
   font-size: 18px;
   line-height: 1.1;
+}
+
+.sampling-free-energy-use-list {
+  display: grid;
+  gap: 3px;
+  min-width: 150px;
+}
+
+.sampling-free-energy-use-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: #6b8073;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.sampling-free-energy-use-row strong {
+  color: #286246;
+  font-size: 12px;
 }
 
 .sampling-daily-cost {
@@ -3431,14 +3470,21 @@ select {
     font-size: 9.5px;
   }
 
-  .sampling-tesla-free-charge {
+  .sampling-free-energy-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sampling-tesla-free-charge,
+  .sampling-free-energy-use {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .sampling-tesla-free-charge-result {
+  .sampling-tesla-free-charge-result,
+  .sampling-free-energy-use-list {
     min-width: 0;
     text-align: left;
+    width: 100%;
   }
 
   .sampling-zero-hero-grid {

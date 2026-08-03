@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dashboard</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260803-tesla-free-charge" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260803-free-energy-use" />
   </head>
   <body>
     <main class="page">
@@ -272,7 +272,10 @@
               <div class="sampling-totals-chart-wrap">
                 <div id="samplingTotalsChartCanvas" class="sampling-totals-chart"></div>
               </div>
-              <div id="samplingTeslaFreeCharge" class="sampling-tesla-free-charge" aria-live="polite"></div>
+              <div class="sampling-free-energy-grid" aria-live="polite">
+                <div id="samplingTeslaFreeCharge" class="sampling-tesla-free-charge"></div>
+                <div id="samplingFreeEnergyUse" class="sampling-free-energy-use"></div>
+              </div>
               <div class="sampling-phase-battery">
                 <div class="sampling-phase-battery-head">
                   <h4 data-i18n="samplingPhaseBatteryTitle">Stage-End Battery Remaining</h4>
@@ -845,6 +848,6 @@
     <script src="/static/vendor/dagre.min.js"></script>
     <script src="/static/vendor/x6.min.js"></script>
     <script src="/static/energy-flow-diagram.js"></script>
-    <script src="/static/app.js?v=20260803-tesla-free-charge"></script>
+    <script src="/static/app.js?v=20260803-free-energy-use"></script>
   </body>
 </html>
