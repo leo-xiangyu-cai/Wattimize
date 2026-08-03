@@ -945,6 +945,10 @@ const I18N = {
     samplingBatteryTimelineSeriesCombined: "SAJ + Solplanet Batteries",
     samplingBatteryTimelineSeriesTotalRemaining: "Total Battery Remaining",
     samplingBatteryTimelineSeriesTesla: "Tesla Battery",
+    samplingTeslaFreeChargeTitle: "Tesla Free Charging",
+    samplingTeslaFreeChargeMeta: "{day} · 11:00-15:00 gross SOC charged",
+    samplingTeslaFreeChargeNoData: "No Tesla SOC samples for the free window",
+    samplingTeslaFreeChargeDetail: "Used {used} · net {net} · {startTime}-{endTime}",
     samplingTotalsTitle: "Energy Breakdown",
     samplingTotalsMeta: "{system} · {range} · directional energy totals",
     samplingTotalsMetaNoData: "{system} · {range} · not enough samples for totals yet",
@@ -2053,6 +2057,10 @@ const I18N = {
     samplingBatteryTimelineSeriesCombined: "SAJ + Solplanet 电池",
     samplingBatteryTimelineSeriesTotalRemaining: "总剩余可用电量",
     samplingBatteryTimelineSeriesTesla: "Tesla 电池",
+    samplingTeslaFreeChargeTitle: "Tesla 免费充电",
+    samplingTeslaFreeChargeMeta: "{day} · 11:00-15:00 累计充入 SOC",
+    samplingTeslaFreeChargeNoData: "免费时段暂无 Tesla SOC 样本",
+    samplingTeslaFreeChargeDetail: "期间消耗 {used} · 净变化 {net} · {startTime}-{endTime}",
     samplingTotalsTitle: "电量分布",
     samplingTotalsMeta: "{system} · {range} · 分方向累计电量",
     samplingTotalsMetaNoData: "{system} · {range} · 当前样本不足，无法统计累计值",
@@ -2623,6 +2631,7 @@ const stateCache = {
   lastSamplingSeries: null,
   lastSamplingBatteryTimeline: null,
   lastSamplingPhaseBattery: null,
+  lastSamplingTeslaFreeCharge: null,
   lastSamplingPumpStatus: null,
   lastSamplingRecentPumpStatus: null,
   lastSamplingZeroHeroHistory: null,
@@ -9712,6 +9721,7 @@ function renderDailyReportEmpty(message, rangeLabel) {
   stateCache.lastSamplingSeries = null;
   stateCache.lastSamplingBatteryTimeline = null;
   stateCache.lastSamplingPhaseBattery = null;
+  stateCache.lastSamplingTeslaFreeCharge = null;
   stateCache.lastSamplingPumpStatus = null;
   stateCache.lastSamplingRecentPumpStatus = null;
   stateCache.lastSamplingZeroHeroHistory = null;
@@ -9726,6 +9736,7 @@ function renderDailyReportEmpty(message, rangeLabel) {
   renderSamplingChart({ items: [] });
   renderSamplingBatteryTimeline({ series: [] });
   renderSamplingPhaseBatteryRemaining(null, rangeLabel);
+  renderTeslaFreeCharge(null);
   renderSamplingPumpStatusSummary(null, null);
   renderSamplingPumpStatusTimeline({ data: [] });
   renderSamplingTotals(null, "overall", rangeLabel, { metaText: message });
@@ -11970,6 +11981,93 @@ function buildBatteryTimelinePayload(seriesBySystem, range) {
     end_at_utc: range.endUtc,
     series,
   };
+}
+
+function buildTeslaFreeChargePayload(combinedSeriesPayload, dayText) {
+  const parts = localDateParts(dayText);
+  if (!parts) return { day: dayText || "", hasData: false, charged_percent: null, used_percent: null, net_percent: null };
+  const windowStart = new Date(parts.year, parts.monthIndex, parts.day, SAMPLING_GRID_IMPORT_WINDOW.startHour, 0, 0, 0);
+  const windowEnd = new Date(parts.year, parts.monthIndex, parts.day, SAMPLING_GRID_IMPORT_WINDOW.endHour, 0, 0, 0);
+  const startMs = windowStart.getTime();
+  const endMs = windowEnd.getTime();
+  const items = (Array.isArray(combinedSeriesPayload?.items) ? combinedSeriesPayload.items : [])
+    .map((item) => {
+      const ts = new Date(item?.sampled_at_utc || "").getTime();
+      const soc = Number(item?.tesla_battery_soc_percent);
+      return { ts, soc };
+    })
+    .filter((item) => Number.isFinite(item.ts) && Number.isFinite(item.soc) && item.ts >= startMs && item.ts <= endMs)
+    .sort((a, b) => a.ts - b.ts);
+  if (items.length < 2) {
+    return {
+      day: dayText || "",
+      start_at_utc: windowStart.toISOString(),
+      end_at_utc: windowEnd.toISOString(),
+      hasData: false,
+      sample_count: items.length,
+      charged_percent: null,
+      used_percent: null,
+      net_percent: null,
+    };
+  }
+  let chargedPercent = 0;
+  let usedPercent = 0;
+  for (let index = 1; index < items.length; index += 1) {
+    const delta = items[index].soc - items[index - 1].soc;
+    if (delta > 0) chargedPercent += delta;
+    else if (delta < 0) usedPercent += Math.abs(delta);
+  }
+  const startSample = items[0];
+  const endSample = items[items.length - 1];
+  return {
+    day: dayText || "",
+    start_at_utc: windowStart.toISOString(),
+    end_at_utc: windowEnd.toISOString(),
+    hasData: true,
+    sample_count: items.length,
+    start_soc_percent: startSample.soc,
+    end_soc_percent: endSample.soc,
+    start_sampled_at_utc: new Date(startSample.ts).toISOString(),
+    end_sampled_at_utc: new Date(endSample.ts).toISOString(),
+    charged_percent: chargedPercent,
+    used_percent: usedPercent,
+    net_percent: endSample.soc - startSample.soc,
+  };
+}
+
+function formatTeslaFreeChargePercent(value, { signed = false } = {}) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  const sign = signed && n > 0 ? "+" : "";
+  return `${sign}${formatTrimmedDecimal(n, 1)}%`;
+}
+
+function renderTeslaFreeCharge(payload) {
+  const el = document.getElementById("samplingTeslaFreeCharge");
+  if (!el) return;
+  const day = payload?.day || "-";
+  const hasData = Boolean(payload?.hasData);
+  const valueText = hasData ? formatTeslaFreeChargePercent(payload.charged_percent, { signed: true }) : "-";
+  const startTs = new Date(payload?.start_sampled_at_utc || "").getTime();
+  const endTs = new Date(payload?.end_sampled_at_utc || "").getTime();
+  const detailText = hasData
+    ? t("samplingTeslaFreeChargeDetail", {
+        used: formatTeslaFreeChargePercent(payload.used_percent),
+        net: formatTeslaFreeChargePercent(payload.net_percent, { signed: true }),
+        startTime: Number.isFinite(startTs) ? formatSamplingClock(startTs, false) : "-",
+        endTime: Number.isFinite(endTs) ? formatSamplingClock(endTs, false) : "-",
+      })
+    : t("samplingTeslaFreeChargeNoData");
+  el.innerHTML = `
+    <div>
+      <p class="sampling-tesla-free-charge-title">${escapeHtml(t("samplingTeslaFreeChargeTitle"))}</p>
+      <p class="sampling-tesla-free-charge-meta">${escapeHtml(t("samplingTeslaFreeChargeMeta", { day }))}</p>
+    </div>
+    <div class="sampling-tesla-free-charge-result">
+      <strong>${escapeHtml(valueText)}</strong>
+      <span>${escapeHtml(detailText)}</span>
+    </div>
+  `;
 }
 
 function getBatteryUsableKwhValue(system, socPercent) {
@@ -15669,6 +15767,7 @@ async function importDatabaseFile(file) {
     stateCache.lastSamplingSeries = null;
     stateCache.lastSamplingBatteryTimeline = null;
     stateCache.lastSamplingPhaseBattery = null;
+    stateCache.lastSamplingTeslaFreeCharge = null;
     stateCache.lastSamplingPumpStatus = null;
     stateCache.lastStorageStatus = null;
     await loadDatabase();
@@ -15861,11 +15960,14 @@ async function loadDailyReport({ generateIfMissing = false } = {}) {
       normalizeSamplingPhaseBatteryPayload(payload.phase_battery, day) ||
       buildSamplingPhaseBatteryPayload({ saj: sajSeries, solplanet: solplanetSeries }, day);
     stateCache.lastSamplingPhaseBattery = phaseBatteryPayload;
+    const teslaFreeChargePayload = buildTeslaFreeChargePayload(combinedSeries, day);
+    stateCache.lastSamplingTeslaFreeCharge = teslaFreeChargePayload;
     setText(
       "samplingBatteryTimelineMeta",
       t("samplingBatteryTimelineMeta", { range: range.label, count: batteryTimelinePayload.count || 0 }),
     );
     renderSamplingBatteryTimeline(batteryTimelinePayload);
+    renderTeslaFreeCharge(teslaFreeChargePayload);
     renderSamplingPhaseBatteryRemaining(phaseBatteryPayload, range.label);
 
     const pumpStatusPayload = buildPumpStatusTimelinePayload(combinedSeries, range);
@@ -16002,6 +16104,7 @@ async function loadSampling({ forceRaw = false, reportDay = "" } = {}) {
       stateCache.lastSamplingSeries = null;
       stateCache.lastSamplingBatteryTimeline = null;
       stateCache.lastSamplingPhaseBattery = null;
+      stateCache.lastSamplingTeslaFreeCharge = null;
       stateCache.lastSamplingPumpStatus = null;
       stateCache.lastSamplingRecentPumpStatus = null;
       setText("samplingDailyMeta", t("loadFailed", { error: invalidMessage }));
@@ -16170,6 +16273,12 @@ async function loadSampling({ forceRaw = false, reportDay = "" } = {}) {
       }),
     );
     renderSamplingBatteryTimeline(batteryTimelinePayload);
+    const teslaFreeChargePayload = buildTeslaFreeChargePayload(
+      seriesResult.status === "fulfilled" ? seriesResult.value : null,
+      normalizedReportDay || getSamplingFocusLocalDay(),
+    );
+    stateCache.lastSamplingTeslaFreeCharge = teslaFreeChargePayload;
+    renderTeslaFreeCharge(teslaFreeChargePayload);
     const phaseBatteryPayload = buildSamplingPhaseBatteryPayload(
       {
         saj: overallSajSeriesResult.status === "fulfilled" ? overallSajSeriesResult.value : null,
@@ -16292,6 +16401,9 @@ function rerenderSamplingViewFromCache() {
       ? getDayInfo(reportCalendarState.selectedDay || getLocalDateText(-1))
       : getSamplingRange();
     renderSamplingPhaseBatteryRemaining(stateCache.lastSamplingPhaseBattery, range.label);
+  }
+  if (stateCache.lastSamplingTeslaFreeCharge) {
+    renderTeslaFreeCharge(stateCache.lastSamplingTeslaFreeCharge);
   }
   if (stateCache.lastSamplingPumpStatus) {
     const range = getSamplingRange();

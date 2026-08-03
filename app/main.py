@@ -154,6 +154,7 @@ SYSTEM_PREFIXES: dict[str, tuple[str, ...]] = {
 BALANCE_TOLERANCE_W = 100.0
 TESLA_ASSUMED_CHARGING_VOLTAGE_V = 240.0
 TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A = 12
+TESLA_FREE_ENERGY_MIN_CHARGE_CURRENT_A = 5
 TESLA_CONTROL_FEEDBACK_KV_PREFIX = "ui.tesla_control_feedback."
 TESLA_CONTROL_FEEDBACK_PENDING_TIMEOUT_SECONDS = 15.0
 TESLA_CONTROL_FEEDBACK_SUCCESS_TTL_SECONDS = 4.0
@@ -1779,31 +1780,33 @@ async def _build_device_priority_snapshot(
         override_target = "auto"
     if not pool_pump_auto_control_enabled and override_target == "pool_pump":
         override_target = "auto"
-    tesla_score = (
-        100.0
-        if tesla_auto_control_enabled and override_target == "tesla"
-        else (tesla_original_score if tesla_auto_control_enabled else 0.0)
-    )
-    pump_score = (
-        100.0
-        if pool_pump_auto_control_enabled and override_target == "pool_pump"
-        else (pump_original_score if pool_pump_auto_control_enabled else 0.0)
-    )
-
-    if tesla_auto_control_enabled and not pool_pump_auto_control_enabled:
-        winner = "tesla"
-    elif pool_pump_auto_control_enabled and not tesla_auto_control_enabled:
-        winner = "pool_pump"
-    elif not tesla_auto_control_enabled and not pool_pump_auto_control_enabled:
-        winner = "none"
+    priority_period, _priority_period_weight = _pool_pump_priority_period_for_local_dt(now_local)
+    scheduled_winner = "pool_pump" if priority_period == "night" else "tesla"
+    if override_target == "tesla":
+        winner = "tesla" if tesla_auto_control_enabled else ("pool_pump" if pool_pump_auto_control_enabled else "none")
+    elif override_target == "pool_pump":
+        winner = "pool_pump" if pool_pump_auto_control_enabled else ("tesla" if tesla_auto_control_enabled else "none")
+    elif scheduled_winner == "tesla":
+        winner = "tesla" if tesla_auto_control_enabled else ("pool_pump" if pool_pump_auto_control_enabled else "none")
+    elif scheduled_winner == "pool_pump":
+        winner = "pool_pump" if pool_pump_auto_control_enabled else ("tesla" if tesla_auto_control_enabled else "none")
     else:
-        winner = "tesla" if tesla_score >= pump_score else "pool_pump"
+        winner = "none"
+    tesla_score = 100.0 if winner == "tesla" and tesla_auto_control_enabled else 0.0
+    pump_score = 100.0 if winner == "pool_pump" and pool_pump_auto_control_enabled else 0.0
 
     return {
         "updated_at_utc": datetime.now(UTC).isoformat(),
         "override": {
             "target": override_target,
             "active": override_target in ("tesla", "pool_pump"),
+        },
+        "schedule_priority": {
+            "period": priority_period,
+            "day_rule": "tesla=100,pool_pump=0",
+            "night_rule": "tesla=0,pool_pump=100",
+            "scheduled_winner": scheduled_winner,
+            "effective_winner": winner,
         },
         "business_day": {
             "definition": f"{PRIORITY_BUSINESS_DAY_START_HOUR:02d}:00 to next day {PRIORITY_BUSINESS_DAY_START_HOUR:02d}:00",
@@ -1820,7 +1823,7 @@ async def _build_device_priority_snapshot(
             "high_urgency_soc_percent": TESLA_PRIORITY_HIGH_URGENCY_SOC_PERCENT,
             "critical_soc_percent": TESLA_PRIORITY_CRITICAL_SOC_PERCENT,
             "min_soc_percent": TESLA_PRIORITY_MIN_SOC_PERCENT,
-            "formula": "80%+ => 0; 60%-80% => ((80-soc)/20)^1.7 * 45; 40%-60% => 45 + ((60-soc)/20)^1.2 * 55; 40%- => 100",
+            "formula": "day schedule => 100, night schedule => 0; manual override can force 100",
         },
         "pool_pump": {
             "score": pump_score,
@@ -1828,7 +1831,7 @@ async def _build_device_priority_snapshot(
             "auto_control_enabled": pool_pump_auto_control_enabled,
             "weighted_target_min_hours": POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MIN_HOURS,
             "weighted_target_max_hours": POOL_PUMP_PRIORITY_WEIGHTED_TARGET_MAX_HOURS,
-            "formula": "clamp(current_deficit / 6.0, 0, 1) * 100",
+            "formula": "day schedule => 0, night schedule => 100; manual override can force 100",
             "runtime_formula": "priority_hours = day_hours * 1.0 + night_hours * 2.0",
             "rolling_runtime_hours_24h": round(rolling_runtime_hours, 3),
             "rolling_runtime_window_hours": POOL_PUMP_FORCE_MIN_RUNTIME_LOOKBACK_HOURS,
@@ -5989,6 +5992,7 @@ def _calculate_tesla_grid_support_target(
     base_grid_w: float,
     charge_state: dict[str, object],
     target_grid_max_w: float | None = None,
+    min_charge_current_a: int = TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A,
 ) -> dict[str, object]:
     off: dict[str, object] = {"mode": "off", "charge_current_amps": 0, "tesla_power_w": 0.0, "predicted_grid_w": base_grid_w}
     min_a = _to_number(charge_state.get("min_current_amps"))
@@ -5996,7 +6000,7 @@ def _calculate_tesla_grid_support_target(
     step_a = _to_number(charge_state.get("current_step_amps"))
     if min_a is None or max_a is None or float(max_a) <= 0:
         return off
-    min_i = max(int(round(float(min_a))), TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A)
+    min_i = max(int(round(float(min_a))), int(min_charge_current_a))
     max_i = int(round(float(max_a)))
     if max_i < min_i:
         return off
@@ -7567,13 +7571,23 @@ async def _run_midday_window_check(
 
         base_grid_w = max(float(result["current_grid_import_w"]) - tesla_charge_power_w, 0.0)
         result["base_grid_without_tesla_w"] = round(base_grid_w, 1)
-        desired = _calculate_tesla_grid_support_target(base_grid_w, charge_state)
+        min_charge_current_a = (
+            TESLA_FREE_ENERGY_MIN_CHARGE_CURRENT_A
+            if window_mode == "free_energy"
+            else TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A
+        )
+        desired = _calculate_tesla_grid_support_target(
+            base_grid_w,
+            charge_state,
+            min_charge_current_a=min_charge_current_a,
+        )
         result["decision"] = desired
         result["decision_reason"] = (
             "calculated_amps_within_grid_cap"
             if desired["mode"] == "charge"
             else "calculated_amps_below_vehicle_minimum"
         )
+        pre_tesla_actions: list[str] = []
 
         current_grid_import_w = float(result["current_grid_import_w"])
         effective_current_amps = current_actual_amps or current_configured_amps or 0.0
@@ -7601,6 +7615,7 @@ async def _run_midday_window_check(
                     base_grid_w,
                     charge_state,
                     target_grid_max_w=tesla_grid_cap_with_pump_w,
+                    min_charge_current_a=min_charge_current_a,
                 )
                 if desired["mode"] != "off"
                 else None
@@ -7610,6 +7625,7 @@ async def _run_midday_window_check(
                 "tesla_score": tesla_score,
                 "pool_pump_score": pool_pump_score,
                 "winner": priority_snapshot.get("winner"),
+                "policy": "tesla_first",
                 "predicted_grid_with_both_w": predicted_grid_with_both_w,
                 "grid_cap_w": POOL_PUMP_FREE_ENERGY_GRID_MAX_W,
                 "tesla_grid_cap_with_pump_w": round(tesla_grid_cap_with_pump_w, 1),
@@ -7619,32 +7635,39 @@ async def _run_midday_window_check(
                 "shared_tesla_target_mode": shared_target_map.get("mode") if shared_target_map else "off",
             }
             if (
+                desired["mode"] == "off"
+                and tesla_rule_enabled
+                and tesla_location_block_reason is None
+                and pump_enabled
+                and pump_power_w > 0
+            ):
+                base_grid_without_tesla_or_pump_w = max(base_grid_w - pump_power_w, 0.0)
+                tesla_without_pump_target = _calculate_tesla_grid_support_target(
+                    base_grid_without_tesla_or_pump_w,
+                    charge_state,
+                    min_charge_current_a=min_charge_current_a,
+                )
+                result["priority_conflict"]["base_grid_without_tesla_or_pump_w"] = round(base_grid_without_tesla_or_pump_w, 1)
+                result["priority_conflict"]["tesla_without_pump_target"] = tesla_without_pump_target
+                if str(tesla_without_pump_target.get("mode") or "").strip().lower() == "charge":
+                    await _pool_pump_set_enabled(False)
+                    pre_tesla_actions.append("stop_pool_pump_for_tesla_priority")
+                    desired = tesla_without_pump_target
+                    result["decision"] = desired
+                    result["decision_reason"] = "tesla_priority_shed_pool_pump_for_charge"
+                    base_grid_w = base_grid_without_tesla_or_pump_w
+                    result["base_grid_without_tesla_w"] = round(base_grid_w, 1)
+            elif (
                 desired["mode"] != "off"
                 and predicted_grid_with_both_w > POOL_PUMP_FREE_ENERGY_GRID_MAX_W
-                and pool_pump_score > tesla_score
             ):
                 if shared_target_map and str(shared_target_map.get("mode") or "").strip().lower() == "charge":
-                    desired = shared_target_map
-                    result["decision"] = desired
-                    result["decision_reason"] = "adjusted_amps_for_pool_pump_priority_under_grid_cap"
+                    result["priority_conflict"]["shared_target_ignored_reason"] = "tesla_first_policy"
                 else:
-                    result["decision"] = {
-                        "mode": "off",
-                        "charge_current_amps": 0,
-                        "predicted_grid_w": round(base_grid_w, 1),
-                    }
-                    result["decision_reason"] = "pool_pump_priority_higher_in_business_window"
-                    if charge_requested_enabled or charging_enabled:
-                        await _tesla_set_charging(False)
-                        result["action"] = {"type": "stop_charging", "reason": "pool_pump_priority_higher"}
-                        status = "applied"
-                    else:
-                        result["action"] = {"type": "noop", "reason": "pool_pump_priority_higher"}
-                        status = "noop"
-                    return result
+                    result["priority_conflict"]["shared_target_ignored_reason"] = "tesla_first_policy_no_shared_pump_budget"
 
         desired_amps = int(desired["charge_current_amps"])
-        if desired["mode"] != "off" and desired_amps < TESLA_AUTO_CONTROL_MIN_CHARGE_CURRENT_A:
+        if desired["mode"] != "off" and desired_amps < min_charge_current_a:
             result["decision"] = {
                 "mode": "off",
                 "charge_current_amps": 0,
@@ -7712,7 +7735,8 @@ async def _run_midday_window_check(
         ]
 
         if (
-            charging_enabled
+            not pre_tesla_actions
+            and charging_enabled
             and configured_matches_desired
             and (current_actual_amps is None or actual_matches_desired)
         ):
@@ -7747,7 +7771,7 @@ async def _run_midday_window_check(
                 status = "noop"
             return result
 
-        actions: list[str] = []
+        actions: list[str] = list(pre_tesla_actions)
         if current_configured_amps is None or int(round(current_configured_amps)) != desired_amps:
             await _tesla_set_charge_current(desired_amps)
             actions.append(f"set_current_{desired_amps}a")
