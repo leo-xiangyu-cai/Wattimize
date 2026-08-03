@@ -34,6 +34,7 @@ from app.config import (
     ALLOWED_DETAIL_RETENTION_MONTHS,
     ALLOWED_SAMPLE_INTERVAL_SECONDS,
     CONST_DETAIL_RETENTION_MONTHS,
+    CONST_SOLPLANET_PRE_PEAK_EXPORT_RESERVE_KWH,
     CONST_SAJ_SAMPLE_INTERVAL_SECONDS,
     CONST_SOLPLANET_EXPORT_RESERVE_FLOOR_KWH,
     CONST_SOLPLANET_SAMPLE_INTERVAL_SECONDS,
@@ -253,7 +254,6 @@ EXPORT_WINDOW_BATTERY_SOFT_DISCHARGE_TARGET_W = 7_500.0
 EXPORT_WINDOW_BATTERY_HARD_DISCHARGE_LIMIT_W = 10_000.0
 SOLPLANET_EXPORT_MONITOR_TARGET_KWH = 18.5
 SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH = CONST_SOLPLANET_EXPORT_RESERVE_FLOOR_KWH
-SOLPLANET_EXPORT_MONITOR_PRE_PEAK_RESERVE_KWH = 35.0
 SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH = 20.0
 SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W = 10_000.0
 SOLPLANET_EXPORT_MONITOR_PRE_PEAK_END_HOUR = 18
@@ -1372,6 +1372,11 @@ class ConfigPayload(BaseModel):
         ge=0,
         le=100,
     )
+    solplanet_pre_peak_export_reserve_kwh: float = Field(
+        default=CONST_SOLPLANET_PRE_PEAK_EXPORT_RESERVE_KWH,
+        ge=0,
+        le=100,
+    )
 
 
 class SolplanetDiscoverPayload(BaseModel):
@@ -2108,6 +2113,10 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
     energy_reference = _combined_usable_battery_reference(metrics)
     energy_reference["solplanet_export_reserve_floor_kwh"] = max(
         float(settings.solplanet_export_reserve_floor_kwh),
+        0.0,
+    )
+    energy_reference["solplanet_pre_peak_export_reserve_kwh"] = max(
+        float(settings.solplanet_pre_peak_export_reserve_kwh),
         0.0,
     )
     raw_obj = flow.get("raw")
@@ -5625,6 +5634,7 @@ def _build_solplanet_export_monitor(
         else ("peak_hold" if in_peak_hold_phase else ("late_target" if in_late_phase else "outside_export_window"))
     )
     reserve_floor_kwh = max(float(settings.solplanet_export_reserve_floor_kwh), 0.0)
+    pre_peak_reserve_floor_kwh = max(float(settings.solplanet_pre_peak_export_reserve_kwh), 0.0)
     current_home_load_w = _to_number(metrics_map.get("load_w"))
     minutes_since_midnight = now_local.hour * 60 + now_local.minute + (now_local.second / 60.0)
     remaining_export_window_hours = max(
@@ -5650,14 +5660,14 @@ def _build_solplanet_export_monitor(
     if usable_total_kwh is not None:
         surplus_above_floor_kwh = round(usable_total_kwh - reserve_floor_kwh, 4)
         surplus_above_pre_peak_reserve_kwh = round(
-            usable_total_kwh - SOLPLANET_EXPORT_MONITOR_PRE_PEAK_RESERVE_KWH,
+            usable_total_kwh - pre_peak_reserve_floor_kwh,
             4,
         )
         surplus_above_comfort_kwh = round(usable_total_kwh - SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH, 4)
         surplus_above_late_dynamic_reserve_kwh = round(usable_total_kwh - late_dynamic_reserve_floor_kwh, 4)
         if usable_total_kwh <= reserve_floor_kwh:
             reserve_state = "below_floor"
-        elif usable_total_kwh < SOLPLANET_EXPORT_MONITOR_PRE_PEAK_RESERVE_KWH and in_pre_peak_phase:
+        elif usable_total_kwh < pre_peak_reserve_floor_kwh and in_pre_peak_phase:
             reserve_state = "below_pre_peak_reserve"
         elif usable_total_kwh < SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH:
             reserve_state = "between_floor_and_comfort"
@@ -5676,11 +5686,11 @@ def _build_solplanet_export_monitor(
             target_sell_kwh = max((surplus_above_pre_peak_reserve_kwh or 0.0), 0.0)
             if target_sell_kwh > 0.0:
                 recommendation = "sell"
-                reason = "pre_peak_surplus_above_35kwh_reserve"
+                reason = "pre_peak_surplus_above_configured_reserve"
                 recommended_pout_w = SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
             else:
                 recommendation = "hold"
-                reason = "pre_peak_35kwh_reserve_not_available"
+                reason = "pre_peak_configured_reserve_not_available"
         elif in_peak_hold_phase:
             recommendation = "hold_until_late_phase"
             reason = "evening_peak_reserve_period"
@@ -5745,7 +5755,7 @@ def _build_solplanet_export_monitor(
             4,
         ),
         "reserve_floor_kwh": reserve_floor_kwh,
-        "pre_peak_reserve_floor_kwh": SOLPLANET_EXPORT_MONITOR_PRE_PEAK_RESERVE_KWH,
+        "pre_peak_reserve_floor_kwh": pre_peak_reserve_floor_kwh,
         "comfort_floor_kwh": SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH,
         "current_home_load_w": round(current_home_load_w, 1) if current_home_load_w is not None else None,
         "remaining_export_window_hours": round(remaining_export_window_hours, 4),
@@ -5771,7 +5781,7 @@ def _build_solplanet_export_monitor(
         "avoid_import_loss_aud_per_kwh": round(avoid_import_loss_aud_per_kwh, 4),
         "guardrails": {
             "do_not_sell_below_floor_kwh": reserve_floor_kwh,
-            "pre_peak_sell_only_above_kwh": SOLPLANET_EXPORT_MONITOR_PRE_PEAK_RESERVE_KWH,
+            "pre_peak_sell_only_above_kwh": pre_peak_reserve_floor_kwh,
             "normal_keep_comfort_floor_kwh": SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH,
             "late_phase_dynamic_floor": "reserve_floor_kwh + current_home_load_w projected to export_window_end_hour",
             "pre_peak_phase_end_hour": SOLPLANET_EXPORT_MONITOR_PRE_PEAK_END_HOUR,
@@ -12907,6 +12917,23 @@ def _worker_control_result_text(
                 f"added={_fmt_result_number(export_tracking_map.get('added_export_wh'), 0, 'Wh')}, "
                 f"threshold={threshold_text}"
             )
+        solplanet_monitor = export_window_map.get("solplanet_export_monitor")
+        solplanet_monitor_map = solplanet_monitor if isinstance(solplanet_monitor, dict) else {}
+        if solplanet_monitor_map:
+            monitor_control = export_window_map.get("solplanet_export_monitor_control")
+            monitor_control_map = monitor_control if isinstance(monitor_control, dict) else {}
+            extra_parts.append(
+                "solplanet_export_monitor "
+                f"phase={solplanet_monitor_map.get('phase') or '-'}, "
+                f"recommendation={solplanet_monitor_map.get('recommendation') or '-'}, "
+                f"reason={solplanet_monitor_map.get('reason') or '-'}, "
+                f"target_sell={_fmt_result_number(solplanet_monitor_map.get('target_sell_kwh'), 3, 'kWh')}, "
+                f"usable={_fmt_result_number(solplanet_monitor_map.get('usable_battery_total_kwh'), 1, 'kWh')}, "
+                f"reserve={_fmt_result_number(solplanet_monitor_map.get('reserve_floor_kwh'), 1, 'kWh')}, "
+                f"pre_peak_reserve={_fmt_result_number(solplanet_monitor_map.get('pre_peak_reserve_floor_kwh'), 1, 'kWh')}, "
+                f"late_dynamic_reserve={_fmt_result_number(solplanet_monitor_map.get('late_dynamic_reserve_floor_kwh'), 1, 'kWh')}, "
+                f"desired_pout={_fmt_result_number(monitor_control_map.get('desired_pout_w'), 0, 'W')}"
+            )
         if steps_text and steps_text != "-":
             extra_parts.append(f"detail {action_type} ({steps_text})")
         for notification_map in notification_list:
@@ -15170,6 +15197,7 @@ async def config_status() -> dict[str, object]:
         "solplanet_sample_interval_seconds": solplanet_sample_interval_seconds,
         "detail_retention_months": settings.detail_retention_months,
         "solplanet_export_reserve_floor_kwh": settings.solplanet_export_reserve_floor_kwh,
+        "solplanet_pre_peak_export_reserve_kwh": settings.solplanet_pre_peak_export_reserve_kwh,
     }
 
 

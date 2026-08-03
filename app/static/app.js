@@ -127,8 +127,9 @@ const I18N = {
     configMustSaveFirst: "Configuration is not complete yet. Complete setup first.",
     dashboardReserveFloorLabel: "Export reserve",
     dashboardReserveFloorInputLabel: "Keep",
+    dashboardPrePeakReserveInputLabel: "16-18 keep",
     dashboardReserveFloorSaveBtn: "Save",
-    dashboardReserveFloorDisplay: "Reserve {value} before selling",
+    dashboardReserveFloorDisplay: "Reserve {value} before selling · 16-18 keep {prePeak}",
     dashboardReserveFloorSaving: "Saving...",
     dashboardReserveFloorSaved: "Saved",
     dashboardReserveFloorSaveFailed: "Save failed: {error}",
@@ -877,9 +878,15 @@ const I18N = {
     samplingZeroHeroFieldLiveExport: "Live Export",
     samplingZeroHeroFieldCoverage: "Coverage",
     samplingZeroHeroFieldSolplanetRecommendation: "Solplanet Plan",
+    samplingZeroHeroFieldSolplanetPhase: "Sell Phase",
     samplingZeroHeroFieldDailyExport: "Daily Export",
     samplingZeroHeroFieldUsableBattery: "Usable Battery",
+    samplingZeroHeroFieldActiveReserve: "Active Reserve",
     samplingZeroHeroFieldReserve: "Reserve Margin",
+    solplanetExportMonitorPhasePrePeak: "16:00-18:00, sell only above configured reserve",
+    solplanetExportMonitorPhasePeakHold: "18:00-21:00, hold battery for peak load",
+    solplanetExportMonitorPhaseLateTarget: "21:00-23:00, sell above dynamic reserve",
+    solplanetExportMonitorPhaseOutside: "Outside export window",
     solplanetExportMonitorRecommendationSell: "Sell at {power}",
     solplanetExportMonitorRecommendationSellSurplus: "Sell surplus at {power}",
     solplanetExportMonitorRecommendationStop: "Stop selling",
@@ -1245,8 +1252,9 @@ const I18N = {
     configMustSaveFirst: "当前配置还不完整，请先完成配置",
     dashboardReserveFloorLabel: "卖电保留线",
     dashboardReserveFloorInputLabel: "保留",
+    dashboardPrePeakReserveInputLabel: "16-18 保留",
     dashboardReserveFloorSaveBtn: "保存",
-    dashboardReserveFloorDisplay: "卖电前保留 {value}",
+    dashboardReserveFloorDisplay: "卖电前保留 {value} · 16-18 保留 {prePeak}",
     dashboardReserveFloorSaving: "保存中...",
     dashboardReserveFloorSaved: "已保存",
     dashboardReserveFloorSaveFailed: "保存失败: {error}",
@@ -1995,9 +2003,15 @@ const I18N = {
     samplingZeroHeroFieldLiveExport: "实时卖电",
     samplingZeroHeroFieldCoverage: "覆盖率",
     samplingZeroHeroFieldSolplanetRecommendation: "Solplanet 策略",
+    samplingZeroHeroFieldSolplanetPhase: "卖电阶段",
     samplingZeroHeroFieldDailyExport: "今日卖电",
     samplingZeroHeroFieldUsableBattery: "可用电量",
+    samplingZeroHeroFieldActiveReserve: "当前保底",
     samplingZeroHeroFieldReserve: "保底余量",
+    solplanetExportMonitorPhasePrePeak: "16:00-18:00，仅卖配置保底以上",
+    solplanetExportMonitorPhasePeakHold: "18:00-21:00，留电给晚高峰负载",
+    solplanetExportMonitorPhaseLateTarget: "21:00-23:00，仅卖动态保底以上",
+    solplanetExportMonitorPhaseOutside: "不在外送窗口",
     solplanetExportMonitorRecommendationSell: "按 {power} 卖电",
     solplanetExportMonitorRecommendationSellSurplus: "按 {power} 卖余电",
     solplanetExportMonitorRecommendationStop: "停止卖电",
@@ -3993,6 +4007,9 @@ function buildConfigPayloadFromForm() {
   const reserveFloorKwh = toFiniteNumber(document.getElementById("combinedReserveFloorInput")?.value)
     ?? toFiniteNumber(stateCache.lastConfig?.solplanet_export_reserve_floor_kwh)
     ?? 18;
+  const prePeakReserveKwh = toFiniteNumber(document.getElementById("combinedPrePeakReserveInput")?.value)
+    ?? toFiniteNumber(stateCache.lastConfig?.solplanet_pre_peak_export_reserve_kwh)
+    ?? 35;
   return {
     ha_url: document.getElementById("cfgHaUrl").value.trim(),
     ha_token: document.getElementById("cfgHaToken").value.trim(),
@@ -4005,6 +4022,7 @@ function buildConfigPayloadFromForm() {
     weather_lat: parseFloat(document.getElementById("cfgWeatherLat").value) || null,
     weather_lon: parseFloat(document.getElementById("cfgWeatherLon").value) || null,
     solplanet_export_reserve_floor_kwh: reserveFloorKwh,
+    solplanet_pre_peak_export_reserve_kwh: prePeakReserveKwh,
   };
 }
 
@@ -6407,23 +6425,45 @@ function dashboardReserveFloorFromSource(combinedFlow = null, configPayload = nu
     ?? 18;
 }
 
+function dashboardPrePeakReserveFromSource(combinedFlow = null, configPayload = null) {
+  return toFiniteNumber(configPayload?.solplanet_pre_peak_export_reserve_kwh)
+    ?? toFiniteNumber(combinedFlow?.energy_reference?.solplanet_pre_peak_export_reserve_kwh)
+    ?? toFiniteNumber(stateCache.lastConfig?.solplanet_pre_peak_export_reserve_kwh)
+    ?? 35;
+}
+
 function renderDashboardReserveFloorControl(combinedFlow = null, configPayload = null) {
   const reserveFloorKwh = dashboardReserveFloorFromSource(combinedFlow, configPayload);
+  const prePeakReserveKwh = dashboardPrePeakReserveFromSource(combinedFlow, configPayload);
   const formatted = formatSamplingKwh(reserveFloorKwh, 1);
-  setText("combined-usableBatteryReserve", t("dashboardReserveFloorDisplay", { value: formatted }));
-  setText("combinedReserveFloorDisplay", t("dashboardReserveFloorDisplay", { value: formatted }));
+  const prePeakFormatted = formatSamplingKwh(prePeakReserveKwh, 1);
+  setText("combined-usableBatteryReserve", t("dashboardReserveFloorDisplay", { value: formatted, prePeak: prePeakFormatted }));
+  setText("combinedReserveFloorDisplay", t("dashboardReserveFloorDisplay", { value: formatted, prePeak: prePeakFormatted }));
   const input = document.getElementById("combinedReserveFloorInput");
   if (input && document.activeElement !== input) {
     input.value = String(Number.isInteger(reserveFloorKwh) ? reserveFloorKwh : reserveFloorKwh.toFixed(1));
+  }
+  const prePeakInput = document.getElementById("combinedPrePeakReserveInput");
+  if (prePeakInput && document.activeElement !== prePeakInput) {
+    prePeakInput.value = String(Number.isInteger(prePeakReserveKwh) ? prePeakReserveKwh : prePeakReserveKwh.toFixed(1));
   }
 }
 
 async function saveDashboardReserveFloor() {
   const input = document.getElementById("combinedReserveFloorInput");
+  const prePeakInput = document.getElementById("combinedPrePeakReserveInput");
   const statusEl = document.getElementById("combinedReserveFloorStatus");
   const button = document.getElementById("combinedReserveFloorSaveBtn");
   const reserveFloorKwh = toFiniteNumber(input?.value);
-  if (reserveFloorKwh === null || reserveFloorKwh < 0 || reserveFloorKwh > 100) {
+  const prePeakReserveKwh = toFiniteNumber(prePeakInput?.value);
+  if (
+    reserveFloorKwh === null
+    || reserveFloorKwh < 0
+    || reserveFloorKwh > 100
+    || prePeakReserveKwh === null
+    || prePeakReserveKwh < 0
+    || prePeakReserveKwh > 100
+  ) {
     if (statusEl) statusEl.textContent = t("dashboardReserveFloorSaveFailed", { error: "0-100 kWh" });
     return;
   }
@@ -6434,6 +6474,7 @@ async function saveDashboardReserveFloor() {
     const payload = {
       ...current,
       solplanet_export_reserve_floor_kwh: reserveFloorKwh,
+      solplanet_pre_peak_export_reserve_kwh: prePeakReserveKwh,
     };
     const result = await fetchJson("/api/config", {
       method: "PUT",
@@ -11032,6 +11073,27 @@ function formatSolplanetExportMonitorRecommendation(monitor) {
   return t("solplanetExportMonitorRecommendationObserve");
 }
 
+function formatSolplanetExportMonitorPhase(monitor) {
+  const phase = String(monitor?.phase || "").trim();
+  if (phase === "pre_peak_surplus") return t("solplanetExportMonitorPhasePrePeak");
+  if (phase === "peak_hold") return t("solplanetExportMonitorPhasePeakHold");
+  if (phase === "late_target") return t("solplanetExportMonitorPhaseLateTarget");
+  return t("solplanetExportMonitorPhaseOutside");
+}
+
+function solplanetExportMonitorActiveReserveKwh(monitor) {
+  const phase = String(monitor?.phase || "").trim();
+  const hardReserveKwh = Number(monitor?.reserve_floor_kwh);
+  const prePeakReserveKwh = Number(monitor?.pre_peak_reserve_floor_kwh);
+  const lateDynamicReserveKwh = Number(monitor?.late_dynamic_reserve_floor_kwh);
+  const comfortFloorKwh = Number(monitor?.comfort_floor_kwh);
+  if (phase === "pre_peak_surplus" && Number.isFinite(prePeakReserveKwh)) return prePeakReserveKwh;
+  if (phase === "late_target" && Number.isFinite(lateDynamicReserveKwh)) return lateDynamicReserveKwh;
+  if (Number.isFinite(comfortFloorKwh) && Number.isFinite(hardReserveKwh)) return Math.max(comfortFloorKwh, hardReserveKwh);
+  if (Number.isFinite(hardReserveKwh)) return hardReserveKwh;
+  return null;
+}
+
 function renderSamplingZeroHeroWindow() {
   const badgeEl = document.getElementById("samplingZeroHeroBadge");
   const bodyEl = document.getElementById("samplingZeroHeroBody");
@@ -11089,11 +11151,15 @@ function renderSamplingZeroHeroWindow() {
     const exportedKwh = Number(solplanetExportMonitor.exported_kwh);
     const targetKwh = Number(solplanetExportMonitor.daily_export_target_kwh);
     const usableKwh = Number(solplanetExportMonitor.usable_battery_total_kwh);
-    const comfortFloorKwh = Number(solplanetExportMonitor.comfort_floor_kwh);
+    const activeReserveKwh = solplanetExportMonitorActiveReserveKwh(solplanetExportMonitor);
     metrics.push(
       {
         label: t("samplingZeroHeroFieldSolplanetRecommendation"),
         value: formatSolplanetExportMonitorRecommendation(solplanetExportMonitor),
+      },
+      {
+        label: t("samplingZeroHeroFieldSolplanetPhase"),
+        value: formatSolplanetExportMonitorPhase(solplanetExportMonitor),
       },
       {
         label: t("samplingZeroHeroFieldDailyExport"),
@@ -11104,10 +11170,14 @@ function renderSamplingZeroHeroWindow() {
         value: formatSamplingKwh(usableKwh, 1),
       },
       {
+        label: t("samplingZeroHeroFieldActiveReserve"),
+        value: activeReserveKwh === null ? "-" : formatSamplingKwh(activeReserveKwh, 1),
+      },
+      {
         label: t("samplingZeroHeroFieldReserve"),
         value:
-          Number.isFinite(usableKwh) && Number.isFinite(comfortFloorKwh)
-            ? formatSamplingKwh(usableKwh - comfortFloorKwh, 1)
+          Number.isFinite(usableKwh) && activeReserveKwh !== null
+            ? formatSamplingKwh(usableKwh - activeReserveKwh, 1)
             : "-",
       },
     );
