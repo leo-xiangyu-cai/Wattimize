@@ -489,6 +489,9 @@ const I18N = {
     sajProfileOptionSelfConsumption: "Self Consumption",
     sajProfileOptionTimeOfUse: "Time of Use",
     sajProfileOptionMicrogrid: "Microgrid",
+    sajTouDirectionSell: "Sell",
+    sajTouDirectionBuy: "Buy",
+    sajTouPowerLabel: "Power (W)",
     sajProfileDesiredText: "Selected profile: {profile}",
     sajProfileActualText: "Remote profile: {profile}",
     sajProfileStatusPending: "Status: waiting for HA readback to match the selected profile",
@@ -1614,6 +1617,9 @@ const I18N = {
     sajProfileOptionSelfConsumption: "自发自用",
     sajProfileOptionTimeOfUse: "分时电价",
     sajProfileOptionMicrogrid: "微电网",
+    sajTouDirectionSell: "卖电",
+    sajTouDirectionBuy: "买电",
+    sajTouPowerLabel: "功率 (W)",
     sajProfileDesiredText: "已选择档位：{profile}",
     sajProfileActualText: "远端实际档位：{profile}",
     sajProfileStatusPending: "状态：等待 Home Assistant 读回与已选档位一致",
@@ -5586,6 +5592,7 @@ function renderSajProfileFields(payload, ids) {
   const select = document.getElementById(ids.selectId);
   if (!payload) {
     if (select) select.value = "self_consumption";
+    renderSajTouControls();
     setText(ids.desiredId, "-");
     setText(ids.actualId, "-");
     setText(ids.statusId, "-");
@@ -5594,15 +5601,40 @@ function renderSajProfileFields(payload, ids) {
 
   const selectedProfile = payload.selected_profile || payload.effective_profile || "self_consumption";
   const actualProfile = payload.actual_profile || null;
-  if (select) select.value = selectedProfile;
-  setText(ids.desiredId, t("sajProfileDesiredText", { profile: sajProfileLabel(selectedProfile) }));
+  const visibleProfile = actualProfile || selectedProfile;
+  if (select) select.value = visibleProfile;
+  renderSajTouControls();
+  setText(ids.desiredId, t("sajProfileDesiredText", { profile: sajProfileLabel(visibleProfile) }));
   setText(ids.actualId, t("sajProfileActualText", { profile: sajProfileLabel(actualProfile) }));
 
   let statusKey = "sajProfileStatusUnknown";
   if (payload.pending_remote_sync) statusKey = "sajProfileStatusPending";
-  else if (actualProfile && selectedProfile && actualProfile === selectedProfile) statusKey = "sajProfileStatusSynced";
+  else if (actualProfile && visibleProfile && actualProfile === visibleProfile) statusKey = "sajProfileStatusSynced";
   else if (payload.is_custom_remote_state) statusKey = "sajProfileStatusCustom";
   setText(ids.statusId, t(statusKey));
+}
+
+function sajTouPowerFromControlState() {
+  const profileState = stateCache.lastSajProfile?.profile_state || stateCache.lastSajProfile || null;
+  const state = profileState?.control_state || stateCache.lastSajControl?.control_state || stateCache.lastSajControl?.state || null;
+  const slot = Array.isArray(state?.discharge?.slots) ? state.discharge.slots[0] : null;
+  const estimate = Number(slot?.power_w_estimate);
+  if (Number.isFinite(estimate) && estimate > 0) return Math.round(estimate);
+  const percent = Number(slot?.power_percent);
+  if (Number.isFinite(percent)) return Math.round((_sajRatedPowerForUi() * percent) / 100);
+  return 5000;
+}
+
+function renderSajTouControls() {
+  const select = document.getElementById("sajDashboardProfileSelect");
+  const controls = document.getElementById("sajDashboardTouControls");
+  if (!controls) return;
+  const isTimeOfUse = select?.value === "time_of_use";
+  controls.classList.toggle("hidden", !isTimeOfUse);
+  const powerInput = document.getElementById("sajDashboardTouPowerInput");
+  if (powerInput && isTimeOfUse && !powerInput.matches(":focus")) {
+    powerInput.value = String(sajTouPowerFromControlState());
+  }
 }
 
 function getSajDashboardModeText() {
@@ -5612,7 +5644,7 @@ function getSajDashboardModeText() {
   const actualLabel = actualProfile ? sajProfileLabel(actualProfile) : "";
   const selectedLabel = selectedProfile ? sajProfileLabel(selectedProfile) : "";
   if (actualLabel && selectedLabel) {
-    return actualProfile === selectedProfile ? actualLabel : `${actualLabel} -> ${selectedLabel}`;
+    return actualLabel;
   }
   if (actualLabel) return actualLabel;
   if (selectedLabel) return selectedLabel;
@@ -5665,19 +5697,46 @@ function sajControlApiRemovedMessage() {
 }
 
 async function loadSajProfile() {
-  stateCache.lastSajProfile = null;
+  const previous = stateCache.lastSajProfile;
   renderSajProfilePanel();
-  setText("sajProfileStatusText", sajControlApiRemovedMessage());
-  setText("sajDashboardProfileStatusText", sajControlApiRemovedMessage());
+  try {
+    const payload = await fetchJson("/api/saj/control/state", { timeoutMs: 12000 });
+    stateCache.lastSajControl = payload;
+    stateCache.lastSajProfile = payload?.profile_state || payload || null;
+  } catch (err) {
+    stateCache.lastSajProfile = previous || null;
+    setText("sajProfileStatusText", t("sajProfileLoadFailed", { error: String(err) }));
+    setText("sajDashboardProfileStatusText", t("sajProfileLoadFailed", { error: String(err) }));
+  }
+  renderSajProfilePanel();
+  renderSummary(stateCache.lastSummary || null);
 }
 
 async function applySajProfile(selectId = "sajProfileSelect") {
   const fromDashboardPopover = selectId === "sajDashboardProfileSelect";
   if (fromDashboardPopover) setSajDashboardProfilePopoverVisible(false);
-  const errorText = sajControlApiRemovedMessage();
-  setText("sajProfileStatusText", errorText);
-  setText("sajDashboardProfileStatusText", errorText);
-  showSajActionError(errorText, []);
+  const profileId = normalizeSajProfileId(document.getElementById(selectId)?.value || "");
+  try {
+    if (profileId === "self_consumption") {
+      await applySajSelfConsumption();
+    } else if (profileId === "time_of_use") {
+      const direction = document.querySelector("input[name='sajDashboardTouDirection']:checked")?.value || "discharge";
+      const rawPower = Number(document.getElementById("sajDashboardTouPowerInput")?.value || "0");
+      const powerW = Math.round(Math.max(0, Math.min(_sajRatedPowerForUi(), Number.isFinite(rawPower) ? rawPower : 0)));
+      if (direction === "charge") await applySajManualChargePower(powerW);
+      else await applySajManualDischargePower(powerW);
+    } else {
+      throw new Error(sajControlApiRemovedMessage());
+    }
+    await loadSajProfile();
+    setText("sajProfileStatusText", t("sajProfileApplySummary", { profile: sajProfileLabel(profileId) }));
+    setText("sajDashboardProfileStatusText", t("sajProfileApplySummary", { profile: sajProfileLabel(profileId) }));
+  } catch (err) {
+    const errorText = t("sajProfileApplyFailed", { error: String(err) });
+    setText("sajProfileStatusText", errorText);
+    setText("sajDashboardProfileStatusText", errorText);
+    showSajActionError(errorText, []);
+  }
 }
 
 function setBalanceStatus(system, balanceW) {
@@ -14732,6 +14791,17 @@ async function applySajManualDischargePower(powerW) {
   return payload;
 }
 
+async function applySajManualChargePower(powerW) {
+  const payload = await fetchJson("/api/saj/manual-charge-power", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ power_w: powerW }),
+    timeoutMs: 15000,
+  });
+  stateCache.lastSajControl = payload;
+  return payload;
+}
+
 async function applySajSelfConsumption() {
   const payload = await fetchJson("/api/saj/self-consumption", {
     method: "PUT",
@@ -15674,6 +15744,7 @@ async function loadSummary() {
   renderSajProfilePanel();
   const previousCombinedFlow = summary.combinedFlow;
   const combinedRequest = fetchJson("/api/energy-flow/combined", { timeoutMs: 30000 });
+  void loadSajProfile();
 
   void combinedRequest
     .then((combinedFlow) => {
@@ -17315,6 +17386,9 @@ bindClickIfPresent("sajProfileApplyBtn", (event) => {
 bindClickIfPresent("sajDashboardProfileApplyBtn", (event) => {
   event?.stopPropagation?.();
   void applySajProfile("sajDashboardProfileSelect");
+});
+bindChangeIfPresent("sajDashboardProfileSelect", () => {
+  renderSajTouControls();
 });
 bindClickIfPresent("sajInverterModeApplyBtn", () => {
   void applySajInverterModeTarget();

@@ -288,6 +288,11 @@ select {
   background: var(--accent-dark);
 }
 
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .btn.secondary {
   background: #5f6d78;
 }
@@ -4035,6 +4040,45 @@ td {
 
 .saj-profile-field select {
   width: 100%;
+}
+
+.saj-profile-field input {
+  width: 100%;
+}
+
+.saj-tou-controls {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.saj-tou-controls.hidden {
+  display: none;
+}
+
+.saj-tou-direction {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.saj-tou-direction label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid rgba(103, 133, 118, 0.22);
+  border-radius: 8px;
+  background: #f9fbf8;
+  color: #31453a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.saj-tou-direction label.disabled {
+  color: #8da095;
+  background: #f3f5f2;
 }
 
 .saj-profile-actions {

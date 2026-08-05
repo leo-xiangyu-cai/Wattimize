@@ -34,6 +34,37 @@ cleanup_remote_temp() {
 
 trap cleanup_remote_temp EXIT
 
+prune_remote_database_backups() {
+  remote_exec "
+    set -euo pipefail
+    backup_dir='${NAS_DATA_DIR}/backup'
+    if [ ! -d \"\${backup_dir}\" ]; then
+      echo 'No NAS database backup directory found; skipping database backup cleanup.'
+      exit 0
+    fi
+
+    before_count=\$(find \"\${backup_dir}\" -maxdepth 1 -type f \\( \
+      -name '${DB_BASENAME}.*.bak' -o \
+      -name '${DB_BASENAME}-wal.*.bak' -o \
+      -name '${DB_BASENAME}-shm.*.bak' \
+    \\) 2>/dev/null | wc -l | tr -d ' ')
+
+    find \"\${backup_dir}\" -maxdepth 1 -type f \\( \
+      -name '${DB_BASENAME}.*.bak' -o \
+      -name '${DB_BASENAME}-wal.*.bak' -o \
+      -name '${DB_BASENAME}-shm.*.bak' \
+    \\) -mtime '+${NAS_DB_BACKUP_RETENTION_DAYS}' -delete
+
+    after_count=\$(find \"\${backup_dir}\" -maxdepth 1 -type f \\( \
+      -name '${DB_BASENAME}.*.bak' -o \
+      -name '${DB_BASENAME}-wal.*.bak' -o \
+      -name '${DB_BASENAME}-shm.*.bak' \
+    \\) 2>/dev/null | wc -l | tr -d ' ')
+    deleted_count=\$((before_count - after_count))
+    echo \"Pruned \${deleted_count} NAS database backup file(s) older than ${NAS_DB_BACKUP_RETENTION_DAYS} day(s); \${after_count} file(s) remain.\"
+  "
+}
+
 sync_plan_file_to_nas() {
   if [[ ! -f "${LOCAL_PLAN_PATH}" ]]; then
     echo "Electricity plan file not found at ${LOCAL_PLAN_PATH}; cannot deploy Plan page data." >&2
@@ -135,6 +166,8 @@ fi
 
 echo "Health check passed. Cleaning remote temporary files..."
 cleanup_remote_temp
+echo "Cleaning old NAS database backups..."
+prune_remote_database_backups
 
 cutoff_file_args=("-mtime" "+${RETENTION_DAYS}")
 find dist/docker-images -type f \( -name 'wattimize_amd64_*.tar' -o -name 'wattimize_amd64_*.tar.sha256' \) "${cutoff_file_args[@]}" -delete

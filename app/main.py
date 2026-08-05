@@ -60,11 +60,13 @@ from app.persistence import (
     count_pending_worker_api_logs,
     backfill_notification_entries_from_worker_logs,
     build_daily_report_phase_battery,
+    build_daily_report_soc_estimates,
     build_monthly_report_analysis,
     compute_daily_usage,
     compute_daily_cost_between,
     compute_daily_report_cost,
     compute_usage_between,
+    apply_daily_report_soc_estimates,
     delete_worker_api_logs_older_than,
     dismiss_notification_entry,
     delete_realtime_kv_by_prefix,
@@ -216,6 +218,8 @@ TESLA_POST_EXPORT_FORECAST_HISTORY_DAYS = 3
 TESLA_POST_EXPORT_FORECAST_MIN_COVERAGE_RATIO = 0.5
 FREE_ENERGY_WINDOW_START_HOUR = 11
 FREE_ENERGY_WINDOW_END_HOUR = 15
+SAJ_POST_FREE_DISCHARGE_POWER_W = 5000
+SAJ_EXPORT_WINDOW_DISCHARGE_POWER_W = 5000
 PRIORITY_BUSINESS_DAY_START_HOUR = 11
 TESLA_PRIORITY_TARGET_SOC_PERCENT = 80.0
 TESLA_PRIORITY_MIN_SOC_PERCENT = 10.0
@@ -250,6 +254,7 @@ SAJ_MORNING_GRID_IMPORT_GUARD_START_SOC_PERCENT = 25.0
 SAJ_MORNING_GRID_IMPORT_GUARD_STOP_SOC_PERCENT = 20.0
 SAJ_MORNING_GRID_IMPORT_GUARD_DISCHARGE_POWER_W = 2_000
 SAJ_MORNING_GRID_IMPORT_GUARD_STATE_KEY = "operation_state.saj_morning_grid_import_guard"
+SAJ_POST_FREE_DISCHARGE_STATE_KEY = "operation_state.saj_post_free_discharge"
 EXPORT_WINDOW_BATTERY_SOFT_DISCHARGE_TARGET_W = 7_500.0
 EXPORT_WINDOW_BATTERY_HARD_DISCHARGE_LIMIT_W = 10_000.0
 SOLPLANET_EXPORT_MONITOR_TARGET_KWH = 18.5
@@ -1428,6 +1433,12 @@ SOLPLANET_DAY_ALIAS = {
 
 
 class SajManualDischargePowerPayload(BaseModel):
+    power_w: int | None = Field(default=None, ge=0, le=SAJ_RATED_POWER_W)
+    power_percent: int | None = Field(default=None, ge=0, le=100)
+    settle_seconds: float = Field(default=2.0, ge=0, le=10)
+
+
+class SajManualChargePowerPayload(BaseModel):
     power_w: int | None = Field(default=None, ge=0, le=SAJ_RATED_POWER_W)
     power_percent: int | None = Field(default=None, ge=0, le=100)
     settle_seconds: float = Field(default=2.0, ge=0, le=10)
@@ -3746,7 +3757,7 @@ def _is_time_window_rule_enabled(enabled_map: dict[str, bool] | None, rule_code:
 def _saj_target_profile_for_time(now_local: datetime) -> tuple[str, str]:
     if _is_within_free_energy_window(now_local):
         return "self_consumption", "free_energy_window_force_self_consumption"
-    return "self_consumption", "outside_free_energy_window_force_self_consumption"
+    return "time_of_use", "post_free_window_one_time_discharge"
 
 
 async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str, bool] | None = None) -> dict[str, object]:
@@ -3800,6 +3811,7 @@ async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str
     result: dict[str, object] = {
         "desired_profile": desired_profile,
         "desired_reason": desired_reason,
+        "desired_discharge_power_w": SAJ_POST_FREE_DISCHARGE_POWER_W if not free_energy_window_active else None,
         "rule_code": rule_code,
         "rule_enabled": True,
         "selected_profile": selected_profile or None,
@@ -3815,6 +3827,84 @@ async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str
         "free_energy_fallback_needed": free_energy_fallback_needed,
         "action": "noop",
     }
+    if not free_energy_window_active:
+        target_power_percent = int(round((SAJ_POST_FREE_DISCHARGE_POWER_W / SAJ_RATED_POWER_W) * 100.0))
+        trigger_date = now_local.date().isoformat()
+        post_free_trigger_due = now_local.hour >= FREE_ENERGY_WINDOW_END_HOUR
+        discharge_slots = discharge_map.get("slots")
+        discharge_slots_list = discharge_slots if isinstance(discharge_slots, list) else []
+        slot1 = discharge_slots_list[0] if discharge_slots_list and isinstance(discharge_slots_list[0], dict) else {}
+        discharge_time_enable = _to_number(discharge_map.get("time_enable_mask"))
+        slot_power_percent = _to_number(slot1.get("power_percent"))
+        slot_start = str(slot1.get("start_time") or "").strip()
+        slot_end = str(slot1.get("end_time") or "").strip()
+        slot_day_mask = _to_number(slot1.get("day_mask"))
+        configured_for_post_free_discharge = bool(
+            input_profile == "time_of_use"
+            and discharge_control_switch is True
+            and discharge_time_enable == 1
+            and slot_power_percent == target_power_percent
+            and slot_start == "00:00"
+            and slot_end == "23:59"
+            and slot_day_mask == 127
+        )
+        target_discharge_active = bool(
+            battery_power_w is not None
+            and battery_power_w >= SAJ_POST_FREE_DISCHARGE_POWER_W - BALANCE_TOLERANCE_W
+        )
+        result.update(
+            {
+                "target_power_percent": target_power_percent,
+                "configured_for_post_free_discharge": configured_for_post_free_discharge,
+                "target_discharge_active": target_discharge_active,
+                "post_free_trigger_date": trigger_date,
+                "post_free_trigger_due": post_free_trigger_due,
+            }
+        )
+        if not post_free_trigger_due:
+            result["reason"] = "post_free_discharge_trigger_not_due"
+            return result
+        post_free_state = await _load_saj_post_free_discharge_state()
+        last_triggered_date = str(post_free_state.get("last_triggered_date") or "").strip()
+        result["last_triggered_date"] = last_triggered_date or None
+        if last_triggered_date == trigger_date:
+            result["reason"] = "post_free_discharge_already_triggered_today"
+            return result
+        if configured_for_post_free_discharge:
+            await _store_saj_post_free_discharge_state(
+                {
+                    "last_triggered_date": trigger_date,
+                    "last_triggered_at_utc": datetime.now(UTC).isoformat(),
+                    "reason": "already_configured",
+                    "target_power_w": SAJ_POST_FREE_DISCHARGE_POWER_W,
+                    "target_power_percent": target_power_percent,
+                }
+            )
+            result["reason"] = "post_free_discharge_already_configured_mark_triggered"
+            return result
+        api_result = await put_saj_manual_discharge_power(
+            SajManualDischargePowerPayload(power_w=SAJ_POST_FREE_DISCHARGE_POWER_W, settle_seconds=2.0),
+            trigger_source="worker:saj_profile_guard",
+        )
+        await _store_saj_post_free_discharge_state(
+            {
+                "last_triggered_date": trigger_date,
+                "last_triggered_at_utc": datetime.now(UTC).isoformat(),
+                "reason": "applied",
+                "target_power_w": SAJ_POST_FREE_DISCHARGE_POWER_W,
+                "target_power_percent": target_power_percent,
+            }
+        )
+        result.update(
+            {
+                "action": "applied",
+                "reason": "apply_post_free_discharge_once",
+                "applied_profile": "time_of_use",
+                "api_path": "/api/saj/manual-discharge-power",
+                "api_result": api_result,
+            }
+        )
+        return result
     if not needs_apply:
         if free_energy_window_active and desired_profile == "self_consumption":
             result["reason"] = "free_energy_self_consumption_observe"
@@ -3842,7 +3932,8 @@ async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str
         )
         return result
 
-    if input_profile == desired_profile and actual_profile and actual_profile != desired_profile:
+    saj_charging = bool(battery_power_w is not None and battery_power_w <= -POWER_FLOW_ACTIVE_THRESHOLD_W)
+    if input_profile == desired_profile and actual_profile and actual_profile != desired_profile and not saj_charging:
         result.update(
             {
                 "reason": "pending_remote_sync",
@@ -3851,11 +3942,14 @@ async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str
         )
         return result
 
-    api_result = await put_saj_self_consumption(SajSelfConsumptionPayload(settle_seconds=2.0))
+    api_result = await put_saj_self_consumption(
+        SajSelfConsumptionPayload(settle_seconds=2.0),
+        trigger_source="worker:saj_profile_guard",
+    )
     result.update(
         {
             "action": "applied",
-            "reason": "applied_self_consumption",
+            "reason": "reapply_self_consumption_while_still_charging" if saj_charging else "applied_self_consumption",
             "applied_profile": desired_profile,
             "api_path": "/api/saj/self-consumption",
             "api_result": api_result,
@@ -4943,16 +5037,33 @@ def _operation_timeline_worker_entries(
 def _operation_timeline_manual_reason(run: dict[str, object], *, lang: Literal["zh", "en"] = "zh") -> str:
     status = str(run.get("status") or "").strip().lower()
     error_text = str(run.get("error_text") or "").strip()
+    trigger_source = str(run.get("trigger_source") or "manual_ui").strip().lower()
+    is_worker = trigger_source.startswith("worker")
+    source_text = (
+        "Worker automation"
+        if is_worker and lang == "en"
+        else "自动worker"
+        if is_worker
+        else "Manual operation from UI"
+        if lang == "en"
+        else "UI 手动触发的操作"
+    )
     if status in (OPERATION_RUN_STATUS_FAILED, OPERATION_RUN_STATUS_TIMEOUT):
         if error_text:
             return (
-                f"Manual operation from UI. Result: {error_text}"
+                f"{source_text}. Result: {error_text}"
                 if lang == "en"
-                else f"这是 UI 手动触发的操作。结果：{error_text}"
+                else f"这是{source_text}。结果：{error_text}"
             )
-        return "Manual operation from UI. Result: failed" if lang == "en" else "这是 UI 手动触发的操作。结果：失败"
+        return f"{source_text}. Result: failed" if lang == "en" else f"这是{source_text}。结果：失败"
     if status == OPERATION_RUN_STATUS_PENDING:
-        return "Manual operation from UI. Waiting for result." if lang == "en" else "这是 UI 手动触发的操作，正在等待结果。"
+        return f"{source_text}. Waiting for result." if lang == "en" else f"这是{source_text}，正在等待结果。"
+    if is_worker:
+        return (
+            f"{source_text}. Trigger source: {trigger_source}."
+            if lang == "en"
+            else f"这是{source_text}触发的操作。来源：{trigger_source}。"
+        )
     return "Manual operation from UI. No automation rule was involved." if lang == "en" else "这是 UI 手动触发的操作，不涉及自动规则。"
 
 
@@ -5001,6 +5112,23 @@ def _operation_timeline_manual_text(run: dict[str, object], *, lang: Literal["zh
                 base = f"设置SAJ手动放电为{int(round(power_percent))}%"
             else:
                 base = "设置SAJ手动放电"
+    elif operation_code == "saj.manual.set_charge_power":
+        power_w = _to_number(request_map.get("power_w"))
+        power_percent = _to_number(request_map.get("power_percent"))
+        if lang == "en":
+            if power_w is not None:
+                base = f"Set SAJ manual charge to {int(round(power_w))}W"
+            elif power_percent is not None:
+                base = f"Set SAJ manual charge to {int(round(power_percent))}%"
+            else:
+                base = "Set SAJ manual charge"
+        else:
+            if power_w is not None:
+                base = f"设置SAJ手动充电为{int(round(power_w))}W"
+            elif power_percent is not None:
+                base = f"设置SAJ手动充电为{int(round(power_percent))}%"
+            else:
+                base = "设置SAJ手动充电"
     elif operation_code == "saj.manual.set_self_consumption":
         base = "Set SAJ self-consumption" if lang == "en" else "设置SAJ为自发自用"
     elif operation_code == "saj.worker.morning_grid_import_guard":
@@ -5356,6 +5484,25 @@ async def _load_saj_morning_grid_import_guard_state() -> dict[str, object]:
     return {}
 
 
+async def _load_saj_post_free_discharge_state() -> dict[str, object]:
+    kv_map = await asyncio.to_thread(
+        get_realtime_kv_by_prefix,
+        storage_db_path,
+        prefix=SAJ_POST_FREE_DISCHARGE_STATE_KEY,
+    )
+    row = kv_map.get(SAJ_POST_FREE_DISCHARGE_STATE_KEY)
+    value = (row or {}).get("value")
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 async def _store_pool_pump_overnight_state(state: dict[str, object]) -> None:
     await asyncio.to_thread(
         upsert_realtime_kv,
@@ -5382,6 +5529,16 @@ async def _store_saj_morning_grid_import_guard_state(state: dict[str, object]) -
         storage_db_path,
         [
             (SAJ_MORNING_GRID_IMPORT_GUARD_STATE_KEY, json.dumps(state, ensure_ascii=False), "worker"),
+        ],
+    )
+
+
+async def _store_saj_post_free_discharge_state(state: dict[str, object]) -> None:
+    await asyncio.to_thread(
+        upsert_realtime_kv,
+        storage_db_path,
+        [
+            (SAJ_POST_FREE_DISCHARGE_STATE_KEY, json.dumps(state, ensure_ascii=False), "worker"),
         ],
     )
 
@@ -5969,6 +6126,122 @@ async def _apply_solplanet_export_monitor_control(
             }
         )
         combined_status["solplanet_export_monitor_control"] = {
+            **result,
+            "checked_at_utc": now_utc.isoformat(),
+        }
+        return result
+
+
+async def _apply_saj_export_window_discharge_control(
+    *,
+    solplanet_monitor: dict[str, object] | None,
+    solplanet_control: dict[str, object] | None,
+    now_local: datetime,
+    combined_status: dict[str, object],
+) -> dict[str, object]:
+    solplanet_control_map = solplanet_control if isinstance(solplanet_control, dict) else {}
+    desired_pout = _to_number(solplanet_control_map.get("desired_pout_w"))
+    if desired_pout is None:
+        desired_pout, desired_reason = _solplanet_export_monitor_desired_pout(solplanet_monitor, now_local)
+    else:
+        desired_reason = str(solplanet_control_map.get("desired_reason") or "").strip() or "monitor_not_selling"
+    should_discharge = bool(_is_within_export_window(now_local) and desired_pout and desired_pout > 0)
+    target_power_w = SAJ_EXPORT_WINDOW_DISCHARGE_POWER_W if should_discharge else 0
+    base_result: dict[str, object] = {
+        "mode": "auto_control",
+        "desired_discharge_power_w": target_power_w,
+        "desired_reason": desired_reason,
+        "checked_live": False,
+        "action": {"type": "noop", "reason": "solplanet_not_selling"},
+    }
+    if not should_discharge:
+        combined_status["saj_export_window_discharge_control"] = {
+            **base_result,
+            "checked_at_utc": datetime.now(UTC).isoformat(),
+        }
+        return base_result
+
+    now_utc = datetime.now(UTC)
+    target_power_percent = int(round((SAJ_EXPORT_WINDOW_DISCHARGE_POWER_W / SAJ_RATED_POWER_W) * 100.0))
+    try:
+        _, states_by_id = await _saj_control_states()
+        control_state = _build_saj_control_state(states_by_id)
+        profile_state = _build_saj_profile_state(control_state)
+        input_profile = str(profile_state.get("input_profile") or "").strip()
+        charge_state = control_state.get("charge")
+        charge_map = charge_state if isinstance(charge_state, dict) else {}
+        discharge_state = control_state.get("discharge")
+        discharge_map = discharge_state if isinstance(discharge_state, dict) else {}
+        discharge_slots = discharge_map.get("slots")
+        discharge_slots_list = discharge_slots if isinstance(discharge_slots, list) else []
+        slot1 = discharge_slots_list[0] if discharge_slots_list and isinstance(discharge_slots_list[0], dict) else {}
+        charge_time_enable = _to_number(charge_map.get("time_enable_mask"))
+        discharge_time_enable = _to_number(discharge_map.get("time_enable_mask"))
+        slot_power_percent = _to_number(slot1.get("power_percent"))
+        slot_start = str(slot1.get("start_time") or "").strip()
+        slot_end = str(slot1.get("end_time") or "").strip()
+        slot_day_mask = _to_number(slot1.get("day_mask"))
+        configured_for_export_discharge = bool(
+            input_profile == "time_of_use"
+            and charge_map.get("control_switch") is False
+            and charge_time_enable == 0
+            and discharge_map.get("control_switch") is True
+            and discharge_time_enable == 1
+            and slot_power_percent == target_power_percent
+            and slot_start == "00:00"
+            and slot_end == "23:59"
+            and slot_day_mask == 127
+        )
+        result = dict(base_result)
+        result.update(
+            {
+                "checked_live": True,
+                "target_power_percent": target_power_percent,
+                "configured_for_export_discharge": configured_for_export_discharge,
+                "input_profile": input_profile or None,
+                "charge_control_switch": charge_map.get("control_switch"),
+                "charge_time_enable": charge_time_enable,
+                "discharge_control_switch": discharge_map.get("control_switch"),
+                "discharge_time_enable": discharge_time_enable,
+                "slot1": {
+                    "start_time": slot_start or None,
+                    "end_time": slot_end or None,
+                    "power_percent": slot_power_percent,
+                    "day_mask": slot_day_mask,
+                },
+            }
+        )
+        if configured_for_export_discharge:
+            result["action"] = {"type": "noop", "reason": "already_at_target"}
+            combined_status["saj_export_window_discharge_control"] = {
+                **result,
+                "checked_at_utc": now_utc.isoformat(),
+            }
+            return result
+
+        api_result = await put_saj_manual_discharge_power(
+            SajManualDischargePowerPayload(power_w=SAJ_EXPORT_WINDOW_DISCHARGE_POWER_W, settle_seconds=2.0),
+            trigger_source="worker:solplanet_export_monitor",
+        )
+        result["action"] = {"type": "apply", "reason": desired_reason}
+        result["api_path"] = "/api/saj/manual-discharge-power"
+        result["api_result"] = api_result
+        combined_status["saj_export_window_discharge_control"] = {
+            **result,
+            "checked_at_utc": now_utc.isoformat(),
+            "applied_at_utc": now_utc.isoformat(),
+        }
+        return result
+    except Exception as exc:  # noqa: BLE001
+        result = dict(base_result)
+        result.update(
+            {
+                "checked_live": True,
+                "action": {"type": "failed", "reason": desired_reason},
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        )
+        combined_status["saj_export_window_discharge_control"] = {
             **result,
             "checked_at_utc": now_utc.isoformat(),
         }
@@ -6929,6 +7202,12 @@ async def _run_midday_window_check(
                 now_local=now_local,
                 combined_status=combined_status,
             )
+            result["export_window"]["saj_export_window_discharge_control"] = await _apply_saj_export_window_discharge_control(
+                solplanet_monitor=result["export_window"]["solplanet_export_monitor"],
+                solplanet_control=result["export_window"]["solplanet_export_monitor_control"],
+                now_local=now_local,
+                combined_status=combined_status,
+            )
             control_action = (
                 result["export_window"]["solplanet_export_monitor_control"].get("action")
                 if isinstance(result["export_window"].get("solplanet_export_monitor_control"), dict)
@@ -6939,6 +7218,19 @@ async def _run_midday_window_check(
                     "type": "set_solplanet_export",
                     "reason": control_action.get("reason"),
                     "desired_pout_w": result["export_window"]["solplanet_export_monitor_control"].get("desired_pout_w"),
+                })
+            saj_control_action = (
+                result["export_window"]["saj_export_window_discharge_control"].get("action")
+                if isinstance(result["export_window"].get("saj_export_window_discharge_control"), dict)
+                else None
+            )
+            if isinstance(saj_control_action, dict) and saj_control_action.get("type") == "apply":
+                _append_worker_action(result, {
+                    "type": "set_saj_export_discharge",
+                    "reason": saj_control_action.get("reason"),
+                    "desired_discharge_power_w": result["export_window"]["saj_export_window_discharge_control"].get(
+                        "desired_discharge_power_w"
+                    ),
                 })
 
         if tesla_rule_code:
@@ -7298,6 +7590,12 @@ async def _run_midday_window_check(
                 now_local=now_local,
                 combined_status=combined_status,
             )
+            export_window_map["saj_export_window_discharge_control"] = await _apply_saj_export_window_discharge_control(
+                solplanet_monitor=export_window_map["solplanet_export_monitor"],
+                solplanet_control=export_window_map["solplanet_export_monitor_control"],
+                now_local=now_local,
+                combined_status=combined_status,
+            )
             control_action = (
                 export_window_map["solplanet_export_monitor_control"].get("action")
                 if isinstance(export_window_map.get("solplanet_export_monitor_control"), dict)
@@ -7308,6 +7606,19 @@ async def _run_midday_window_check(
                     "type": "set_solplanet_export",
                     "reason": control_action.get("reason"),
                     "desired_pout_w": export_window_map["solplanet_export_monitor_control"].get("desired_pout_w"),
+                })
+            saj_control_action = (
+                export_window_map["saj_export_window_discharge_control"].get("action")
+                if isinstance(export_window_map.get("saj_export_window_discharge_control"), dict)
+                else None
+            )
+            if isinstance(saj_control_action, dict) and saj_control_action.get("type") == "apply":
+                _append_worker_action(result, {
+                    "type": "set_saj_export_discharge",
+                    "reason": saj_control_action.get("reason"),
+                    "desired_discharge_power_w": export_window_map["saj_export_window_discharge_control"].get(
+                        "desired_discharge_power_w"
+                    ),
                 })
             priority_snapshot = await _build_device_priority_snapshot(combined_flow, now_local=now_local)
             result["priority_snapshot"] = priority_snapshot
@@ -8020,7 +8331,10 @@ async def _run_saj_morning_grid_import_guard_check(
                 low_import_since_utc = ""
 
         if active and exit_reason is not None:
-            api_result = await put_saj_self_consumption(SajSelfConsumptionPayload(settle_seconds=2.0))
+            api_result = await put_saj_self_consumption(
+                SajSelfConsumptionPayload(settle_seconds=2.0),
+                trigger_source="worker:saj_morning_grid_import_guard",
+            )
             action = {
                 "type": "set_saj_self_consumption",
                 "reason": exit_reason,
@@ -9432,6 +9746,7 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
         states_by_entity_id,
         (f"sensor.{prefixes[0]}_app_mode",),
     ) or _find_state_by_keywords(states, prefixes, (("app", "mode"),))
+    sun = states_by_entity_id.get("sun.sun")
     pv1 = _find_state_by_entity_ids(
         states_by_entity_id,
         (f"sensor.{prefixes[0]}_pv1_power",),
@@ -9480,19 +9795,45 @@ def _build_energy_flow_payload(system: str, states: list[dict[str, object]]) -> 
     )
     inverter_status = inverter.get("state") if inverter else None
     notes: list[str] = []
-    if system == "saj" and _is_saj_offnet_mode(mode_sensor=app_mode_v, inverter_status=inverter_status):
+    saj_offnet_mode = system == "saj" and _is_saj_offnet_mode(mode_sensor=app_mode_v, inverter_status=inverter_status)
+    saj_corrected_pv_terms = [value for value in (pv1_w, pv2_w) if value is not None]
+    saj_corrected_pv_w = sum(saj_corrected_pv_terms) if saj_corrected_pv_terms else None
+    saj_raw_pv_mirrors_battery_charge = bool(
+        system == "saj"
+        and pv_w is not None
+        and battery_w is not None
+        and battery_w < -POWER_FLOW_ACTIVE_THRESHOLD_W
+        and abs(pv_w + battery_w) <= max(BALANCE_TOLERANCE_W, abs(pv_w) * 0.05)
+    )
+    saj_string_pv_much_lower = bool(
+        system == "saj"
+        and pv_w is not None
+        and saj_corrected_pv_w is not None
+        and pv_w > saj_corrected_pv_w + max(BALANCE_TOLERANCE_W, abs(pv_w) * 0.25)
+    )
+    saj_aggregate_pv_suspect = bool(saj_raw_pv_mirrors_battery_charge and saj_string_pv_much_lower)
+    if system == "saj" and (saj_offnet_mode or saj_aggregate_pv_suspect):
         corrected_pv_terms = [value for value in (pv1_w, pv2_w) if value is not None]
         if corrected_pv_terms:
             raw_pv_w = pv_w
             pv_w = sum(corrected_pv_terms)
             pv_source = "calc:saj_pv1_power + saj_pv2_power"
-            notes.append("saj_offnet_detected")
+            if saj_offnet_mode:
+                notes.append("saj_offnet_detected")
+            if saj_aggregate_pv_suspect:
+                notes.append("saj_aggregate_pv_mirrors_battery_charge")
             notes.append(f"saj_corrected_pv_w_source:{pv_source}")
             if raw_pv_w is not None:
                 notes.append(f"saj_raw_pv_power_w:{round(raw_pv_w, 1)}")
+            if str((sun or {}).get("state") or "").strip().lower() == "below_horizon" and pv_w <= BALANCE_TOLERANCE_W:
+                pv_w = 0.0
+                notes.append("saj_corrected_pv_zeroed_below_horizon")
         else:
             pv_source = str(pv.get("entity_id")) if pv else "unavailable"
-            notes.append("saj_offnet_detected_but_pv1_pv2_unavailable")
+            if saj_offnet_mode:
+                notes.append("saj_offnet_detected_but_pv1_pv2_unavailable")
+            if saj_aggregate_pv_suspect:
+                notes.append("saj_aggregate_pv_suspect_but_pv1_pv2_unavailable")
     else:
         pv_source = str(pv.get("entity_id")) if pv else "unavailable"
 
@@ -11393,6 +11734,19 @@ async def _saj_set_text(entity_id: str, value: str) -> None:
 async def _saj_set_switch(entity_id: str, enabled: bool) -> None:
     service = "turn_on" if enabled else "turn_off"
     await ha_client.call_service("switch", service, {"entity_id": entity_id})
+
+
+def _resolve_saj_power_request(payload: SajManualChargePowerPayload | SajManualDischargePowerPayload) -> tuple[int, int]:
+    if (payload.power_w is None) == (payload.power_percent is None):
+        raise HTTPException(status_code=400, detail="Provide exactly one of power_w or power_percent")
+    if payload.power_percent is not None:
+        power_percent = int(payload.power_percent)
+        requested_power_w = int(round(SAJ_RATED_POWER_W * power_percent / 100.0))
+    else:
+        requested_power_w = int(payload.power_w or 0)
+        power_percent = int(round((requested_power_w / SAJ_RATED_POWER_W) * 100.0))
+        power_percent = max(0, min(100, power_percent))
+    return requested_power_w, power_percent
 
 
 def _solplanet_encode_slot(*, hour: int, minute: int, duration_minutes: int, mode: int) -> int:
@@ -13930,6 +14284,12 @@ async def _generate_daily_report(report_day_local: date) -> dict[str, object]:
             report_day_local=report_day_local,
             local_timezone_name=timezone_name,
         )
+        soc_estimates_task = asyncio.to_thread(
+            build_daily_report_soc_estimates,
+            storage_db_path,
+            report_day_local=report_day_local,
+            local_timezone_name=timezone_name,
+        )
         daily_cost_task = asyncio.to_thread(
             compute_daily_cost_between,
             storage_db_path,
@@ -13946,6 +14306,7 @@ async def _generate_daily_report(report_day_local: date) -> dict[str, object]:
             *(("series", system) for system in series_tasks),
             ("zero_hero", "combined"),
             ("phase_battery", "combined"),
+            ("soc_estimates", "combined"),
             ("daily_cost", "combined"),
         ]
         results = await asyncio.gather(
@@ -13953,11 +14314,16 @@ async def _generate_daily_report(report_day_local: date) -> dict[str, object]:
             *series_tasks.values(),
             zero_hero_task,
             phase_battery_task,
+            soc_estimates_task,
             daily_cost_task,
         )
         result_map = dict(zip(task_keys, results, strict=True))
         usage_by_system = {system: result_map[("usage", system)] for system in usage_tasks}
         usage_by_system["_daily_cost"] = result_map[("daily_cost", "combined")]
+        usage_by_system = apply_daily_report_soc_estimates(
+            usage_by_system,
+            result_map[("soc_estimates", "combined")],
+        )
         series_by_system = {system: result_map[("series", system)] for system in series_tasks}
         zero_hero_history = result_map[("zero_hero", "combined")]
         phase_battery = result_map[("phase_battery", "combined")]
@@ -15490,6 +15856,30 @@ async def get_saj_raw_core_entities() -> dict[str, object]:
         )
 
 
+@app.get("/api/saj/control/state")
+async def get_saj_control_state() -> dict[str, object]:
+    _ensure_ha_configured()
+    try:
+        _, states_by_id = await _saj_control_states()
+        control_state = _build_saj_control_state(states_by_id)
+        return {
+            "system": "saj",
+            "profile_state": _build_saj_profile_state(control_state),
+            "control_state": control_state,
+        }
+    except httpx.HTTPStatusError as exc:
+        logger.warning("Home Assistant returned %s for SAJ control state", exc.response.status_code)
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "Home Assistant API returned an error",
+                "status_code": exc.response.status_code,
+            },
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
 @app.get("/api/tesla/control/state")
 async def get_tesla_control_state() -> dict[str, object]:
     _ensure_ha_configured()
@@ -15753,18 +16143,13 @@ async def put_pool_pump_force_min_runtime_hours(payload: PoolPumpForceMinRuntime
 
 
 @app.put("/api/saj/manual-discharge-power")
-async def put_saj_manual_discharge_power(payload: SajManualDischargePowerPayload) -> dict[str, object]:
+async def put_saj_manual_discharge_power(
+    payload: SajManualDischargePowerPayload,
+    *,
+    trigger_source: str = "manual_ui",
+) -> dict[str, object]:
     _ensure_ha_configured()
-    if (payload.power_w is None) == (payload.power_percent is None):
-        raise HTTPException(status_code=400, detail="Provide exactly one of power_w or power_percent")
-
-    if payload.power_percent is not None:
-        power_percent = int(payload.power_percent)
-        requested_power_w = int(round(SAJ_RATED_POWER_W * power_percent / 100.0))
-    else:
-        requested_power_w = int(payload.power_w or 0)
-        power_percent = int(round((requested_power_w / SAJ_RATED_POWER_W) * 100.0))
-        power_percent = max(0, min(100, power_percent))
+    requested_power_w, power_percent = _resolve_saj_power_request(payload)
 
     operation_run_id: int | None = None
     request_payload = {
@@ -15776,6 +16161,8 @@ async def put_saj_manual_discharge_power(payload: SajManualDischargePowerPayload
         "end_time": "23:59",
         "day_mask": 127,
         "mode_code": SAJ_PROFILE_MODE_CODES["time_of_use"],
+        "charging_control": False,
+        "charge_time_enable": 0,
     }
     changed: list[dict[str, object]] = []
     try:
@@ -15784,10 +16171,15 @@ async def put_saj_manual_discharge_power(payload: SajManualDischargePowerPayload
             "saj.manual.set_discharge_power",
             request_payload=request_payload,
             previous_state={"state": _build_saj_control_state(initial_states_by_id)},
+            trigger_source=trigger_source,
         )
 
         await _saj_set_number("number.saj_app_mode_input", SAJ_PROFILE_MODE_CODES["time_of_use"])
         changed.append({"entity_id": "number.saj_app_mode_input", "value": SAJ_PROFILE_MODE_CODES["time_of_use"]})
+        await _saj_set_switch("switch.saj_charging_control", False)
+        changed.append({"entity_id": "switch.saj_charging_control", "value": False})
+        await _saj_set_number("number.saj_charge_time_enable_input", 0)
+        changed.append({"entity_id": "number.saj_charge_time_enable_input", "value": 0})
         await _saj_set_number("number.saj_discharge_time_enable_input", 1)
         changed.append({"entity_id": "number.saj_discharge_time_enable_input", "value": 1})
         await _saj_set_text("text.saj_discharge1_start_time_time", "00:00")
@@ -15800,6 +16192,100 @@ async def put_saj_manual_discharge_power(payload: SajManualDischargePowerPayload
         changed.append({"entity_id": "number.saj_discharge1_day_mask_input", "value": 127})
         await _saj_set_switch("switch.saj_discharging_control", True)
         changed.append({"entity_id": "switch.saj_discharging_control", "value": True})
+
+        if payload.settle_seconds > 0:
+            await asyncio.sleep(float(payload.settle_seconds))
+        _, states_by_id = await _saj_control_states()
+        result = {
+            "ok": True,
+            "system": "saj",
+            "requested_power_w": requested_power_w,
+            "resolved_power_percent": power_percent,
+            "resolved_power_w_estimate": int(round(SAJ_RATED_POWER_W * power_percent / 100.0)),
+            "changed": changed,
+            "state": _build_saj_control_state(states_by_id),
+        }
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"state": result.get("state")},
+            response_payload=result,
+            completed=True,
+        )
+        return result
+    except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Home Assistant API returned {exc.response.status_code}",
+            completed=True,
+        )
+        detail = {
+            "message": "Home Assistant API returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Home Assistant: {exc}",
+            completed=True,
+        )
+        raise HTTPException(status_code=502, detail=f"Failed to reach Home Assistant: {exc}") from exc
+
+
+@app.put("/api/saj/manual-charge-power")
+async def put_saj_manual_charge_power(
+    payload: SajManualChargePowerPayload,
+    *,
+    trigger_source: str = "manual_ui",
+) -> dict[str, object]:
+    _ensure_ha_configured()
+    requested_power_w, power_percent = _resolve_saj_power_request(payload)
+
+    operation_run_id: int | None = None
+    request_payload = {
+        **payload.model_dump(mode="json"),
+        "resolved_power_percent": power_percent,
+        "resolved_power_w_estimate": int(round(SAJ_RATED_POWER_W * power_percent / 100.0)),
+        "slot": 1,
+        "start_time": "00:00",
+        "end_time": "23:59",
+        "day_mask": 127,
+        "mode_code": SAJ_PROFILE_MODE_CODES["time_of_use"],
+        "discharging_control": False,
+        "discharge_time_enable": 0,
+    }
+    changed: list[dict[str, object]] = []
+    try:
+        _, initial_states_by_id = await _saj_control_states()
+        operation_run_id = await _start_operation_history_run(
+            "saj.manual.set_charge_power",
+            request_payload=request_payload,
+            previous_state={"state": _build_saj_control_state(initial_states_by_id)},
+            trigger_source=trigger_source,
+        )
+
+        await _saj_set_number("number.saj_app_mode_input", SAJ_PROFILE_MODE_CODES["time_of_use"])
+        changed.append({"entity_id": "number.saj_app_mode_input", "value": SAJ_PROFILE_MODE_CODES["time_of_use"]})
+        await _saj_set_switch("switch.saj_discharging_control", False)
+        changed.append({"entity_id": "switch.saj_discharging_control", "value": False})
+        await _saj_set_number("number.saj_discharge_time_enable_input", 0)
+        changed.append({"entity_id": "number.saj_discharge_time_enable_input", "value": 0})
+        await _saj_set_number("number.saj_charge_time_enable_input", 1)
+        changed.append({"entity_id": "number.saj_charge_time_enable_input", "value": 1})
+        await _saj_set_text("text.saj_charge1_start_time_time", "00:00")
+        changed.append({"entity_id": "text.saj_charge1_start_time_time", "value": "00:00"})
+        await _saj_set_text("text.saj_charge1_end_time_time", "23:59")
+        changed.append({"entity_id": "text.saj_charge1_end_time_time", "value": "23:59"})
+        await _saj_set_number("number.saj_charge1_power_percent_input", power_percent)
+        changed.append({"entity_id": "number.saj_charge1_power_percent_input", "value": power_percent})
+        await _saj_set_number("number.saj_charge1_day_mask_input", 127)
+        changed.append({"entity_id": "number.saj_charge1_day_mask_input", "value": 127})
+        await _saj_set_switch("switch.saj_charging_control", True)
+        changed.append({"entity_id": "switch.saj_charging_control", "value": True})
 
         if payload.settle_seconds > 0:
             await asyncio.sleep(float(payload.settle_seconds))
@@ -15945,14 +16431,21 @@ async def _apply_saj_free_energy_slow_charge_hold(*, settle_seconds: float = 2.0
 
 
 @app.put("/api/saj/self-consumption")
-async def put_saj_self_consumption(payload: SajSelfConsumptionPayload | None = None) -> dict[str, object]:
+async def put_saj_self_consumption(
+    payload: SajSelfConsumptionPayload | None = None,
+    *,
+    trigger_source: str = "manual_ui",
+) -> dict[str, object]:
     _ensure_ha_configured()
     payload = payload or SajSelfConsumptionPayload()
     operation_run_id: int | None = None
     request_payload = {
         **payload.model_dump(mode="json"),
         "mode_code": SAJ_PROFILE_MODE_CODES["self_consumption"],
+        "charging_control": False,
+        "charge_time_enable": 0,
         "discharging_control": False,
+        "discharge_time_enable": 0,
     }
     changed: list[dict[str, object]] = []
     try:
@@ -15961,12 +16454,19 @@ async def put_saj_self_consumption(payload: SajSelfConsumptionPayload | None = N
             "saj.manual.set_self_consumption",
             request_payload=request_payload,
             previous_state={"state": _build_saj_control_state(initial_states_by_id)},
+            trigger_source=trigger_source,
         )
 
         await _saj_set_number("number.saj_app_mode_input", SAJ_PROFILE_MODE_CODES["self_consumption"])
         changed.append({"entity_id": "number.saj_app_mode_input", "value": SAJ_PROFILE_MODE_CODES["self_consumption"]})
+        await _saj_set_switch("switch.saj_charging_control", False)
+        changed.append({"entity_id": "switch.saj_charging_control", "value": False})
+        await _saj_set_number("number.saj_charge_time_enable_input", 0)
+        changed.append({"entity_id": "number.saj_charge_time_enable_input", "value": 0})
         await _saj_set_switch("switch.saj_discharging_control", False)
         changed.append({"entity_id": "switch.saj_discharging_control", "value": False})
+        await _saj_set_number("number.saj_discharge_time_enable_input", 0)
+        changed.append({"entity_id": "number.saj_discharge_time_enable_input", "value": 0})
 
         if payload.settle_seconds > 0:
             await asyncio.sleep(float(payload.settle_seconds))
@@ -15981,7 +16481,10 @@ async def put_saj_self_consumption(payload: SajSelfConsumptionPayload | None = N
             "success_criteria": {
                 "mode_input_entity": "number.saj_app_mode_input",
                 "mode_sensor_entity": "sensor.saj_app_mode",
+                "charging_control_entity": "switch.saj_charging_control",
+                "charge_time_enable_entity": "number.saj_charge_time_enable_input",
                 "discharging_control_entity": "switch.saj_discharging_control",
+                "discharge_time_enable_entity": "number.saj_discharge_time_enable_input",
                 "battery_power_is_diagnostic_only": True,
             },
             "state": control_state,

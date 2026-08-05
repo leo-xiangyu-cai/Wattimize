@@ -112,9 +112,24 @@
                   <select id="sajDashboardProfileSelect">
                     <option value="self_consumption" data-i18n="sajProfileOptionSelfConsumption">Self Consumption</option>
                     <option value="time_of_use" data-i18n="sajProfileOptionTimeOfUse">Time of Use</option>
-                    <option value="microgrid" data-i18n="sajProfileOptionMicrogrid">Microgrid</option>
                   </select>
                 </label>
+                <div id="sajDashboardTouControls" class="saj-tou-controls hidden">
+                  <div class="saj-tou-direction" role="radiogroup" aria-label="SAJ Time of Use direction">
+                    <label>
+                      <input type="radio" name="sajDashboardTouDirection" value="discharge" checked />
+                      <span data-i18n="sajTouDirectionSell">Sell</span>
+                    </label>
+                    <label>
+                      <input type="radio" name="sajDashboardTouDirection" value="charge" />
+                      <span data-i18n="sajTouDirectionBuy">Buy</span>
+                    </label>
+                  </div>
+                  <label class="saj-profile-field">
+                    <span data-i18n="sajTouPowerLabel">Power</span>
+                    <input id="sajDashboardTouPowerInput" type="number" min="0" max="5000" step="100" value="5000" />
+                  </label>
+                </div>
                 <div class="saj-profile-actions">
                   <button id="sajDashboardProfileApplyBtn" class="btn" type="button" data-i18n="sajProfileApplyBtn">Apply</button>
                 </div>

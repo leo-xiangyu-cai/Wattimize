@@ -15,7 +15,9 @@ if str(ROOT) not in sys.path:
 
 from app.config import get_config_path, load_settings
 from app.persistence import (
+    apply_daily_report_soc_estimates,
     build_daily_report_phase_battery,
+    build_daily_report_soc_estimates,
     compute_daily_cost_between,
     compute_usage_between,
     get_series_samples,
@@ -195,6 +197,12 @@ def generate_report(db_path: Path, day: date, local_tz: object, timezone_name: s
         report_day_local=day,
         local_timezone_name=timezone_name,
     )
+    soc_estimates = build_daily_report_soc_estimates(
+        db_path,
+        report_day_local=day,
+        local_timezone_name=timezone_name,
+    )
+    usage_by_system = apply_daily_report_soc_estimates(usage_by_system, soc_estimates)
     return save_daily_report(
         db_path,
         report_day_local=day,

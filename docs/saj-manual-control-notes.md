@@ -124,7 +124,7 @@ This guard treats Solplanet charging as context, not a trigger condition. The tr
 
 ## Local API wrapper
 
-Only narrow local SAJ write APIs are currently exposed.
+Only narrow local SAJ write APIs are currently exposed. The dashboard TOU controls and worker automation use these same wrappers.
 
 Force all-day TOU discharge:
 
@@ -148,6 +148,31 @@ The API always writes the same narrow manual setup:
 - `number.saj_discharge1_power_percent_input = resolved power_percent`
 - `number.saj_discharge1_day_mask_input = 127`
 - `switch.saj_discharging_control = on`
+
+Force all-day TOU charge:
+
+```bash
+curl -s -X PUT http://<wattimize-host>:18000/api/saj/manual-charge-power \
+  -H 'Content-Type: application/json' \
+  -d '{"power_w":2000}' | jq
+```
+
+The charge-power request body accepts exactly one of:
+
+- `power_w`: `0..5000`, converted to percent using the local `SAJ_RATED_POWER_W = 5000`.
+- `power_percent`: `0..100`, written directly to `number.saj_charge1_power_percent_input`.
+
+The API writes the matching all-day TOU charge setup:
+
+- `number.saj_app_mode_input = 1`
+- `switch.saj_discharging_control = off`
+- `switch.saj_charging_control = on`
+- `number.saj_charge_time_enable_input = 1`
+- `number.saj_discharge_time_enable_input = 0`
+- `text.saj_charge1_start_time_time = 00:00`
+- `text.saj_charge1_end_time_time = 23:59`
+- `number.saj_charge1_power_percent_input = resolved power_percent`
+- `number.saj_charge1_day_mask_input = 127`
 
 The response includes both the requested/resolved power and a fresh SAJ control-state readback. The readback must be used to compare input values against effective `sensor.saj_*` values.
 

@@ -82,10 +82,12 @@ DAILY_REPORT_BATTERY_CAPACITY_KWH = {
     "saj": 15.0,
     "solplanet": 50.0,
 }
+DAILY_REPORT_TESLA_BATTERY_CAPACITY_KWH = 75.0
 DAILY_REPORT_BATTERY_MIN_DISCHARGE_SOC_PERCENT = {
     "saj": 20.0,
     "solplanet": 10.0,
 }
+DAILY_REPORT_SOC_ESTIMATE_MIN_DELTA_PERCENT = 0.05
 DAILY_REPORT_PHASE_BATTERY_STAGES: tuple[dict[str, object], ...] = (
     {"id": "overnight_shoulder", "titleKey": "notificationMatrixWindowOvernightTitle", "endHour": 11},
     {"id": "free_energy", "titleKey": "notificationMatrixWindowFreeEnergyTitle", "endHour": 15},
@@ -3386,6 +3388,276 @@ def build_daily_report_phase_battery(
     }
 
 
+def _daily_report_soc_float(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not 0.0 <= number <= 100.0:
+        return None
+    return number
+
+
+def _daily_report_soc_estimate_from_rows(
+    rows: list[tuple[str, float, object]],
+    *,
+    capacity_kwh: float,
+) -> dict[str, object]:
+    points = [
+        {
+            "sampled_at_utc": row[0],
+            "sampled_at_epoch": float(row[1]),
+            "soc_percent": soc,
+        }
+        for row in rows
+        if (soc := _daily_report_soc_float(row[2])) is not None
+    ]
+    if len(points) < 2 or capacity_kwh <= 0:
+        return {
+            "sample_count": len(rows),
+            "soc_sample_count": len(points),
+            "charge_kwh": 0.0,
+            "discharge_kwh": 0.0,
+            "net_change_kwh": 0.0,
+        }
+
+    charge_kwh = 0.0
+    discharge_kwh = 0.0
+    min_delta = DAILY_REPORT_SOC_ESTIMATE_MIN_DELTA_PERCENT
+    for current, next_item in zip(points, points[1:]):
+        delta_percent = float(next_item["soc_percent"]) - float(current["soc_percent"])
+        if abs(delta_percent) < min_delta:
+            continue
+        delta_kwh = capacity_kwh * delta_percent / 100.0
+        if delta_kwh > 0:
+            charge_kwh += delta_kwh
+        else:
+            discharge_kwh += abs(delta_kwh)
+
+    first = points[0]
+    last = points[-1]
+    return {
+        "sample_count": len(rows),
+        "soc_sample_count": len(points),
+        "first_sampled_at_utc": first["sampled_at_utc"],
+        "last_sampled_at_utc": last["sampled_at_utc"],
+        "first_soc_percent": round(float(first["soc_percent"]), 3),
+        "last_soc_percent": round(float(last["soc_percent"]), 3),
+        "charge_kwh": round(charge_kwh, 4),
+        "discharge_kwh": round(discharge_kwh, 4),
+        "net_change_kwh": round(capacity_kwh * (float(last["soc_percent"]) - float(first["soc_percent"])) / 100.0, 4),
+        "capacity_kwh": float(capacity_kwh),
+        "method": "soc_delta_sum",
+    }
+
+
+def _daily_report_soc_rows(
+    session: Session,
+    *,
+    system: str,
+    start_epoch: float,
+    end_epoch: float,
+) -> list[tuple[str, float, object]]:
+    return list(
+        session.execute(
+            select(
+                AssembledFlowSnapshotRow.assembled_at_utc,
+                AssembledFlowSnapshotRow.assembled_at_epoch,
+                AssembledFlowSnapshotRow.battery_soc_percent,
+            )
+            .where(
+                AssembledFlowSnapshotRow.system == system,
+                AssembledFlowSnapshotRow.assembled_at_epoch >= start_epoch,
+                AssembledFlowSnapshotRow.assembled_at_epoch < end_epoch,
+            )
+            .order_by(AssembledFlowSnapshotRow.assembled_at_epoch.asc())
+        ).all()
+    )
+
+
+def _daily_report_tesla_soc_rows(
+    session: Session,
+    *,
+    start_epoch: float,
+    end_epoch: float,
+) -> list[tuple[str, float, object]]:
+    rows = session.execute(
+        select(
+            AssembledFlowSnapshotRow.assembled_at_utc,
+            AssembledFlowSnapshotRow.assembled_at_epoch,
+            AssembledFlowSnapshotRow.flow_json,
+        )
+        .where(
+            AssembledFlowSnapshotRow.system == "combined",
+            AssembledFlowSnapshotRow.assembled_at_epoch >= start_epoch,
+            AssembledFlowSnapshotRow.assembled_at_epoch < end_epoch,
+        )
+        .order_by(AssembledFlowSnapshotRow.assembled_at_epoch.asc())
+    ).all()
+    result: list[tuple[str, float, object]] = []
+    for row in rows:
+        payload = _json_loads(row[2], default={})
+        metrics = payload.get("metrics") if isinstance(payload, dict) else None
+        metrics_map = metrics if isinstance(metrics, dict) else {}
+        soc = metrics_map.get("tesla_battery_soc_percent")
+        if soc is None and isinstance(payload, dict):
+            display_items = payload.get("display", {}).get("items", {})
+            if isinstance(display_items, dict):
+                tesla_item = display_items.get("tesla_soc")
+                if isinstance(tesla_item, dict):
+                    soc = tesla_item.get("value")
+        result.append((row[0], float(row[1]), soc))
+    return result
+
+
+def build_daily_report_soc_estimates(
+    db_path: DatabaseTarget,
+    *,
+    report_day_local: date,
+    local_timezone_name: str,
+) -> dict[str, object]:
+    local_tz = _phase_battery_local_timezone(local_timezone_name)
+    start_local = datetime.combine(report_day_local, time.min, tzinfo=local_tz)
+    end_local = datetime.combine(report_day_local + timedelta(days=1), time.min, tzinfo=local_tz)
+    start_epoch = start_local.astimezone(UTC).timestamp()
+    end_epoch = end_local.astimezone(UTC).timestamp()
+
+    with _session_scope(db_path) as session:
+        estimates = {
+            system: _daily_report_soc_estimate_from_rows(
+                _daily_report_soc_rows(session, system=system, start_epoch=start_epoch, end_epoch=end_epoch),
+                capacity_kwh=float(capacity),
+            )
+            for system, capacity in DAILY_REPORT_BATTERY_CAPACITY_KWH.items()
+        }
+        estimates["tesla"] = _daily_report_soc_estimate_from_rows(
+            _daily_report_tesla_soc_rows(session, start_epoch=start_epoch, end_epoch=end_epoch),
+            capacity_kwh=DAILY_REPORT_TESLA_BATTERY_CAPACITY_KWH,
+        )
+
+    return {
+        "day": report_day_local.isoformat(),
+        "timezone_name": str(local_timezone_name or ""),
+        "period_start_utc": start_local.astimezone(UTC).isoformat(),
+        "period_end_utc": end_local.astimezone(UTC).isoformat(),
+        "method": "soc_delta_sum_conservative_floor",
+        "items": estimates,
+    }
+
+
+def _daily_report_apply_energy_floor(
+    usage: dict[str, object],
+    *,
+    energy_key: str,
+    floor_kwh: object,
+    estimate_key: str,
+) -> bool:
+    try:
+        floor_value = float(floor_kwh)
+    except (TypeError, ValueError):
+        return False
+    if floor_value <= 0:
+        return False
+    energy = usage.get("energy_kwh")
+    if not isinstance(energy, dict):
+        energy = {}
+    else:
+        energy = dict(energy)
+    usage["energy_kwh"] = energy
+    current_value = float(energy.get(energy_key) or 0.0)
+    if current_value + 0.0001 >= floor_value:
+        return False
+    energy[energy_key] = round(floor_value, 4)
+    estimates = usage.get("estimated_energy_kwh")
+    estimates = dict(estimates) if isinstance(estimates, dict) else {}
+    estimates[energy_key] = {
+        "value": round(floor_value, 4),
+        "replaced_value": round(current_value, 4),
+        "source": estimate_key,
+    }
+    usage["estimated_energy_kwh"] = estimates
+    quality = usage.get("quality")
+    quality = dict(quality) if isinstance(quality, dict) else {}
+    applied = quality.get("soc_estimate_applied")
+    applied_list = list(applied) if isinstance(applied, list) else []
+    applied_list.append(energy_key)
+    quality["soc_estimate_applied"] = applied_list
+    usage["quality"] = quality
+    return True
+
+
+def apply_daily_report_soc_estimates(
+    usage_by_system: dict[str, object],
+    soc_estimates: dict[str, object] | None,
+) -> dict[str, object]:
+    """Raise report-only usage totals when SOC deltas prove integration undercounted across gaps."""
+    if not isinstance(usage_by_system, dict) or not isinstance(soc_estimates, dict):
+        return usage_by_system
+    items = soc_estimates.get("items")
+    if not isinstance(items, dict):
+        return usage_by_system
+
+    result = dict(usage_by_system)
+    applied: list[dict[str, object]] = []
+
+    for system in ("saj", "solplanet"):
+        usage = result.get(system)
+        estimate = items.get(system)
+        if not isinstance(usage, dict) or not isinstance(estimate, dict):
+            continue
+        usage_copy = dict(usage)
+        changed = False
+        changed |= _daily_report_apply_energy_floor(
+            usage_copy,
+            energy_key="battery_charge",
+            floor_kwh=estimate.get("charge_kwh"),
+            estimate_key=f"{system}.soc_delta.charge_kwh",
+        )
+        changed |= _daily_report_apply_energy_floor(
+            usage_copy,
+            energy_key="battery_discharge",
+            floor_kwh=estimate.get("discharge_kwh"),
+            estimate_key=f"{system}.soc_delta.discharge_kwh",
+        )
+        if changed:
+            result[system] = usage_copy
+            quality = usage_copy.get("quality")
+            fields = quality.get("soc_estimate_applied", []) if isinstance(quality, dict) else []
+            applied.append({"system": system, "fields": fields})
+
+    combined_usage = result.get("combined")
+    tesla_estimate = items.get("tesla")
+    if isinstance(combined_usage, dict) and isinstance(tesla_estimate, dict):
+        combined_copy = dict(combined_usage)
+        if _daily_report_apply_energy_floor(
+            combined_copy,
+            energy_key="tesla_load",
+            floor_kwh=tesla_estimate.get("charge_kwh"),
+            estimate_key="tesla.soc_delta.charge_kwh",
+        ):
+            breakdown = combined_copy.get("breakdown_kwh")
+            if not isinstance(breakdown, dict):
+                breakdown = {}
+            else:
+                breakdown = dict(breakdown)
+            combined_copy["breakdown_kwh"] = breakdown
+            home_load = breakdown.get("home_load")
+            if not isinstance(home_load, dict):
+                home_load = {}
+            else:
+                home_load = dict(home_load)
+            breakdown["home_load"] = home_load
+            home_load["tesla"] = combined_copy.get("energy_kwh", {}).get("tesla_load", 0.0)
+            result["combined"] = combined_copy
+            applied.append({"system": "combined", "fields": ["tesla_load"]})
+
+    if applied:
+        result["_soc_estimates"] = {**soc_estimates, "applied": applied}
+    else:
+        result["_soc_estimates"] = soc_estimates
+    return result
+
+
 def save_daily_report(
     db_path: DatabaseTarget,
     *,
@@ -3547,11 +3819,13 @@ def get_daily_report(
     phase_battery = None
     daily_cost = None
     bill_actual_cost = None
+    soc_estimates = None
     if isinstance(usage_by_system, dict):
         usage_by_system = dict(usage_by_system)
         phase_battery = usage_by_system.pop("_phase_battery", None)
         daily_cost = usage_by_system.pop("_daily_cost", None)
         bill_actual_cost = usage_by_system.pop("_bill_actual_cost", None)
+        soc_estimates = usage_by_system.pop("_soc_estimates", None)
 
     if not isinstance(series_by_system, dict) or not series_by_system:
         try:
@@ -3597,6 +3871,7 @@ def get_daily_report(
         "phase_battery": phase_battery if isinstance(phase_battery, dict) else {},
         "daily_cost": daily_cost if isinstance(daily_cost, dict) else {},
         "bill_actual_cost": bill_actual_cost if isinstance(bill_actual_cost, dict) else {},
+        "soc_estimates": soc_estimates if isinstance(soc_estimates, dict) else {},
         "samples": {
             "count": len(items),
             "total": total,

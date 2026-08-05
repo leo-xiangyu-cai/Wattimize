@@ -148,6 +148,7 @@ make nas-deploy
 
 `make nas-deploy` now stops local `docker compose` services first. If the NAS container is not already running, it pushes the local SQLite database and uploaded bill artifacts to the NAS before deploying. If the NAS container is already running, it treats the command as a code-only refresh and skips data sync.
 Every NAS deploy also uploads `data/home-plan/electricity-plans.json` to `${NAS_DATA_DIR}/home-plan/electricity-plans.json`, which is mounted in the container as `/app/data/home-plan/electricity-plans.json` for the Plan tab.
+After the NAS health check passes, deploys prune old manual SQLite backups under `${NAS_DATA_DIR}/backup`, keeping backups from the last `NAS_DB_BACKUP_RETENTION_DAYS` days.
 
 To deploy code to the NAS without pushing the local database or bill artifacts, use:
 
@@ -168,7 +169,7 @@ Supported overrides for `make nas-deploy`:
 - `NAS_HOST`, `NAS_PORT`, `NAS_USER`, `SSH_KEY`
 - `CONTAINER_NAME`, `IMAGE_NAME`, `IMAGE_REPOSITORY`
 - `NAS_DATA_DIR`, `HOST_PORT`, `CONTAINER_PORT`, `TZ_VALUE`
-- `DOCKER_BIN`, `RETENTION_DAYS`
+- `DOCKER_BIN`, `RETENTION_DAYS`, `NAS_DB_BACKUP_RETENTION_DAYS`
 - `LOCAL_PLAN_PATH`
 
 Test the actual SSH and NAS storage path used by deployments:
@@ -215,6 +216,7 @@ First-run configuration:
 - The `History` tab combines range selection with an energy breakdown card, a Tesla free-window gross SOC charge metric, an estimated free-grid-electricity split for Tesla, home load, and battery charging normalized to the same free import kWh total, a power timeline chart, a combined SAJ/Solplanet SOC chart, a total usable remaining-energy chart, a Tesla SOC chart, a pool-pump on/off timeline, a live 5-minute export-window observation card, and a selected-day `16:00-23:00` matrix of five-minute export windows, color-coded for net import, mixed import/net export, and pure export.
 - The `Report` tab reuses the History presentation but reads a persisted daily snapshot. The backend generates the completed local day at midnight, immediately backfills yesterday after an upgrade when needed, and stores precomputed usage, daily electricity cost, chart series, Zero Hero windows, and paginable sample rows for fast reads.
 - Daily report cost uses the bill-derived GloBird ZEROHERO rates in `data/home-plan/electricity-plans.json`, including fixed charges, import time windows, feed-in credits, Super Export top-up, and the estimated ZEROHERO day credit. The Report tab displays estimated cost, uploaded-bill actual cost, and the estimate-vs-bill delta in one compact breakdown.
+- Daily reports also compute conservative SOC-delta energy floors for SAJ, Solplanet, and Tesla so persisted report totals can recover obvious charge/discharge undercounts across raw-sample gaps.
 - Electricity bill uploads are accepted through the Report tab or `POST /api/bills/upload`. Uploaded PDF/text artifacts are stored under `data/home-plan/bills/` with parsed billing-period date filenames, parsed into `bills-index.json`, and allocated back into matching daily reports as `_bill_actual_cost`.
 - To audit or backfill persisted daily report cost fields without starting the app, run `PYTHONPYCACHEPREFIX=/tmp/wattimize-pycache python3.12 scripts/audit-daily-report-costs.py` for a read-only comparison, or add `--write` to update missing/mismatched `_daily_cost` payloads. Stop any Wattimize service that uses `data/wattimize.sqlite3` before running a write-mode DB audit/backfill.
 - `GET /api/storage/samples?system=combined` now includes `tesla_charge_power_w` and `pool_pump_power_w` so frontend charts can separate home load from Tesla/pool-pump overlays.
@@ -232,6 +234,7 @@ First-run configuration:
 - Pool pump runtime protection is configurable through `PUT /api/devices/pool-pump/force-min-runtime-hours`, which sets the minimum runtime that should be reached within the rolling 24-hour lookback used by overnight automation.
 - Tesla time-window operation rows remain visible in the dashboard, but they are now read-only snapshots that reflect the unified Tesla auto-control state instead of per-window switches.
 - SAJ profile automation still respects per-window rule switches before issuing control actions. During the free-energy window (`11:00-15:00`), it first forces/holds SAJ in self-consumption; only if SAJ is already targeted at self-consumption and `sensor.saj_battery_power` still shows active discharge does it apply the slow-charge hold (`charging_control=on`, `discharging_control=off`, charge/discharge time masks `1/0`, and `400W` charge limits).
+- Outside the free-energy window, SAJ profile automation can apply a one-time all-day TOU discharge target for the day, and the dashboard profile popover exposes TOU sell/buy power controls backed by the narrow SAJ manual charge/discharge APIs.
 - The overnight shoulder window (`23:00-11:00`) now computes a shared overnight battery budget after reserving projected home load, then allocates the remaining power between Tesla and the pool pump according to the live priority winner, the Tesla forced-charge threshold, and the pool pump's 24-hour minimum-runtime requirement.
 - The FOUR4FREE export window (`16:00-23:00`) can now temporarily pull forward Tesla charging and pool-pump runtime when either device is below its minimum support target, but only while auto control is enabled for that device and the live zero-import guard still has enough headroom.
 - During that export window support mode, a dedicated `5s` fast guard now watches the live Solplanet Home Assistant signal and immediately sheds the interruptible auto-controlled loads when grid import starts, the export signal disappears, or Solplanet discharge rises above the `10kW` hard limit; worker status still records the current 5-minute Zero Hero observation for review in the History tab.
