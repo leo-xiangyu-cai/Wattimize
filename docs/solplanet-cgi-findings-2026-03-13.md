@@ -145,7 +145,7 @@ The backend now exposes Solplanet manual control for `Pin`, `Pout`, and daily sl
 
 The automatic export policy is:
 
-- `16:00-18:00`: sell at `10kW` only while usable battery remains above the configurable pre-peak reserve, default `35kWh`.
+- `16:00-18:00`: hold battery for evening home load; do not start automatic export selling.
 - `18:00-21:00`: hold the active discharge/sell slot outside the current time so evening home-load peaks can use the battery naturally.
 - `21:00-23:00`: attempt to reach the `18.5kWh` daily export target only above the dynamic reserve: configured hard reserve plus current home load projected through `23:00`.
 - After reaching `18.5kWh`: sell only surplus above `max(20kWh comfort reserve, dynamic load reserve)`.

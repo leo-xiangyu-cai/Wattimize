@@ -4104,6 +4104,10 @@ td {
   margin-top: 8px;
 }
 
+.mobile-dashboard-freshness {
+  display: none;
+}
+
 .mobile-flow-board.is-x6-ready .mobile-energy-card {
   overflow: hidden;
 }
@@ -6299,6 +6303,54 @@ td {
 
   .mobile-flow-board {
     display: none !important;
+  }
+
+  .mobile-dashboard-freshness {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 34px;
+    margin: 0 0 6px;
+    padding: 7px 9px;
+    border: 1px solid #bfd2e5;
+    border-radius: 8px;
+    background: #f7fbff;
+    color: #23435c;
+    font-size: 11px;
+    line-height: 1.25;
+  }
+
+  .mobile-dashboard-freshness-state {
+    flex: 0 0 auto;
+    font-weight: 800;
+  }
+
+  .mobile-dashboard-freshness-time {
+    min-width: 0;
+    overflow: hidden;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #49657c;
+    font-weight: 700;
+  }
+
+  .mobile-dashboard-freshness.is-refreshing {
+    border-color: #8eb9df;
+    background: #eef7ff;
+  }
+
+  .mobile-dashboard-freshness.is-stale,
+  .mobile-dashboard-freshness.is-failed {
+    border-color: #e08a8a;
+    background: #fff1f1;
+    color: #9b1c1c;
+  }
+
+  .mobile-dashboard-freshness.is-stale .mobile-dashboard-freshness-time,
+  .mobile-dashboard-freshness.is-failed .mobile-dashboard-freshness-time {
+    color: #9b1c1c;
   }
 
   #weatherWidget {

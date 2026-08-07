@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dashboard</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260803-free-energy-use" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260807-mobile-freshness" />
   </head>
   <body>
     <main class="page">
@@ -86,6 +86,10 @@
                 <span id="combined-updatedAt" class="muted">-</span>
                 <span id="combined-loadingSpinner" class="loading-spinner is-hidden" aria-hidden="true"></span>
               </div>
+              <div id="combinedMobileFreshness" class="mobile-dashboard-freshness" aria-live="polite">
+                <span id="combinedMobileFreshnessState" class="mobile-dashboard-freshness-state">-</span>
+                <span id="combinedMobileFreshnessTime" class="mobile-dashboard-freshness-time">-</span>
+              </div>
               <div id="energyFlowCombined" class="flow-board combined-flow-board diagram-host" data-diagram="combined"></div>
               <div class="dashboard-reserve-control" aria-live="polite">
                 <div>
@@ -95,11 +99,6 @@
                 <label class="dashboard-reserve-input-label">
                   <span data-i18n="dashboardReserveFloorInputLabel">Keep</span>
                   <input id="combinedReserveFloorInput" type="number" min="0" max="100" step="0.5" value="18" />
-                  <span>kWh</span>
-                </label>
-                <label class="dashboard-reserve-input-label">
-                  <span data-i18n="dashboardPrePeakReserveInputLabel">16-18 keep</span>
-                  <input id="combinedPrePeakReserveInput" type="number" min="0" max="100" step="0.5" value="35" />
                   <span>kWh</span>
                 </label>
                 <button id="combinedReserveFloorSaveBtn" class="btn secondary" type="button" data-i18n="dashboardReserveFloorSaveBtn">Save</button>
@@ -868,6 +867,6 @@
     <script src="/static/vendor/dagre.min.js"></script>
     <script src="/static/vendor/x6.min.js"></script>
     <script src="/static/energy-flow-diagram.js"></script>
-    <script src="/static/app.js?v=20260803-free-energy-use"></script>
+    <script src="/static/app.js?v=20260807-mobile-freshness"></script>
   </body>
 </html>
