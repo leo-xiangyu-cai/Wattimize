@@ -40,6 +40,9 @@
         <button id="tabMonthlyReport" class="tab-btn" type="button" data-tab="monthlyReport" data-i18n="monthlyReportTab" role="tab" aria-selected="false" aria-controls="monthlyReportView" tabindex="-1">
           Monthly
         </button>
+        <button id="tabBills" class="tab-btn" type="button" data-tab="bills" data-i18n="billsTab" role="tab" aria-selected="false" aria-controls="billsView" tabindex="-1">
+          Bills
+        </button>
         <button id="tabPlan" class="tab-btn" type="button" data-tab="plan" data-i18n="planTab" role="tab" aria-selected="false" aria-controls="planView" tabindex="-1">
           Plan
         </button>
@@ -569,6 +572,29 @@
               <tbody id="operationTimelineBody"></tbody>
             </table>
           </div>
+        </section>
+      </section>
+
+      <section id="billsView" class="view hidden">
+        <section class="card bills-card">
+          <div class="section-header bills-header">
+            <div>
+              <h2 data-i18n="billsTitle">Bills</h2>
+              <p id="billsMeta" class="muted">-</p>
+            </div>
+            <div class="bills-actions">
+              <input id="billsFileInput" type="file" accept="application/pdf,.pdf,text/plain,.txt" hidden />
+              <button id="billsUploadBtn" type="button" class="btn secondary" data-i18n="billsUploadBtn">Upload bill</button>
+              <span id="billsUploadStatus" class="muted" aria-live="polite"></span>
+              <span id="billsUpdatedAt" class="muted">-</span>
+            </div>
+          </div>
+          <div class="bills-picker-row">
+            <label for="billsPeriodSelect" data-i18n="billsPeriodSelectLabel">Bill period</label>
+            <select id="billsPeriodSelect"></select>
+          </div>
+          <div id="billsSummaryGrid" class="bills-summary-grid"></div>
+          <div id="billsList" class="bills-list"></div>
         </section>
       </section>
 

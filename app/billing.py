@@ -76,10 +76,10 @@ def _line_category(description: str) -> str:
         return "fixed"
     if "zerohero" in text:
         return "zerohero"
-    if "peak usage" in text:
-        return "peak_import"
     if "offpeak usage" in text:
         return "offpeak_import"
+    if "peak usage" in text:
+        return "peak_import"
     if "shoulder usage" in text:
         return "shoulder_import"
     if "super export" in text:

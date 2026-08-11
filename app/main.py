@@ -25,7 +25,6 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, Response
 
 from app.billing import (
-    apply_bill_actuals_to_daily_reports,
     load_bills_index,
     parse_bill_upload,
     save_bill_artifacts,
@@ -14488,14 +14487,140 @@ def _billed_electricity_plan_for_day(report_day_local: date) -> dict[str, object
     return select_billed_electricity_plan(_load_electricity_plan_payload(), report_day_local)
 
 
+def _bill_date_range(start: date, end: date) -> list[date]:
+    if end < start:
+        return []
+    days: list[date] = []
+    cursor = start
+    while cursor <= end:
+        days.append(cursor)
+        cursor += timedelta(days=1)
+    return days
+
+
+def _rate_after_discount(rate: object) -> float | None:
+    raw = rate.get("after_discount") if isinstance(rate, dict) else rate
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value == value else None
+
+
+def _bill_plan_summary(plan: dict[str, object] | None) -> dict[str, object]:
+    if not isinstance(plan, dict):
+        return {}
+    rates = plan.get("rates") if isinstance(plan.get("rates"), dict) else {}
+    rate_keys = (
+        "daily_charge_aud_per_day",
+        "peak_usage_aud_per_kwh",
+        "off_peak_first_50_kwh_per_day_aud_per_kwh",
+        "shoulder_usage_aud_per_kwh",
+        "solar_feed_in_4pm_11pm_aud_per_kwh",
+        "solar_feed_in_11pm_4pm_aud_per_kwh",
+        "super_export_top_up_aud_per_kwh",
+        "zerohero_credit_aud_per_qualified_day",
+    )
+    return {
+        "id": plan.get("id") or "",
+        "display_name": plan.get("display_name") or plan.get("name") or "",
+        "retailer": plan.get("retailer") or "",
+        "price_basis": plan.get("price_basis") or "",
+        "effective_from": plan.get("effective_from") or "",
+        "effective_to": plan.get("effective_to") or "",
+        "rates": {
+            key: {
+                "value": _rate_after_discount(rates.get(key)),
+                "time_window": (rates.get(key) or {}).get("time_window") if isinstance(rates.get(key), dict) else "",
+                "daily_cap_kwh": (rates.get(key) or {}).get("daily_cap_kwh") if isinstance(rates.get(key), dict) else None,
+            }
+            for key in rate_keys
+        },
+    }
+
+
+def _bill_rate_periods(bill: dict[str, object], plan_payload: dict[str, object]) -> list[dict[str, object]]:
+    period = bill.get("billing_period") if isinstance(bill.get("billing_period"), dict) else {}
+    try:
+        start = date.fromisoformat(str(period.get("start")))
+        end = date.fromisoformat(str(period.get("end")))
+    except ValueError:
+        return []
+    periods: list[dict[str, object]] = []
+    current: dict[str, object] | None = None
+    for day in _bill_date_range(start, end):
+        plan = select_billed_electricity_plan(plan_payload, day)
+        plan_id = str((plan or {}).get("id") or "")
+        if current is None or current.get("plan_id") != plan_id:
+            current = {
+                "start": day.isoformat(),
+                "end": day.isoformat(),
+                "plan_id": plan_id,
+                "plan": _bill_plan_summary(plan),
+            }
+            periods.append(current)
+        else:
+            current["end"] = day.isoformat()
+    return periods
+
+
+def _bill_line_summary(bill: dict[str, object]) -> dict[str, object]:
+    totals: dict[str, dict[str, float]] = {}
+    line_items = bill.get("line_items") if isinstance(bill.get("line_items"), list) else []
+    for raw_line in line_items:
+        if not isinstance(raw_line, dict):
+            continue
+        category = str(raw_line.get("category") or "other")
+        bucket = totals.setdefault(category, {"quantity": 0.0, "total_aud": 0.0})
+        try:
+            bucket["quantity"] += float(raw_line.get("quantity") or 0.0)
+            bucket["total_aud"] += float(raw_line.get("total_aud") or 0.0)
+        except (TypeError, ValueError):
+            continue
+    return {
+        key: {"quantity": round(value["quantity"], 4), "total_aud": round(value["total_aud"], 4)}
+        for key, value in totals.items()
+    }
+
+
+def _enrich_bill_index(payload: dict[str, object]) -> dict[str, object]:
+    plan_payload = _load_electricity_plan_payload()
+    bills = payload.get("bills") if isinstance(payload.get("bills"), list) else []
+    sorted_bills = sorted(
+        [bill for bill in bills if isinstance(bill, dict)],
+        key=lambda bill: str((bill.get("billing_period") or {}).get("start") or ""),
+    )
+    enriched: list[dict[str, object]] = []
+    for index, bill in enumerate(sorted_bills, start=1):
+        item = dict(bill)
+        item["sequence_number"] = index
+        item["rate_periods"] = _bill_rate_periods(item, plan_payload)
+        item["analysis"] = {
+            "type": "globird_bill_parse_v1",
+            "line_item_summary": _bill_line_summary(item),
+            "source_documents": {
+                "pdf": item.get("source_pdf") or "",
+                "text": item.get("extracted_text") or "",
+            },
+        }
+        enriched.append(item)
+    result = dict(payload)
+    result["bills"] = enriched
+    result["bill_count"] = len(enriched)
+    return result
+
+
 def _parse_save_apply_bill_upload(filename: str, raw: bytes) -> dict[str, object]:
     bill, extracted_text = parse_bill_upload(raw, filename=filename)
     saved_bill = save_bill_artifacts(BILLS_DIR, raw=raw, filename=filename, bill=bill, text=extracted_text)
-    update_result = apply_bill_actuals_to_daily_reports(storage_db_path, saved_bill)
     return {
         "ok": True,
         "bill": saved_bill,
-        "daily_report_update": update_result,
+        "daily_report_update": {
+            "updated_daily_reports": 0,
+            "status": "skipped",
+            "reason": "Bill uploads are retained for billing-period analysis; daily bill allocation is disabled.",
+        },
     }
 
 
@@ -14507,6 +14632,7 @@ async def home_plan_electricity_plans() -> dict[str, object]:
 @app.get("/api/bills")
 async def electricity_bills() -> dict[str, object]:
     payload = await asyncio.to_thread(load_bills_index, BILLS_DIR)
+    payload = await asyncio.to_thread(_enrich_bill_index, payload)
     payload["updated_at"] = datetime.now(UTC).isoformat()
     return payload
 

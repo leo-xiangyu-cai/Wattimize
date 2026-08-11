@@ -143,6 +143,7 @@ const I18N = {
     weatherLoadError: "Weather unavailable: {error}",
     refreshBtn: "Refresh",
     dashboardTab: "Dashboard",
+    billsTab: "Bills",
     planTab: "Plan",
     planTitle: "Electricity Plan",
     planMatrixTitle: "Plan Timetable",
@@ -716,13 +717,58 @@ const I18N = {
     reportDailyCostNotAvailable: "not available",
     reportBillChooseBtn: "Upload bill",
     reportBillUploading: "Uploading bill...",
-    reportBillUploaded: "Bill {invoice} uploaded · updated {days} reports",
+    reportBillUploaded: "Bill {invoice} uploaded",
     reportBillUploadFailed: "Bill upload failed: {error}",
     reportBillNoFile: "Choose a PDF bill first.",
     reportBillListBtn: "Bills",
     reportBillListLoading: "Loading bills...",
     reportBillListEmpty: "No uploaded bills",
     reportBillListFailed: "Bills unavailable: {error}",
+    billsTitle: "Bills",
+    billsUploadBtn: "Upload bill",
+    billsMeta: "{count} uploaded bills · sorted by billing period",
+    billsUpdated: "Updated {date}",
+    billsLoading: "Loading bills...",
+    billsEmpty: "No uploaded bills yet.",
+    billsLoadFailed: "Bills unavailable: {error}",
+    billsUploading: "Uploading bill...",
+    billsUploaded: "Bill {invoice} uploaded",
+    billsUploadFailed: "Bill upload failed: {error}",
+    billsNoFile: "Choose a PDF bill first.",
+    billsPeriodSelectLabel: "Bill period",
+    billsTotalSpend: "Total billed",
+    billsLatestPeriod: "Latest period",
+    billsPlanCount: "Plans seen",
+    billsPeriod: "Period",
+    billsBillingDays: "Billing days",
+    billsDaysValue: "{days} days",
+    billsInvoice: "Invoice",
+    billsIssued: "Issued",
+    billsDue: "Due",
+    billsAmountDue: "Amount due",
+    billsBillTotal: "Bill total",
+    billsPay: "Pay {amount}",
+    billsCreditEarned: "Credit earned {amount}",
+    billsSettled: "$0.00",
+    billsPlanRates: "Plan and rates",
+    billsParsedLines: "Parsed line items",
+    billsDocuments: "Source documents",
+    billsOpenPdf: "Open PDF",
+    billsOpenText: "Open extracted text",
+    billsRateDaily: "Daily",
+    billsRatePeak: "Peak",
+    billsRateFree: "Free",
+    billsRateShoulder: "Shoulder",
+    billsRateFitEvening: "FIT evening",
+    billsRateFitOther: "FIT other",
+    billsRateSuperExport: "Super Export",
+    billsRateZeroHero: "ZEROHERO",
+    billsLineDescription: "Description",
+    billsLinePeriod: "Period",
+    billsLineQuantity: "Quantity",
+    billsLineRate: "Rate",
+    billsLineTotal: "Total",
+    billsAnalysisType: "Analysis",
     reportCalendarTitle: "Report Calendar",
     reportCalendarMeta: "{month} · generated reports {count}/{days}",
     reportCalendarLoading: "Loading report index...",
@@ -1275,6 +1321,7 @@ const I18N = {
     weatherLoadError: "天气获取失败: {error}",
     refreshBtn: "刷新",
     dashboardTab: "总览",
+    billsTab: "账单",
     planTab: "电价",
     planTitle: "电价计划",
     planMatrixTitle: "电价时间表",
@@ -1848,13 +1895,58 @@ const I18N = {
     reportDailyCostNotAvailable: "不可用",
     reportBillChooseBtn: "上传账单",
     reportBillUploading: "正在上传账单...",
-    reportBillUploaded: "账单 {invoice} 已上传 · 更新 {days} 条日报",
+    reportBillUploaded: "账单 {invoice} 已上传",
     reportBillUploadFailed: "账单上传失败：{error}",
     reportBillNoFile: "请先选择 PDF 账单。",
     reportBillListBtn: "账单",
     reportBillListLoading: "正在加载账单...",
     reportBillListEmpty: "暂无已上传账单",
     reportBillListFailed: "账单列表不可用：{error}",
+    billsTitle: "账单",
+    billsUploadBtn: "上传账单",
+    billsMeta: "已上传 {count} 期账单 · 按账单周期排序",
+    billsUpdated: "更新于 {date}",
+    billsLoading: "正在加载账单...",
+    billsEmpty: "还没有上传账单。",
+    billsLoadFailed: "账单不可用：{error}",
+    billsUploading: "正在上传账单...",
+    billsUploaded: "账单 {invoice} 已上传",
+    billsUploadFailed: "账单上传失败：{error}",
+    billsNoFile: "请先选择 PDF 账单。",
+    billsPeriodSelectLabel: "账单周期",
+    billsTotalSpend: "账单合计",
+    billsLatestPeriod: "最新周期",
+    billsPlanCount: "涉及计划",
+    billsPeriod: "周期",
+    billsBillingDays: "账单天数",
+    billsDaysValue: "{days} 天",
+    billsInvoice: "发票",
+    billsIssued: "出账日",
+    billsDue: "到期日",
+    billsAmountDue: "应付金额",
+    billsBillTotal: "账单总额",
+    billsPay: "需要支付 {amount}",
+    billsCreditEarned: "获得抵扣 {amount}",
+    billsSettled: "$0.00",
+    billsPlanRates: "Plan 和费率",
+    billsParsedLines: "解析明细",
+    billsDocuments: "原始文档",
+    billsOpenPdf: "打开 PDF",
+    billsOpenText: "打开提取文本",
+    billsRateDaily: "日费",
+    billsRatePeak: "Peak",
+    billsRateFree: "免费/Offpeak",
+    billsRateShoulder: "Shoulder",
+    billsRateFitEvening: "傍晚上网",
+    billsRateFitOther: "其他上网",
+    billsRateSuperExport: "Super Export",
+    billsRateZeroHero: "ZEROHERO",
+    billsLineDescription: "项目",
+    billsLinePeriod: "周期",
+    billsLineQuantity: "数量",
+    billsLineRate: "单价",
+    billsLineTotal: "金额",
+    billsAnalysisType: "解析类型",
     reportCalendarTitle: "日报日历",
     reportCalendarMeta: "{month} · 已生成日报 {count}/{days}",
     reportCalendarLoading: "正在加载日报索引...",
@@ -2664,6 +2756,7 @@ const stateCache = {
   lastSolplanetControlLive: null,
   lastSolplanetControlFetch: null,
   lastHomePlan: null,
+  lastBills: null,
   lastSamplingStatus: null,
   lastSamplingDaily: null,
   lastSamplingUsageBySystem: null,
@@ -2840,7 +2933,7 @@ function getLang() {
 
 let currentLang = getLang();
 const _hashTab = location.hash.slice(1);
-const ALL_TABS = ["dashboard", "plan", "notificationMatrix", "rawData", "solplanetControl", "report", "monthlyReport", "database", "workerLogs", "operationTimeline", "workerFailureLog"];
+const ALL_TABS = ["dashboard", "plan", "notificationMatrix", "rawData", "solplanetControl", "report", "monthlyReport", "bills", "database", "workerLogs", "operationTimeline", "workerFailureLog"];
 const SAJ_PROFILE_IDS = ["self_consumption", "time_of_use", "microgrid"];
 const PLAN_RATE_KEYS = {
   daily: "daily_charge_aud_per_day",
@@ -2915,6 +3008,7 @@ const tabLoadState = {
   sampling: { inFlight: false },
   report: { inFlight: false },
   monthlyReport: { inFlight: false },
+  bills: { inFlight: false },
   database: { inFlight: false },
   workerLogs: { inFlight: false },
   operationTimeline: { inFlight: false },
@@ -2961,6 +3055,9 @@ const monthlyReportState = {
   payload: null,
   statusText: "",
   selectedAnomalyDay: "",
+};
+const billsState = {
+  selectedInvoice: "",
 };
 
 function getSelectedSamplingSystem() {
@@ -9967,6 +10064,198 @@ async function loadReportBillsMenu({ force = false } = {}) {
   }
 }
 
+function billDateRangeText(period) {
+  const start = String(period?.start || "");
+  const end = String(period?.end || "");
+  if (!start && !end) return "-";
+  if (start === end) return start;
+  return `${start || "-"} to ${end || "-"}`;
+}
+
+function formatBillRate(value, suffix) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${formatDailyCostAud(n)}${suffix}`;
+}
+
+function formatBillMoneyOutcome(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  if (Math.abs(n) < 0.005) return t("billsSettled");
+  const amount = formatDailyCostAud(Math.abs(n));
+  return n < 0 ? t("billsCreditEarned", { amount }) : t("billsPay", { amount });
+}
+
+function formatBillQuantity(value, unit) {
+  const n = Number(value);
+  const unitText = String(unit || "").trim();
+  if (!Number.isFinite(n)) return unitText || "-";
+  return `${formatTrimmedDecimal(n, 3)}${unitText ? ` ${unitText}` : ""}`;
+}
+
+function billRateRows(plan) {
+  const rates = plan?.rates && typeof plan.rates === "object" ? plan.rates : {};
+  return [
+    ["billsRateDaily", "daily_charge_aud_per_day", "/day"],
+    ["billsRatePeak", "peak_usage_aud_per_kwh", "/kWh"],
+    ["billsRateFree", "off_peak_first_50_kwh_per_day_aud_per_kwh", "/kWh"],
+    ["billsRateShoulder", "shoulder_usage_aud_per_kwh", "/kWh"],
+    ["billsRateFitEvening", "solar_feed_in_4pm_11pm_aud_per_kwh", "/kWh"],
+    ["billsRateFitOther", "solar_feed_in_11pm_4pm_aud_per_kwh", "/kWh"],
+    ["billsRateSuperExport", "super_export_top_up_aud_per_kwh", "/kWh"],
+    ["billsRateZeroHero", "zerohero_credit_aud_per_qualified_day", "/day"],
+  ].map(([labelKey, key, suffix]) => {
+    const item = rates[key] && typeof rates[key] === "object" ? rates[key] : {};
+    const windowText = item.time_window ? ` · ${item.time_window}` : "";
+    const capText = item.daily_cap_kwh ? ` · ${formatEnergyKwhText(item.daily_cap_kwh)}/day cap` : "";
+    return `<span><strong>${escapeHtml(t(labelKey))}</strong> ${escapeHtml(formatBillRate(item.value, suffix))}${escapeHtml(windowText + capText)}</span>`;
+  });
+}
+
+function renderBills(payload = stateCache.lastBills) {
+  const list = document.getElementById("billsList");
+  const grid = document.getElementById("billsSummaryGrid");
+  const picker = document.getElementById("billsPeriodSelect");
+  if (!list || !grid) return;
+  const bills = Array.isArray(payload?.bills) ? payload.bills : [];
+  setText("billsUpdatedAt", payload?.updated_at ? t("billsUpdated", { date: formatDateTimeWithAgo(payload.updated_at) }) : formatUpdatedAt(null));
+  setText("billsMeta", t("billsMeta", { count: bills.length }));
+  if (!payload) {
+    grid.innerHTML = "";
+    list.innerHTML = `<p class="bills-empty muted">${escapeHtml(t("billsLoading"))}</p>`;
+    if (picker) picker.innerHTML = "";
+    return;
+  }
+  if (payload.error) {
+    grid.innerHTML = "";
+    list.innerHTML = `<p class="bills-empty is-error">${escapeHtml(t("billsLoadFailed", { error: payload.error }))}</p>`;
+    if (picker) picker.innerHTML = "";
+    return;
+  }
+  if (!bills.length) {
+    grid.innerHTML = "";
+    list.innerHTML = `<p class="bills-empty muted">${escapeHtml(t("billsEmpty"))}</p>`;
+    if (picker) picker.innerHTML = "";
+    return;
+  }
+  if (!bills.some((bill) => String(bill.invoice_number || "") === billsState.selectedInvoice)) {
+    billsState.selectedInvoice = String(bills[bills.length - 1]?.invoice_number || "");
+  }
+  const selectedBill = bills.find((bill) => String(bill.invoice_number || "") === billsState.selectedInvoice) || bills[bills.length - 1];
+  const selectedPeriod = selectedBill?.billing_period && typeof selectedBill.billing_period === "object" ? selectedBill.billing_period : {};
+  const selectedDays = Number(selectedPeriod.days);
+  if (picker) {
+    picker.innerHTML = bills.map((bill) => {
+      const invoice = String(bill.invoice_number || "");
+      const label = `#${bill.sequence_number || "-"} · ${billDateRangeText(bill.billing_period || {})}${invoice ? ` · ${invoice}` : ""}`;
+      return `<option value="${escapeHtml(invoice)}">${escapeHtml(label)}</option>`;
+    }).join("");
+    picker.value = String(selectedBill?.invoice_number || "");
+  }
+  const planIds = new Set((selectedBill.rate_periods || []).map((period) => period?.plan_id).filter(Boolean));
+  grid.innerHTML = [
+    { label: t("billsBillTotal"), value: formatBillMoneyOutcome(selectedBill.bill_total_including_gst_aud) },
+    { label: t("billsPeriod"), value: billDateRangeText(selectedBill?.billing_period || {}) },
+    { label: t("billsBillingDays"), value: Number.isFinite(selectedDays) ? t("billsDaysValue", { days: formatTrimmedDecimal(selectedDays, 0) }) : "-" },
+    { label: t("billsPlanCount"), value: String(planIds.size || "-") },
+  ].map((item) => `
+    <div class="bills-summary-card">
+      <span>${escapeHtml(item.label)}</span>
+      <strong>${escapeHtml(item.value)}</strong>
+    </div>
+  `).join("");
+
+  const bill = selectedBill;
+  const period = bill.billing_period || {};
+  const sourcePdf = String(bill.source_pdf || bill.analysis?.source_documents?.pdf || "");
+  const sourceText = String(bill.extracted_text || bill.analysis?.source_documents?.text || "");
+  const ratePeriods = Array.isArray(bill.rate_periods) ? bill.rate_periods : [];
+  const lineItems = Array.isArray(bill.line_items) ? bill.line_items : [];
+  const rateHtml = ratePeriods.map((periodItem) => {
+    const plan = periodItem.plan || {};
+    const planName = plan.display_name || plan.id || "-";
+    return `
+      <section class="bills-rate-period">
+        <div>
+          <strong>${escapeHtml(planName)}</strong>
+          <span class="muted">${escapeHtml(billDateRangeText(periodItem))} · ${escapeHtml(plan.price_basis || "-")}</span>
+        </div>
+        <div class="bills-rate-grid">${billRateRows(plan).join("")}</div>
+      </section>
+    `;
+  }).join("");
+  const linesHtml = lineItems.map((line) => `
+    <tr>
+      <td>${escapeHtml(line.description || "-")}</td>
+      <td>${escapeHtml(billDateRangeText({ start: line.period_start, end: line.period_end }))}</td>
+      <td>${escapeHtml(formatBillQuantity(line.quantity, line.unit))}</td>
+      <td>${escapeHtml(formatDailyCostAud(line.rate_aud))}</td>
+      <td>${escapeHtml(formatBillMoneyOutcome(line.total_aud))}</td>
+    </tr>
+  `).join("");
+  list.innerHTML = `
+      <article class="bills-item">
+        <div class="bills-item-head">
+          <div>
+            <p class="bills-item-kicker">${escapeHtml(`#${bill.sequence_number || "-"} · ${t("billsPeriod")}`)}</p>
+            <h3>${escapeHtml(billDateRangeText(period))}</h3>
+          </div>
+          <strong class="bills-item-total">${escapeHtml(formatBillMoneyOutcome(bill.bill_total_including_gst_aud))}</strong>
+        </div>
+        <div class="bills-facts">
+          <span><strong>${escapeHtml(t("billsInvoice"))}</strong> ${escapeHtml(bill.invoice_number || "-")}</span>
+          <span><strong>${escapeHtml(t("billsBillingDays"))}</strong> ${escapeHtml(Number.isFinite(Number(period.days)) ? t("billsDaysValue", { days: formatTrimmedDecimal(Number(period.days), 0) }) : "-")}</span>
+          <span><strong>${escapeHtml(t("billsIssued"))}</strong> ${escapeHtml(bill.issue_date || "-")}</span>
+          <span><strong>${escapeHtml(t("billsDue"))}</strong> ${escapeHtml(bill.due_date || "-")}</span>
+          <span><strong>${escapeHtml(t("billsAmountDue"))}</strong> ${escapeHtml(formatBillMoneyOutcome(bill.amount_due_aud))}</span>
+          <span><strong>${escapeHtml(t("billsAnalysisType"))}</strong> ${escapeHtml(bill.analysis?.type || "-")}</span>
+        </div>
+        <section class="bills-detail-block">
+          <h4>${escapeHtml(t("billsPlanRates"))}</h4>
+          ${rateHtml || `<p class="muted">-</p>`}
+        </section>
+        <section class="bills-detail-block">
+          <h4>${escapeHtml(t("billsParsedLines"))}</h4>
+          <div class="table-wrap bills-lines-table-wrap">
+            <table class="bills-lines-table">
+              <thead>
+                <tr>
+                  <th>${escapeHtml(t("billsLineDescription"))}</th>
+                  <th>${escapeHtml(t("billsLinePeriod"))}</th>
+                  <th>${escapeHtml(t("billsLineQuantity"))}</th>
+                  <th>${escapeHtml(t("billsLineRate"))}</th>
+                  <th>${escapeHtml(t("billsLineTotal"))}</th>
+                </tr>
+              </thead>
+              <tbody>${linesHtml}</tbody>
+            </table>
+          </div>
+        </section>
+        <section class="bills-detail-block bills-documents">
+          <h4>${escapeHtml(t("billsDocuments"))}</h4>
+          ${sourcePdf ? `<a class="btn secondary" href="${escapeHtml(reportBillArtifactUrl(sourcePdf))}" target="_blank" rel="noopener">${escapeHtml(t("billsOpenPdf"))}</a>` : ""}
+          ${sourceText ? `<a class="btn secondary" href="${escapeHtml(reportBillArtifactUrl(sourceText))}" target="_blank" rel="noopener">${escapeHtml(t("billsOpenText"))}</a>` : ""}
+        </section>
+      </article>
+    `;
+}
+
+async function loadBills({ force = false } = {}) {
+  if (!force && stateCache.lastBills) {
+    renderBills(stateCache.lastBills);
+    return;
+  }
+  stateCache.lastBills = null;
+  renderBills(null);
+  try {
+    const payload = await fetchJson("/api/bills", { timeoutMs: 10000 });
+    stateCache.lastBills = payload;
+  } catch (err) {
+    stateCache.lastBills = { bills: [], error: formatApiErrorMessage(err), updated_at: null };
+  }
+  renderBills(stateCache.lastBills);
+}
+
 async function toggleReportBillMenu() {
   const menu = document.getElementById("reportBillMenu");
   const nextVisible = !menu || menu.classList.contains("hidden");
@@ -16336,13 +16625,19 @@ function setReportBillUploadBusy(busy) {
   if (input) input.disabled = Boolean(busy);
 }
 
-async function uploadReportBillFile(file) {
+function setBillsUploadBusy(busy) {
+  const button = document.getElementById("billsUploadBtn");
+  const input = document.getElementById("billsFileInput");
+  if (button) button.disabled = Boolean(busy);
+  if (input) input.disabled = Boolean(busy);
+}
+
+async function uploadBillFile(file, { statusElementId, noFileKey, uploadingKey, uploadedKey, failedKey, afterUpload } = {}) {
   if (!file) {
-    setText("reportBillUploadStatus", t("reportBillNoFile"));
+    setText(statusElementId, t(noFileKey));
     return;
   }
-  setReportBillUploadBusy(true);
-  setText("reportBillUploadStatus", t("reportBillUploading"));
+  setText(statusElementId, t(uploadingKey));
   const formData = new FormData();
   formData.append("file", file);
   try {
@@ -16352,17 +16647,55 @@ async function uploadReportBillFile(file) {
       timeoutMs: 120000,
     });
     const invoice = payload?.bill?.invoice_number || "-";
-    const updatedDays = Number(payload?.daily_report_update?.updated_daily_reports || 0);
-    setText("reportBillUploadStatus", t("reportBillUploaded", { invoice, days: updatedDays }));
-    invalidateReportCalendarMonthsForBill(payload?.bill || null);
-    await loadReportBillsMenu({ force: true });
-    await loadReportIndexForVisibleMonth({ force: true });
-    await loadDailyReport({ generateIfMissing: false });
+    setText(statusElementId, t(uploadedKey, { invoice }));
+    reportBillsState.loaded = false;
+    stateCache.lastBills = null;
+    if (typeof afterUpload === "function") await afterUpload(payload);
   } catch (err) {
-    setText("reportBillUploadStatus", t("reportBillUploadFailed", { error: formatApiErrorMessage(err) }));
+    setText(statusElementId, t(failedKey, { error: formatApiErrorMessage(err) }));
+  }
+}
+
+async function uploadReportBillFile(file) {
+  setReportBillUploadBusy(true);
+  try {
+    await uploadBillFile(file, {
+      statusElementId: "reportBillUploadStatus",
+      noFileKey: "reportBillNoFile",
+      uploadingKey: "reportBillUploading",
+      uploadedKey: "reportBillUploaded",
+      failedKey: "reportBillUploadFailed",
+      afterUpload: async (payload) => {
+        invalidateReportCalendarMonthsForBill(payload?.bill || null);
+        await loadReportBillsMenu({ force: true });
+        await loadReportIndexForVisibleMonth({ force: true });
+        await loadDailyReport({ generateIfMissing: false });
+      },
+    });
   } finally {
     setReportBillUploadBusy(false);
     const input = document.getElementById("reportBillFileInput");
+    if (input) input.value = "";
+  }
+}
+
+async function uploadBillsFile(file) {
+  setBillsUploadBusy(true);
+  try {
+    await uploadBillFile(file, {
+      statusElementId: "billsUploadStatus",
+      noFileKey: "billsNoFile",
+      uploadingKey: "billsUploading",
+      uploadedKey: "billsUploaded",
+      failedKey: "billsUploadFailed",
+      afterUpload: async () => {
+        await loadBills({ force: true });
+        await loadReportBillsMenu({ force: true });
+      },
+    });
+  } finally {
+    setBillsUploadBusy(false);
+    const input = document.getElementById("billsFileInput");
     if (input) input.value = "";
   }
 }
@@ -16854,6 +17187,10 @@ async function loadTabWithGuard(tab, fromAutoRefresh = false) {
       await loadMonthlyReport();
       return true;
     }
+    if (tabKey === "bills") {
+      await loadBills();
+      return true;
+    }
     if (tabKey === "database") {
       await loadDatabase();
       return true;
@@ -16933,6 +17270,7 @@ function setActiveTab(tab, load = true) {
   const solplanetControlView = document.getElementById("solplanetControlView");
   const samplingView = document.getElementById("samplingView");
   const monthlyReportView = document.getElementById("monthlyReportView");
+  const billsView = document.getElementById("billsView");
   const databaseView = document.getElementById("databaseView");
   const workerLogsView = document.getElementById("workerLogsView");
   const operationTimelineView = document.getElementById("operationTimelineView");
@@ -16944,6 +17282,7 @@ function setActiveTab(tab, load = true) {
   const tabSolplanetControl = document.getElementById("tabSolplanetControl");
   const tabReport = document.getElementById("tabReport");
   const tabMonthlyReport = document.getElementById("tabMonthlyReport");
+  const tabBills = document.getElementById("tabBills");
   const tabDatabase = document.getElementById("tabDatabase");
   const tabWorkerLogs = document.getElementById("tabWorkerLogs");
   const tabOperationTimeline = document.getElementById("tabOperationTimeline");
@@ -16957,6 +17296,7 @@ function setActiveTab(tab, load = true) {
   const samplingActive = currentTab === "sampling" || currentTab === "report";
   const reportActive = currentTab === "report";
   const monthlyReportActive = currentTab === "monthlyReport";
+  const billsActive = currentTab === "bills";
   const databaseActive = currentTab === "database";
   const workerLogsActive = currentTab === "workerLogs";
   const operationTimelineActive = currentTab === "operationTimeline";
@@ -16968,6 +17308,7 @@ function setActiveTab(tab, load = true) {
   if (solplanetControlView) solplanetControlView.classList.toggle("hidden", !solplanetControlActive);
   if (samplingView) samplingView.classList.toggle("hidden", !samplingActive);
   if (monthlyReportView) monthlyReportView.classList.toggle("hidden", !monthlyReportActive);
+  if (billsView) billsView.classList.toggle("hidden", !billsActive);
   if (databaseView) databaseView.classList.toggle("hidden", !databaseActive);
   if (workerLogsView) workerLogsView.classList.toggle("hidden", !workerLogsActive);
   if (operationTimelineView) operationTimelineView.classList.toggle("hidden", !operationTimelineActive);
@@ -16979,6 +17320,7 @@ function setActiveTab(tab, load = true) {
   if (tabSolplanetControl) tabSolplanetControl.classList.toggle("active", solplanetControlActive);
   if (tabReport) tabReport.classList.toggle("active", reportActive);
   if (tabMonthlyReport) tabMonthlyReport.classList.toggle("active", monthlyReportActive);
+  if (tabBills) tabBills.classList.toggle("active", billsActive);
   if (tabDatabase) tabDatabase.classList.toggle("active", databaseActive);
   if (tabWorkerLogs) tabWorkerLogs.classList.toggle("active", workerLogsActive);
   if (tabOperationTimeline) tabOperationTimeline.classList.toggle("active", operationTimelineActive);
@@ -16991,6 +17333,7 @@ function setActiveTab(tab, load = true) {
     [tabSolplanetControl, solplanetControlActive],
     [tabReport, reportActive],
     [tabMonthlyReport, monthlyReportActive],
+    [tabBills, billsActive],
     [tabDatabase, databaseActive],
     [tabWorkerLogs, workerLogsActive],
     [tabOperationTimeline, operationTimelineActive],
@@ -17020,6 +17363,8 @@ function setActiveTab(tab, load = true) {
     renderReportCalendar();
   } else if (currentTab === "monthlyReport") {
     renderMonthlyReport();
+  } else if (currentTab === "bills") {
+    renderBills();
   } else if (currentTab === "plan") {
     renderHomePlan();
   }
@@ -17052,6 +17397,7 @@ bindChangeIfPresent("langSelect", (event) => {
   refreshFlowDiagrams();
   if (currentTab === "report") renderReportCalendar();
   else if (currentTab === "monthlyReport") renderMonthlyReport();
+  else if (currentTab === "bills") renderBills();
   else renderSamplingRangeInputContainer();
   syncWorkerLogsFilters();
   if (stateCache.lastWorkerLogsPage) renderWorkerLogsPage(stateCache.lastWorkerLogsPage);
@@ -17131,6 +17477,21 @@ bindChangeIfPresent("reportBillFileInput", (event) => {
 });
 bindClickIfPresent("tabMonthlyReport", () => {
   setActiveTab("monthlyReport");
+});
+bindClickIfPresent("tabBills", () => {
+  setActiveTab("bills");
+});
+bindClickIfPresent("billsUploadBtn", () => {
+  const input = document.getElementById("billsFileInput");
+  if (input) input.click();
+});
+bindChangeIfPresent("billsFileInput", (event) => {
+  const file = event?.target?.files?.[0] || null;
+  void uploadBillsFile(file);
+});
+bindChangeIfPresent("billsPeriodSelect", (event) => {
+  billsState.selectedInvoice = String(event?.target?.value || "");
+  renderBills();
 });
 bindClickIfPresent("tabDatabase", () => {
   setActiveTab("database");
