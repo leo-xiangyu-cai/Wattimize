@@ -29,6 +29,12 @@ from app.billing import (
     parse_bill_upload,
     save_bill_artifacts,
 )
+from app.meter_usage import (
+    compute_meter_usage_actuals,
+    load_meter_usage_index,
+    parse_meter_usage_upload,
+    save_meter_usage_artifacts,
+)
 from app.config import (
     ALLOWED_DETAIL_RETENTION_MONTHS,
     ALLOWED_SAMPLE_INTERVAL_SECONDS,
@@ -62,9 +68,9 @@ from app.persistence import (
     build_monthly_report_analysis,
     compute_daily_usage,
     compute_daily_cost_between,
-    compute_daily_report_cost,
     compute_usage_between,
     apply_daily_report_soc_estimates,
+    apply_daily_actual_costs_to_daily_reports,
     delete_worker_api_logs_older_than,
     dismiss_notification_entry,
     delete_realtime_kv_by_prefix,
@@ -458,7 +464,9 @@ static_asset_version = "dev"
 HOME_PLAN_DIR = Path(__file__).resolve().parent.parent / "data" / "home-plan"
 ELECTRICITY_PLANS_PATH = HOME_PLAN_DIR / "electricity-plans.json"
 BILLS_DIR = HOME_PLAN_DIR / "bills"
+METER_USAGE_DIR = HOME_PLAN_DIR / "meter-usage"
 MAX_BILL_UPLOAD_BYTES = 20 * 1024 * 1024
+MAX_USAGE_UPLOAD_BYTES = 20 * 1024 * 1024
 
 solplanet_flow_cache: dict[str, object] = {"payload": None, "at_monotonic": 0.0}
 solplanet_flow_lock = asyncio.Lock()
@@ -4129,6 +4137,10 @@ def _operation_reason_label(reason: object, *, lang: Literal["zh", "en"] = "zh")
         return "Hard guard tripped during export window" if lang == "en" else "晚高峰卖电时段触发硬保护"
     if code == "export_window_support_allocated_under_zero_import_guard":
         return "Allocated support load under zero-import guard" if lang == "en" else "在零购电保护下分配前移负载"
+    if code == "export_window_tesla_force_charge_above_23_reserve":
+        return "Tesla below forced threshold and battery remains above the configured export reserve" if lang == "en" else "Tesla 低于强制阈值，且电池仍高于配置外送保留线"
+    if code == "export_window_tesla_force_charge_below_23_reserve":
+        return "Tesla below forced threshold, but battery is at or below the configured export reserve" if lang == "en" else "Tesla 低于强制阈值，但电池已到或低于配置外送保留线"
     if code == "export_window_no_live_export_headroom":
         return "No live export headroom during export window" if lang == "en" else "晚高峰卖电时段当前没有外送余量"
     if code == "export_window_insufficient_headroom_for_interruptible_loads":
@@ -4418,6 +4430,11 @@ def _operation_reason_fmt_wh(value: object) -> str:
     return f"{numeric:.0f}Wh"
 
 
+def _operation_reason_fmt_kwh(value: object) -> str:
+    numeric = _to_number(value)
+    return f"{numeric:.2f}kWh" if numeric is not None else "-"
+
+
 def _operation_reason_fmt_hours(value: object) -> str:
     numeric = _to_number(value)
     return f"{numeric:.2f}h" if numeric is not None else "-"
@@ -4520,11 +4537,21 @@ def _operation_reason_why_summary(
                     if lang == "en"
                     else "实时购电或电池硬上限事件触发了卖电窗口保护，因此可中断支撑负载被立刻切掉。"
                 )
-        if action_type in ("start_charging", "stop_charging", "restart_charging", "set_charge_current") or re.fullmatch(r"set_current_\d+a", action_type):
+        if action_type in ("apply", "start_charging", "stop_charging", "restart_charging", "set_charge_current") or re.fullmatch(r"set_current_\d+a", action_type):
             tesla_soc = _operation_reason_fmt_pct(tesla_support.get("tesla_soc_percent"))
             threshold_soc = _operation_reason_fmt_pct(tesla_support.get("force_max_charge_threshold_soc_percent"))
-            if reason_code == "allocated_export_support":
+            if reason_code in ("allocated_export_support", "force_charge_above_23_reserve"):
                 if tesla_support.get("force_support_needed"):
+                    guard = export_map.get("support_guard") if isinstance(export_map.get("support_guard"), dict) else {}
+                    reserve = guard.get("tesla_force_reserve") if isinstance(guard.get("tesla_force_reserve"), dict) else {}
+                    reserve_text = _operation_reason_fmt_kwh(reserve.get("reserve_to_23_kwh"))
+                    usable_text = _operation_reason_fmt_kwh(reserve.get("usable_battery_total_kwh"))
+                    if reason_code == "force_charge_above_23_reserve":
+                        return (
+                            f"Tesla SOC {tesla_soc} was below the forced threshold {threshold_soc}, and usable battery {usable_text} remained above the configured export reserve {reserve_text}, so Tesla was forced to charge."
+                            if lang == "en"
+                            else f"Tesla 电量 {tesla_soc} 低于强制阈值 {threshold_soc}，且可用电量 {usable_text} 高于配置外送保留线 {reserve_text}，所以强制 Tesla 充电。"
+                        )
                     return (
                         f"Tesla SOC {tesla_soc} was below the minimum support threshold {threshold_soc}, so charging was pulled forward into the export window."
                         if lang == "en"
@@ -4536,6 +4563,14 @@ def _operation_reason_why_summary(
                     else "在零购电保护下，Tesla 被选为卖电窗口里的支撑负载。"
                 )
             if reason_code == "not_allocated_export_support":
+                guard = export_map.get("support_guard") if isinstance(export_map.get("support_guard"), dict) else {}
+                reserve = guard.get("tesla_force_reserve") if isinstance(guard.get("tesla_force_reserve"), dict) else {}
+                if tesla_support.get("force_support_needed") and reserve and not reserve.get("allowed"):
+                    return (
+                        "Tesla was below the forced threshold, but the battery was already at or below the configured export reserve, so charging was stopped."
+                        if lang == "en"
+                        else "Tesla 低于强制阈值，但电池已经到或低于配置外送保留线，所以停止充电。"
+                    )
                 return (
                     "Tesla support was no longer needed, or there was no longer enough zero-import headroom to keep it charging."
                     if lang == "en"
@@ -6903,12 +6938,6 @@ async def _run_export_window_fast_guard(
     result["solplanet_fast_guard"] = fast_guard_signal
 
     hard_guard_reasons: list[str] = []
-    if grid_w is None:
-        hard_guard_reasons.append("solplanet_grid_unavailable")
-    elif float(grid_w) > 0.0:
-        hard_guard_reasons.append("solplanet_grid_import_started")
-    elif not export_signal_active:
-        hard_guard_reasons.append("solplanet_export_signal_lost")
     if (
         battery_discharge_w is not None
         and battery_discharge_w > EXPORT_WINDOW_BATTERY_HARD_DISCHARGE_LIMIT_W + BALANCE_TOLERANCE_W
@@ -7699,6 +7728,29 @@ async def _run_midday_window_check(
                 ),
                 "live_export_present": current_grid_export_w > 0.0,
             }
+            solplanet_monitor_map = (
+                export_window_map.get("solplanet_export_monitor")
+                if isinstance(export_window_map.get("solplanet_export_monitor"), dict)
+                else {}
+            )
+            export_reserve_usable_kwh = _to_number(solplanet_monitor_map.get("usable_battery_total_kwh"))
+            export_reserve_floor_kwh = _to_number(solplanet_monitor_map.get("reserve_floor_kwh"))
+            export_reserve_surplus_kwh = (
+                round(float(export_reserve_usable_kwh) - float(export_reserve_floor_kwh), 4)
+                if export_reserve_usable_kwh is not None and export_reserve_floor_kwh is not None
+                else None
+            )
+            tesla_export_reserve_allowed = bool(
+                tesla_force_support_needed
+                and export_reserve_surplus_kwh is not None
+                and export_reserve_surplus_kwh > 0.0
+            )
+            export_window_map["support_guard"]["tesla_force_reserve"] = {
+                "usable_battery_total_kwh": export_reserve_usable_kwh,
+                "reserve_to_23_kwh": export_reserve_floor_kwh,
+                "surplus_above_reserve_kwh": export_reserve_surplus_kwh,
+                "allowed": tesla_export_reserve_allowed,
+            }
             export_window_map["tesla_support"] = {
                 "auto_control_enabled": tesla_auto_control_enabled,
                 "location_block_reason": tesla_location_block_reason,
@@ -7735,8 +7787,6 @@ async def _run_midday_window_check(
                     for reason in fast_guard_reasons
                     if str(reason).strip()
                 )
-            if current_grid_import_w > 0.0:
-                hard_guard_reasons.append("grid_import_started")
             if battery2_discharge_w > EXPORT_WINDOW_BATTERY_HARD_DISCHARGE_LIMIT_W + BALANCE_TOLERANCE_W:
                 hard_guard_reasons.append("battery_discharge_limit_exceeded")
             if hard_guard_reasons:
@@ -7785,6 +7835,9 @@ async def _run_midday_window_check(
                         pool_pump_target_mode = "run"
                         remaining_headroom_w = max(remaining_headroom_w - pump_power_w, 0.0)
                     continue
+                if tesla_export_reserve_allowed:
+                    tesla_target = _calculate_tesla_max_power_target(charge_state)
+                    continue
                 candidate_target = _calculate_tesla_target_for_power_budget(charge_state, remaining_headroom_w)
                 if str(candidate_target.get("mode") or "").strip().lower() == "charge":
                     tesla_target = candidate_target
@@ -7817,7 +7870,11 @@ async def _run_midday_window_check(
                     "charge_current_amps": int(tesla_target.get("charge_current_amps") or 0),
                     "predicted_grid_w": round(float(grid_w), 1),
                 }
-                result["decision_reason"] = "export_window_support_allocated_under_zero_import_guard"
+                result["decision_reason"] = (
+                    "export_window_tesla_force_charge_above_23_reserve"
+                    if tesla_allocated and tesla_export_reserve_allowed
+                    else "export_window_support_allocated_under_zero_import_guard"
+                )
             elif support_candidates:
                 result["decision"] = {
                     "mode": "observe_only",
@@ -7825,6 +7882,9 @@ async def _run_midday_window_check(
                     "predicted_grid_w": round(float(grid_w), 1),
                 }
                 result["decision_reason"] = (
+                    "export_window_tesla_force_charge_below_23_reserve"
+                    if tesla_force_support_needed and not tesla_export_reserve_allowed
+                    else
                     "export_window_no_live_export_headroom"
                     if current_grid_export_w <= 0.0
                     else "export_window_insufficient_headroom_for_interruptible_loads"
@@ -7853,20 +7913,26 @@ async def _run_midday_window_check(
                         _append_worker_action(result, {
                             "type": "apply",
                             "steps": [f"set_current_{desired_amps}a"],
-                            "reason": "allocated_export_support",
+                            "reason": "force_charge_above_23_reserve"
+                            if tesla_export_reserve_allowed
+                            else "allocated_export_support",
                         })
                     if not charging_enabled:
                         if charge_requested_enabled:
                             await _tesla_restart_charging()
                             _append_worker_action(result, {
                                 "type": "restart_charging",
-                                "reason": "allocated_export_support",
+                                "reason": "force_charge_above_23_reserve"
+                                if tesla_export_reserve_allowed
+                                else "allocated_export_support",
                             })
                         else:
                             await _tesla_set_charging(True)
                             _append_worker_action(result, {
                                 "type": "start_charging",
-                                "reason": "allocated_export_support",
+                                "reason": "force_charge_above_23_reserve"
+                                if tesla_export_reserve_allowed
+                                else "allocated_export_support",
                             })
                     elif configured_matches_desired and (current_actual_amps is None or actual_matches_desired):
                         export_window_map["tesla_support"]["holding_allocated_target"] = True
@@ -14624,6 +14690,35 @@ def _parse_save_apply_bill_upload(filename: str, raw: bytes) -> dict[str, object
     }
 
 
+def _parse_save_apply_meter_usage_upload(filename: str, raw: bytes) -> dict[str, object]:
+    usage = parse_meter_usage_upload(raw, filename=filename)
+    source_label = str(usage.get("source_filename") or filename or "meter usage")
+    actuals_by_day = compute_meter_usage_actuals(
+        usage,
+        plan_payload=_load_electricity_plan_payload(),
+        timezone_name="Australia/Sydney",
+        source_label=source_label,
+    )
+    saved_usage = save_meter_usage_artifacts(
+        METER_USAGE_DIR,
+        raw=raw,
+        filename=filename,
+        usage=usage,
+        actuals_by_day=actuals_by_day,
+    )
+    update_result = apply_daily_actual_costs_to_daily_reports(
+        storage_db_path,
+        actuals_by_day,
+        timezone_name="Australia/Sydney",
+        plan_payload=_load_electricity_plan_payload(),
+    )
+    return {
+        "ok": True,
+        "usage": saved_usage,
+        "daily_report_update": update_result,
+    }
+
+
 @app.get("/api/home-plan/electricity-plans")
 async def home_plan_electricity_plans() -> dict[str, object]:
     return _load_electricity_plan_payload()
@@ -14685,6 +14780,38 @@ async def electricity_bill_upload(file: UploadFile = File(...)) -> dict[str, obj
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except OSError as exc:
         raise HTTPException(status_code=507, detail=f"Bill upload failed: {exc}") from exc
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=500, detail=f"Daily report update failed: {exc}") from exc
+
+
+@app.get("/api/usage/uploads")
+async def meter_usage_uploads() -> dict[str, object]:
+    payload = await asyncio.to_thread(load_meter_usage_index, METER_USAGE_DIR)
+    payload["updated_at"] = datetime.now(UTC).isoformat()
+    return payload
+
+
+@app.post("/api/usage/upload")
+async def meter_usage_upload(file: UploadFile = File(...)) -> dict[str, object]:
+    filename = Path(str(file.filename or "meter-usage.csv")).name
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Uploaded usage file is empty")
+    if len(raw) > MAX_USAGE_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"Uploaded usage file exceeds {MAX_USAGE_UPLOAD_BYTES // (1024 * 1024)} MB")
+    suffix = Path(filename).suffix.lower()
+    content_type = str(file.content_type or "").lower()
+    if suffix != ".csv" and "csv" not in content_type and "text/plain" not in content_type:
+        raise HTTPException(status_code=400, detail="Upload a CSV meter usage file")
+    try:
+        async with daily_report_generation_lock:
+            return await asyncio.to_thread(_parse_save_apply_meter_usage_upload, filename, raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=507, detail=f"Usage upload failed: {exc}") from exc
     except sqlite3.Error as exc:
         raise HTTPException(status_code=500, detail=f"Daily report update failed: {exc}") from exc
 
@@ -15038,23 +15165,6 @@ async def daily_report(
                 "available_days": [item.get("report_day_local") for item in available],
             },
         )
-    if not payload.get("daily_cost"):
-        try:
-            period_start = _parse_iso_utc_datetime(str(payload.get("period_start_utc") or ""), field_name="period_start_utc")
-            period_end = _parse_iso_utc_datetime(str(payload.get("period_end_utc") or ""), field_name="period_end_utc")
-            payload["daily_cost"] = await asyncio.to_thread(
-                compute_daily_report_cost,
-                storage_db_path,
-                report_day_local=target_day,
-                system="combined",
-                start_at_utc=period_start,
-                end_at_utc=period_end,
-                sample_interval_seconds=_sample_interval_for_system("combined"),
-                local_timezone_name=str(payload.get("timezone_name") or ""),
-                electricity_plan=_billed_electricity_plan_for_day(target_day),
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception("Daily cost fallback calculation failed for %s", target_day.isoformat())
     return payload
 
 
@@ -15645,6 +15755,38 @@ async def storage_usage_range(
         grid_import_window_end_hour=FREE_ENERGY_WINDOW_END_HOUR,
         grid_export_window_start_hour=EXPORT_WINDOW_START_HOUR,
         grid_export_window_end_hour=EXPORT_WINDOW_END_HOUR,
+    )
+
+
+@app.get("/api/storage/daily-cost")
+async def storage_daily_cost(
+    system: str = Query(default="combined", description="saj, solplanet, or combined"),
+    report_day_local: date = Query(..., description="Local day in YYYY-MM-DD"),
+    start_utc: str | None = Query(default=None, description="UTC datetime in ISO-8601"),
+    end_utc: str | None = Query(default=None, description="UTC datetime in ISO-8601"),
+) -> dict[str, object]:
+    normalized = _normalize_system_name(system)
+    if start_utc:
+        start_at = _parse_iso_utc_datetime(start_utc, field_name="start_utc")
+    else:
+        start_at, _, _ = _daily_report_local_period(report_day_local)
+    if end_utc:
+        end_at = _parse_iso_utc_datetime(end_utc, field_name="end_utc")
+    else:
+        _, end_at, _ = _daily_report_local_period(report_day_local)
+    if start_at >= end_at:
+        raise HTTPException(status_code=400, detail="start_utc must be earlier than end_utc")
+    _, timezone_name = _tesla_grid_support_now_local()
+    return await asyncio.to_thread(
+        compute_daily_cost_between,
+        storage_db_path,
+        system=normalized,
+        report_day_local=report_day_local,
+        start_at_utc=start_at,
+        end_at_utc=end_at,
+        sample_interval_seconds=_sample_interval_for_system(normalized),
+        local_timezone_name=timezone_name,
+        electricity_plan=_billed_electricity_plan_for_day(report_day_local),
     )
 
 

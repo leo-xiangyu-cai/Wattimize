@@ -191,6 +191,8 @@ const I18N = {
     planTimetableSuperExport: "Super Export",
     planTimetableTotalExport: "total {value}",
     planTimetableZeroHero: "ZEROHERO credit",
+    planTimetableAfterCap: "after cap {value}",
+    reportDailyCostOverCap: "over cap",
     notificationMatrixTab: "Time Window",
     notificationMatrixTitle: "Time Window",
     notificationMatrixIntro: "Each panel groups rules by Operation and Notification so you can quickly distinguish automated actions from alerts. Tesla and pool pump auto control are managed only from Priority Scores, not from each time-window rule.",
@@ -294,7 +296,7 @@ const I18N = {
     notificationMatrixWindowAfterFreeShoulderTitle: "Solar Prep Window",
     notificationMatrixWindowAfterFreeShoulderSummary: "15:00-16:00. Buy rate is 37.5c/kWh and feed-in is 0c/kWh; worker watches Solplanet battery headroom before the export window.",
     notificationMatrixWindowExportTitle: "Export Window",
-    notificationMatrixWindowExportSummary: "16:00-23:00. Buy rate is 57.8c/kWh and feed-in is 8c/kWh; this is the export window, so worker tracks export behavior and import risk.",
+    notificationMatrixWindowExportSummary: "16:00-23:00. Buy rate is 57.8c/kWh and feed-in is 8c/kWh; when Tesla is below the forced threshold, worker charges it while usable battery stays above the configured export reserve.",
     notificationMatrixWindowOvernightTitle: "Overnight Budget Window",
     notificationMatrixWindowOvernightSummary: "23:00-11:00 next day. Buy rate is 37.5c/kWh and feed-in is 0c/kWh; worker runs Tesla charging and pool pump within the overnight battery budget.",
     notificationMatrixRuleTypeNotification: "Notification",
@@ -313,8 +315,8 @@ const I18N = {
     notificationRuleTeslaOvernightShoulderTrigger: "During 23:00-11:00, start Tesla charging when projected battery minus home load to 11am minus pool pump to 5am is above 1.0 kWh; stop when that budget is exhausted.",
     notificationRulePoolPumpOvernightTitle: "Pool pump uses Overnight Budget Window battery budget",
     notificationRulePoolPumpOvernightTrigger: "During 23:00-05:00, estimate how long the pump can run from the overnight battery forecast, then use only 80% of that available runtime.",
-    notificationRuleTeslaExportWindowTitle: "Tesla charging uses solar surplus during Export Window",
-    notificationRuleTeslaExportWindowTrigger: "Use solar surplus and Solplanet SOC thresholds to decide charging state and current while avoiding unnecessary grid import.",
+    notificationRuleTeslaExportWindowTitle: "Tesla charging follows forced threshold during Export Window",
+    notificationRuleTeslaExportWindowTrigger: "When Tesla SOC is below the forced threshold, charge while usable battery remains above the configured export reserve; stop at or below that reserve.",
     notificationMatrixTeslaTriggerGridCap: "Target <= 15.0kW grid",
     notificationMatrixTeslaTriggerSolplanetSoc: "Solplanet {soc} (start >= 95%, keep >= 90%)",
     notificationMatrixTeslaTriggerSolplanetReserve: "Solplanet {soc} (keep > 10%)",
@@ -691,19 +693,21 @@ const I18N = {
     reportDailyCostMeta: "{plan} · {basis} · {samples} samples",
     reportDailyCostNoData: "Cost estimate unavailable for this report.",
     reportDailyCostEstimated: "Estimated",
-    reportDailyCostBillActual: "Bill actual",
-    reportDailyCostBillAllocated: "allocated",
-    reportDailyCostNoBill: "No bill uploaded for this day",
+    reportDailyCostBillActual: "Usage actual",
+    reportDailyCostBillAllocated: "calculated",
+    reportDailyCostNoBill: "No usage uploaded for this day",
+    reportDailyCostNoOverCap: "no over cap {value}",
     reportDailyCostDelta: "Delta",
-    reportDailyCostDeltaDetail: "estimate minus bill",
+    reportDailyCostDeltaDetail: "estimate minus actual",
     reportDailyCostFixed: "Fixed",
     reportDailyCostImport: "Import",
     reportDailyCostCredits: "Credits",
     reportDailyCostZeroHero: "ZEROHERO",
     reportDailyCostBreakdown: "Breakdown",
     reportDailyCostComponent: "Component",
-    reportDailyCostBill: "Bill",
-    reportDailyCostEstimateMinusBill: "Estimate - bill",
+    reportDailyCostFormula: "Formula",
+    reportDailyCostBill: "Actual",
+    reportDailyCostEstimateMinusBill: "Estimate - actual",
     reportDailyCostHigher: "estimate higher",
     reportDailyCostLower: "estimate lower",
     reportDailyCostEven: "aligned",
@@ -715,11 +719,11 @@ const I18N = {
     reportDailyCostNotQualified: "not qualified",
     reportDailyCostInsufficient: "insufficient data",
     reportDailyCostNotAvailable: "not available",
-    reportBillChooseBtn: "Upload bill",
-    reportBillUploading: "Uploading bill...",
-    reportBillUploaded: "Bill {invoice} uploaded",
-    reportBillUploadFailed: "Bill upload failed: {error}",
-    reportBillNoFile: "Choose a PDF bill first.",
+    reportUsageChooseBtn: "Upload usage",
+    reportUsageUploading: "Uploading usage...",
+    reportUsageUploaded: "Usage {name} uploaded · updated {days} reports",
+    reportUsageUploadFailed: "Usage upload failed: {error}",
+    reportUsageNoFile: "Choose a CSV usage file first.",
     reportBillListBtn: "Bills",
     reportBillListLoading: "Loading bills...",
     reportBillListEmpty: "No uploaded bills",
@@ -1369,6 +1373,8 @@ const I18N = {
     planTimetableSuperExport: "Super Export",
     planTimetableTotalExport: "合计 {value}",
     planTimetableZeroHero: "ZEROHERO 返现",
+    planTimetableAfterCap: "超出 cap 后 {value}",
+    reportDailyCostOverCap: "超出 cap",
     notificationMatrixTab: "Time Window",
     notificationMatrixTitle: "Time Window",
     notificationMatrixIntro: "每个面板会按 Operation 和 Notification 分组展示规则，这样你可以更快区分自动执行的动作和提醒通知。Tesla 和水泵的自动控制都只在 Priority Scores 里统一管理，不在各个 time window 规则里单独修改。",
@@ -1472,7 +1478,7 @@ const I18N = {
     notificationMatrixWindowAfterFreeShoulderTitle: "备电时段",
     notificationMatrixWindowAfterFreeShoulderSummary: "15:00-16:00。买电 37.5c/kWh，卖电 0c/kWh；这是免费时段和 8c/kWh 外送时段之间的特殊 1 小时。",
     notificationMatrixWindowExportTitle: "外送时段",
-    notificationMatrixWindowExportSummary: "16:00-23:00。买电 57.8c/kWh，卖电 8c/kWh；这是外送窗口，worker 会跟踪外送行为并监控高价购电风险。",
+    notificationMatrixWindowExportSummary: "16:00-23:00。买电 57.8c/kWh，卖电 8c/kWh；当 Tesla 低于强制阈值时，只要可用电量仍高于配置的外送保留线，worker 就会让它充电。",
     notificationMatrixWindowOvernightTitle: "夜间预算时段",
     notificationMatrixWindowOvernightSummary: "23:00-次日11:00。买电 37.5c/kWh，卖电 0c/kWh；worker 会按夜间电池预算运行 Tesla 充电和水泵。",
     notificationMatrixRuleTypeNotification: "通知",
@@ -1491,8 +1497,8 @@ const I18N = {
     notificationRuleTeslaOvernightShoulderTrigger: "23:00-次日11:00 期间，当两块电池总可用电量扣除到早上11点的家庭负载和到早上5点的水泵用电后仍超过 1.0 kWh 时允许 Tesla 充电；预算耗尽时停止。",
     notificationRulePoolPumpOvernightTitle: "夜间预算时段按电池预算运行水泵",
     notificationRulePoolPumpOvernightTrigger: "23:00-05:00 期间，根据夜间电池预测算出水泵可运行时长，再只运行其中的 80%。",
-    notificationRuleTeslaExportWindowTitle: "外送时段 Tesla 按太阳能富余充电",
-    notificationRuleTeslaExportWindowTrigger: "结合太阳能富余和 Solplanet SOC 阈值来决定 Tesla 的充电状态和充电电流，尽量避免不必要的电网取电。",
+    notificationRuleTeslaExportWindowTitle: "外送时段 Tesla 按强制阈值充电",
+    notificationRuleTeslaExportWindowTrigger: "Tesla SOC 低于强制阈值时，只要可用电量高于配置的外送保留线就充电；到达或低于保留线则停止。",
     notificationMatrixTeslaTriggerGridCap: "目标保持电网 <= 15.0kW",
     notificationMatrixTeslaTriggerSolplanetSoc: "Solplanet {soc}（达到 95% 开始，>= 90% 维持）",
     notificationMatrixTeslaTriggerSolplanetReserve: "Solplanet {soc}（保持 > 10%）",
@@ -1869,19 +1875,21 @@ const I18N = {
     reportDailyCostMeta: "{plan} · {basis} · {samples} 个样本",
     reportDailyCostNoData: "此日报暂无法估算电费。",
     reportDailyCostEstimated: "系统估算",
-    reportDailyCostBillActual: "账单实际",
-    reportDailyCostBillAllocated: "已分摊",
-    reportDailyCostNoBill: "这一天还没有上传账单",
+    reportDailyCostBillActual: "用量实际",
+    reportDailyCostBillAllocated: "已计算",
+    reportDailyCostNoBill: "这一天还没有上传用量",
+    reportDailyCostNoOverCap: "不含超 cap {value}",
     reportDailyCostDelta: "差额",
-    reportDailyCostDeltaDetail: "估算减账单",
+    reportDailyCostDeltaDetail: "估算减实际",
     reportDailyCostFixed: "固定费",
     reportDailyCostImport: "买电",
     reportDailyCostCredits: "抵扣",
     reportDailyCostZeroHero: "ZEROHERO",
     reportDailyCostBreakdown: "明细",
     reportDailyCostComponent: "项目",
-    reportDailyCostBill: "账单",
-    reportDailyCostEstimateMinusBill: "估算 - 账单",
+    reportDailyCostFormula: "公式",
+    reportDailyCostBill: "实际",
+    reportDailyCostEstimateMinusBill: "估算 - 实际",
     reportDailyCostHigher: "估算偏高",
     reportDailyCostLower: "估算偏低",
     reportDailyCostEven: "基本一致",
@@ -1893,11 +1901,11 @@ const I18N = {
     reportDailyCostNotQualified: "未达标",
     reportDailyCostInsufficient: "数据不足",
     reportDailyCostNotAvailable: "不可用",
-    reportBillChooseBtn: "上传账单",
-    reportBillUploading: "正在上传账单...",
-    reportBillUploaded: "账单 {invoice} 已上传",
-    reportBillUploadFailed: "账单上传失败：{error}",
-    reportBillNoFile: "请先选择 PDF 账单。",
+    reportUsageChooseBtn: "上传用量",
+    reportUsageUploading: "正在上传用量...",
+    reportUsageUploaded: "用量 {name} 已上传 · 更新 {days} 条日报",
+    reportUsageUploadFailed: "用量上传失败：{error}",
+    reportUsageNoFile: "请先选择 CSV 用量文件。",
     reportBillListBtn: "账单",
     reportBillListLoading: "正在加载账单...",
     reportBillListEmpty: "暂无已上传账单",
@@ -2939,6 +2947,7 @@ const PLAN_RATE_KEYS = {
   daily: "daily_charge_aud_per_day",
   peak: "peak_usage_aud_per_kwh",
   free: "off_peak_first_50_kwh_per_day_aud_per_kwh",
+  offPeakBalance: "off_peak_balance_aud_per_kwh",
   shoulder: "shoulder_usage_aud_per_kwh",
   controlledLoad: "controlled_load_aud_per_kwh",
   metering: "metering_charge_aud_per_day",
@@ -3702,6 +3711,10 @@ function getPlanTimetableSpecials(plan, row, buyKey, sellKey, group) {
   if (buyKey === PLAN_RATE_KEYS.free && buyAfter === 0) {
     const parts = [t("planTimetableFreeUsage")];
     if (buyRate?.daily_cap_kwh) parts.push(t("planCapKwhPerDay", { value: buyRate.daily_cap_kwh }));
+    const afterCapRate = getPlanRate(plan, PLAN_RATE_KEYS.offPeakBalance);
+    if (afterCapRate !== null) {
+      parts.push(t("planTimetableAfterCap", { value: formatPlanTimetableRateValue(afterCapRate, "$/kWh") }));
+    }
     specials.push(parts.join(" · "));
   }
 
@@ -9706,8 +9719,8 @@ function setReportCalendarVisible(visible) {
   }
 }
 
-function setReportBillUploadVisible(visible) {
-  const toolbar = document.getElementById("reportBillUploadToolbar");
+function setReportUsageUploadVisible(visible) {
+  const toolbar = document.getElementById("reportUsageUploadToolbar");
   if (!toolbar) return;
   toolbar.hidden = !visible;
   toolbar.classList.toggle("hidden", !visible);
@@ -9790,10 +9803,10 @@ function renderReportCalendar() {
     const dayText = `${info.year}-${String(info.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     const report = reportCalendarState.availableDays.get(dayText);
     const hasReport = Boolean(report);
-    const noDataReport = hasReport && getDailyReportStatus(report) === "no_data";
+    const billActualMeta = getReportBillActualMeta(report);
+    const noDataReport = hasReport && getDailyReportStatus(report) === "no_data" && !billActualMeta.hasBillActual;
     const planLabel = hasReport && !noDataReport ? getReportCalendarPlanLabel(dayText) : "";
     const isLegacyZeroHero = hasReport && !noDataReport && isReportCalendarLegacyZeroHeroDay(dayText);
-    const billActualMeta = getReportBillActualMeta(report);
     const billActualText = billActualMeta.invoice
       ? t("reportCalendarBillActualWithInvoice", { invoice: billActualMeta.invoice })
       : t("reportCalendarBillActual");
@@ -9910,6 +9923,16 @@ async function fetchDailyReportPayload(day, { timeoutMs = 10000 } = {}) {
     }
     throw err;
   }
+}
+
+async function fetchDailyCostPayload(day, { startUtc = "", endUtc = "", timeoutMs = 12000 } = {}) {
+  const params = new URLSearchParams({
+    system: "combined",
+    report_day_local: day,
+  });
+  if (startUtc) params.set("start_utc", startUtc);
+  if (endUtc) params.set("end_utc", endUtc);
+  return fetchJson(`/api/storage/daily-cost?${params.toString()}`, { timeoutMs });
 }
 
 function emptySamplingPagePayload() {
@@ -11759,10 +11782,57 @@ function formatEnergyKwhText(value) {
 }
 
 function formatDailyCostAud(value, { signed = false } = {}) {
+  if (value === null || value === undefined || value === "") return "-";
   const n = Number(value);
   if (!Number.isFinite(n)) return "-";
   const sign = n < 0 ? "-" : (signed && n > 0 ? "+" : "");
   return `${sign}$${formatTrimmedDecimal(Math.abs(n), 2)}`;
+}
+
+function formatDailyCostDeltaPercent(delta, actual) {
+  const deltaNumber = Number(delta);
+  const actualNumber = Number(actual);
+  if (!Number.isFinite(deltaNumber) || !Number.isFinite(actualNumber) || Math.abs(actualNumber) < 0.0001) {
+    return "-";
+  }
+  const percent = (deltaNumber / Math.abs(actualNumber)) * 100;
+  const sign = percent > 0 ? "+" : "";
+  return `${sign}${formatTrimmedDecimal(percent, Math.abs(percent) >= 10 ? 1 : 2)}%`;
+}
+
+function formatDailyCostDeltaAudWithPercent(delta, actual) {
+  const deltaText = formatDailyCostAud(delta, { signed: true });
+  const percentText = formatDailyCostDeltaPercent(delta, actual);
+  return percentText === "-" ? deltaText : `${deltaText} (${percentText})`;
+}
+
+function formatDailyCostNoOverCapNote(value) {
+  const text = formatDailyCostAud(value);
+  return text === "-" ? "-" : t("reportDailyCostNoOverCap", { value: text });
+}
+
+function formatDailyCostFormulaPart(label, value, unit = "kWh") {
+  const n = Number(value);
+  if (!Number.isFinite(n) || Math.abs(n) < 0.0001) return "";
+  const valueText = unit === "AUD" ? formatDailyCostAud(n) : `${formatTrimmedDecimal(n, 2)} ${unit}`;
+  return `${label} ${valueText}`;
+}
+
+function formatDailyCostRate(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `$${formatTrimmedDecimal(n, 4)}/kWh`;
+}
+
+function formatDailyCostKwhRatePart(label, kwh, rate) {
+  const kwhNumber = Number(kwh);
+  if (!Number.isFinite(kwhNumber) || Math.abs(kwhNumber) < 0.0001) return "";
+  return `${label} ${formatTrimmedDecimal(kwhNumber, 2)} kWh x ${formatDailyCostRate(rate)}`;
+}
+
+function joinDailyCostFormula(parts) {
+  const filtered = parts.filter(Boolean);
+  return filtered.length ? filtered.join(" · ") : "-";
 }
 
 function formatDailyCostKwh(value) {
@@ -11803,51 +11873,63 @@ function setSamplingDailyCostHidden(hidden) {
 function renderSamplingDailyCost(dailyCost, billActualCost = null) {
   const container = document.getElementById("samplingDailyCost");
   if (!container) return;
-  if (currentTab !== "report" || !dailyCost || typeof dailyCost !== "object" || !Object.keys(dailyCost).length) {
+  const dailyCostMap = dailyCost && typeof dailyCost === "object" ? dailyCost : {};
+  const billActualMap = billActualCost && typeof billActualCost === "object" ? billActualCost : {};
+  const hasEstimatedCost = Number.isFinite(Number(dailyCostMap.total_daily_cost_aud));
+  const hasBillActual = Number.isFinite(Number(billActualMap.actual_daily_cost_aud));
+  if (currentTab !== "report" || (!hasEstimatedCost && !hasBillActual)) {
     setSamplingDailyCostHidden(true);
     return;
   }
 
   setSamplingDailyCostHidden(false);
-  const total = Number(dailyCost.total_daily_cost_aud);
-  if (!Number.isFinite(total)) {
-    container.innerHTML = `<p class="sampling-daily-cost-meta">${escapeHtml(t("reportDailyCostNoData"))}</p>`;
-    return;
-  }
+  const total = hasEstimatedCost ? Number(dailyCostMap.total_daily_cost_aud) : null;
 
-  const lineItems = dailyCost.line_items || {};
+  const lineItems = dailyCostMap.line_items || {};
   const fixed = lineItems.fixed || {};
   const importItem = lineItems.import || {};
   const exportItem = lineItems.export || {};
   const zeroHero = lineItems.zerohero || {};
-  const fixedAud = Number(fixed.total_aud || 0);
-  const importAud = Number(importItem.charge_aud || 0);
-  const exportCreditAud = Number(exportItem.credit_aud || 0);
-  const fitCreditAud = Number(exportItem.fit_credit_aud || 0);
-  const superExportCreditAud = Number(exportItem.super_export_credit_aud || 0);
-  const zeroHeroCreditAud = Number(zeroHero.credit_aud || 0);
-  const planName = dailyCost.plan?.display_name || dailyCost.plan?.id || "-";
-  const basis = dailyCost.price_basis || "inc GST";
-  const samples = Number(dailyCost.samples || 0);
-  const hasBillActual = billActualCost && typeof billActualCost === "object" && Number.isFinite(Number(billActualCost.actual_daily_cost_aud));
-  const actualTotal = hasBillActual ? Number(billActualCost.actual_daily_cost_aud) : null;
-  const deltaAud = hasBillActual ? total - actualTotal : null;
-  const actualItems = hasBillActual && billActualCost.line_items && typeof billActualCost.line_items === "object"
-    ? billActualCost.line_items
+  const rates = dailyCostMap.rates && typeof dailyCostMap.rates === "object" ? dailyCostMap.rates : {};
+  const fixedAud = hasEstimatedCost ? Number(fixed.total_aud || 0) : null;
+  const importAud = hasEstimatedCost ? Number(importItem.charge_aud || 0) : null;
+  const exportCreditAud = hasEstimatedCost ? Number(exportItem.credit_aud || 0) : null;
+  const fitCreditAud = hasEstimatedCost ? Number(exportItem.fit_credit_aud || 0) : null;
+  const superExportCreditAud = hasEstimatedCost ? Number(exportItem.super_export_credit_aud || 0) : null;
+  const zeroHeroCreditAud = hasEstimatedCost ? Number(zeroHero.credit_aud || 0) : null;
+  const planName = dailyCostMap.plan?.display_name || dailyCostMap.plan?.id || billActualMap.plan_name || billActualMap.plan_id || "-";
+  const basis = dailyCostMap.price_basis || billActualMap.price_basis || "inc GST";
+  const samples = Number(dailyCostMap.samples || billActualMap.samples || 0);
+  const actualTotal = hasBillActual ? Number(billActualMap.actual_daily_cost_aud) : null;
+  const deltaAud = hasEstimatedCost && hasBillActual ? total - actualTotal : null;
+  const actualItems = hasBillActual && billActualMap.line_items && typeof billActualMap.line_items === "object"
+    ? billActualMap.line_items
     : {};
   const actualFixed = Number(actualItems.fixed_aud || 0);
   const actualImport = Number(actualItems.import_aud || 0);
   const actualExport = Number(actualItems.solar_feed_in_aud || 0) + Number(actualItems.super_export_aud || 0);
   const actualZeroHero = Number(actualItems.zerohero_aud || 0);
-  const zeroHeroRate = Number(dailyCost.rates?.zerohero_credit_aud_per_qualified_day || 0);
+  const actualUsageKwh = actualItems.usage_kwh && typeof actualItems.usage_kwh === "object" ? actualItems.usage_kwh : {};
+  const overCapRate = Number(rates.off_peak_balance_aud_per_kwh || 0);
+  const estimatedOverCapAud = hasEstimatedCost && Number.isFinite(overCapRate)
+    ? Math.max(0, Number(importItem.off_peak_balance_kwh || 0)) * overCapRate
+    : 0;
+  const actualOverCapAud = hasBillActual && Number.isFinite(overCapRate)
+    ? Math.max(0, Number(actualUsageKwh.off_peak_balance_kwh || 0)) * overCapRate
+    : 0;
+  const estimatedTotalNoOverCap = hasEstimatedCost ? total - estimatedOverCapAud : null;
+  const actualTotalNoOverCap = hasBillActual ? actualTotal - actualOverCapAud : null;
+  const estimatedImportNoOverCap = hasEstimatedCost ? importAud - estimatedOverCapAud : null;
+  const actualImportNoOverCap = hasBillActual ? actualImport - actualOverCapAud : null;
+  const zeroHeroRate = Number(dailyCostMap.rates?.zerohero_credit_aud_per_qualified_day || 0);
   const zeroHeroStatus = String(zeroHero.status || "");
   const hasZeroHeroCostLine =
     zeroHeroRate > 0 ||
-    Math.abs(zeroHeroCreditAud) > 0.0001 ||
+    Math.abs(Number(zeroHeroCreditAud || 0)) > 0.0001 ||
     Math.abs(actualZeroHero) > 0.0001 ||
     (zeroHeroStatus && zeroHeroStatus !== "not_available");
   const invoiceText = hasBillActual
-    ? `${billActualCost.invoice_number || "-"} · ${t("reportDailyCostBillAllocated")}`
+    ? `${billActualMap.invoice_number || "-"} · ${t("reportDailyCostBillAllocated")}`
     : t("reportDailyCostNoBill");
   const zeroHeroCoverage = Number(zeroHero.coverage_ratio);
   const zeroHeroCoverageText = Number.isFinite(zeroHeroCoverage)
@@ -11856,44 +11938,67 @@ function renderSamplingDailyCost(dailyCost, billActualCost = null) {
   const zeroHeroRedWindows = Math.max(0, Math.round(Number(zeroHero.net_import_windows || 0)));
   const zeroHeroYellowWindows = Math.max(0, Math.round(Number(zeroHero.mixed_export_windows || 0)));
   const deltaTone = (value) => {
-    if (!hasBillActual || !Number.isFinite(Number(value))) return "is-muted";
+    if (value === null || value === undefined || !hasBillActual || !Number.isFinite(Number(value))) return "is-muted";
     if (Math.abs(Number(value)) < 0.01) return "is-even";
     return Number(value) > 0 ? "is-higher" : "is-lower";
   };
-  const deltaMetaText = hasBillActual
+  const hasDelta = hasEstimatedCost && hasBillActual;
+  const deltaMetaText = hasDelta
     ? Math.abs(deltaAud) < 0.01
       ? t("reportDailyCostEven")
       : deltaAud > 0
         ? t("reportDailyCostHigher")
         : t("reportDailyCostLower")
+    : hasBillActual
+      ? t("reportDailyCostNoData")
     : t("reportDailyCostNoBill");
   const rows = [
     {
       key: "fixed",
       label: t("reportDailyCostFixed"),
-      detail: t("reportDailyCostFixedDetail"),
+      estimatedDetail: joinDailyCostFormula([
+        formatDailyCostFormulaPart("supply", rates.daily_charge_aud_per_day, "AUD"),
+        formatDailyCostFormulaPart("metering", rates.metering_charge_aud_per_day, "AUD"),
+      ]),
+      actualDetail: joinDailyCostFormula([
+        formatDailyCostFormulaPart("supply", rates.daily_charge_aud_per_day, "AUD"),
+        formatDailyCostFormulaPart("metering", rates.metering_charge_aud_per_day, "AUD"),
+      ]),
       estimated: fixedAud,
       actual: actualFixed,
     },
     {
       key: "import",
       label: t("reportDailyCostImport"),
-      detail: t("reportDailyCostImportDetail", {
-        peak: formatDailyCostKwh(importItem.peak_kwh),
-        shoulder: formatDailyCostKwh(importItem.shoulder_kwh),
-        free: formatDailyCostKwh(importItem.free_kwh),
-      }),
+      estimatedDetail: joinDailyCostFormula([
+        formatDailyCostKwhRatePart("peak", importItem.peak_kwh, rates.peak_usage_aud_per_kwh),
+        formatDailyCostKwhRatePart("shoulder", importItem.shoulder_kwh, rates.shoulder_usage_aud_per_kwh),
+        formatDailyCostKwhRatePart("free", importItem.free_kwh, rates.off_peak_first_50_kwh_per_day_aud_per_kwh),
+        formatDailyCostKwhRatePart(t("reportDailyCostOverCap"), importItem.off_peak_balance_kwh, rates.off_peak_balance_aud_per_kwh),
+      ]),
+      actualDetail: joinDailyCostFormula([
+        formatDailyCostKwhRatePart("peak", actualUsageKwh.peak_kwh, rates.peak_usage_aud_per_kwh),
+        formatDailyCostKwhRatePart("shoulder", actualUsageKwh.shoulder_kwh, rates.shoulder_usage_aud_per_kwh),
+        formatDailyCostKwhRatePart("free", actualUsageKwh.free_kwh, rates.off_peak_first_50_kwh_per_day_aud_per_kwh),
+        formatDailyCostKwhRatePart(t("reportDailyCostOverCap"), actualUsageKwh.off_peak_balance_kwh, rates.off_peak_balance_aud_per_kwh),
+      ]),
       estimated: importAud,
       actual: actualImport,
     },
     {
       key: "credits",
       label: t("reportDailyCostCredits"),
-      detail: t("reportDailyCostCreditDetail", {
-        fit: formatDailyCostAud(-fitCreditAud),
-        superExport: formatDailyCostAud(-superExportCreditAud),
-      }),
-      estimated: -exportCreditAud,
+      estimatedDetail: joinDailyCostFormula([
+        formatDailyCostKwhRatePart("FIT 4-11", exportItem.fit_evening_kwh, rates.solar_feed_in_evening_aud_per_kwh),
+        formatDailyCostKwhRatePart("FIT other", exportItem.fit_other_kwh, rates.solar_feed_in_other_aud_per_kwh),
+        formatDailyCostKwhRatePart("super export", exportItem.super_export_billable_kwh, rates.super_export_top_up_aud_per_kwh),
+      ]),
+      actualDetail: joinDailyCostFormula([
+        formatDailyCostKwhRatePart("FIT 4-11", actualUsageKwh.fit_evening_kwh, rates.solar_feed_in_evening_aud_per_kwh),
+        formatDailyCostKwhRatePart("FIT other", actualUsageKwh.fit_other_kwh, rates.solar_feed_in_other_aud_per_kwh),
+        formatDailyCostKwhRatePart("super export", actualUsageKwh.super_export_billable_kwh, rates.super_export_top_up_aud_per_kwh),
+      ]),
+      estimated: exportCreditAud === null ? null : -exportCreditAud,
       actual: actualExport,
     },
   ];
@@ -11901,28 +12006,37 @@ function renderSamplingDailyCost(dailyCost, billActualCost = null) {
     rows.push({
       key: "zerohero",
       label: t("reportDailyCostZeroHero"),
-      detail: t("reportDailyCostZeroHeroDetail", {
+      estimatedDetail: t("reportDailyCostZeroHeroDetail", {
         status: dailyCostZeroHeroStatusText(zeroHero),
         redWindows: Number.isFinite(zeroHeroRedWindows) ? String(zeroHeroRedWindows) : "-",
         yellowWindows: Number.isFinite(zeroHeroYellowWindows) ? String(zeroHeroYellowWindows) : "-",
         coverage: zeroHeroCoverageText,
       }),
-      estimated: -zeroHeroCreditAud,
+      actualDetail: billActualMap?.zerohero && typeof billActualMap.zerohero === "object"
+        ? t("reportDailyCostZeroHeroDetail", {
+            status: dailyCostZeroHeroStatusText(billActualMap.zerohero),
+            redWindows: Number.isFinite(Number(billActualMap.zerohero.net_import_windows)) ? String(Math.round(Number(billActualMap.zerohero.net_import_windows))) : "-",
+            yellowWindows: Number.isFinite(Number(billActualMap.zerohero.mixed_export_windows)) ? String(Math.round(Number(billActualMap.zerohero.mixed_export_windows))) : "-",
+            coverage: Number.isFinite(Number(billActualMap.zerohero.coverage_ratio)) ? `${formatTrimmedDecimal(Number(billActualMap.zerohero.coverage_ratio) * 100, 0)}%` : "-",
+          })
+        : "-",
+      estimated: zeroHeroCreditAud === null ? null : -zeroHeroCreditAud,
       actual: actualZeroHero,
     });
   }
   const rowHtml = rows
     .map((row) => {
-      const rowDelta = hasBillActual ? row.estimated - row.actual : null;
+      const rowDelta = hasEstimatedCost && hasBillActual ? row.estimated - row.actual : null;
       return `
         <div class="sampling-daily-cost-row" role="row">
           <div class="sampling-daily-cost-component" role="cell">
             <span class="sampling-daily-cost-component-name">${escapeHtml(row.label)}</span>
-            <span class="sampling-daily-cost-component-detail">${escapeHtml(row.detail)}</span>
           </div>
+          <div class="sampling-daily-cost-formula" role="cell">${escapeHtml(row.estimatedDetail)}</div>
           <div class="sampling-daily-cost-amount" role="cell">${escapeHtml(formatDailyCostAud(row.estimated))}</div>
+          <div class="sampling-daily-cost-formula ${hasBillActual ? "" : "is-muted"}" role="cell">${escapeHtml(hasBillActual ? row.actualDetail : "-")}</div>
           <div class="sampling-daily-cost-amount ${hasBillActual ? "" : "is-muted"}" role="cell">${escapeHtml(hasBillActual ? formatDailyCostAud(row.actual) : "-")}</div>
-          <div class="sampling-daily-cost-amount ${deltaTone(rowDelta)}" role="cell">${escapeHtml(hasBillActual ? formatDailyCostAud(rowDelta, { signed: true }) : "-")}</div>
+          <div class="sampling-daily-cost-amount sampling-daily-cost-delta ${deltaTone(rowDelta)}" role="cell">${escapeHtml(hasEstimatedCost && hasBillActual ? formatDailyCostDeltaAudWithPercent(rowDelta, row.actual) : "-")}</div>
         </div>
       `;
     })
@@ -11940,21 +12054,25 @@ function renderSamplingDailyCost(dailyCost, billActualCost = null) {
       <div class="sampling-daily-cost-metric">
         <span class="sampling-daily-cost-label">${escapeHtml(t("reportDailyCostEstimated"))}</span>
         <strong class="sampling-daily-cost-metric-value">${escapeHtml(formatDailyCostAud(total))}</strong>
+        <span class="sampling-daily-cost-metric-note">${escapeHtml(formatDailyCostNoOverCapNote(estimatedTotalNoOverCap))}</span>
       </div>
       <div class="sampling-daily-cost-metric ${hasBillActual ? "" : "is-muted"}">
         <span class="sampling-daily-cost-label">${escapeHtml(t("reportDailyCostBillActual"))}</span>
         <strong class="sampling-daily-cost-metric-value">${escapeHtml(hasBillActual ? formatDailyCostAud(actualTotal) : "-")}</strong>
+        <span class="sampling-daily-cost-metric-note">${escapeHtml(hasBillActual ? formatDailyCostNoOverCapNote(actualTotalNoOverCap) : "-")}</span>
       </div>
       <div class="sampling-daily-cost-metric ${deltaTone(deltaAud)}">
         <span class="sampling-daily-cost-label">${escapeHtml(t("reportDailyCostDelta"))}</span>
-        <strong class="sampling-daily-cost-metric-value">${escapeHtml(hasBillActual ? formatDailyCostAud(deltaAud, { signed: true }) : "-")}</strong>
+        <strong class="sampling-daily-cost-metric-value sampling-daily-cost-delta-value">${escapeHtml(hasDelta ? formatDailyCostDeltaAudWithPercent(deltaAud, actualTotal) : "-")}</strong>
         <span class="sampling-daily-cost-metric-note">${escapeHtml(deltaMetaText)}</span>
       </div>
     </div>
     <div class="sampling-daily-cost-table" role="table" aria-label="${escapeHtml(t("reportDailyCostBreakdown"))}">
       <div class="sampling-daily-cost-row sampling-daily-cost-row-head" role="row">
         <div role="columnheader">${escapeHtml(t("reportDailyCostComponent"))}</div>
+        <div role="columnheader">${escapeHtml(t("reportDailyCostEstimated"))} ${escapeHtml(t("reportDailyCostFormula"))}</div>
         <div role="columnheader">${escapeHtml(t("reportDailyCostEstimated"))}</div>
+        <div role="columnheader">${escapeHtml(t("reportDailyCostBill"))} ${escapeHtml(t("reportDailyCostFormula"))}</div>
         <div role="columnheader">${escapeHtml(t("reportDailyCostBill"))}</div>
         <div role="columnheader">${escapeHtml(t("reportDailyCostEstimateMinusBill"))}</div>
       </div>
@@ -16496,7 +16614,22 @@ async function loadDailyReport({ generateIfMissing = false } = {}) {
       renderDailyReportEmpty(message, range.label);
       return;
     }
-    const billActualMeta = getReportBillActualMeta({ bill_actual_cost: payload.bill_actual_cost || null });
+    let displayDailyCost = payload.daily_cost || null;
+    const hasDisplayDailyCost = displayDailyCost && Number.isFinite(Number(displayDailyCost.total_daily_cost_aud));
+    if (!hasDisplayDailyCost) {
+      try {
+        displayDailyCost = await fetchDailyCostPayload(day, {
+          startUtc: payload.period_start_utc || range.startUtc,
+          endUtc: payload.period_end_utc || range.endUtc,
+        });
+      } catch (_err) {
+        displayDailyCost = null;
+      }
+    }
+    const billActualMeta = getReportBillActualMeta({
+      daily_cost: displayDailyCost || null,
+      bill_actual_cost: payload.bill_actual_cost || null,
+    });
     reportCalendarState.availableDays.set(day, {
       report_day_local: payload.report_day_local || day,
       timezone_name: payload.timezone_name || "",
@@ -16522,7 +16655,7 @@ async function loadDailyReport({ generateIfMissing = false } = {}) {
     stateCache.lastSamplingDaily = combineSamplingUsageForOverall(usageBySystem);
     renderSamplingUsage(stateCache.lastSamplingDaily, range.label);
     renderSamplingTotals(usageBySystem, "overall", range.label);
-    renderSamplingDailyCost(payload.daily_cost || null, payload.bill_actual_cost || null);
+    renderSamplingDailyCost(displayDailyCost || null, payload.bill_actual_cost || null);
 
     stateCache.lastSamplingZeroHeroHistory = payload.zero_hero_history || null;
     renderSamplingZeroHeroHistory(stateCache.lastSamplingZeroHeroHistory);
@@ -16616,12 +16749,10 @@ async function loadDailyReport({ generateIfMissing = false } = {}) {
   }
 }
 
-function setReportBillUploadBusy(busy) {
-  const button = document.getElementById("reportBillChooseBtn");
-  const listButton = document.getElementById("reportBillListBtn");
-  const input = document.getElementById("reportBillFileInput");
+function setReportUsageUploadBusy(busy) {
+  const button = document.getElementById("reportUsageChooseBtn");
+  const input = document.getElementById("reportUsageFileInput");
   if (button) button.disabled = Boolean(busy);
-  if (listButton) listButton.disabled = Boolean(busy);
   if (input) input.disabled = Boolean(busy);
 }
 
@@ -16656,25 +16787,31 @@ async function uploadBillFile(file, { statusElementId, noFileKey, uploadingKey, 
   }
 }
 
-async function uploadReportBillFile(file) {
-  setReportBillUploadBusy(true);
+async function uploadReportUsageFile(file) {
+  if (!file) {
+    setText("reportUsageUploadStatus", t("reportUsageNoFile"));
+    return;
+  }
+  setReportUsageUploadBusy(true);
+  setText("reportUsageUploadStatus", t("reportUsageUploading"));
+  const formData = new FormData();
+  formData.append("file", file);
   try {
-    await uploadBillFile(file, {
-      statusElementId: "reportBillUploadStatus",
-      noFileKey: "reportBillNoFile",
-      uploadingKey: "reportBillUploading",
-      uploadedKey: "reportBillUploaded",
-      failedKey: "reportBillUploadFailed",
-      afterUpload: async (payload) => {
-        invalidateReportCalendarMonthsForBill(payload?.bill || null);
-        await loadReportBillsMenu({ force: true });
-        await loadReportIndexForVisibleMonth({ force: true });
-        await loadDailyReport({ generateIfMissing: false });
-      },
+    const payload = await fetchJson("/api/usage/upload", {
+      method: "POST",
+      body: formData,
+      timeoutMs: 120000,
     });
+    const name = payload?.usage?.source_filename || file.name || "-";
+    const updatedDays = Number(payload?.daily_report_update?.updated_daily_reports || 0);
+    setText("reportUsageUploadStatus", t("reportUsageUploaded", { name, days: updatedDays }));
+    await loadReportIndexForVisibleMonth({ force: true });
+    await loadDailyReport({ generateIfMissing: false });
+  } catch (err) {
+    setText("reportUsageUploadStatus", t("reportUsageUploadFailed", { error: formatApiErrorMessage(err) }));
   } finally {
-    setReportBillUploadBusy(false);
-    const input = document.getElementById("reportBillFileInput");
+    setReportUsageUploadBusy(false);
+    const input = document.getElementById("reportUsageFileInput");
     if (input) input.value = "";
   }
 }
@@ -16783,8 +16920,10 @@ async function loadSampling({ forceRaw = false, reportDay = "" } = {}) {
     const zeroHeroHistoryDay = normalizedReportDay || getSamplingFocusLocalDay();
     const zeroHeroHistoryUrl =
       `/api/storage/zero-hero-window-history?system=combined&days=1&day_local=${encodeURIComponent(zeroHeroHistoryDay)}`;
+    const liveDailyCostUrl =
+      `/api/storage/daily-cost?system=combined&report_day_local=${encodeURIComponent(zeroHeroHistoryDay)}&start_utc=${encodeURIComponent(range.startUtc)}&end_utc=${encodeURIComponent(range.endUtc)}`;
 
-    const [collectorResult, statusResult, sajUsageResult, solplanetUsageResult, combinedUsageResult, samplesResult, seriesResult, overallSajSeriesResult, overallSolplanetSeriesResult, combinedPumpSeriesResult, recentPumpSeriesResult, zeroHeroHistoryResult] = await Promise.allSettled([
+    const [collectorResult, statusResult, sajUsageResult, solplanetUsageResult, combinedUsageResult, samplesResult, seriesResult, overallSajSeriesResult, overallSolplanetSeriesResult, combinedPumpSeriesResult, recentPumpSeriesResult, zeroHeroHistoryResult, liveDailyCostResult] = await Promise.allSettled([
       fetchJson("/api/collector/status", { timeoutMs: 6000 }),
       fetchJson("/api/storage/status", { timeoutMs: 6000 }),
       fetchJson(sajUsageUrl, { timeoutMs: 6000 }),
@@ -16797,6 +16936,7 @@ async function loadSampling({ forceRaw = false, reportDay = "" } = {}) {
       overallMode ? Promise.resolve(null) : fetchJson(combinedSeriesUrl, { timeoutMs: 6000 }),
       fetchJson(recentPumpSeriesUrl, { timeoutMs: 12000 }),
       fetchJson(zeroHeroHistoryUrl, { timeoutMs: 12000 }),
+      reportRawMode ? fetchJson(liveDailyCostUrl, { timeoutMs: 12000 }) : Promise.resolve(null),
     ]);
 
     if (collectorResult.status === "fulfilled") {
@@ -16857,7 +16997,7 @@ async function loadSampling({ forceRaw = false, reportDay = "" } = {}) {
       setText("samplingDailyMeta", t("loadFailed", { error: String(selectedUsageError) }));
     }
     renderSamplingTotals(usageBySystem, system, range.label);
-    renderSamplingDailyCost(null);
+    renderSamplingDailyCost(reportRawMode && liveDailyCostResult.status === "fulfilled" ? liveDailyCostResult.value : null);
 
     if (samplesResult.status === "fulfilled") {
       const payload = samplesResult.value;
@@ -17352,7 +17492,7 @@ function setActiveTab(tab, load = true) {
   }
   if (samplingRangeModeSelect) samplingRangeModeSelect.disabled = false;
   setReportCalendarVisible(reportActive);
-  setReportBillUploadVisible(reportActive);
+  setReportUsageUploadVisible(reportActive);
   setSamplingZeroHeroCurrentVisible(samplingActive && !reportActive);
   setSamplingZeroHeroHistoryVisible(samplingActive && !reportActive);
   setSamplingSamplesSectionVisible(samplingActive && !reportActive);
@@ -17463,17 +17603,13 @@ bindClickIfPresent("tabSolplanetControl", () => {
 bindClickIfPresent("tabReport", () => {
   setActiveTab("report");
 });
-bindClickIfPresent("reportBillChooseBtn", () => {
-  const input = document.getElementById("reportBillFileInput");
+bindClickIfPresent("reportUsageChooseBtn", () => {
+  const input = document.getElementById("reportUsageFileInput");
   if (input) input.click();
 });
-bindClickIfPresent("reportBillListBtn", (event) => {
-  event.stopPropagation();
-  void toggleReportBillMenu();
-});
-bindChangeIfPresent("reportBillFileInput", (event) => {
+bindChangeIfPresent("reportUsageFileInput", (event) => {
   const file = event?.target?.files?.[0] || null;
-  void uploadReportBillFile(file);
+  void uploadReportUsageFile(file);
 });
 bindClickIfPresent("tabMonthlyReport", () => {
   setActiveTab("monthlyReport");

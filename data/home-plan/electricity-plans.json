@@ -100,7 +100,9 @@
       "name": "Old ZEROHERO - current billed",
       "display_name": "Old ZEROHERO (current billed)",
       "plan_type": "Bill-derived legacy ZEROHERO",
+      "billing_status": "historical_billed",
       "effective_from": "2026-07-01",
+      "effective_to": "2026-07-27",
       "expected_unchanged_until": "2027-07",
       "price_basis": "inc GST",
       "discount_note": "Latest bill-derived rates. This legacy plan may not be available for switching.",
@@ -272,12 +274,13 @@
     {
       "id": "globird-four4free-quote",
       "retailer": "GloBird Energy",
-      "name": "FOUR4FREE - quote",
-      "display_name": "FOUR4FREE (quote)",
-      "plan_type": "Free midday usage plan - quote",
-      "effective_from": "2026-07-13 quote",
+      "name": "FOUR4FREE - current billed",
+      "display_name": "FOUR4FREE (current billed)",
+      "plan_type": "Free midday usage plan",
+      "billing_status": "current_billed",
+      "effective_from": "2026-07-28",
       "price_basis": "inc GST",
-      "discount_note": "Pasted table includes before-discount and after-discount rates. This card records the quote; no comparison is calculated here.",
+      "discount_note": "Pasted table includes before-discount and after-discount rates. Used for billed daily-cost calculations from the recorded 2026-07-28 plan switch date until a later bill proves a different rate.",
       "estimated_annual_price": {
         "quote_aud": 3168
       },
@@ -333,7 +336,7 @@
           "description": "4pm-11pm feed-in is 8 c/kWh in the pasted quote table."
         }
       ],
-      "source": "User-pasted GloBird quote rate table"
+      "source": "User-pasted GloBird quote rate table and recorded FOUR4FREE start date in Wattimize report calendar"
     }
   ],
   "rate_change_history": [
@@ -420,6 +423,6 @@
   "notes": [
     "Plan tab uses a time-based timetable as the comparison view for the four plan records.",
     "Old ZEROHERO before 2026-07-01 and Old ZEROHERO current billed are separated so the price change is visible.",
-    "ZEROHERO new quote and FOUR4FREE quote are quote records, not bill-derived current-account rates."
+    "ZEROHERO new quote is retained as a comparison-only quote. FOUR4FREE is treated as the current billed plan from 2026-07-28 until a later bill proves different rates."
   ]
 }

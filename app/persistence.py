@@ -2390,8 +2390,10 @@ def select_billed_electricity_plan(plan_payload: object, report_day_local: date)
             continue
         plan_id = str(raw_plan.get("id") or "")
         plan_type = str(raw_plan.get("plan_type") or "").lower()
+        billing_status = str(raw_plan.get("billing_status") or "").lower()
         is_billed = (
             plan_id in {ELECTRICITY_PLAN_CURRENT_BILLED_ID, ELECTRICITY_PLAN_HISTORICAL_BILLED_ID}
+            or billing_status in {"current_billed", "historical_billed"}
             or ("bill-derived" in plan_type and "quote" not in plan_type)
         )
         if not is_billed:
@@ -2413,7 +2415,7 @@ def select_billed_electricity_plan(plan_payload: object, report_day_local: date)
         for raw_plan in plans:
             if isinstance(raw_plan, dict) and raw_plan.get("id") == preferred_id:
                 return dict(raw_plan)
-    return dict(plans[0]) if isinstance(plans[0], dict) else None
+    return dict(plans[0]) if plans and isinstance(plans[0], dict) else None
 
 
 def _cost_number(value: object) -> float | None:
@@ -2624,6 +2626,214 @@ def _refresh_bill_actual_cost_estimate(
     refreshed["estimated_daily_cost_aud"] = _round_aud(estimated_total)
     refreshed["delta_aud"] = _round_aud(estimated_total - actual_total) if actual_total is not None else None
     return refreshed
+
+
+def apply_daily_actual_costs_to_daily_reports(
+    db_path: DatabaseTarget,
+    actuals_by_day: dict[str, dict[str, Any]],
+    *,
+    timezone_name: str = "Australia/Sydney",
+    plan_payload: object | None = None,
+) -> dict[str, Any]:
+    if not actuals_by_day:
+        return {"updated_daily_reports": 0, "covered_days": 0, "missing_report_days": []}
+    normalized: dict[date, dict[str, Any]] = {}
+    for day_text, actual in actuals_by_day.items():
+        if not isinstance(actual, dict):
+            continue
+        try:
+            day = date.fromisoformat(str(day_text))
+        except ValueError:
+            continue
+        normalized[day] = dict(actual)
+    if not normalized:
+        return {"updated_daily_reports": 0, "covered_days": 0, "missing_report_days": []}
+
+    start = min(normalized)
+    end = max(normalized)
+    with sqlite3.connect(str(db_path), timeout=30.0) as conn:
+        conn.execute("PRAGMA busy_timeout=30000")
+        rows = conn.execute(
+            """
+            SELECT report_day_local, usage_json
+            FROM daily_reports
+            WHERE report_day_local >= ?
+              AND report_day_local <= ?
+            ORDER BY report_day_local
+            """,
+            (start.isoformat(), end.isoformat()),
+        ).fetchall()
+
+    def bill_actual_from_usage_actual(actual: dict[str, Any], usage_payload: dict[str, object]) -> dict[str, Any]:
+        line_items = actual.get("line_items") if isinstance(actual.get("line_items"), dict) else {}
+        usage_kwh = actual.get("usage_kwh") if isinstance(actual.get("usage_kwh"), dict) else {}
+        zerohero = actual.get("zerohero") if isinstance(actual.get("zerohero"), dict) else {}
+        plan = actual.get("plan") if isinstance(actual.get("plan"), dict) else {}
+        fixed_aud = _number_or_none(line_items.get("fixed_aud")) or 0.0
+        import_aud = _number_or_none(line_items.get("import_aud")) or 0.0
+        fit_aud = _number_or_none(line_items.get("solar_feed_in_aud")) or 0.0
+        super_export_aud = _number_or_none(line_items.get("super_export_aud")) or 0.0
+        zerohero_aud = _number_or_none(line_items.get("zerohero_aud")) or 0.0
+        total_aud = _number_or_none(actual.get("actual_daily_cost_aud")) or (
+            fixed_aud + import_aud + fit_aud + super_export_aud + zerohero_aud
+        )
+        bill_actual = {
+            "status": "bill_allocated",
+            "source": actual.get("source") or "uploaded_meter_usage",
+            "invoice_number": actual.get("source_filename") or "",
+            "bill_id": actual.get("upload_id") or actual.get("source_filename") or "",
+            "system": "meter",
+            "report_day_local": actual.get("day") or "",
+            "currency": actual.get("currency") or "AUD",
+            "price_basis": plan.get("price_basis") or "",
+            "plan_id": plan.get("id") or "",
+            "plan_name": plan.get("display_name") or plan.get("id") or "",
+            "samples": int(_number_or_none(actual.get("interval_count")) or 0),
+            "expected_samples": int(_number_or_none(actual.get("interval_count")) or 0),
+            "coverage_ratio": zerohero.get("coverage_ratio"),
+            "actual_daily_cost_aud": _round_aud(total_aud),
+            "line_items": {
+                "fixed_aud": _round_aud(fixed_aud),
+                "import_aud": _round_aud(import_aud),
+                "solar_feed_in_aud": _round_aud(fit_aud),
+                "super_export_aud": _round_aud(super_export_aud),
+                "zerohero_aud": _round_aud(zerohero_aud),
+                "usage_kwh": {
+                    "free_kwh": round(float(usage_kwh.get("free_import") or 0.0), 4),
+                    "off_peak_balance_kwh": round(float(usage_kwh.get("off_peak_balance") or 0.0), 4),
+                    "peak_kwh": round(float(usage_kwh.get("peak_import") or 0.0), 4),
+                    "shoulder_kwh": round(float(usage_kwh.get("shoulder_import") or 0.0), 4),
+                    "total_kwh": round(float(usage_kwh.get("import_total") or 0.0), 4),
+                    "fit_evening_kwh": round(float(usage_kwh.get("fit_evening_export") or 0.0), 4),
+                    "fit_other_kwh": round(float(usage_kwh.get("fit_other_export") or 0.0), 4),
+                    "super_export_window_kwh": round(float(usage_kwh.get("super_export_window") or 0.0), 4),
+                    "super_export_billable_kwh": round(float(usage_kwh.get("super_export_billable") or 0.0), 4),
+                },
+            },
+            "zerohero": zerohero,
+            "quality": {
+                "integration": "meter-interval-csv",
+                "allocation_method": actual.get("allocation_method") or "meter_interval_kwh_by_plan_rate",
+                "source_filename": actual.get("source_filename") or "",
+            },
+        }
+        return _refresh_bill_actual_cost_estimate(bill_actual, usage_payload) or bill_actual
+
+    try:
+        local_tz = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        local_tz = ZoneInfo("Australia/Sydney")
+
+    def day_period(day: date) -> tuple[datetime, datetime]:
+        start_local = datetime.combine(day, time.min, tzinfo=local_tz)
+        end_local = datetime.combine(day + timedelta(days=1), time.min, tzinfo=local_tz)
+        return start_local.astimezone(UTC), end_local.astimezone(UTC)
+
+    updates: list[tuple[str, str]] = []
+    found_days: set[date] = set()
+    for day_text, usage_json_text in rows:
+        try:
+            day = date.fromisoformat(str(day_text))
+        except ValueError:
+            continue
+        actual = normalized.get(day)
+        if actual is None:
+            continue
+        found_days.add(day)
+        try:
+            usage_payload = json.loads(usage_json_text or "{}")
+        except json.JSONDecodeError:
+            usage_payload = {}
+        if not isinstance(usage_payload, dict):
+            usage_payload = {}
+        current_daily_cost = usage_payload.get("_daily_cost") if isinstance(usage_payload.get("_daily_cost"), dict) else None
+        if isinstance(current_daily_cost, dict) and current_daily_cost.get("source") == "uploaded_meter_usage":
+            usage_payload.pop("_daily_cost", None)
+        try:
+            period_start = _parse_iso_to_utc(str(usage_payload.get("_daily_cost", {}).get("period_start_utc") or ""))
+            period_end = _parse_iso_to_utc(str(usage_payload.get("_daily_cost", {}).get("period_end_utc") or ""))
+        except (AttributeError, ValueError):
+            period_start, period_end = day_period(day)
+        if int(actual.get("interval_count") or 0) >= 0:
+            estimated_plan = select_billed_electricity_plan(plan_payload, day)
+            estimated_cost = compute_daily_report_cost(
+                db_path,
+                report_day_local=day,
+                system="combined",
+                start_at_utc=period_start,
+                end_at_utc=period_end,
+                sample_interval_seconds=60.0,
+                local_timezone_name=timezone_name,
+                electricity_plan=estimated_plan,
+            )
+            if estimated_cost.get("status") != "no_data":
+                usage_payload["_daily_cost"] = estimated_cost
+        usage_payload["_bill_actual_cost"] = bill_actual_from_usage_actual(actual, usage_payload)
+        updates.append((json.dumps(usage_payload, ensure_ascii=False, separators=(",", ":")), day.isoformat()))
+
+    missing_days = sorted(set(normalized) - found_days)
+    inserts: list[tuple[str, str, float, str, float, str, float, int, str, str, str]] = []
+    for day in missing_days:
+        actual = normalized[day]
+        period_start, period_end = day_period(day)
+        generated_at = datetime.now(UTC)
+        usage_payload: dict[str, Any] = {}
+        usage_payload["_bill_actual_cost"] = bill_actual_from_usage_actual(actual, usage_payload)
+        usage_payload["_bill_actual_cost"]["period_start_utc"] = period_start.isoformat()
+        usage_payload["_bill_actual_cost"]["period_end_utc"] = period_end.isoformat()
+        usage_payload["_bill_actual_cost"]["timezone_name"] = timezone_name
+        inserts.append((
+            day.isoformat(),
+            timezone_name,
+            period_start.isoformat(),
+            period_start.timestamp(),
+            period_end.isoformat(),
+            period_end.timestamp(),
+            generated_at.isoformat(),
+            generated_at.timestamp(),
+            0,
+            json.dumps(usage_payload, ensure_ascii=False, separators=(",", ":")),
+            "{}",
+            "{}",
+        ))
+
+    if updates or inserts:
+        with sqlite3.connect(str(db_path), timeout=30.0) as conn:
+            conn.execute("PRAGMA busy_timeout=30000")
+            if updates:
+                conn.executemany("UPDATE daily_reports SET usage_json = ? WHERE report_day_local = ?", updates)
+            if inserts:
+                conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO daily_reports (
+                        report_day_local,
+                        timezone_name,
+                        period_start_utc,
+                        period_start_epoch,
+                        period_end_utc,
+                        period_end_epoch,
+                        generated_at_utc,
+                        generated_at_epoch,
+                        sample_count,
+                        usage_json,
+                        series_json,
+                        zero_hero_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    inserts,
+                )
+            conn.commit()
+
+    all_days = set(normalized)
+    return {
+        "updated_daily_reports": len(updates) + len(inserts),
+        "created_daily_reports": len(inserts),
+        "covered_days": len(normalized),
+        "missing_report_days": [],
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+    }
 
 
 def _integrate_daily_cost_rows(
@@ -3698,13 +3908,8 @@ def save_daily_report(
             else None
         )
         usage_payload = dict(usage_by_system or {})
-        if isinstance(existing_bill_actual_cost, dict) and "_bill_actual_cost" not in usage_payload:
-            refreshed_bill_actual_cost = _refresh_bill_actual_cost_estimate(
-                existing_bill_actual_cost,
-                usage_payload,
-            )
-            if refreshed_bill_actual_cost is not None:
-                usage_payload["_bill_actual_cost"] = refreshed_bill_actual_cost
+        if isinstance(existing_bill_actual_cost, dict):
+            usage_payload["_bill_actual_cost"] = _refresh_bill_actual_cost_estimate(existing_bill_actual_cost, usage_payload) or existing_bill_actual_cost
         if phase_battery is not None:
             usage_payload["_phase_battery"] = phase_battery
         report.usage_json = _json_dumps_full(usage_payload) or "{}"
@@ -3907,10 +4112,14 @@ def list_daily_reports(
     items: list[dict[str, object]] = []
     for row in rows:
         usage_payload = _json_loads(row.usage_json, default={})
+        daily_cost = usage_payload.get("_daily_cost") if isinstance(usage_payload, dict) else None
         bill_actual_cost = usage_payload.get("_bill_actual_cost") if isinstance(usage_payload, dict) else None
         has_bill_actual_cost = isinstance(bill_actual_cost, dict) and (
             "actual_daily_cost_aud" in bill_actual_cost or bill_actual_cost.get("status") == "bill_allocated"
         )
+        actual_source_name = ""
+        if isinstance(bill_actual_cost, dict):
+            actual_source_name = str(bill_actual_cost.get("invoice_number") or "")
         items.append(
             {
                 "report_day_local": str(row.report_day_local),
@@ -3919,9 +4128,7 @@ def list_daily_reports(
                 "sample_count": int(row.sample_count or 0),
                 "report_status": _daily_report_status(int(row.sample_count or 0)),
                 "has_bill_actual_cost": has_bill_actual_cost,
-                "bill_actual_invoice_number": str(bill_actual_cost.get("invoice_number") or "")
-                if isinstance(bill_actual_cost, dict)
-                else "",
+                "bill_actual_invoice_number": actual_source_name,
             }
         )
     return items
