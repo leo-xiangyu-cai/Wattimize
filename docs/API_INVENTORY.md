@@ -92,6 +92,7 @@ Status values:
 - `GET /api/solplanet/entities/core` (`candidate`)
 - `GET /api/solplanet/energy-flow` (`used`)
 - `GET /api/solplanet/control/state` (`used`)
+- `PUT /api/solplanet/control/work-mode` (`used`)
 - `PUT /api/solplanet/control/limits` (`used`)
 - `PUT /api/solplanet/control/day-schedule/{day}` (`used`)
 - `PUT /api/solplanet/control/day-schedule/{day}/slots/{slot}` (`used`)

@@ -272,6 +272,11 @@ SOLPLANET_EXPORT_MONITOR_POST_EXPORT_IMPORT_AUD_PER_KWH = 0.375
 SOLPLANET_EXPORT_MONITOR_DISCHARGE_SLOT_INDEXES = (1, 2)
 SOLPLANET_EXPORT_MONITOR_CONTROL_MIN_INTERVAL_SECONDS = 60.0
 SOLPLANET_EXPORT_MONITOR_STOP_VERIFY_INTERVAL_SECONDS = 5 * 60.0
+SOLPLANET_FREE_ENERGY_TARGET_PIN_W = 10_000
+SOLPLANET_FREE_ENERGY_TARGET_POUT_W = 10_000
+SOLPLANET_FREE_ENERGY_TARGET_SOC_PERCENT = 95.0
+SOLPLANET_FREE_ENERGY_CHARGE_SLOT_INDEX = 0
+SOLPLANET_FREE_ENERGY_RECOVERY_MIN_INTERVAL_SECONDS = 5 * 60.0
 ZERO_HERO_WINDOW_MINUTES = 5
 SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_HIGH_SOC_PERCENT = 50.0
 SAJ_BATTERY_WATCH_REMINDER_THRESHOLD_LOW_SOC_PERCENT = 20.0
@@ -326,6 +331,7 @@ WORKER_LOG_LEGACY_STATUSES: tuple[str, ...] = (
 )
 TIME_WINDOW_RULE_DEFINITIONS: tuple[dict[str, str], ...] = (
     {"code": "saj_profile_free_energy", "window": "free_energy", "kind": "operation"},
+    {"code": "solplanet_free_energy_recovery", "window": "free_energy", "kind": "operation"},
     {"code": "tesla_free_energy_control", "window": "free_energy", "kind": "operation"},
     {"code": "pool_pump_free_energy_control", "window": "free_energy", "kind": "operation"},
     {"code": "pool_pump_off_period_control", "window": "pump_off_period", "kind": "operation"},
@@ -414,6 +420,15 @@ MANUAL_OPERATION_DEFINITIONS: tuple[dict[str, object], ...] = (
         "title": "Solplanet Limits",
         "input_schema": {"payload": "object"},
         "output_schema": {"state": "object", "changed": "array"},
+    },
+    {
+        "operation_code": "solplanet.manual.set_work_mode",
+        "system": "solplanet",
+        "operation_type": "work_mode_control",
+        "action": "set_work_mode",
+        "title": "Solplanet Work Mode",
+        "input_schema": {"mode": "string"},
+        "output_schema": {"battery_info": "object", "changed": "array"},
     },
     {
         "operation_code": "solplanet.manual.set_day_schedule",
@@ -1420,6 +1435,23 @@ SOLPLANET_SLOT_MAX = 6
 SOLPLANET_LIMIT_MIN = 0
 SOLPLANET_LIMIT_MAX = 20000
 SOLPLANET_DAY_KEYS = ("Sun", "Mon", "Tus", "Wen", "Thu", "Fri", "Sat")
+SOLPLANET_WORK_MODE_CUSTOM = "custom"
+SOLPLANET_WORK_MODE_SELF_CONSUMPTION = "self_consumption"
+SOLPLANET_WORK_MODE_REGISTER_BY_ID = {
+    SOLPLANET_WORK_MODE_CUSTOM: 4,
+    SOLPLANET_WORK_MODE_SELF_CONSUMPTION: 2,
+}
+SOLPLANET_WORK_MODE_ID_BY_REGISTER = {
+    register: mode_id for mode_id, register in SOLPLANET_WORK_MODE_REGISTER_BY_ID.items()
+}
+SOLPLANET_BATTERY_SETTING_PRESERVED_FIELDS = (
+    "type",
+    "discharge_max",
+    "charge_max",
+    "muf",
+    "mod",
+    "num",
+)
 SOLPLANET_DAY_ALIAS = {
     "sun": "Sun",
     "mon": "Mon",
@@ -1452,6 +1484,10 @@ class SajSelfConsumptionPayload(BaseModel):
 class SolplanetLimitsPayload(BaseModel):
     pin: int | None = Field(default=None, ge=SOLPLANET_LIMIT_MIN, le=SOLPLANET_LIMIT_MAX)
     pout: int | None = Field(default=None, ge=SOLPLANET_LIMIT_MIN, le=SOLPLANET_LIMIT_MAX)
+
+
+class SolplanetWorkModePayload(BaseModel):
+    mode: Literal["custom", "self_consumption"] = Field(...)
 
 
 class SolplanetSlotPayload(BaseModel):
@@ -4030,6 +4066,24 @@ def _worker_operation_action_label(action_code: str, *, lang: Literal["zh", "en"
             if lang == "en"
             else "重启特斯拉充电(电流不一致)(restart_charging_for_current_mismatch)"
         )
+    if normalized == "set_solplanet_free_energy_charge":
+        return (
+            "Set Solplanet Custom mode and free-energy charge schedule (set_solplanet_free_energy_charge)"
+            if lang == "en"
+            else "切Solplanet Custom模式并重写免费电充电计划(set_solplanet_free_energy_charge)"
+        )
+    if normalized == "set_solplanet_export":
+        return (
+            "Set Solplanet export schedule (set_solplanet_export)"
+            if lang == "en"
+            else "设置Solplanet卖电计划(set_solplanet_export)"
+        )
+    if normalized == "set_saj_export_discharge":
+        return (
+            "Set SAJ export discharge (set_saj_export_discharge)"
+            if lang == "en"
+            else "设置SAJ卖电放电(set_saj_export_discharge)"
+        )
     set_current_match = re.fullmatch(r"set_current_(\d+)a", normalized)
     if set_current_match:
         amps = set_current_match.group(1)
@@ -6140,6 +6194,162 @@ async def _apply_solplanet_export_monitor_control(
         return result
 
 
+def _solplanet_charge_slot_active(slot: dict[str, object], now_local: datetime) -> bool:
+    if not bool(slot.get("enabled")) or int(_to_number(slot.get("mode")) or 0) != 2:
+        return False
+    start_minutes = (int(_to_number(slot.get("hour")) or 0) * 60) + int(_to_number(slot.get("minute")) or 0)
+    duration_minutes = int(_to_number(slot.get("duration_minutes")) or 0)
+    if duration_minutes <= 0:
+        return False
+    end_minutes = start_minutes + duration_minutes
+    current_minutes = now_local.hour * 60 + now_local.minute
+    if end_minutes <= 24 * 60:
+        return start_minutes <= current_minutes < end_minutes
+    return current_minutes >= start_minutes or current_minutes < (end_minutes % (24 * 60))
+
+
+async def _apply_solplanet_free_energy_recovery(
+    *,
+    combined_flow: dict[str, object] | None,
+    now_local: datetime,
+    enabled_map: dict[str, bool] | None,
+    combined_status: dict[str, object],
+) -> dict[str, object]:
+    rule_code = "solplanet_free_energy_recovery"
+    now_utc = datetime.now(UTC)
+    window_active = _is_within_free_energy_window(now_local)
+    result: dict[str, object] = {
+        "mode": "auto_control",
+        "rule_code": rule_code,
+        "rule_enabled": _is_time_window_rule_enabled(enabled_map, rule_code),
+        "window_active": window_active,
+        "window_schedule": _window_schedule_text("free_energy"),
+        "target_pin_w": SOLPLANET_FREE_ENERGY_TARGET_PIN_W,
+        "target_pout_w": SOLPLANET_FREE_ENERGY_TARGET_POUT_W,
+        "target_soc_percent": SOLPLANET_FREE_ENERGY_TARGET_SOC_PERCENT,
+        "checked_live": False,
+        "action": {"type": "noop", "reason": "not_evaluated"},
+    }
+    if not window_active:
+        result["action"] = {"type": "noop", "reason": "outside_free_energy_window"}
+        return result
+    if not result["rule_enabled"]:
+        result["action"] = {"type": "noop", "reason": "rule_disabled"}
+        return result
+
+    metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
+    metrics_map = metrics if isinstance(metrics, dict) else {}
+    battery_w = _to_number(metrics_map.get("battery2_w"))
+    soc_percent = _to_number(metrics_map.get("battery2_soc_percent"))
+    charging = bool(battery_w is not None and battery_w <= -POWER_FLOW_ACTIVE_THRESHOLD_W)
+    target_reached = bool(
+        soc_percent is not None
+        and soc_percent >= SOLPLANET_FREE_ENERGY_TARGET_SOC_PERCENT
+    )
+    result.update(
+        {
+            "battery_w": round(battery_w, 1) if battery_w is not None else None,
+            "soc_percent": round(soc_percent, 1) if soc_percent is not None else None,
+            "charging": charging,
+            "target_reached": target_reached,
+        }
+    )
+    if charging:
+        result["action"] = {"type": "noop", "reason": "already_charging"}
+        return result
+    if target_reached:
+        result["action"] = {"type": "noop", "reason": "target_soc_reached"}
+        return result
+
+    state = combined_status.get("solplanet_free_energy_recovery")
+    state_map = state if isinstance(state, dict) else {}
+    last_applied_at_text = str(state_map.get("applied_at_utc") or "").strip()
+    elapsed_since_apply_s: float | None = None
+    if last_applied_at_text:
+        try:
+            last_applied_at = datetime.fromisoformat(last_applied_at_text.replace("Z", "+00:00"))
+            if last_applied_at.tzinfo is None:
+                last_applied_at = last_applied_at.replace(tzinfo=UTC)
+            elapsed_since_apply_s = max((now_utc - last_applied_at.astimezone(UTC)).total_seconds(), 0.0)
+        except ValueError:
+            elapsed_since_apply_s = None
+    if elapsed_since_apply_s is not None and elapsed_since_apply_s < SOLPLANET_FREE_ENERGY_RECOVERY_MIN_INTERVAL_SECONDS:
+        result["action"] = {
+            "type": "noop",
+            "reason": "recently_applied",
+            "elapsed_since_apply_s": round(elapsed_since_apply_s, 1),
+        }
+        return result
+
+    try:
+        schedule = await _solplanet_get_schedule_live()
+        day_key = _solplanet_day_key_for_local_date(now_local)
+        current_slots = _solplanet_day_slots(schedule.get(day_key))
+        current_charge_slot = _solplanet_decode_slot(current_slots[SOLPLANET_FREE_ENERGY_CHARGE_SLOT_INDEX])
+        desired_charge_slot = _solplanet_encode_slot(
+            hour=FREE_ENERGY_WINDOW_START_HOUR,
+            minute=0,
+            duration_minutes=(FREE_ENERGY_WINDOW_END_HOUR - FREE_ENERGY_WINDOW_START_HOUR) * 60,
+            mode=2,
+        )
+        next_slots = list(current_slots)
+        next_slots[SOLPLANET_FREE_ENERGY_CHARGE_SLOT_INDEX] = desired_charge_slot
+        update_payload: dict[str, object] = {
+            "Pin": SOLPLANET_FREE_ENERGY_TARGET_PIN_W,
+            "Pout": SOLPLANET_FREE_ENERGY_TARGET_POUT_W,
+            day_key: next_slots,
+        }
+        result.update(
+            {
+                "checked_live": True,
+                "day_key": day_key,
+                "current_pin_w": int(_to_number(schedule.get("Pin")) or 0),
+                "current_pout_w": int(_to_number(schedule.get("Pout")) or 0),
+                "current_charge_slot": current_charge_slot,
+                "desired_charge_slot": _solplanet_decode_slot(desired_charge_slot),
+                "current_charge_slot_active": _solplanet_charge_slot_active(current_charge_slot, now_local),
+            }
+        )
+        mode_write_result = await _solplanet_set_work_mode_payload(SOLPLANET_WORK_MODE_CUSTOM)
+        write_result = await _solplanet_set_schedule_payload(update_payload, current_schedule=schedule)
+        result["action"] = {
+            "type": "apply",
+            "reason": "free_energy_not_charging_set_custom_mode_and_charge_schedule",
+            "payload": update_payload,
+            "work_mode": SOLPLANET_WORK_MODE_CUSTOM,
+        }
+        result["mode_write_response"] = (
+            mode_write_result.get("response") if isinstance(mode_write_result, dict) else None
+        )
+        result["mode_request_payload"] = (
+            mode_write_result.get("request_payload") if isinstance(mode_write_result, dict) else None
+        )
+        result["readback_mode"] = mode_write_result.get("readback_mode") if isinstance(mode_write_result, dict) else None
+        result["readback_mode_register"] = (
+            mode_write_result.get("readback_mode_register") if isinstance(mode_write_result, dict) else None
+        )
+        result["write_response"] = write_result.get("response") if isinstance(write_result, dict) else None
+        combined_status["solplanet_free_energy_recovery"] = {
+            **result,
+            "checked_at_utc": now_utc.isoformat(),
+            "applied_at_utc": now_utc.isoformat(),
+        }
+        return result
+    except Exception as exc:  # noqa: BLE001
+        result.update(
+            {
+                "checked_live": True,
+                "action": {"type": "failed", "reason": "free_energy_recovery_failed"},
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        )
+        combined_status["solplanet_free_energy_recovery"] = {
+            **result,
+            "checked_at_utc": now_utc.isoformat(),
+        }
+        return result
+
+
 async def _apply_saj_export_window_discharge_control(
     *,
     solplanet_monitor: dict[str, object] | None,
@@ -7069,6 +7279,25 @@ async def _run_midday_window_check(
         tesla_auto_control_enabled = await _load_tesla_auto_control_enabled()
         result["tesla_auto_control_enabled"] = tesla_auto_control_enabled
         result["saj_profile_guard"] = await _guard_saj_profile_for_time(now_local, enabled_map)
+        combined_status = collector_status.setdefault("combined", {})
+        result["solplanet_free_energy_recovery"] = await _apply_solplanet_free_energy_recovery(
+            combined_flow=combined_flow,
+            now_local=now_local,
+            enabled_map=enabled_map,
+            combined_status=combined_status,
+        )
+        solplanet_recovery_action = (
+            result["solplanet_free_energy_recovery"].get("action")
+            if isinstance(result.get("solplanet_free_energy_recovery"), dict)
+            else None
+        )
+        if isinstance(solplanet_recovery_action, dict) and solplanet_recovery_action.get("type") == "apply":
+            _append_worker_action(result, {
+                "type": "set_solplanet_free_energy_charge",
+                "reason": solplanet_recovery_action.get("reason"),
+                "target_pin_w": result["solplanet_free_energy_recovery"].get("target_pin_w"),
+                "target_soc_percent": result["solplanet_free_energy_recovery"].get("target_soc_percent"),
+            })
         observation = (
             tesla_observation_result.get("observation")
             if isinstance(tesla_observation_result, dict)
@@ -7128,7 +7357,6 @@ async def _run_midday_window_check(
         current_actual_amps = _to_number(charge_state.get("current_amps"))
         connection_state = str(charge_state.get("connection_state") or "").strip().lower()
         status_text = str(charge_state.get("status_text") or "").strip().lower()
-        combined_status = collector_status.setdefault("combined", {})
         if window_mode != "export_window":
             result["solplanet_export_monitor_control"] = await _apply_solplanet_export_monitor_control(
                 monitor=None,
@@ -11914,6 +12142,61 @@ async def _solplanet_set_schedule_payload(
     return {
         "response": response if isinstance(response, dict) else {},
         "request_payload": {"device": 4, "action": "setdefine", "value": define_payload},
+    }
+
+
+async def _solplanet_get_battery_info_live() -> dict[str, object]:
+    _ensure_solplanet_configured()
+    context = _get_solplanet_runtime_context() or _config_backed_solplanet_context() or {}
+    inverter_sn = str(context.get("inverter_sn") or "").strip()
+    if not inverter_sn:
+        raise HTTPException(status_code=400, detail="Solplanet inverter serial is not configured")
+    battery_info = await asyncio.wait_for(
+        solplanet_client.get_battery_info(inverter_sn),
+        timeout=settings.solplanet_request_timeout_seconds,
+    )
+    return battery_info if isinstance(battery_info, dict) else {}
+
+
+async def _solplanet_set_work_mode_payload(mode_id: str) -> dict[str, object]:
+    _ensure_solplanet_configured()
+    mode_key = str(mode_id or "").strip().lower()
+    mode_register = SOLPLANET_WORK_MODE_REGISTER_BY_ID.get(mode_key)
+    if mode_register is None:
+        raise HTTPException(status_code=400, detail="Unsupported Solplanet work mode")
+
+    battery_info = await _solplanet_get_battery_info_live()
+    inverter_sn = str(battery_info.get("isn") or "").strip()
+    if not inverter_sn:
+        context = _get_solplanet_runtime_context() or _config_backed_solplanet_context() or {}
+        inverter_sn = str(context.get("inverter_sn") or "").strip()
+    if not inverter_sn:
+        raise HTTPException(status_code=400, detail="Solplanet inverter serial is not available")
+
+    value: dict[str, object] = {
+        "sn": inverter_sn,
+        "mod_r": mode_register,
+    }
+    for key in SOLPLANET_BATTERY_SETTING_PRESERVED_FIELDS:
+        if key in battery_info and battery_info.get(key) is not None:
+            value[key] = battery_info[key]
+
+    response = await asyncio.wait_for(
+        solplanet_client.set_battery(value),
+        timeout=settings.solplanet_request_timeout_seconds,
+    )
+    _reset_solplanet_caches()
+    readback = await _solplanet_get_battery_info_live()
+    readback_mode_register = int(_to_number(readback.get("mod_r")) or 0)
+    return {
+        "response": response if isinstance(response, dict) else {},
+        "request_payload": {"device": 4, "action": "setbattery", "value": value},
+        "battery_info_before": battery_info,
+        "battery_info_after": readback,
+        "mode": mode_key,
+        "mode_register": mode_register,
+        "readback_mode": SOLPLANET_WORK_MODE_ID_BY_REGISTER.get(readback_mode_register),
+        "readback_mode_register": readback_mode_register,
     }
 
 
@@ -16823,6 +17106,71 @@ async def put_solplanet_control_limits(payload: SolplanetLimitsPayload) -> dict[
             operation_run_id,
             status=OPERATION_RUN_STATUS_SUCCEEDED,
             latest_state={"state": state_payload},
+            response_payload=result,
+            completed=True,
+        )
+        return result
+    except httpx.HTTPStatusError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Solplanet CGI returned {exc.response.status_code}",
+            completed=True,
+        )
+        detail = {
+            "message": "Solplanet CGI returned an error",
+            "status_code": exc.response.status_code,
+            "response": exc.response.text,
+        }
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Failed to reach Solplanet CGI: {exc}",
+            completed=True,
+        )
+        raise HTTPException(status_code=502, detail=f"Failed to reach Solplanet CGI: {exc}") from exc
+    except (TimeoutError, asyncio.TimeoutError) as exc:
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            error_text=f"Solplanet CGI timed out: {exc}",
+            completed=True,
+        )
+        raise HTTPException(status_code=504, detail=f"Solplanet CGI timed out: {exc}") from exc
+
+
+@app.put("/api/soulplanet/control/work-mode")
+@app.put("/api/solplanet/control/work-mode")
+async def put_solplanet_control_work_mode(payload: SolplanetWorkModePayload) -> dict[str, object]:
+    operation_run_id: int | None = None
+    try:
+        previous_battery_info = await _solplanet_get_battery_info_live()
+        operation_run_id = await _start_operation_history_run(
+            "solplanet.manual.set_work_mode",
+            request_payload=payload.model_dump(mode="json"),
+            previous_state={"battery_info": previous_battery_info},
+        )
+        cgi_write = await _solplanet_set_work_mode_payload(payload.mode)
+        battery_info_after = cgi_write.get("battery_info_after") if isinstance(cgi_write, dict) else None
+        result = {
+            "ok": True,
+            "changed": [
+                {
+                    "key": "mod_r",
+                    "value": cgi_write.get("mode_register") if isinstance(cgi_write, dict) else None,
+                    "mode": payload.mode,
+                }
+            ],
+            "request_payload": cgi_write.get("request_payload") if isinstance(cgi_write, dict) else None,
+            "cgi_write": cgi_write,
+            "battery_info": battery_info_after,
+        }
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"battery_info": battery_info_after},
             response_payload=result,
             completed=True,
         )

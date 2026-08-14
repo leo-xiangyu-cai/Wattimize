@@ -252,5 +252,8 @@ class SolplanetCgiClient:
     async def set_definition(self, value: dict[str, Any]) -> dict[str, Any]:
         return await self.set_value({"device": 4, "action": "setdefine", "value": value})
 
+    async def set_battery(self, value: dict[str, Any]) -> dict[str, Any]:
+        return await self.set_value({"device": 4, "action": "setbattery", "value": value})
+
     async def aclose(self) -> None:
         await self._client.aclose()
