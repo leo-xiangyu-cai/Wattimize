@@ -175,6 +175,7 @@ POOL_PUMP_POWER_ENTITY_ID = "sensor.cuco_v3_3c00_electric_power"
 POOL_PUMP_ENERGY_TODAY_ENTITY_ID = "sensor.cuco_v3_3c00_power_cost_today"
 POOL_PUMP_INFO_ENTITY_ID = "button.cuco_v3_3c00_info"
 POOL_PUMP_ASSUMED_POWER_W = 1100.0
+POOL_PUMP_ZERO_FIT_EXPORT_BUFFER_W = 100.0
 POOL_PUMP_POWER_STATE_STALE_SECONDS = 30 * 60
 POOL_PUMP_ENERGY_STATE_FRESH_SECONDS = 20 * 60
 POOL_PUMP_CONTROL_OVERRIDE_TTL_SECONDS = 20 * 60
@@ -3632,6 +3633,61 @@ def _is_within_overnight_shoulder_window(now_local: datetime) -> bool:
     return _is_hour_in_window(hour, OVERNIGHT_SHOULDER_WINDOW_START_HOUR, OVERNIGHT_SHOULDER_WINDOW_END_HOUR)
 
 
+def _pool_pump_zero_fit_export_sink_context(
+    metrics_map: dict[str, object],
+    now_local: datetime,
+    *,
+    pump_additional_grid_w: float,
+) -> dict[str, object]:
+    grid_w = _to_number(metrics_map.get("grid_w"))
+    pv_w = _to_number(metrics_map.get("pv_w"))
+    battery_w = _to_number(metrics_map.get("battery_w"))
+    load_w = _to_number(metrics_map.get("load_w"))
+    current_grid_export_w = max(-(float(grid_w) if grid_w is not None else 0.0), 0.0)
+    current_battery_discharge_w = max(float(battery_w or 0.0), 0.0)
+    predicted_grid_with_pump_w = float(grid_w) + pump_additional_grid_w if grid_w is not None else None
+    export_buffer_w = float(POOL_PUMP_ZERO_FIT_EXPORT_BUFFER_W)
+    zero_fit_window = not _is_within_export_window(now_local)
+    solar_surplus_available = bool(
+        pv_w is not None
+        and float(pv_w) > 0.0
+        and current_grid_export_w > 0.0
+        and current_battery_discharge_w <= POWER_FLOW_ACTIVE_THRESHOLD_W
+    )
+    avoids_grid_import = bool(
+        predicted_grid_with_pump_w is not None
+        and predicted_grid_with_pump_w <= 0.0
+    )
+    enough_export_for_pump = current_grid_export_w >= max(pump_additional_grid_w + export_buffer_w, export_buffer_w)
+    active = bool(zero_fit_window and solar_surplus_available and avoids_grid_import and enough_export_for_pump)
+    return {
+        "active": active,
+        "zero_fit_window": zero_fit_window,
+        "current_grid_export_w": round(current_grid_export_w, 1),
+        "current_battery_discharge_w": round(current_battery_discharge_w, 1),
+        "pv_w": round(float(pv_w), 1) if pv_w is not None else None,
+        "load_w": round(float(load_w), 1) if load_w is not None else None,
+        "pump_additional_grid_w": round(float(pump_additional_grid_w), 1),
+        "predicted_grid_with_pump_w": round(predicted_grid_with_pump_w, 1)
+        if predicted_grid_with_pump_w is not None
+        else None,
+        "export_buffer_w": round(export_buffer_w, 1),
+        "reason": (
+            "zero_fit_solar_export_can_run_pool_pump"
+            if active
+            else "paid_export_window"
+            if not zero_fit_window
+            else "battery_discharge_export"
+            if current_battery_discharge_w > POWER_FLOW_ACTIVE_THRESHOLD_W
+            else "not_enough_export_for_pool_pump"
+            if not enough_export_for_pump
+            else "pool_pump_would_import_grid"
+            if not avoids_grid_import
+            else "no_solar_export_surplus"
+        ),
+    }
+
+
 def _is_within_saj_morning_grid_import_guard_window(now_local: datetime) -> bool:
     hour = now_local.hour
     return _is_hour_in_window(
@@ -4143,10 +4199,19 @@ def _operation_reason_label(reason: object, *, lang: Literal["zh", "en"] = "zh")
         "tesla_priority_pending",
         "tesla_priority_blocks_pool_pump",
         "pool_pump_would_exceed_free_energy_grid_cap",
+        "zero_fit_solar_export_supply_insufficient_for_pool_pump",
     ):
         return "Insufficient supply (grid headroom is not enough)" if lang == "en" else "供电不足（电网余量不足）"
     if code in ("within_grid_cap_after_tesla_priority", "free_energy_pool_pump_within_grid_cap_after_tesla_priority"):
         return "Sufficient supply (grid headroom is available)" if lang == "en" else "供电充足（电网余量充足）"
+    if code in (
+        "zero_fit_solar_export_surplus",
+        "zero_fit_solar_export_pool_pump_within_export_surplus",
+        "zero_fit_solar_export_can_run_pool_pump",
+    ):
+        return "Zero feed-in solar export is available, run the pool pump" if lang == "en" else "当前是 0 收益光伏外送，打开水泵消纳"
+    if code == "zero_fit_solar_export_exempt":
+        return "Zero feed-in solar export keeps the pool pump exempt from the off period" if lang == "en" else "当前有 0 收益光伏外送，水泵不受停泵时段限制"
     if code in ("recent_stop_cooldown", "free_energy_recent_stop_cooldown_active", "pool_pump_recent_stop_cooldown_active"):
         return (
             "Restart cooldown active (less than 15 minutes since last stop)"
@@ -4169,6 +4234,12 @@ def _operation_reason_label(reason: object, *, lang: Literal["zh", "en"] = "zh")
         return "Tesla SOC below forced charge threshold, force max charging blocks pool pump" if lang == "en" else "Tesla 电量低于强制充电阈值，强制满功率充电，水泵不参与"
     if code == "force_max_charge_below_45_soc":
         return "Tesla SOC below forced charge threshold, force max charging" if lang == "en" else "Tesla 电量低于强制充电阈值，强制满功率充电"
+    if code == "after_free_shoulder_tesla_force_max_charge_below_threshold":
+        return (
+            "Tesla SOC below forced charge threshold during after-free shoulder, force max charging"
+            if lang == "en"
+            else "免费后 shoulder 时段 Tesla 电量低于强制充电阈值，强制满功率充电"
+        )
     if code == "already_charging_with_force_max_power":
         return "Tesla already charging at forced max power" if lang == "en" else "Tesla 已按强制最大功率充电"
     if code == "overnight_pool_pump_force_run_below_1h_24h":
@@ -4670,6 +4741,14 @@ def _operation_reason_why_summary(
         band = "after-free shoulder" if window_mode == "after_free_shoulder" else "after-free peak"
         band_zh = "免费后 shoulder" if window_mode == "after_free_shoulder" else "免费后 peak"
         if action_type in ("start_charging", "restart_charging"):
+            if details_map.get("after_free_shoulder_tesla_force_max_charge_active"):
+                tesla_soc = _operation_reason_fmt_pct(details_map.get("tesla_soc_percent"))
+                threshold_soc = _operation_reason_fmt_pct(details_map.get("tesla_force_max_charge_threshold_soc_percent"))
+                return (
+                    f"Tesla SOC {tesla_soc} was below the forced charge threshold {threshold_soc} during the {band} window, so Tesla was charged before the export window."
+                    if lang == "en"
+                    else f"Tesla 电量 {tesla_soc} 低于强制充电阈值 {threshold_soc}，因此在{band_zh}先充电，避免拖到卖电时段。"
+                )
             return (
                 f"Solplanet SOC crossed the {band} start threshold, so Tesla charging was enabled."
                 if lang == "en"
@@ -4844,14 +4923,23 @@ def _operation_reason_math_summary(
         start_soc = _operation_reason_fmt_pct(band_map.get("start_soc_percent"))
         stop_soc = _operation_reason_fmt_pct(band_map.get("stop_soc_percent"))
         capacity = _to_number(band_map.get("solplanet_available_capacity_kwh"))
+        tesla_force_active = bool(details_map.get("after_free_shoulder_tesla_force_max_charge_active"))
         if lang == "en":
             text = f"Solplanet SOC {soc}; start threshold {start_soc}; stop threshold {stop_soc}"
             if capacity is not None:
                 text += f"; available capacity {capacity:.1f}kWh"
+            if tesla_force_active:
+                tesla_soc = _operation_reason_fmt_pct(details_map.get("tesla_soc_percent"))
+                threshold = _operation_reason_fmt_pct(details_map.get("tesla_force_max_charge_threshold_soc_percent"))
+                text += f"; Tesla SOC {tesla_soc} below force threshold {threshold}"
             return text
         text = f"Solplanet 电量 {soc}；启动阈值 {start_soc}；停止阈值 {stop_soc}"
         if capacity is not None:
             text += f"；可用容量 {capacity:.1f}kWh"
+        if tesla_force_active:
+            tesla_soc = _operation_reason_fmt_pct(details_map.get("tesla_soc_percent"))
+            threshold = _operation_reason_fmt_pct(details_map.get("tesla_force_max_charge_threshold_soc_percent"))
+            text += f"；Tesla 电量 {tesla_soc} 低于强制阈值 {threshold}"
         return text
 
     if check_name == "overnight_shoulder" and target != "pool_pump":
@@ -5885,15 +5973,27 @@ def _build_solplanet_export_monitor(
         if projected_home_load_to_export_end_kwh is not None
         else reserve_floor_kwh
     )
+    early_sell_floor_kwh = max(SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH, late_dynamic_reserve_floor_kwh)
+    full_power_export_remaining_kwh = round(
+        (SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W / 1000.0) * remaining_export_window_hours,
+        4,
+    )
 
     reserve_state = "unknown"
     surplus_above_floor_kwh: float | None = None
     surplus_above_comfort_kwh: float | None = None
     surplus_above_late_dynamic_reserve_kwh: float | None = None
+    surplus_above_early_sell_floor_kwh: float | None = None
+    early_sell_required_kwh: float | None = None
     if usable_total_kwh is not None:
         surplus_above_floor_kwh = round(usable_total_kwh - reserve_floor_kwh, 4)
         surplus_above_comfort_kwh = round(usable_total_kwh - SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH, 4)
         surplus_above_late_dynamic_reserve_kwh = round(usable_total_kwh - late_dynamic_reserve_floor_kwh, 4)
+        surplus_above_early_sell_floor_kwh = round(usable_total_kwh - early_sell_floor_kwh, 4)
+        early_sell_required_kwh = round(
+            max(surplus_above_early_sell_floor_kwh - full_power_export_remaining_kwh, 0.0),
+            4,
+        )
         if usable_total_kwh <= reserve_floor_kwh:
             reserve_state = "below_floor"
         elif usable_total_kwh < SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH:
@@ -5913,8 +6013,14 @@ def _build_solplanet_export_monitor(
             recommendation = "hold"
             reason = "pre_peak_selling_disabled"
         elif in_peak_hold_phase:
-            recommendation = "hold_until_late_phase"
-            reason = "evening_peak_reserve_period"
+            if early_sell_required_kwh is not None and early_sell_required_kwh > 0.0:
+                target_sell_kwh = max(surplus_above_early_sell_floor_kwh or 0.0, 0.0)
+                recommendation = "sell"
+                reason = "peak_hold_full_power_cannot_clear_surplus_before_export_end"
+                recommended_pout_w = SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
+            else:
+                recommendation = "hold_until_late_phase"
+                reason = "evening_peak_reserve_period"
         elif in_late_phase:
             if remaining_to_target_kwh > 0.0:
                 target_sell_kwh = min(
@@ -5981,6 +6087,8 @@ def _build_solplanet_export_monitor(
         "remaining_export_window_hours": round(remaining_export_window_hours, 4),
         "projected_home_load_to_export_end_kwh": projected_home_load_to_export_end_kwh,
         "late_dynamic_reserve_floor_kwh": late_dynamic_reserve_floor_kwh,
+        "early_sell_floor_kwh": round(early_sell_floor_kwh, 4),
+        "full_power_export_remaining_kwh": full_power_export_remaining_kwh,
         "reserve_state": reserve_state,
         "usable_battery_total_kwh": usable_total_kwh,
         "usable_battery_by_system_kwh": {
@@ -5990,6 +6098,8 @@ def _build_solplanet_export_monitor(
         "surplus_above_floor_kwh": surplus_above_floor_kwh,
         "surplus_above_comfort_kwh": surplus_above_comfort_kwh,
         "surplus_above_late_dynamic_reserve_kwh": surplus_above_late_dynamic_reserve_kwh,
+        "surplus_above_early_sell_floor_kwh": surplus_above_early_sell_floor_kwh,
+        "early_sell_required_kwh": early_sell_required_kwh,
         "target_sell_kwh": round(target_sell_kwh, 4),
         "projected_usable_after_target_kwh": projected_usable_after_target_kwh,
         "minutes_to_target_at_recommended_power": minutes_to_target_at_recommended_power,
@@ -6002,6 +6112,7 @@ def _build_solplanet_export_monitor(
             "do_not_sell_below_floor_kwh": reserve_floor_kwh,
             "pre_peak_selling": "disabled",
             "normal_keep_comfort_floor_kwh": SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH,
+            "peak_hold_early_sell_trigger": "sell when surplus above max(comfort floor, dynamic reserve) exceeds full-power export capacity to window end",
             "late_phase_dynamic_floor": "reserve_floor_kwh + current_home_load_w projected to export_window_end_hour",
             "pre_peak_phase_end_hour": SOLPLANET_EXPORT_MONITOR_PRE_PEAK_END_HOUR,
             "early_phase_end_hour": SOLPLANET_EXPORT_MONITOR_LATE_START_HOUR,
@@ -6678,17 +6789,20 @@ async def _run_pool_pump_free_energy_control_check(
 ) -> dict[str, object]:
     requested_at_utc = str(requested_at_utc or "").strip() or datetime.now(UTC).isoformat()
     now_local, timezone_name = _tesla_grid_support_now_local()
-    window_active = _is_within_free_energy_window(now_local)
+    window_mode = _tesla_midday_window_mode(now_local)
+    free_energy_window_active = window_mode == "free_energy"
+    zero_fit_candidate_window = window_mode == "after_free_shoulder"
+    window_active = free_energy_window_active or zero_fit_candidate_window
     result: dict[str, object] = {
         "executed_at_utc": datetime.now(UTC).isoformat(),
         "evaluated_at_local": now_local.isoformat(),
         "timezone": timezone_name,
         "window_active": window_active,
-        "window_mode": "free_energy" if window_active else "off",
-        "window_schedule": _window_schedule_text("free_energy" if window_active else "off"),
+        "window_mode": window_mode if window_active else "off",
+        "window_schedule": _window_schedule_text(window_mode if window_active else "off"),
         "target": "pool_pump",
         "service_window": WINDOW_CHECK_FREE_ENERGY_SERVICE,
-        "service_window_schedule": _window_schedule_text("free_energy"),
+        "service_window_schedule": _window_schedule_text(window_mode if window_active else "free_energy"),
         "target_grid_max_w": POOL_PUMP_FREE_ENERGY_GRID_MAX_W,
     }
     status = "ok"
@@ -6810,7 +6924,9 @@ async def _run_pool_pump_free_energy_control_check(
             status = "skipped"
             return result
         current_grid_import_w = max(float(grid_w), 0.0)
+        current_grid_export_w = max(-float(grid_w), 0.0)
         result["current_grid_import_w"] = round(current_grid_import_w, 1)
+        result["current_grid_export_w"] = round(current_grid_export_w, 1)
 
         current_tesla_power_w = max(float(_to_number(tesla_before_map.get("power_w")) or 0.0), 0.0)
         base_grid_without_tesla_w = max(current_grid_import_w - current_tesla_power_w, 0.0)
@@ -6841,10 +6957,33 @@ async def _run_pool_pump_free_energy_control_check(
         # Only add the incremental pump load when predicting "with pump" state.
         current_pump_power_w = pump_power_w if pump_enabled else 0.0
         pump_additional_grid_w = max(pump_power_w - current_pump_power_w, 0.0)
+        zero_fit_export_sink = _pool_pump_zero_fit_export_sink_context(
+            metrics_map,
+            now_local,
+            pump_additional_grid_w=pump_additional_grid_w,
+        )
+        result["zero_fit_export_sink"] = zero_fit_export_sink
+        zero_fit_export_sink_active = bool(zero_fit_candidate_window and zero_fit_export_sink.get("active"))
+        if zero_fit_candidate_window and not zero_fit_export_sink_active:
+            result["decision"] = {
+                "mode": "observe_only",
+                "predicted_grid_w": zero_fit_export_sink.get("predicted_grid_with_pump_w"),
+                "pool_pump_power_w": round(pump_power_w, 1),
+            }
+            result["action"] = {"type": "noop", "reason": zero_fit_export_sink.get("reason")}
+            result["decision_reason"] = str(zero_fit_export_sink.get("reason") or "no_zero_fit_export_surplus")
+            status = "outside_window"
+            return result
+
+        if zero_fit_export_sink_active:
+            base_grid_without_tesla_w = float(grid_w) - current_tesla_power_w
+            result["base_grid_without_tesla_w"] = round(base_grid_without_tesla_w, 1)
         predicted_grid_with_tesla_w = base_grid_without_tesla_w + tesla_priority_power_w
         predicted_grid_with_pump_w = predicted_grid_with_tesla_w + pump_additional_grid_w
         tesla_priority_ready = (not tesla_should_charge) or tesla_currently_active
-        within_grid_cap = predicted_grid_with_pump_w <= POOL_PUMP_FREE_ENERGY_GRID_MAX_W
+        target_grid_max_w = 0.0 if zero_fit_export_sink_active else POOL_PUMP_FREE_ENERGY_GRID_MAX_W
+        within_grid_cap = predicted_grid_with_pump_w <= target_grid_max_w
+        result["target_grid_max_w"] = target_grid_max_w
 
         result["tesla_rule_code"] = midday_map.get("tesla_rule_code")
         result["tesla_rule_enabled"] = midday_map.get("tesla_rule_enabled")
@@ -6877,7 +7016,7 @@ async def _run_pool_pump_free_energy_control_check(
         priority_first = "pool_pump" if priority_winner == "pool_pump" else "tesla"
         priority_second = "tesla" if priority_first == "pool_pump" else "pool_pump"
         first_reserved_grid_w = pump_power_w if priority_first == "pool_pump" else tesla_priority_power_w
-        second_grid_budget_w = max(POOL_PUMP_FREE_ENERGY_GRID_MAX_W - first_reserved_grid_w, 0.0)
+        second_grid_budget_w = max(target_grid_max_w - first_reserved_grid_w, 0.0)
         result["tesla_priority_score"] = round(tesla_priority_score, 1)
         result["pool_pump_priority_score"] = round(pump_priority_score, 1)
         result["priority_winner"] = priority_winner
@@ -6887,7 +7026,7 @@ async def _run_pool_pump_free_energy_control_check(
             "winner": priority_winner,
         }
         result["resource_reservation"] = {
-            "grid_cap_w": POOL_PUMP_FREE_ENERGY_GRID_MAX_W,
+            "grid_cap_w": target_grid_max_w,
             "first_reserved_grid_w": round(first_reserved_grid_w, 1),
             "second_grid_budget_w": round(second_grid_budget_w, 1),
             "first_predicted_grid_w": round(
@@ -6903,7 +7042,9 @@ async def _run_pool_pump_free_energy_control_check(
                 "pool_pump_power_w": round(pump_power_w, 1),
             }
             result["decision_reason"] = (
-                "free_energy_pool_pump_within_grid_cap_after_tesla_priority"
+                "zero_fit_solar_export_pool_pump_within_export_surplus"
+                if zero_fit_export_sink_active
+                else "free_energy_pool_pump_within_grid_cap_after_tesla_priority"
             )
             if pump_enabled:
                 result["action"] = {"type": "noop", "reason": "already_running"}
@@ -6915,10 +7056,15 @@ async def _run_pool_pump_free_energy_control_check(
             else:
                 await _pool_pump_set_enabled(True)
                 persisted_state["auto_started"] = True
-                result["action"] = {"type": "start_pool_pump", "reason": "within_grid_cap_after_tesla_priority"}
+                result["action"] = {
+                    "type": "start_pool_pump",
+                    "reason": "zero_fit_solar_export_surplus"
+                    if zero_fit_export_sink_active
+                    else "within_grid_cap_after_tesla_priority",
+                }
                 status = "applied"
                 switch_action_applied = "start_pool_pump"
-                switch_reason_applied = "within_grid_cap_after_tesla_priority"
+                switch_reason_applied = str(result["action"]["reason"])
             next_last_stop_at_utc = last_stop_at_utc or None
             next_last_stop_reason = last_stop_reason or None
             if switch_action_applied == "stop_pool_pump":
@@ -6934,7 +7080,11 @@ async def _run_pool_pump_free_energy_control_check(
             "predicted_grid_w": round(predicted_grid_with_pump_w, 1),
             "pool_pump_power_w": round(pump_power_w, 1),
         }
-        result["decision_reason"] = "free_energy_supply_insufficient_for_pool_pump"
+        result["decision_reason"] = (
+            "zero_fit_solar_export_supply_insufficient_for_pool_pump"
+            if zero_fit_export_sink_active
+            else "free_energy_supply_insufficient_for_pool_pump"
+        )
         if pump_enabled:
             await _pool_pump_set_enabled(False)
             persisted_state["auto_started"] = False
@@ -7589,6 +7739,18 @@ async def _run_midday_window_check(
             active_or_requested = charging_enabled or charge_requested_enabled
             should_start = solplanet_soc_percent >= TESLA_SOLAR_SURPLUS_START_SOLPLANET_SOC_PERCENT
             should_stop = solplanet_soc_percent < TESLA_SOLAR_SURPLUS_STOP_SOLPLANET_SOC_PERCENT
+            tesla_soc_percent = _to_number(metrics_map.get("tesla_battery_soc_percent"))
+            tesla_force_max_charge_threshold_soc_percent = await _load_tesla_force_max_charge_threshold_soc_percent()
+            force_max_target = _calculate_tesla_max_power_target(charge_state)
+            force_max_desired_amps = int(force_max_target.get("charge_current_amps") or 0)
+            tesla_force_max_charge = bool(
+                tesla_soc_percent is not None
+                and tesla_soc_percent < float(tesla_force_max_charge_threshold_soc_percent)
+                and str(force_max_target.get("mode") or "").strip().lower() == "charge"
+            )
+            result["tesla_soc_percent"] = tesla_soc_percent
+            result["tesla_force_max_charge_threshold_soc_percent"] = tesla_force_max_charge_threshold_soc_percent
+            result["after_free_shoulder_tesla_force_max_charge_active"] = tesla_force_max_charge
 
             if not tesla_rule_enabled:
                 result["decision"] = {
@@ -7599,6 +7761,51 @@ async def _run_midday_window_check(
                 result["decision_reason"] = "tesla_auto_control_disabled"
                 result["action"] = {"type": "noop", "reason": "tesla_auto_control_disabled"}
                 status = "noop"
+                return result
+
+            if tesla_force_max_charge:
+                configured_matches_desired = (
+                    current_configured_amps is not None
+                    and int(round(current_configured_amps)) == force_max_desired_amps
+                )
+                actual_matches_desired = (
+                    current_actual_amps is not None
+                    and int(round(current_actual_amps)) == force_max_desired_amps
+                )
+                result["decision"] = {
+                    "mode": "charge",
+                    "charge_current_amps": force_max_desired_amps,
+                    "predicted_grid_w": round(float(grid_w), 1),
+                }
+                result["decision_reason"] = "after_free_shoulder_tesla_force_max_charge_below_threshold"
+                if charging_enabled and configured_matches_desired and (current_actual_amps is None or actual_matches_desired):
+                    result["action"] = {"type": "noop", "reason": "already_charging_with_force_max_power"}
+                    status = "noop"
+                    return result
+                actions: list[str] = []
+                if not configured_matches_desired:
+                    await _tesla_set_charge_current(force_max_desired_amps)
+                    actions.append(f"set_current_{force_max_desired_amps}a")
+                if not charging_enabled:
+                    if charge_requested_enabled:
+                        await _tesla_restart_charging()
+                        actions.append("restart_charging")
+                    else:
+                        await _tesla_set_charging(True)
+                        actions.append("start_charging")
+                if actions:
+                    result["action"] = {
+                        "type": "apply",
+                        "steps": actions,
+                        "reason": "after_free_shoulder_tesla_force_max_charge_below_threshold",
+                    }
+                    status = "applied"
+                else:
+                    result["action"] = {
+                        "type": "noop",
+                        "reason": "already_charging_with_force_max_power",
+                    }
+                    status = "noop"
                 return result
 
             if should_start:
@@ -9303,6 +9510,7 @@ async def _run_saj_battery_watch_check(
 
 
 async def _run_pool_pump_off_period_check(
+    combined_flow: dict[str, object] | None = None,
     *,
     round_id: str | None = None,
     requested_at_utc: str | None = None,
@@ -9377,6 +9585,37 @@ async def _run_pool_pump_off_period_check(
             result["decision"] = {"mode": "observe_only"}
             result["action"] = {"type": "noop", "reason": "pool_pump_unavailable"}
             result["decision_reason"] = "pool_pump_unavailable"
+            status = "noop"
+            return result
+
+        metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
+        metrics_map = metrics if isinstance(metrics, dict) else {}
+        pump_power_w_candidates = [
+            _to_number((pool_pump_state.get("metrics") or {}).get("power_w"))
+            if isinstance(pool_pump_state.get("metrics"), dict)
+            else None,
+            _to_number(metrics_map.get("pool_pump_power_w")),
+        ]
+        pump_power_w = next(
+            (float(value) for value in pump_power_w_candidates if value is not None and float(value) > 0),
+            POOL_PUMP_ASSUMED_POWER_W,
+        )
+        current_pump_power_w = pump_power_w if pump_enabled else 0.0
+        pump_additional_grid_w = max(pump_power_w - current_pump_power_w, 0.0)
+        zero_fit_export_sink = _pool_pump_zero_fit_export_sink_context(
+            metrics_map,
+            now_local,
+            pump_additional_grid_w=pump_additional_grid_w,
+        )
+        result["zero_fit_export_sink"] = zero_fit_export_sink
+        if midday_window_mode == "after_free_shoulder" and bool(zero_fit_export_sink.get("active")):
+            result["decision"] = {
+                "mode": "run",
+                "predicted_grid_w": zero_fit_export_sink.get("predicted_grid_with_pump_w"),
+                "pool_pump_power_w": round(pump_power_w, 1),
+            }
+            result["action"] = {"type": "noop", "reason": "zero_fit_solar_export_exempt"}
+            result["decision_reason"] = "zero_fit_solar_export_exempt"
             status = "noop"
             return result
 
@@ -14192,6 +14431,7 @@ async def _collector_loop() -> None:
         pool_pump_off_period_result: dict[str, object] | None = None
         try:
             pool_pump_off_period_result = await _run_pool_pump_off_period_check(
+                combined_flow_for_window,
                 round_id=round_id,
                 requested_at_utc=round_started_at_utc,
             )
