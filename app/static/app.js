@@ -4789,11 +4789,11 @@ function buildCombinedDiagramSpec() {
   };
   const compactNodeSizes = {
     ...desktopNodeSizes,
-    switchboard: { ...desktopNodeSizes.switchboard, width: 188 },
-    compactLoad: { ...COMBINED_COMPACT_LOAD_NODE_SIZE, height: 128 },
-    poolPump: { ...COMBINED_COMPACT_LOAD_NODE_SIZE, height: 128 },
-    tesla: { width: COMBINED_TESLA_NODE_SIZE.width, height: 154 },
-    battery: { ...SAJ_COMBINED_BATTERY_NODE_SIZE, height: 236 },
+    switchboard: { ...desktopNodeSizes.switchboard, width: 136, height: 124 },
+    compactLoad: { ...COMBINED_COMPACT_LOAD_NODE_SIZE, height: 116 },
+    poolPump: { ...COMBINED_COMPACT_LOAD_NODE_SIZE, height: 116 },
+    tesla: { width: COMBINED_TESLA_NODE_SIZE.width, height: 198 },
+    battery: { ...SAJ_COMBINED_BATTERY_NODE_SIZE, height: 208 },
     inverter1: { ...desktopNodeSizes.inverter1, width: 152 },
     inverter2: { ...desktopNodeSizes.inverter2, width: 152 },
   };
@@ -4846,12 +4846,147 @@ function buildCombinedDiagramSpec() {
       },
     };
   };
+  const compactBatteryBridgeEdge = (batteryKey, inverterKey, side, labelSide = null) => {
+    const battery = nodePositions[batteryKey];
+    const inverter = nodePositions[inverterKey];
+    const batterySize = nodeSizes.battery;
+    const inverterSize = nodeSizes[inverterKey];
+    const horizontalY = side === "top"
+      ? Math.max(4, Math.min(battery.y, inverter.y) - 56)
+      : Math.min(viewport.height - 18, Math.max(battery.y + batterySize.height, inverter.y + inverterSize.height) + 34);
+    const resolvedLabelSide = labelSide || (side === "top" ? "above" : "below");
+    const labelY = resolvedLabelSide === "above" ? horizontalY - 3 : horizontalY + 12;
+    const source = {
+      x: battery.x + (batterySize.width / 2),
+      y: side === "top" ? battery.y : battery.y + batterySize.height,
+    };
+    const target = {
+      x: inverter.x + (inverterSize.width / 2),
+      y: side === "top" ? inverter.y : inverter.y + inverterSize.height,
+    };
+    return {
+      points: [
+        source,
+        { x: source.x, y: horizontalY },
+        { x: target.x, y: horizontalY },
+        target,
+      ],
+      labelPosition: {
+        x: (source.x + target.x) / 2,
+        y: labelY,
+      },
+    };
+  };
+  const compactSwitchboardLoadEdge = (loadKey, switchboardSide) => {
+    const switchboard = nodePositions.switchboard;
+    const load = nodePositions[loadKey];
+    const switchboardSize = nodeSizes.switchboard;
+    const loadSize = nodeSizes[loadKey === "tesla" ? "tesla" : loadKey === "poolPump" ? "poolPump" : "compactLoad"];
+    const loadAnchor = {
+      x: load.x + loadSize.width,
+      y: load.y + (loadSize.height / 2),
+    };
+
+    if (switchboardSide === "top") {
+      const switchAnchor = {
+        x: switchboard.x + (switchboardSize.width * 0.28),
+        y: switchboard.y,
+      };
+      return {
+        points: [
+          switchAnchor,
+          { x: switchAnchor.x, y: loadAnchor.y },
+          loadAnchor,
+        ],
+        labelPosition: {
+          x: (switchAnchor.x + loadAnchor.x) / 2,
+          y: loadAnchor.y - 26,
+        },
+      };
+    }
+
+    if (switchboardSide === "bottom") {
+      const switchAnchor = {
+        x: switchboard.x + (switchboardSize.width * 0.28),
+        y: switchboard.y + switchboardSize.height,
+      };
+      return {
+        points: [
+          switchAnchor,
+          { x: switchAnchor.x, y: loadAnchor.y },
+          loadAnchor,
+        ],
+        labelPosition: {
+          x: (switchAnchor.x + loadAnchor.x) / 2,
+          y: loadAnchor.y - 24,
+        },
+      };
+    }
+
+    return {
+      points: [
+        { x: switchboard.x, y: loadAnchor.y },
+        loadAnchor,
+      ],
+      labelPosition: {
+        x: (switchboard.x + loadAnchor.x) / 2,
+        y: loadAnchor.y - 24,
+      },
+    };
+  };
+  const compactGridToSwitchboardEdge = () => {
+    const grid = nodePositions.grid;
+    const switchboard = nodePositions.switchboard;
+    const gridSize = nodeSizes.source;
+    const switchboardSize = nodeSizes.switchboard;
+    const source = {
+      x: grid.x + (gridSize.width / 2),
+      y: grid.y + gridSize.height,
+    };
+    const target = {
+      x: switchboard.x + switchboardSize.width,
+      y: switchboard.y + (switchboardSize.height / 2),
+    };
+    return {
+      points: [
+        source,
+        { x: source.x, y: target.y },
+        target,
+      ],
+      labelPosition: {
+        x: (source.x + target.x) / 2,
+        y: target.y + 28,
+      },
+    };
+  };
+  const compactInverterToSwitchboardEdge = (inverterKey, switchboardSide) => {
+    const inverter = nodePositions[inverterKey];
+    const switchboard = nodePositions.switchboard;
+    const inverterSize = nodeSizes[inverterKey];
+    const switchboardSize = nodeSizes.switchboard;
+    const laneX = switchboard.x + (switchboardSize.width * 0.72);
+    const source = {
+      x: laneX,
+      y: switchboardSide === "top" ? inverter.y + inverterSize.height : inverter.y,
+    };
+    const target = {
+      x: laneX,
+      y: switchboardSide === "top" ? switchboard.y : switchboard.y + switchboardSize.height,
+    };
+    return {
+      points: [source, target],
+      labelPosition: {
+        x: source.x - 34,
+        y: (source.y + target.y) / 2,
+      },
+    };
+  };
   const nodePositions = compact
     ? {
         solar: rotateDesktopNode(layout.nodes.solar, desktopNodeSizes.source),
         grid: rotateDesktopNode(layout.nodes.grid, desktopNodeSizes.source),
         usableBattery: rotateDesktopNode(layout.nodes.usableBattery, desktopNodeSizes.usableBattery),
-        switchboard: rotateDesktopNode(layout.nodes.switchboard, desktopNodeSizes.switchboard),
+        switchboard: rotateDesktopNode(layout.nodes.switchboard, desktopNodeSizes.switchboard, compactNodeSizes.switchboard),
         load: rotateDesktopNode(layout.nodes.load, desktopNodeSizes.compactLoad),
         poolPump: rotateDesktopNode(layout.nodes.poolPump, desktopNodeSizes.poolPump),
         tesla: rotateDesktopNode(layout.nodes.tesla, desktopNodeSizes.tesla, compactNodeSizes.tesla),
@@ -4864,6 +4999,10 @@ function buildCombinedDiagramSpec() {
   const nodeSizes = compact
     ? compactNodeSizes
     : desktopNodeSizes;
+  if (compact) {
+    nodePositions.grid.y -= 156;
+    nodePositions.switchboard.x += 24;
+  }
   const edgeLayout = compact
     ? {
         gridToSwitchboard: rotateDesktopEdge(layout.edges.gridToSwitchboard, "gridToSwitchboard"),
@@ -4878,6 +5017,17 @@ function buildCombinedDiagramSpec() {
         inverter2ToSwitchboard: rotateDesktopEdge(layout.edges.inverter2ToSwitchboard, "inverter2ToSwitchboard"),
       }
     : layout.edges;
+  if (compact) {
+    edgeLayout.gridToSwitchboard = compactGridToSwitchboardEdge();
+    edgeLayout.battery1ToInverter1 = compactBatteryBridgeEdge("battery1", "inverter1", "top");
+    edgeLayout.battery2ToInverter2 = compactBatteryBridgeEdge("battery2", "inverter2", "bottom");
+    edgeLayout.battery1ToInverter1.labelPosition.x = edgeLayout.battery2ToInverter2.labelPosition.x;
+    edgeLayout.switchboardToHomeLoad = compactSwitchboardLoadEdge("load", "top");
+    edgeLayout.switchboardToPoolPump = compactSwitchboardLoadEdge("poolPump", "left");
+    edgeLayout.switchboardToTesla = compactSwitchboardLoadEdge("tesla", "bottom");
+    edgeLayout.inverter1ToSwitchboard = compactInverterToSwitchboardEdge("inverter1", "top");
+    edgeLayout.inverter2ToSwitchboard = compactInverterToSwitchboardEdge("inverter2", "bottom");
+  }
   return {
     layout: "explicit",
     coordinateSystem,
@@ -5115,19 +5265,21 @@ function buildCombinedDiagramSpec() {
         tailUpperGapLength: edgeLayout.switchboardToPoolPump.tailUpperGapLength,
         tailRoundedCorner: edgeLayout.switchboardToPoolPump.tailRoundedCorner,
       },
-      {
-        id: "combined-lineSwitchboardToTotalLoad",
-        source: "combined-switchboardNode",
-        target: "combined-poolPumpNode",
-        labelId: "combined-flowLabelSwitchboardToTotalLoad",
-        glowWidth: 28,
-        lineWidth: 18,
-        coreWidth: 6,
-        points: edgeLayout.switchboardToTotalLoad.points,
-        labelPosition: edgeLayout.switchboardToTotalLoad.labelPosition,
-        lineCap: edgeLayout.switchboardToTotalLoad.lineCap,
-        lineJoin: edgeLayout.switchboardToTotalLoad.lineJoin,
-      },
+      ...(compact
+        ? []
+        : [{
+            id: "combined-lineSwitchboardToTotalLoad",
+            source: "combined-switchboardNode",
+            target: "combined-poolPumpNode",
+            labelId: "combined-flowLabelSwitchboardToTotalLoad",
+            glowWidth: 28,
+            lineWidth: 18,
+            coreWidth: 6,
+            points: edgeLayout.switchboardToTotalLoad.points,
+            labelPosition: edgeLayout.switchboardToTotalLoad.labelPosition,
+            lineCap: edgeLayout.switchboardToTotalLoad.lineCap,
+            lineJoin: edgeLayout.switchboardToTotalLoad.lineJoin,
+          }]),
       {
         id: "combined-lineBattery1ToInverter1",
         source: "combined-battery1Node",
@@ -5662,9 +5814,16 @@ function renderBatterySocDisplay({
   runtimeDataKind = "estimate",
   rateDataKind = "estimate",
 }) {
+  const renderSocValueHtml = (socText, inlineEnergyText = null) => {
+    const mainHtml = formatValueWithDataKindHtml(socText, socDataKind);
+    if (!inlineEnergyText) return mainHtml;
+    return `${mainHtml} <span class="soc-inline-energy">(${escapeHtml(inlineEnergyText)})</span>`;
+  };
+
   if (soc === null || soc === undefined) {
-    setText(socValueId, "-");
-    if (energyValueId) setHtml(energyValueId, formatValueWithDataKindHtml(formatBatteryEnergyKwh(system, null), energyDataKind));
+    const energyText = energyValueId ? formatBatteryEnergyKwh(system, null) : null;
+    setHtml(socValueId, renderSocValueHtml("-", energyText));
+    if (energyValueId) setHtml(energyValueId, formatValueWithDataKindHtml(energyText, energyDataKind));
     if (usableValueId) setHtml(usableValueId, formatValueWithDataKindHtml(formatBatteryUsableKwh(system, null), usableDataKind));
     if (runtimeValueId) setText(runtimeValueId, "");
     if (rateValueId) setText(rateValueId, formatBatterySocRateEstimate(system, batteryW));
@@ -5674,8 +5833,9 @@ function renderBatterySocDisplay({
   }
 
   const clampedSoc = Math.max(0, Math.min(100, Number(soc)));
-  setHtml(socValueId, formatValueWithDataKindHtml(`${clampedSoc.toFixed(0)}%`, socDataKind));
-  if (energyValueId) setHtml(energyValueId, formatValueWithDataKindHtml(formatBatteryEnergyKwh(system, clampedSoc), energyDataKind));
+  const energyText = energyValueId ? formatBatteryEnergyKwh(system, clampedSoc) : null;
+  setHtml(socValueId, renderSocValueHtml(`${clampedSoc.toFixed(0)}%`, energyText));
+  if (energyValueId) setHtml(energyValueId, formatValueWithDataKindHtml(energyText, energyDataKind));
   if (usableValueId) setHtml(usableValueId, formatValueWithDataKindHtml(formatBatteryUsableKwh(system, clampedSoc), usableDataKind));
   if (runtimeValueId) setText(runtimeValueId, "");
   if (rateValueId) setText(rateValueId, formatBatterySocRateEstimate(system, batteryW));

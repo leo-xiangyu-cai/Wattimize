@@ -6278,6 +6278,10 @@ td {
   overflow-wrap: anywhere;
 }
 
+.soc-inline-energy {
+  display: none;
+}
+
 .efd-node.efd-node-id-saj-batteryNode,
 .efd-node.efd-node-id-combined-battery1Node,
 .efd-node.efd-node-id-combined-battery2Node {
@@ -6738,7 +6742,28 @@ td {
   }
 
   .combined-flow-board .efd-node.efd-node-switchboard .node-title {
-    font-size: 22px;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 15px;
+    line-height: 1.05;
+    letter-spacing: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .combined-flow-board .efd-node.efd-node-switchboard .inline-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+  }
+
+  .combined-flow-board .efd-node.efd-node-switchboard .inline-icon svg {
+    width: 23px;
+    height: 23px;
+  }
+
+  .combined-flow-board .efd-node.efd-node-switchboard .node-title span:last-child {
+    max-width: 100%;
   }
 
   .efd-node.efd-node-id-combined-usableBatteryNode,
@@ -6773,33 +6798,33 @@ td {
   }
 
   .efd-node.efd-node-tesla .node-title {
-    font-size: 15px;
+    font-size: 18px;
   }
 
   .efd-node.efd-node-tesla .node-sub-value,
   .efd-node.efd-node-tesla .node-mini-value,
   .efd-node.efd-node-tesla .tesla-current-trigger {
-    font-size: 11px;
+    font-size: 14px;
   }
 
   .efd-node.efd-node-tesla .tesla-control-btn {
     min-height: 20px;
     margin-top: 3px;
     padding: 3px 6px;
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .efd-node.efd-node-tesla .soc-wrap {
-    inset: 25px 4px 5px;
+    inset: 30px 4px 5px;
   }
 
   .efd-node.efd-node-tesla .soc-value-inside {
     padding: 4px 5px 6px;
-    font-size: 16px;
+    font-size: 18px;
   }
 
   #combined-teslaSocValue {
-    font-size: 23px;
+    font-size: 27px;
   }
 
   .efd-node.efd-node-id-combined-battery1Node,
@@ -6810,7 +6835,7 @@ td {
 
   .efd-node.efd-node-id-combined-battery1Node .node-title,
   .efd-node.efd-node-id-combined-battery2Node .node-title {
-    font-size: 16px;
+    font-size: 18px;
   }
 
   .efd-node.efd-node-id-combined-battery1Node .soc-wrap,
@@ -6822,8 +6847,23 @@ td {
   .efd-node.efd-node-id-combined-battery1Node .soc-value-inside,
   .efd-node.efd-node-id-combined-battery2Node .soc-value-inside {
     gap: 3px;
-    padding: 38px 7px 7px;
+    padding: 30px 7px 7px;
     font-size: 26px;
+  }
+
+  .efd-node.efd-node-id-combined-battery1Node .soc-inline-energy,
+  .efd-node.efd-node-id-combined-battery2Node .soc-inline-energy {
+    display: inline;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1;
+    white-space: nowrap;
+    opacity: 0.88;
+  }
+
+  .efd-node.efd-node-id-combined-battery1Node .soc-energy-inside,
+  .efd-node.efd-node-id-combined-battery2Node .soc-energy-inside {
+    display: none;
   }
 
   .efd-node.efd-node-id-combined-battery1Node .soc-energy-inside,
@@ -6834,8 +6874,14 @@ td {
   .efd-node.efd-node-id-combined-battery2Node .soc-runtime-inside,
   .efd-node.efd-node-id-combined-battery1Node .soc-rate-inside,
   .efd-node.efd-node-id-combined-battery2Node .soc-rate-inside {
-    font-size: 12px;
-    line-height: 1.1;
+    font-size: 20px;
+    line-height: 1.18;
+  }
+
+  .efd-node.efd-node-id-combined-battery1Node .battery-window-forecast-compact,
+  .efd-node.efd-node-id-combined-battery2Node .battery-window-forecast-compact {
+    font-size: 20px;
+    line-height: 1.18;
   }
 
   .mobile-energy-node {
