@@ -15177,8 +15177,245 @@ def _bill_line_summary(bill: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _comparison_number(value: object) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return number if number == number else 0.0
+
+
+def _empty_bill_comparison_column() -> dict[str, float]:
+    return {
+        "fixed_aud": 0.0,
+        "import_aud": 0.0,
+        "solar_feed_in_aud": 0.0,
+        "super_export_aud": 0.0,
+        "zerohero_aud": 0.0,
+        "other_aud": 0.0,
+        "total_aud": 0.0,
+    }
+
+
+def _bill_line_comparison_bucket(line: dict[str, object]) -> str:
+    description = str(line.get("description") or "").lower()
+    category = str(line.get("category") or "other")
+    if category == "fixed" or "daily charge" in description:
+        return "fixed_aud"
+    if category in {"peak_import", "offpeak_import", "shoulder_import"}:
+        return "import_aud"
+    if category in {"fit_evening", "fit_other"}:
+        return "solar_feed_in_aud"
+    if category == "super_export":
+        return "super_export_aud"
+    if category == "zerohero":
+        return "zerohero_aud"
+    return "other_aud"
+
+
+def _bill_comparison_from_bill(bill: dict[str, object]) -> tuple[dict[str, float], dict[str, float]]:
+    column = _empty_bill_comparison_column()
+    usage_kwh = {
+        "peak_import": 0.0,
+        "offpeak_import": 0.0,
+        "shoulder_import": 0.0,
+        "solar_feed_in": 0.0,
+        "super_export": 0.0,
+        "zerohero_days": 0.0,
+    }
+    for raw_line in bill.get("line_items") if isinstance(bill.get("line_items"), list) else []:
+        if not isinstance(raw_line, dict):
+            continue
+        bucket = _bill_line_comparison_bucket(raw_line)
+        column[bucket] += _comparison_number(raw_line.get("total_aud"))
+        category = str(raw_line.get("category") or "other")
+        description = str(raw_line.get("description") or "").lower()
+        quantity = _comparison_number(raw_line.get("quantity"))
+        if category == "offpeak_import" or "offpeak" in description:
+            usage_kwh["offpeak_import"] += quantity
+        elif category == "peak_import":
+            usage_kwh["peak_import"] += quantity
+        elif category == "shoulder_import":
+            usage_kwh["shoulder_import"] += quantity
+        elif category in {"fit_evening", "fit_other"}:
+            usage_kwh["solar_feed_in"] += quantity
+        elif category == "super_export":
+            usage_kwh["super_export"] += quantity
+        elif category == "zerohero":
+            usage_kwh["zerohero_days"] += quantity
+    column["total_aud"] = _comparison_number(bill.get("bill_total_including_gst_aud"))
+    return column, usage_kwh
+
+
+def _add_bill_comparison_values(target: dict[str, float], source: dict[str, object]) -> None:
+    target["fixed_aud"] += _comparison_number(source.get("fixed_aud"))
+    target["import_aud"] += _comparison_number(source.get("import_aud"))
+    target["solar_feed_in_aud"] += _comparison_number(source.get("solar_feed_in_aud"))
+    target["super_export_aud"] += _comparison_number(source.get("super_export_aud"))
+    target["zerohero_aud"] += _comparison_number(source.get("zerohero_aud"))
+    target["other_aud"] += _comparison_number(source.get("other_aud"))
+
+
+def _cost_variant_line_items(cost: dict[str, object], variant_key: str) -> dict[str, object]:
+    variants = cost.get("pricing_variants") if isinstance(cost.get("pricing_variants"), dict) else {}
+    variant = variants.get(variant_key) if isinstance(variants.get(variant_key), dict) else {}
+    line_items = variant.get("line_items") if isinstance(variant.get("line_items"), dict) else None
+    if line_items is not None:
+        return line_items
+    return cost.get("line_items") if isinstance(cost.get("line_items"), dict) else {}
+
+
+def _cost_variant_total(cost: dict[str, object], variant_key: str, fallback_key: str) -> float:
+    variants = cost.get("pricing_variants") if isinstance(cost.get("pricing_variants"), dict) else {}
+    variant = variants.get(variant_key) if isinstance(variants.get(variant_key), dict) else {}
+    if "total_aud" in variant:
+        return _comparison_number(variant.get("total_aud"))
+    return _comparison_number(cost.get(fallback_key))
+
+
+def _aggregate_uploaded_usage_comparison(
+    day_keys: list[str],
+    usage_index: dict[str, object],
+) -> tuple[dict[str, float], dict[str, float], dict[str, float], int]:
+    current = _empty_bill_comparison_column()
+    no_daily_cap = _empty_bill_comparison_column()
+    usage_kwh = {
+        "peak_import": 0.0,
+        "offpeak_import": 0.0,
+        "offpeak_balance": 0.0,
+        "shoulder_import": 0.0,
+        "solar_feed_in": 0.0,
+        "super_export": 0.0,
+    }
+    latest_by_day = usage_index.get("latest_by_day") if isinstance(usage_index.get("latest_by_day"), dict) else {}
+    matched_days = 0
+    for day_key in day_keys:
+        day_record = latest_by_day.get(day_key) if isinstance(latest_by_day.get(day_key), dict) else {}
+        cost = day_record.get("actual_cost") if isinstance(day_record.get("actual_cost"), dict) else {}
+        if not cost:
+            continue
+        matched_days += 1
+        current_items = _cost_variant_line_items(cost, "daily_cap")
+        no_cap_items = _cost_variant_line_items(cost, "no_daily_cap")
+        _add_bill_comparison_values(current, current_items)
+        _add_bill_comparison_values(no_daily_cap, no_cap_items)
+        current["total_aud"] += _cost_variant_total(cost, "daily_cap", "actual_daily_cost_aud")
+        no_daily_cap["total_aud"] += _cost_variant_total(cost, "no_daily_cap", "actual_daily_cost_aud")
+        usage = cost.get("usage_kwh") if isinstance(cost.get("usage_kwh"), dict) else {}
+        usage_kwh["peak_import"] += _comparison_number(usage.get("peak_import"))
+        usage_kwh["offpeak_import"] += _comparison_number(usage.get("free_import"))
+        usage_kwh["offpeak_balance"] += _comparison_number(usage.get("off_peak_balance"))
+        usage_kwh["shoulder_import"] += _comparison_number(usage.get("shoulder_import"))
+        usage_kwh["solar_feed_in"] += _comparison_number(usage.get("export_total"))
+        usage_kwh["super_export"] += _comparison_number(usage.get("super_export_billable"))
+    return current, no_daily_cap, usage_kwh, matched_days
+
+
+def _aggregate_system_cost_comparison(day_keys: list[str]) -> tuple[dict[str, float], dict[str, float], dict[str, float], int]:
+    current = _empty_bill_comparison_column()
+    no_daily_cap = _empty_bill_comparison_column()
+    usage_kwh = {
+        "peak_import": 0.0,
+        "offpeak_import": 0.0,
+        "offpeak_balance": 0.0,
+        "shoulder_import": 0.0,
+        "solar_feed_in": 0.0,
+        "super_export": 0.0,
+    }
+    if not day_keys:
+        return current, no_daily_cap, usage_kwh, 0
+    matched_days = 0
+    try:
+        with sqlite3.connect(str(storage_db_path), timeout=30.0) as conn:
+            conn.execute("PRAGMA busy_timeout=30000")
+            rows = conn.execute(
+                """
+                SELECT report_day_local, usage_json
+                FROM daily_reports
+                WHERE report_day_local >= ?
+                  AND report_day_local <= ?
+                ORDER BY report_day_local
+                """,
+                (day_keys[0], day_keys[-1]),
+            ).fetchall()
+    except sqlite3.Error:
+        return current, no_daily_cap, usage_kwh, 0
+
+    wanted = set(day_keys)
+    for day_text, usage_json_text in rows:
+        if str(day_text) not in wanted:
+            continue
+        try:
+            payload = json.loads(usage_json_text or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        if not isinstance(payload, dict):
+            continue
+        cost = payload.get("_daily_cost") if isinstance(payload.get("_daily_cost"), dict) else {}
+        if not cost:
+            continue
+        matched_days += 1
+        current_items = _cost_variant_line_items(cost, "daily_cap")
+        no_cap_items = _cost_variant_line_items(cost, "no_daily_cap")
+        _add_bill_comparison_values(current, current_items)
+        _add_bill_comparison_values(no_daily_cap, no_cap_items)
+        current["total_aud"] += _cost_variant_total(cost, "daily_cap", "total_daily_cost_aud")
+        no_daily_cap["total_aud"] += _cost_variant_total(cost, "no_daily_cap", "total_daily_cost_aud")
+        line_items = cost.get("line_items") if isinstance(cost.get("line_items"), dict) else {}
+        import_items = line_items.get("import") if isinstance(line_items.get("import"), dict) else {}
+        export_items = line_items.get("export") if isinstance(line_items.get("export"), dict) else {}
+        usage_kwh["peak_import"] += _comparison_number(import_items.get("peak_kwh"))
+        usage_kwh["offpeak_import"] += _comparison_number(import_items.get("free_kwh")) + _comparison_number(import_items.get("off_peak_balance_kwh"))
+        usage_kwh["offpeak_balance"] += _comparison_number(import_items.get("off_peak_balance_kwh"))
+        usage_kwh["shoulder_import"] += _comparison_number(import_items.get("shoulder_kwh"))
+        usage_kwh["solar_feed_in"] += _comparison_number(export_items.get("fit_evening_kwh")) + _comparison_number(export_items.get("fit_other_kwh"))
+        usage_kwh["super_export"] += _comparison_number(export_items.get("super_export_billable_kwh"))
+    return current, no_daily_cap, usage_kwh, matched_days
+
+
+def _rounded_comparison_column(values: dict[str, float]) -> dict[str, float]:
+    return {key: round(float(value or 0.0), 4) for key, value in values.items()}
+
+
+def _bill_cost_comparison(bill: dict[str, object], usage_index: dict[str, object]) -> dict[str, object]:
+    period = bill.get("billing_period") if isinstance(bill.get("billing_period"), dict) else {}
+    try:
+        start = date.fromisoformat(str(period.get("start")))
+        end = date.fromisoformat(str(period.get("end")))
+    except ValueError:
+        return {}
+    day_keys = [day.isoformat() for day in _bill_date_range(start, end)]
+    bill_column, bill_usage_kwh = _bill_comparison_from_bill(bill)
+    usage_current, usage_no_cap, uploaded_usage_kwh, uploaded_days = _aggregate_uploaded_usage_comparison(day_keys, usage_index)
+    system_current, system_no_cap, system_usage_kwh, system_days = _aggregate_system_cost_comparison(day_keys)
+    return {
+        "day_count": len(day_keys),
+        "uploaded_usage_days": uploaded_days,
+        "system_days": system_days,
+        "columns": {
+            "bill": _rounded_comparison_column(bill_column),
+            "uploaded_usage_daily_cap": _rounded_comparison_column(usage_current),
+            "system_daily_cap": _rounded_comparison_column(system_current),
+            "uploaded_usage_no_daily_cap": _rounded_comparison_column(usage_no_cap),
+            "system_no_daily_cap": _rounded_comparison_column(system_no_cap),
+        },
+        "usage_kwh": {
+            "bill": _rounded_comparison_column(bill_usage_kwh),
+            "uploaded_usage": _rounded_comparison_column(uploaded_usage_kwh),
+            "system": _rounded_comparison_column(system_usage_kwh),
+        },
+        "deltas": {
+            "uploaded_usage_daily_cap_minus_bill": round(usage_current["total_aud"] - bill_column["total_aud"], 4),
+            "system_daily_cap_minus_bill": round(system_current["total_aud"] - bill_column["total_aud"], 4),
+            "uploaded_usage_no_daily_cap_minus_bill": round(usage_no_cap["total_aud"] - bill_column["total_aud"], 4),
+            "system_no_daily_cap_minus_bill": round(system_no_cap["total_aud"] - bill_column["total_aud"], 4),
+        },
+    }
+
+
 def _enrich_bill_index(payload: dict[str, object]) -> dict[str, object]:
     plan_payload = _load_electricity_plan_payload()
+    usage_index = load_meter_usage_index(METER_USAGE_DIR)
     bills = payload.get("bills") if isinstance(payload.get("bills"), list) else []
     sorted_bills = sorted(
         [bill for bill in bills if isinstance(bill, dict)],
@@ -15197,6 +15434,7 @@ def _enrich_bill_index(payload: dict[str, object]) -> dict[str, object]:
                 "text": item.get("extracted_text") or "",
             },
         }
+        item["cost_comparison"] = _bill_cost_comparison(item, usage_index)
         enriched.append(item)
     result = dict(payload)
     result["bills"] = enriched
@@ -15233,6 +15471,7 @@ def _parse_save_apply_meter_usage_upload(filename: str, raw: bytes) -> dict[str,
         filename=filename,
         usage=usage,
         actuals_by_day=actuals_by_day,
+        db_path=storage_db_path,
     )
     update_result = apply_daily_actual_costs_to_daily_reports(
         storage_db_path,
@@ -15244,6 +15483,60 @@ def _parse_save_apply_meter_usage_upload(filename: str, raw: bytes) -> dict[str,
         "ok": True,
         "usage": saved_usage,
         "daily_report_update": update_result,
+    }
+
+
+def _rebuild_meter_usage_uploads_from_raw() -> dict[str, object]:
+    index = load_meter_usage_index(METER_USAGE_DIR)
+    uploads = index.get("uploads") if isinstance(index.get("uploads"), list) else []
+    total_uploads = 0
+    total_intervals = 0
+    total_daily_reports = 0
+    for upload in sorted(
+        [item for item in uploads if isinstance(item, dict)],
+        key=lambda item: str(item.get("uploaded_at") or ""),
+    ):
+        source_csv = str(upload.get("source_csv") or "")
+        if not source_csv:
+            continue
+        raw_path = (METER_USAGE_DIR / source_csv).resolve()
+        usage_root = METER_USAGE_DIR.resolve()
+        if usage_root not in raw_path.parents or not raw_path.is_file():
+            continue
+        try:
+            raw = raw_path.read_bytes()
+            filename = str(upload.get("source_filename") or raw_path.name)
+            usage = parse_meter_usage_upload(raw, filename=filename)
+            actuals_by_day = compute_meter_usage_actuals(
+                usage,
+                plan_payload=_load_electricity_plan_payload(),
+                timezone_name="Australia/Sydney",
+                source_label=filename,
+            )
+            saved = save_meter_usage_artifacts(
+                METER_USAGE_DIR,
+                raw=raw,
+                filename=filename,
+                usage=usage,
+                actuals_by_day=actuals_by_day,
+                db_path=storage_db_path,
+            )
+            update = apply_daily_actual_costs_to_daily_reports(
+                storage_db_path,
+                actuals_by_day,
+                timezone_name="Australia/Sydney",
+                plan_payload=_load_electricity_plan_payload(),
+            )
+        except (OSError, ValueError, RuntimeError, sqlite3.Error):
+            logger.exception("Meter usage raw CSV rebuild failed for %s", source_csv)
+            continue
+        total_uploads += 1
+        total_intervals += int((saved.get("db_import") or {}).get("interval_rows_upserted") or 0)
+        total_daily_reports += int(update.get("updated_daily_reports") or 0)
+    return {
+        "uploads_rebuilt": total_uploads,
+        "interval_rows_upserted": total_intervals,
+        "daily_reports_updated": total_daily_reports,
     }
 
 
@@ -17893,6 +18186,7 @@ async def on_startup() -> None:
     global static_asset_version
     static_asset_version = await asyncio.to_thread(_compute_static_asset_version)
     await asyncio.to_thread(init_db, storage_db_path)
+    await asyncio.to_thread(_rebuild_meter_usage_uploads_from_raw)
     await asyncio.to_thread(upsert_operation_definitions, storage_db_path, definitions=list(MANUAL_OPERATION_DEFINITIONS))
     await asyncio.to_thread(migrate_worker_log_legacy_statuses, storage_db_path)
     await asyncio.to_thread(

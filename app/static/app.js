@@ -694,11 +694,13 @@ const I18N = {
     reportDailyCostNoData: "Cost estimate unavailable for this report.",
     reportDailyCostEstimated: "Estimated",
     reportDailyCostBillActual: "Usage actual",
+    reportDailyCostSystemNoDailyCap: "System no daily cap",
+    reportDailyCostSystemDailyCap: "System daily cap",
+    reportDailyCostUsageNoDailyCap: "Usage no daily cap",
+    reportDailyCostUsageDailyCap: "Usage daily cap",
     reportDailyCostBillAllocated: "calculated",
     reportDailyCostNoBill: "No usage uploaded for this day",
-    reportDailyCostNoOverCap: "no over cap {value}",
     reportDailyCostDelta: "Delta",
-    reportDailyCostDeltaDetail: "estimate minus actual",
     reportDailyCostFixed: "Fixed",
     reportDailyCostImport: "Import",
     reportDailyCostCredits: "Credits",
@@ -776,6 +778,22 @@ const I18N = {
     billsLineRate: "Rate",
     billsLineTotal: "Total",
     billsAnalysisType: "Analysis",
+    billsComparisonTitle: "Cost comparison",
+    billsComparisonBill: "Bill",
+    billsComparisonUsageDailyCap: "Usage daily cap",
+    billsComparisonSystemDailyCap: "System daily cap",
+    billsComparisonUsageNoDailyCap: "Usage no daily cap",
+    billsComparisonSystemNoDailyCap: "System no daily cap",
+    billsComparisonDifference: "Difference",
+    billsComparisonFixed: "Fixed",
+    billsComparisonImport: "Import",
+    billsComparisonSolar: "Solar feed-in",
+    billsComparisonSuper: "Super Export",
+    billsComparisonZeroHero: "ZEROHERO",
+    billsComparisonOther: "Other",
+    billsComparisonTotal: "Total",
+    billsComparisonDataDays: "{usageDays}/{days} usage days · {systemDays}/{days} system days",
+    billsComparisonKwhTitle: "Usage kWh",
     reportCalendarTitle: "Report Calendar",
     reportCalendarMeta: "{month} · generated reports {count}/{days}",
     reportCalendarLoading: "Loading report index...",
@@ -1879,11 +1897,13 @@ const I18N = {
     reportDailyCostNoData: "此日报暂无法估算电费。",
     reportDailyCostEstimated: "系统估算",
     reportDailyCostBillActual: "用量实际",
+    reportDailyCostSystemNoDailyCap: "系统不按日 cap",
+    reportDailyCostSystemDailyCap: "系统按日 cap",
+    reportDailyCostUsageNoDailyCap: "用量不按日 cap",
+    reportDailyCostUsageDailyCap: "用量按日 cap",
     reportDailyCostBillAllocated: "已计算",
     reportDailyCostNoBill: "这一天还没有上传用量",
-    reportDailyCostNoOverCap: "不含超 cap {value}",
     reportDailyCostDelta: "差额",
-    reportDailyCostDeltaDetail: "估算减实际",
     reportDailyCostFixed: "固定费",
     reportDailyCostImport: "买电",
     reportDailyCostCredits: "抵扣",
@@ -1961,6 +1981,22 @@ const I18N = {
     billsLineRate: "单价",
     billsLineTotal: "金额",
     billsAnalysisType: "解析类型",
+    billsComparisonTitle: "费用对比",
+    billsComparisonBill: "账单",
+    billsComparisonUsageDailyCap: "用量按日 cap",
+    billsComparisonSystemDailyCap: "系统按日 cap",
+    billsComparisonUsageNoDailyCap: "用量不按日 cap",
+    billsComparisonSystemNoDailyCap: "系统不按日 cap",
+    billsComparisonDifference: "差额",
+    billsComparisonFixed: "固定费",
+    billsComparisonImport: "买电",
+    billsComparisonSolar: "太阳能抵扣",
+    billsComparisonSuper: "Super Export",
+    billsComparisonZeroHero: "ZEROHERO",
+    billsComparisonOther: "其他",
+    billsComparisonTotal: "合计",
+    billsComparisonDataDays: "用量 {usageDays}/{days} 天 · 系统 {systemDays}/{days} 天",
+    billsComparisonKwhTitle: "用量 kWh",
     reportCalendarTitle: "日报日历",
     reportCalendarMeta: "{month} · 已生成日报 {count}/{days}",
     reportCalendarLoading: "正在加载日报索引...",
@@ -10327,6 +10363,112 @@ function billRateRows(plan) {
   });
 }
 
+function billComparisonValue(column, key) {
+  const n = Number(column?.[key]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function billComparisonTableHtml(comparison) {
+  const columns = comparison?.columns && typeof comparison.columns === "object" ? comparison.columns : {};
+  if (!columns.bill) return "";
+  const columnDefs = [
+    ["bill", "billsComparisonBill"],
+    ["uploaded_usage_daily_cap", "billsComparisonUsageDailyCap"],
+    ["system_daily_cap", "billsComparisonSystemDailyCap"],
+    ["uploaded_usage_no_daily_cap", "billsComparisonUsageNoDailyCap"],
+    ["system_no_daily_cap", "billsComparisonSystemNoDailyCap"],
+  ];
+  const rowDefs = [
+    ["fixed_aud", "billsComparisonFixed"],
+    ["import_aud", "billsComparisonImport"],
+    ["solar_feed_in_aud", "billsComparisonSolar"],
+    ["super_export_aud", "billsComparisonSuper"],
+    ["zerohero_aud", "billsComparisonZeroHero"],
+    ["other_aud", "billsComparisonOther"],
+    ["total_aud", "billsComparisonTotal"],
+  ];
+  const billTotal = billComparisonValue(columns.bill, "total_aud");
+  const body = rowDefs.map(([key, labelKey]) => `
+    <tr class="${key === "total_aud" ? "is-total" : ""}">
+      <th scope="row">${escapeHtml(t(labelKey))}</th>
+      ${columnDefs.map(([columnKey]) => `<td>${escapeHtml(formatBillMoneyOutcome(billComparisonValue(columns[columnKey], key)))}</td>`).join("")}
+    </tr>
+  `).join("");
+  const difference = `
+    <tr class="is-difference">
+      <th scope="row">${escapeHtml(t("billsComparisonDifference"))}</th>
+      ${columnDefs.map(([columnKey]) => {
+        const value = billComparisonValue(columns[columnKey], "total_aud");
+        const delta = value === null || billTotal === null ? null : value - billTotal;
+        return `<td>${escapeHtml(delta === null ? "-" : formatDailyCostAud(delta, { signed: true }))}</td>`;
+      }).join("")}
+    </tr>
+  `;
+  return `
+    <section class="bills-detail-block">
+      <div class="bills-detail-heading-row">
+        <h4>${escapeHtml(t("billsComparisonTitle"))}</h4>
+        <span class="muted">${escapeHtml(t("billsComparisonDataDays", {
+          usageDays: comparison.uploaded_usage_days || 0,
+          systemDays: comparison.system_days || 0,
+          days: comparison.day_count || 0,
+        }))}</span>
+      </div>
+      <div class="table-wrap bills-comparison-table-wrap">
+        <table class="bills-lines-table bills-comparison-table">
+          <thead>
+            <tr>
+              <th>${escapeHtml(t("reportDailyCostComponent"))}</th>
+              ${columnDefs.map(([, labelKey]) => `<th>${escapeHtml(t(labelKey))}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>${body}${difference}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function billComparisonKwhTableHtml(comparison) {
+  const usage = comparison?.usage_kwh && typeof comparison.usage_kwh === "object" ? comparison.usage_kwh : {};
+  if (!usage.bill) return "";
+  const columnDefs = [
+    ["bill", "billsComparisonBill"],
+    ["uploaded_usage", "reportDailyCostBillActual"],
+    ["system", "reportDailyCostEstimated"],
+  ];
+  const rowDefs = [
+    ["peak_import", "billsRatePeak"],
+    ["offpeak_import", "billsRateFree"],
+    ["offpeak_balance", "reportDailyCostOverCap"],
+    ["shoulder_import", "billsRateShoulder"],
+    ["solar_feed_in", "billsComparisonSolar"],
+    ["super_export", "billsRateSuperExport"],
+  ];
+  const rows = rowDefs.map(([key, labelKey]) => `
+    <tr>
+      <th scope="row">${escapeHtml(t(labelKey))}</th>
+      ${columnDefs.map(([columnKey]) => `<td>${escapeHtml(formatDailyCostKwh(usage[columnKey]?.[key]))}</td>`).join("")}
+    </tr>
+  `).join("");
+  return `
+    <section class="bills-detail-block">
+      <h4>${escapeHtml(t("billsComparisonKwhTitle"))}</h4>
+      <div class="table-wrap bills-comparison-table-wrap">
+        <table class="bills-lines-table bills-comparison-table">
+          <thead>
+            <tr>
+              <th>${escapeHtml(t("reportDailyCostComponent"))}</th>
+              ${columnDefs.map(([, labelKey]) => `<th>${escapeHtml(t(labelKey))}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
 function renderBills(payload = stateCache.lastBills) {
   const list = document.getElementById("billsList");
   const grid = document.getElementById("billsSummaryGrid");
@@ -10386,6 +10528,8 @@ function renderBills(payload = stateCache.lastBills) {
   const sourceText = String(bill.extracted_text || bill.analysis?.source_documents?.text || "");
   const ratePeriods = Array.isArray(bill.rate_periods) ? bill.rate_periods : [];
   const lineItems = Array.isArray(bill.line_items) ? bill.line_items : [];
+  const comparisonHtml = billComparisonTableHtml(bill.cost_comparison || {});
+  const comparisonKwhHtml = billComparisonKwhTableHtml(bill.cost_comparison || {});
   const rateHtml = ratePeriods.map((periodItem) => {
     const plan = periodItem.plan || {};
     const planName = plan.display_name || plan.id || "-";
@@ -10429,6 +10573,8 @@ function renderBills(payload = stateCache.lastBills) {
           <h4>${escapeHtml(t("billsPlanRates"))}</h4>
           ${rateHtml || `<p class="muted">-</p>`}
         </section>
+        ${comparisonHtml}
+        ${comparisonKwhHtml}
         <section class="bills-detail-block">
           <h4>${escapeHtml(t("billsParsedLines"))}</h4>
           <div class="table-wrap bills-lines-table-wrap">
@@ -11998,9 +12144,13 @@ function formatDailyCostDeltaAudWithPercent(delta, actual) {
   return percentText === "-" ? deltaText : `${deltaText} (${percentText})`;
 }
 
-function formatDailyCostNoOverCapNote(value) {
-  const text = formatDailyCostAud(value);
-  return text === "-" ? "-" : t("reportDailyCostNoOverCap", { value: text });
+function dailyCostVariantTotal(cost, variantKey, fallbackKey) {
+  const variants = cost?.pricing_variants && typeof cost.pricing_variants === "object" ? cost.pricing_variants : {};
+  const variant = variants[variantKey] && typeof variants[variantKey] === "object" ? variants[variantKey] : {};
+  const variantTotal = Number(variant.total_aud);
+  if (Number.isFinite(variantTotal)) return variantTotal;
+  const fallback = Number(cost?.[fallbackKey]);
+  return Number.isFinite(fallback) ? fallback : null;
 }
 
 function formatDailyCostFormulaPart(label, value, unit = "kWh") {
@@ -12076,6 +12226,8 @@ function renderSamplingDailyCost(dailyCost, billActualCost = null) {
 
   setSamplingDailyCostHidden(false);
   const total = hasEstimatedCost ? Number(dailyCostMap.total_daily_cost_aud) : null;
+  const estimatedDailyCapTotal = hasEstimatedCost ? dailyCostVariantTotal(dailyCostMap, "daily_cap", "total_daily_cost_aud") : null;
+  const estimatedNoDailyCapTotal = hasEstimatedCost ? dailyCostVariantTotal(dailyCostMap, "no_daily_cap", "total_daily_cost_aud") : null;
 
   const lineItems = dailyCostMap.line_items || {};
   const fixed = lineItems.fixed || {};
@@ -12093,7 +12245,8 @@ function renderSamplingDailyCost(dailyCost, billActualCost = null) {
   const basis = dailyCostMap.price_basis || billActualMap.price_basis || "inc GST";
   const samples = Number(dailyCostMap.samples || billActualMap.samples || 0);
   const actualTotal = hasBillActual ? Number(billActualMap.actual_daily_cost_aud) : null;
-  const deltaAud = hasEstimatedCost && hasBillActual ? total - actualTotal : null;
+  const actualDailyCapTotal = hasBillActual ? dailyCostVariantTotal(billActualMap, "daily_cap", "actual_daily_cost_aud") : null;
+  const actualNoDailyCapTotal = hasBillActual ? dailyCostVariantTotal(billActualMap, "no_daily_cap", "actual_daily_cost_aud") : null;
   const actualItems = hasBillActual && billActualMap.line_items && typeof billActualMap.line_items === "object"
     ? billActualMap.line_items
     : {};
@@ -12102,17 +12255,6 @@ function renderSamplingDailyCost(dailyCost, billActualCost = null) {
   const actualExport = Number(actualItems.solar_feed_in_aud || 0) + Number(actualItems.super_export_aud || 0);
   const actualZeroHero = Number(actualItems.zerohero_aud || 0);
   const actualUsageKwh = actualItems.usage_kwh && typeof actualItems.usage_kwh === "object" ? actualItems.usage_kwh : {};
-  const overCapRate = Number(rates.off_peak_balance_aud_per_kwh || 0);
-  const estimatedOverCapAud = hasEstimatedCost && Number.isFinite(overCapRate)
-    ? Math.max(0, Number(importItem.off_peak_balance_kwh || 0)) * overCapRate
-    : 0;
-  const actualOverCapAud = hasBillActual && Number.isFinite(overCapRate)
-    ? Math.max(0, Number(actualUsageKwh.off_peak_balance_kwh || 0)) * overCapRate
-    : 0;
-  const estimatedTotalNoOverCap = hasEstimatedCost ? total - estimatedOverCapAud : null;
-  const actualTotalNoOverCap = hasBillActual ? actualTotal - actualOverCapAud : null;
-  const estimatedImportNoOverCap = hasEstimatedCost ? importAud - estimatedOverCapAud : null;
-  const actualImportNoOverCap = hasBillActual ? actualImport - actualOverCapAud : null;
   const zeroHeroRate = Number(dailyCostMap.rates?.zerohero_credit_aud_per_qualified_day || 0);
   const zeroHeroStatus = String(zeroHero.status || "");
   const hasZeroHeroCostLine =
@@ -12134,16 +12276,6 @@ function renderSamplingDailyCost(dailyCost, billActualCost = null) {
     if (Math.abs(Number(value)) < 0.01) return "is-even";
     return Number(value) > 0 ? "is-higher" : "is-lower";
   };
-  const hasDelta = hasEstimatedCost && hasBillActual;
-  const deltaMetaText = hasDelta
-    ? Math.abs(deltaAud) < 0.01
-      ? t("reportDailyCostEven")
-      : deltaAud > 0
-        ? t("reportDailyCostHigher")
-        : t("reportDailyCostLower")
-    : hasBillActual
-      ? t("reportDailyCostNoData")
-    : t("reportDailyCostNoBill");
   const rows = [
     {
       key: "fixed",
@@ -12244,19 +12376,24 @@ function renderSamplingDailyCost(dailyCost, billActualCost = null) {
     </div>
     <div class="sampling-daily-cost-summary">
       <div class="sampling-daily-cost-metric">
-        <span class="sampling-daily-cost-label">${escapeHtml(t("reportDailyCostEstimated"))}</span>
-        <strong class="sampling-daily-cost-metric-value">${escapeHtml(formatDailyCostAud(total))}</strong>
-        <span class="sampling-daily-cost-metric-note">${escapeHtml(formatDailyCostNoOverCapNote(estimatedTotalNoOverCap))}</span>
+        <span class="sampling-daily-cost-label">${escapeHtml(t("reportDailyCostSystemNoDailyCap"))}</span>
+        <strong class="sampling-daily-cost-metric-value">${escapeHtml(formatDailyCostAud(estimatedNoDailyCapTotal))}</strong>
+        <span class="sampling-daily-cost-metric-note">${escapeHtml(t("reportDailyCostEstimated"))}</span>
+      </div>
+      <div class="sampling-daily-cost-metric">
+        <span class="sampling-daily-cost-label">${escapeHtml(t("reportDailyCostSystemDailyCap"))}</span>
+        <strong class="sampling-daily-cost-metric-value">${escapeHtml(formatDailyCostAud(estimatedDailyCapTotal))}</strong>
+        <span class="sampling-daily-cost-metric-note">${escapeHtml(t("reportDailyCostEstimated"))}</span>
       </div>
       <div class="sampling-daily-cost-metric ${hasBillActual ? "" : "is-muted"}">
-        <span class="sampling-daily-cost-label">${escapeHtml(t("reportDailyCostBillActual"))}</span>
-        <strong class="sampling-daily-cost-metric-value">${escapeHtml(hasBillActual ? formatDailyCostAud(actualTotal) : "-")}</strong>
-        <span class="sampling-daily-cost-metric-note">${escapeHtml(hasBillActual ? formatDailyCostNoOverCapNote(actualTotalNoOverCap) : "-")}</span>
+        <span class="sampling-daily-cost-label">${escapeHtml(t("reportDailyCostUsageNoDailyCap"))}</span>
+        <strong class="sampling-daily-cost-metric-value">${escapeHtml(hasBillActual ? formatDailyCostAud(actualNoDailyCapTotal) : "-")}</strong>
+        <span class="sampling-daily-cost-metric-note">${escapeHtml(t("reportDailyCostBillActual"))}</span>
       </div>
-      <div class="sampling-daily-cost-metric ${deltaTone(deltaAud)}">
-        <span class="sampling-daily-cost-label">${escapeHtml(t("reportDailyCostDelta"))}</span>
-        <strong class="sampling-daily-cost-metric-value sampling-daily-cost-delta-value">${escapeHtml(hasDelta ? formatDailyCostDeltaAudWithPercent(deltaAud, actualTotal) : "-")}</strong>
-        <span class="sampling-daily-cost-metric-note">${escapeHtml(deltaMetaText)}</span>
+      <div class="sampling-daily-cost-metric ${hasBillActual ? "" : "is-muted"}">
+        <span class="sampling-daily-cost-label">${escapeHtml(t("reportDailyCostUsageDailyCap"))}</span>
+        <strong class="sampling-daily-cost-metric-value">${escapeHtml(hasBillActual ? formatDailyCostAud(actualDailyCapTotal) : "-")}</strong>
+        <span class="sampling-daily-cost-metric-note">${escapeHtml(t("reportDailyCostBillActual"))}</span>
       </div>
     </div>
     <div class="sampling-daily-cost-table" role="table" aria-label="${escapeHtml(t("reportDailyCostBreakdown"))}">

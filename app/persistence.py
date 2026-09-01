@@ -793,6 +793,64 @@ def init_db(db_path: DatabaseTarget) -> None:
                     "ON assembled_flow_snapshots (system, assembled_at_epoch)"
                 )
             )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS meter_usage_uploads (
+                        upload_id TEXT PRIMARY KEY,
+                        source_filename TEXT NOT NULL,
+                        source_csv TEXT NOT NULL,
+                        uploaded_at_utc TEXT NOT NULL,
+                        content_sha256 TEXT NOT NULL,
+                        nmi TEXT NOT NULL,
+                        network TEXT NOT NULL,
+                        format TEXT NOT NULL,
+                        period_start TEXT NOT NULL,
+                        period_end TEXT NOT NULL,
+                        day_count INTEGER NOT NULL,
+                        interval_count INTEGER NOT NULL
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS meter_usage_intervals (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        upload_id TEXT NOT NULL,
+                        source_filename TEXT NOT NULL,
+                        nmi TEXT NOT NULL,
+                        network TEXT NOT NULL,
+                        stream TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        unit TEXT NOT NULL,
+                        label TEXT NOT NULL,
+                        timezone TEXT NOT NULL,
+                        local_date TEXT NOT NULL,
+                        interval_start_time TEXT NOT NULL,
+                        duration_minutes INTEGER NOT NULL,
+                        kwh REAL NOT NULL,
+                        quality TEXT NOT NULL,
+                        day_total_kwh REAL,
+                        imported_at_utc TEXT NOT NULL,
+                        UNIQUE(nmi, stream, kind, local_date, interval_start_time)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_meter_usage_intervals_day_kind "
+                    "ON meter_usage_intervals (local_date, kind, interval_start_time)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_meter_usage_intervals_upload "
+                    "ON meter_usage_intervals (upload_id)"
+                )
+            )
 
 
 def export_database_bytes(db_path: DatabaseTarget) -> bytes:
@@ -2669,6 +2727,7 @@ def apply_daily_actual_costs_to_daily_reports(
         usage_kwh = actual.get("usage_kwh") if isinstance(actual.get("usage_kwh"), dict) else {}
         zerohero = actual.get("zerohero") if isinstance(actual.get("zerohero"), dict) else {}
         plan = actual.get("plan") if isinstance(actual.get("plan"), dict) else {}
+        pricing_variants = actual.get("pricing_variants") if isinstance(actual.get("pricing_variants"), dict) else {}
         fixed_aud = _number_or_none(line_items.get("fixed_aud")) or 0.0
         import_aud = _number_or_none(line_items.get("import_aud")) or 0.0
         fit_aud = _number_or_none(line_items.get("solar_feed_in_aud")) or 0.0
@@ -2698,6 +2757,7 @@ def apply_daily_actual_costs_to_daily_reports(
                 "solar_feed_in_aud": _round_aud(fit_aud),
                 "super_export_aud": _round_aud(super_export_aud),
                 "zerohero_aud": _round_aud(zerohero_aud),
+                "daily_cap_overage_aud": _round_aud(_number_or_none(line_items.get("daily_cap_overage_aud")) or 0.0),
                 "usage_kwh": {
                     "free_kwh": round(float(usage_kwh.get("free_import") or 0.0), 4),
                     "off_peak_balance_kwh": round(float(usage_kwh.get("off_peak_balance") or 0.0), 4),
@@ -2710,6 +2770,7 @@ def apply_daily_actual_costs_to_daily_reports(
                     "super_export_billable_kwh": round(float(usage_kwh.get("super_export_billable") or 0.0), 4),
                 },
             },
+            "pricing_variants": pricing_variants,
             "zerohero": zerohero,
             "quality": {
                 "integration": "meter-interval-csv",
@@ -3011,6 +3072,8 @@ def _integrate_daily_cost_rows(
         + peak_import_kwh * peak_rate
         + shoulder_import_kwh * shoulder_rate
     )
+    daily_cap_overage_aud = off_peak_balance_kwh * off_peak_balance_rate
+    import_charge_without_daily_cap_aud = import_charge_aud - daily_cap_overage_aud
 
     fit_evening_export_kwh = fit_evening_export_wh / 1000.0
     fit_other_export_kwh = fit_other_export_wh / 1000.0
@@ -3057,7 +3120,13 @@ def _integrate_daily_cost_rows(
         zerohero_status = "not_qualified"
 
     export_credit_aud = fit_credit_aud + super_export_credit_aud
-    total_daily_cost_aud = fixed_charge_aud + import_charge_aud - export_credit_aud - zerohero_credit_aud
+    total_daily_cost_with_daily_cap_aud = fixed_charge_aud + import_charge_aud - export_credit_aud - zerohero_credit_aud
+    total_daily_cost_aud = (
+        fixed_charge_aud
+        + import_charge_without_daily_cap_aud
+        - export_credit_aud
+        - zerohero_credit_aud
+    )
 
     return {
         "status": "estimated",
@@ -3090,7 +3159,9 @@ def _integrate_daily_cost_rows(
                 "peak_kwh": _round_kwh(peak_import_wh),
                 "shoulder_kwh": _round_kwh(shoulder_import_wh),
                 "total_kwh": round(free_import_kwh + peak_import_kwh + shoulder_import_kwh, 4),
-                "charge_aud": _round_aud(import_charge_aud),
+                "charge_aud": _round_aud(import_charge_without_daily_cap_aud),
+                "daily_cap_charge_aud": _round_aud(import_charge_aud),
+                "daily_cap_overage_aud": _round_aud(daily_cap_overage_aud),
             },
             "export": {
                 "fit_evening_kwh": _round_kwh(fit_evening_export_wh),
@@ -3126,6 +3197,30 @@ def _integrate_daily_cost_rows(
             "solar_feed_in_other_aud_per_kwh": fit_other_rate,
             "super_export_top_up_aud_per_kwh": super_export_rate,
             "zerohero_credit_aud_per_qualified_day": zerohero_rate,
+        },
+        "pricing_variants": {
+            "daily_cap": {
+                "total_aud": _round_aud(total_daily_cost_with_daily_cap_aud),
+                "line_items": {
+                    "fixed_aud": _round_aud(fixed_charge_aud),
+                    "import_aud": _round_aud(import_charge_aud),
+                    "solar_feed_in_aud": _round_aud(-fit_credit_aud),
+                    "super_export_aud": _round_aud(-super_export_credit_aud),
+                    "zerohero_aud": _round_aud(-zerohero_credit_aud),
+                    "daily_cap_overage_aud": _round_aud(daily_cap_overage_aud),
+                },
+            },
+            "no_daily_cap": {
+                "total_aud": _round_aud(total_daily_cost_aud),
+                "line_items": {
+                    "fixed_aud": _round_aud(fixed_charge_aud),
+                    "import_aud": _round_aud(import_charge_without_daily_cap_aud),
+                    "solar_feed_in_aud": _round_aud(-fit_credit_aud),
+                    "super_export_aud": _round_aud(-super_export_credit_aud),
+                    "zerohero_aud": _round_aud(-zerohero_credit_aud),
+                    "daily_cap_overage_aud": 0.0,
+                },
+            },
         },
         "quality": {
             "integration": "left-rectangle",

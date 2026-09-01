@@ -2651,6 +2651,35 @@ select {
   line-height: 1.35;
 }
 
+.bills-detail-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.bills-comparison-table-wrap {
+  overflow-x: auto;
+}
+
+.bills-comparison-table th,
+.bills-comparison-table td {
+  white-space: nowrap;
+}
+
+.bills-comparison-table tbody tr.is-total th,
+.bills-comparison-table tbody tr.is-total td {
+  border-top: 1px solid rgba(31, 122, 82, 0.24);
+  font-weight: 700;
+}
+
+.bills-comparison-table tbody tr.is-difference th,
+.bills-comparison-table tbody tr.is-difference td {
+  background: rgba(31, 122, 82, 0.06);
+  font-weight: 700;
+}
+
 .database-transfer {
   margin-top: 12px;
   padding: 12px 14px;
@@ -3157,7 +3186,7 @@ select {
 
 .sampling-daily-cost-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
   gap: 6px;
 }
 
