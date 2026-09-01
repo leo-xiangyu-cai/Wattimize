@@ -1,4 +1,4 @@
 interface:
-  display_name: "Wattimize NAS Deploy"
-  short_description: "Deploy code without overwriting NAS data"
-  default_prompt: "Use $wattimize-nas-deploy to deploy Wattimize code to the NAS while preserving the live NAS SQLite database and uploaded bill artifacts."
+  display_name: "Wattimize NAS Runtime"
+  short_description: "Check and deploy Wattimize on the NAS"
+  default_prompt: "Use $wattimize-nas-deploy to check or deploy Wattimize against the NAS live runtime while preserving the live NAS SQLite database and uploaded bill artifacts."

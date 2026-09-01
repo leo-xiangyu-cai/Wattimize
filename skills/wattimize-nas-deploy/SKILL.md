@@ -1,21 +1,41 @@
 ---
 name: wattimize-nas-deploy
-description: Deploy Wattimize code without losing live database data. Use when the user asks to deploy, publish, push code, refresh the NAS/server/local runtime, or run any deployment for this Wattimize project.
+description: Check or deploy the Wattimize app against the TerraMaster NAS live runtime while preserving NAS data. Use in /Users/caixy/Leo/Wattimize when the user asks to inspect issues, verify behavior, deploy, publish, push code, refresh the server, or run Wattimize.
 ---
 
-# Wattimize NAS Deploy
+# Wattimize NAS Runtime
 
-Use this skill for deploying code from this repository to the TerraMaster NAS or any other runtime.
+Use this skill for Wattimize runtime checks and deployments from `/Users/caixy/Leo/Wattimize`.
+
+The normal target is the TerraMaster NAS, not a local host-side server or local Docker container. When the user asks to check a problem, verify a fix, inspect live behavior, deploy, publish, push code, refresh the server, or run Wattimize, operate against the NAS unless the user explicitly asks for a local-only workflow.
+
+## NAS-First Rule
+
+For runtime inspection, use the live NAS service:
+
+```bash
+http://tnas.local:18000
+```
+
+Prefer read-only NAS checks such as:
+
+```bash
+curl -fsS --max-time 5 http://tnas.local:18000/api/health
+curl -fsS --max-time 8 http://tnas.local:18000/api/config/status
+curl -fsS --max-time 8 http://tnas.local:18000/api/collector/status
+```
+
+For UI checks, open or test `http://tnas.local:18000` with the browser/Playwright tooling. Do not inspect or start the local Wattimize container just to check normal behavior. Use local static checks for code correctness, but treat NAS as the runtime source of truth.
+
+Only use local runtime checks when the user explicitly asks for local-only verification or the NAS is unreachable and the user chooses a local fallback.
 
 ## Data Safety Rule
 
-Database continuity is the hard requirement for every deployment.
+NAS database continuity is the hard requirement for every deployment.
 
-Before any deploy, identify which runtime has been actively writing the database. Preserve that live database and never overwrite it with an older or inactive copy.
+The NAS container is normally the active writer. Preserve the NAS database and uploaded bill artifacts during ordinary code deploys. Do not overwrite them with local files.
 
 The NAS container writes live data under `${NAS_DATA_DIR}`. Do not overwrite that live database with the local database during ordinary deploys. The local database may be stale because the NAS has been running and collecting samples while local has not.
-
-The same principle applies in the other direction: do not overwrite a newer local database with a stale remote copy if local has been the active writer.
 
 Never run these during a code deploy:
 
@@ -56,12 +76,19 @@ Before running, state that the command:
 1. Work from `/Users/caixy/Leo/Wattimize`.
 2. Check local changes with `git status --short`.
 3. Confirm the intended code changes are present.
-4. Do not start local services.
-5. Confirm the deploy path does not replace the active database with a stale copy.
+4. Do not start or inspect local services for normal NAS-first workflows.
+5. Confirm the deploy path preserves NAS database and uploaded bill artifacts.
 6. Run normal static checks when relevant, such as:
 
 ```bash
 PYTHONPYCACHEPREFIX=/tmp/wattimize-pycache python3 -m py_compile app/main.py app/persistence.py
+```
+
+For frontend-only changes, use:
+
+```bash
+node --check app/static/app.js
+git diff --check
 ```
 
 ## Deployment
@@ -76,7 +103,7 @@ If sandbox/network/SSH restrictions block it, request escalation for that exact 
 
 ## Post-Deploy Verification
 
-After deploy completes:
+After deploy completes, verify NAS, not local:
 
 ```bash
 curl -fsS --max-time 5 http://tnas.local:18000/api/health
@@ -85,6 +112,8 @@ curl -fsS --max-time 8 http://tnas.local:18000/api/collector/status
 ```
 
 For feature-specific changes, query the relevant read-only endpoint and report the live decision/status.
+
+For browser-facing changes, verify the deployed page at `http://tnas.local:18000` after deployment.
 
 ## Dangerous Data Operations
 
