@@ -2604,6 +2604,53 @@ select {
   cursor: not-allowed;
 }
 
+.bills-card {
+  position: relative;
+}
+
+.bills-card.is-dragging-file {
+  border-color: rgba(31, 122, 82, 0.52);
+  box-shadow:
+    inset 0 0 0 2px rgba(31, 122, 82, 0.24),
+    0 18px 42px rgba(31, 73, 51, 0.14);
+}
+
+.bills-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  border-radius: inherit;
+  background: rgba(244, 250, 246, 0.82);
+  pointer-events: none;
+}
+
+.bills-drop-overlay-box {
+  display: grid;
+  gap: 4px;
+  min-width: min(360px, 100%);
+  padding: 18px 20px;
+  border: 1px dashed rgba(31, 122, 82, 0.6);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #183126;
+  text-align: center;
+  box-shadow: 0 12px 28px rgba(31, 73, 51, 0.12);
+}
+
+.bills-drop-overlay-box strong {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.bills-drop-overlay-box span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
 .database-transfer {
   margin-top: 12px;
   padding: 12px 14px;

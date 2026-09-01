@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dashboard</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260807-mobile-freshness" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260901-bills-drop-upload" />
   </head>
   <body>
     <main class="page">
@@ -571,7 +571,13 @@
       </section>
 
       <section id="billsView" class="view hidden">
-        <section class="card bills-card">
+        <section id="billsCard" class="card bills-card">
+          <div id="billsDropOverlay" class="bills-drop-overlay hidden" aria-hidden="true">
+            <div class="bills-drop-overlay-box">
+              <strong data-i18n="billsDropTitle">Drop bill file to upload</strong>
+              <span data-i18n="billsDropHint">You will be asked to confirm before upload.</span>
+            </div>
+          </div>
           <div class="section-header bills-header">
             <div>
               <h2 data-i18n="billsTitle">Bills</h2>
@@ -888,6 +894,6 @@
     <script src="/static/vendor/dagre.min.js"></script>
     <script src="/static/vendor/x6.min.js"></script>
     <script src="/static/energy-flow-diagram.js"></script>
-    <script src="/static/app.js?v=20260807-mobile-freshness"></script>
+    <script src="/static/app.js?v=20260901-bills-drop-upload"></script>
   </body>
 </html>

@@ -739,6 +739,9 @@ const I18N = {
     billsUploaded: "Bill {invoice} uploaded",
     billsUploadFailed: "Bill upload failed: {error}",
     billsNoFile: "Choose a PDF bill first.",
+    billsDropTitle: "Drop bill file to upload",
+    billsDropHint: "You will be asked to confirm before upload.",
+    billsDropConfirmUpload: "Upload bill file {name}?",
     billsPeriodSelectLabel: "Bill period",
     billsTotalSpend: "Total billed",
     billsLatestPeriod: "Latest period",
@@ -1921,6 +1924,9 @@ const I18N = {
     billsUploaded: "账单 {invoice} 已上传",
     billsUploadFailed: "账单上传失败：{error}",
     billsNoFile: "请先选择 PDF 账单。",
+    billsDropTitle: "松开上传账单文件",
+    billsDropHint: "上传前会先让你确认。",
+    billsDropConfirmUpload: "要上传账单文件 {name} 吗？",
     billsPeriodSelectLabel: "账单周期",
     billsTotalSpend: "账单合计",
     billsLatestPeriod: "最新周期",
@@ -2940,6 +2946,7 @@ function getLang() {
 }
 
 let currentLang = getLang();
+let billsDropDepth = 0;
 const _hashTab = location.hash.slice(1);
 const ALL_TABS = ["dashboard", "plan", "notificationMatrix", "rawData", "solplanetControl", "report", "monthlyReport", "bills", "database", "workerLogs", "operationTimeline", "workerFailureLog"];
 const SAJ_PROFILE_IDS = ["self_consumption", "time_of_use", "microgrid"];
@@ -16506,6 +16513,26 @@ function setDatabaseActionBusy(busy, exporting = false, importing = false, backi
   }
 }
 
+function dragEventHasFiles(event) {
+  const types = event?.dataTransfer?.types;
+  return Boolean(types && [...types].includes("Files"));
+}
+
+function setBillsDropActive(active) {
+  const card = document.getElementById("billsCard");
+  const overlay = document.getElementById("billsDropOverlay");
+  if (card) card.classList.toggle("is-dragging-file", Boolean(active));
+  if (overlay) {
+    overlay.classList.toggle("hidden", !active);
+    overlay.setAttribute("aria-hidden", active ? "false" : "true");
+  }
+}
+
+function resetBillsDropState() {
+  billsDropDepth = 0;
+  setBillsDropActive(false);
+}
+
 async function exportDatabaseFile() {
   setDatabaseActionBusy(true, true, false);
   try {
@@ -17020,6 +17047,12 @@ async function uploadBillsFile(file) {
     const input = document.getElementById("billsFileInput");
     if (input) input.value = "";
   }
+}
+
+async function uploadDroppedBillsFile(file) {
+  if (!file) return;
+  if (!window.confirm(t("billsDropConfirmUpload", { name: file.name || "-" }))) return;
+  await uploadBillsFile(file);
 }
 
 async function loadReportView({ generateIfMissing = true } = {}) {
@@ -17948,6 +17981,38 @@ bindClickIfPresent("databaseBackupNowBtn", () => {
       if (!file) return;
       void importDatabaseFile(file);
     });
+  }
+}
+
+{
+  const billsView = document.getElementById("billsView");
+  if (billsView) {
+    document.addEventListener("dragenter", (event) => {
+      if (currentTab !== "bills" || !dragEventHasFiles(event)) return;
+      event.preventDefault();
+      billsDropDepth += 1;
+      setBillsDropActive(true);
+    });
+    document.addEventListener("dragover", (event) => {
+      if (currentTab !== "bills" || !dragEventHasFiles(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      setBillsDropActive(true);
+    });
+    document.addEventListener("dragleave", (event) => {
+      if (currentTab !== "bills" || !dragEventHasFiles(event)) return;
+      event.preventDefault();
+      billsDropDepth = Math.max(0, billsDropDepth - 1);
+      if (billsDropDepth === 0) setBillsDropActive(false);
+    });
+    document.addEventListener("drop", (event) => {
+      if (currentTab !== "bills" || !dragEventHasFiles(event)) return;
+      event.preventDefault();
+      const file = event.dataTransfer?.files?.[0] || null;
+      resetBillsDropState();
+      if (file) void uploadDroppedBillsFile(file);
+    });
+    window.addEventListener("blur", resetBillsDropState);
   }
 }
 
