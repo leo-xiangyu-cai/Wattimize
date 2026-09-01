@@ -3559,20 +3559,6 @@ async def _tesla_set_charge_current(amps: int) -> dict[str, object]:
 
 
 def _tesla_control_state_charge_power_w(control_state: dict[str, object]) -> float:
-    current_entity = control_state.get("charge_current_sensor_entity")
-    current_a = _to_number(current_entity.get("state")) if isinstance(current_entity, dict) else None
-    voltage_entity = control_state.get("charge_voltage_entity")
-    voltage_v = _to_number(voltage_entity.get("state")) if isinstance(voltage_entity, dict) else None
-    if current_a is None:
-        current_number_entity = control_state.get("charge_current_number_entity")
-        current_a = _to_number(current_number_entity.get("state")) if isinstance(current_number_entity, dict) else None
-    if current_a is None or current_a <= 0:
-        current_a = None
-    if current_a is not None:
-        if voltage_v is None or voltage_v < 100:
-            voltage_v = TESLA_ASSUMED_CHARGING_VOLTAGE_V
-        return max(current_a * voltage_v, 0.0)
-
     power_entity = control_state.get("power_entity")
     power_w = _power_to_watts(
         _to_number(power_entity.get("state")) if isinstance(power_entity, dict) else None,
@@ -3587,6 +3573,25 @@ def _tesla_control_state_charge_power_w(control_state: dict[str, object]) -> flo
             else None
         ),  # type: ignore[union-attr]
     )
+    if control_state.get("charging_enabled") is False or control_state.get("charge_requested_enabled") is False:
+        return max(power_w or 0.0, 0.0)
+    if power_w is not None and power_w > 0:
+        return power_w
+
+    current_entity = control_state.get("charge_current_sensor_entity")
+    current_a = _to_number(current_entity.get("state")) if isinstance(current_entity, dict) else None
+    voltage_entity = control_state.get("charge_voltage_entity")
+    voltage_v = _to_number(voltage_entity.get("state")) if isinstance(voltage_entity, dict) else None
+    if current_a is None:
+        current_number_entity = control_state.get("charge_current_number_entity")
+        current_a = _to_number(current_number_entity.get("state")) if isinstance(current_number_entity, dict) else None
+    if current_a is None or current_a <= 0:
+        current_a = None
+    if current_a is not None:
+        if voltage_v is None or voltage_v < 100:
+            voltage_v = TESLA_ASSUMED_CHARGING_VOLTAGE_V
+        return max(current_a * voltage_v, 0.0)
+
     if power_w is not None and power_w >= 0:
         return power_w
 
