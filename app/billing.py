@@ -84,7 +84,7 @@ def _line_category(description: str) -> str:
         return "shoulder_import"
     if "super export" in text:
         return "super_export"
-    if "feed in (4pm-9pm)" in text:
+    if "solar/generation feed in (4pm-" in text:
         return "fit_evening"
     if "solar/generation feed in" in text:
         return "fit_other"
@@ -147,15 +147,16 @@ def _charge_section(text: str) -> str:
 
 def _parse_bill_lines(text: str, *, bill_start: date, bill_end: date) -> list[BillLine]:
     section = _charge_section(text)
+    money_pattern = r"-?\$\s*[0-9,]+(?:\.\d+)?|\$\s*-?[0-9,]+(?:\.\d+)?"
     row_pattern = re.compile(
         r"^(?P<description>.+?)\s+"
-        r"(?:(?P<plan>ZEROHERO)\s+)?"
+        r"(?:(?P<plan>[A-Z][A-Z0-9]*(?:[ -][A-Z0-9]+)*)\s+)?"
         r"(?P<period>\d{2}-[A-Za-z]{3}\s*-\s*\d{2}-[A-Za-z]{3})\s+"
         r"(?P<quantity>[0-9,]+(?:\.\d+)?)\s+"
         r"(?P<unit>Days?|Day|kWh)\s+x\s+"
-        r"(?P<rate>-?\$\s*[0-9,]+(?:\.\d+)?|\$\s*-?[0-9,]+(?:\.\d+)?)\s+"
-        r"(?P<total>-?\$\s*[0-9,]+(?:\.\d+)?|\$\s*-?[0-9,]+(?:\.\d+)?)\s*$",
-        flags=re.IGNORECASE,
+        rf"(?P<rate>{money_pattern})\s+"
+        rf"(?P<total>{money_pattern})"
+        rf"(?:\s+(?:(?P<discount>[0-9]+(?:\.\d+)?%)\s+)?(?P<net_total>{money_pattern}))?\s*$",
     )
     lines: list[BillLine] = []
     for raw_line in section.splitlines():
@@ -183,7 +184,7 @@ def _parse_bill_lines(text: str, *, bill_start: date, bill_end: date) -> list[Bi
                 quantity=_parse_number(match.group("quantity")),
                 unit=match.group("unit"),
                 rate_aud=_parse_money(match.group("rate")),
-                total_aud=_parse_money(match.group("total")),
+                total_aud=_parse_money(match.group("net_total") or match.group("total")),
             )
         )
     if not lines:
@@ -203,8 +204,8 @@ def parse_globird_bill_text(text: str, *, source_filename: str = "") -> dict[str
     due_date_text = _extract_first(r"Due Date(?:\s+\(Direct Debit Date\))?\s+(\d{2}-[A-Za-z]{3}-\d{4})", normalized_text)
     nmi = _extract_first(r"National Metering Identifier \(NMI\)\s+([0-9]+)", normalized_text)
     amount_due_text = _extract_first(r"Amount Due\s*\n?\s*(\$ ?[0-9,]+(?:\.\d{2})?)", normalized_text)
-    bill_total_text = _extract_first(r"TOTAL \(including \$[0-9,.]+ GST\)\s+(-?\$ ?[0-9,]+(?:\.\d{2})?)", normalized_text)
-    gst_text = _extract_first(r"TOTAL \(including \$([0-9,.]+) GST\)", normalized_text)
+    bill_total_text = _extract_first(r"^TOTAL \(including \$[0-9,.]+ GST\)\s+(-?\$ ?[0-9,]+(?:\.\d{2})?)", normalized_text)
+    gst_text = _extract_first(r"^TOTAL \(including \$([0-9,.]+) GST\)", normalized_text)
 
     line_dicts = [
         {
