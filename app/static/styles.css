@@ -5754,6 +5754,15 @@ td {
   opacity: 0.92;
 }
 
+.efd-node.efd-node-tesla .tesla-rate-current-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
 .efd-node.efd-node-tesla .node-mini-value .tesla-current-stack {
   display: inline-flex;
   flex-direction: column;
@@ -6712,6 +6721,7 @@ td {
   .node-title {
     gap: 5px;
     font-size: 17px;
+    color: #352c25;
   }
 
   .node-value {
@@ -6814,6 +6824,12 @@ td {
     font-size: 12px;
   }
 
+  .efd-node.efd-node-tesla .tesla-rate-current-row .tesla-current-trigger {
+    width: auto;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
   .efd-node.efd-node-tesla .soc-wrap {
     inset: 30px 4px 5px;
   }
@@ -6835,7 +6851,7 @@ td {
 
   .efd-node.efd-node-id-combined-battery1Node .node-title,
   .efd-node.efd-node-id-combined-battery2Node .node-title {
-    font-size: 18px;
+    font-size: 19px;
   }
 
   .efd-node.efd-node-id-combined-battery1Node .soc-wrap,
@@ -6846,16 +6862,17 @@ td {
 
   .efd-node.efd-node-id-combined-battery1Node .soc-value-inside,
   .efd-node.efd-node-id-combined-battery2Node .soc-value-inside {
+    justify-content: center;
     gap: 3px;
-    padding: 30px 7px 7px;
-    font-size: 26px;
+    padding: 10px 7px 9px;
+    font-size: 28px;
   }
 
   .efd-node.efd-node-id-combined-battery1Node .soc-inline-energy,
   .efd-node.efd-node-id-combined-battery2Node .soc-inline-energy {
     display: inline;
-    font-size: 12px;
-    font-weight: 800;
+    font-size: 16px;
+    font-weight: 700;
     line-height: 1;
     white-space: nowrap;
     opacity: 0.88;
@@ -6874,13 +6891,15 @@ td {
   .efd-node.efd-node-id-combined-battery2Node .soc-runtime-inside,
   .efd-node.efd-node-id-combined-battery1Node .soc-rate-inside,
   .efd-node.efd-node-id-combined-battery2Node .soc-rate-inside {
-    font-size: 20px;
+    font-size: 15px;
+    font-weight: 800;
     line-height: 1.18;
   }
 
   .efd-node.efd-node-id-combined-battery1Node .battery-window-forecast-compact,
   .efd-node.efd-node-id-combined-battery2Node .battery-window-forecast-compact {
-    font-size: 20px;
+    font-size: 15px;
+    font-weight: 800;
     line-height: 1.18;
   }
 

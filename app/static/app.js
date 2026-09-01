@@ -4324,6 +4324,14 @@ function formatBatteryEnergyKwh(system, batterySoc) {
   return `${formatTrimmedDecimal(currentKwh, 1)} / ${formatTrimmedDecimal(capacityKwh, 1)} kWh`;
 }
 
+function formatBatteryCurrentEnergyKwh(system, batterySoc) {
+  const capacityKwh = BATTERY_CAPACITY_KWH[system];
+  if (!Number.isFinite(capacityKwh) || batterySoc === null || batterySoc === undefined) return "- kWh";
+  const clampedSoc = Math.max(0, Math.min(100, Number(batterySoc)));
+  const currentKwh = (capacityKwh * clampedSoc) / 100;
+  return `${formatTrimmedDecimal(currentKwh, 1)} kWh`;
+}
+
 function formatBatteryUsableKwh(system, batterySoc) {
   const capacityKwh = BATTERY_CAPACITY_KWH[system];
   const minDischargeSoc = BATTERY_MIN_DISCHARGE_SOC[system] ?? 0;
@@ -4792,7 +4800,7 @@ function buildCombinedDiagramSpec() {
     switchboard: { ...desktopNodeSizes.switchboard, width: 136, height: 124 },
     compactLoad: { ...COMBINED_COMPACT_LOAD_NODE_SIZE, height: 116 },
     poolPump: { ...COMBINED_COMPACT_LOAD_NODE_SIZE, height: 116 },
-    tesla: { width: COMBINED_TESLA_NODE_SIZE.width, height: 198 },
+    tesla: { width: 212, height: 198 },
     battery: { ...SAJ_COMBINED_BATTERY_NODE_SIZE, height: 208 },
     inverter1: { ...desktopNodeSizes.inverter1, width: 152 },
     inverter2: { ...desktopNodeSizes.inverter2, width: 152 },
@@ -4976,7 +4984,7 @@ function buildCombinedDiagramSpec() {
     return {
       points: [source, target],
       labelPosition: {
-        x: source.x - 34,
+        x: source.x + (inverterKey === "inverter1" ? 0 : -34),
         y: (source.y + target.y) / 2,
       },
     };
@@ -5002,6 +5010,7 @@ function buildCombinedDiagramSpec() {
   if (compact) {
     nodePositions.grid.y -= 156;
     nodePositions.switchboard.x += 24;
+    nodePositions.battery2.y += 22;
   }
   const edgeLayout = compact
     ? {
@@ -5822,7 +5831,8 @@ function renderBatterySocDisplay({
 
   if (soc === null || soc === undefined) {
     const energyText = energyValueId ? formatBatteryEnergyKwh(system, null) : null;
-    setHtml(socValueId, renderSocValueHtml("-", energyText));
+    const inlineEnergyText = energyValueId ? formatBatteryCurrentEnergyKwh(system, null) : null;
+    setHtml(socValueId, renderSocValueHtml("-", inlineEnergyText));
     if (energyValueId) setHtml(energyValueId, formatValueWithDataKindHtml(energyText, energyDataKind));
     if (usableValueId) setHtml(usableValueId, formatValueWithDataKindHtml(formatBatteryUsableKwh(system, null), usableDataKind));
     if (runtimeValueId) setText(runtimeValueId, "");
@@ -5834,7 +5844,8 @@ function renderBatterySocDisplay({
 
   const clampedSoc = Math.max(0, Math.min(100, Number(soc)));
   const energyText = energyValueId ? formatBatteryEnergyKwh(system, clampedSoc) : null;
-  setHtml(socValueId, renderSocValueHtml(`${clampedSoc.toFixed(0)}%`, energyText));
+  const inlineEnergyText = energyValueId ? formatBatteryCurrentEnergyKwh(system, clampedSoc) : null;
+  setHtml(socValueId, renderSocValueHtml(`${clampedSoc.toFixed(0)}%`, inlineEnergyText));
   if (energyValueId) setHtml(energyValueId, formatValueWithDataKindHtml(energyText, energyDataKind));
   if (usableValueId) setHtml(usableValueId, formatValueWithDataKindHtml(formatBatteryUsableKwh(system, clampedSoc), usableDataKind));
   if (runtimeValueId) setText(runtimeValueId, "");
@@ -6853,8 +6864,19 @@ function renderTeslaControlButton(teslaInfo = null) {
 
 function renderTeslaCurrentControl(teslaInfo = null) {
   const el = document.getElementById("combined-teslaCurrentControlValue");
-  if (!el) return;
-  setHtml("combined-teslaCurrentControlValue", formatTeslaCurrentControlHtml(teslaInfo));
+  const rateEl = document.getElementById("combined-teslaRateValue");
+  const rateText = String(rateEl?.dataset?.teslaRateText || "").trim();
+  const controlHtml = formatTeslaCurrentControlHtml(teslaInfo);
+  if (rateEl && rateText) {
+    setHtml(
+      "combined-teslaRateValue",
+      `<span class="tesla-rate-current-row"><span>${escapeHtml(rateText)}</span>${controlHtml}</span>`,
+    );
+  }
+  if (el) {
+    el.hidden = Boolean(rateEl && rateText);
+    setHtml("combined-teslaCurrentControlValue", rateEl && rateText ? "" : controlHtml);
+  }
   const triggerBtn = document.getElementById("combined-teslaCurrentTriggerBtn");
   if (triggerBtn) {
     triggerBtn.addEventListener("click", () => {
@@ -7454,7 +7476,10 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null, poolPumpDevice
     socDataKind: dataKinds.teslaSoc,
   });
   setTeslaSocTone(teslaSoc);
-  setText("combined-teslaRateValue", formatTeslaSocRateEstimate(teslaTotalCapacityKwh, teslaChargingW));
+  const teslaRateText = formatTeslaSocRateEstimate(teslaTotalCapacityKwh, teslaChargingW);
+  setText("combined-teslaRateValue", teslaRateText);
+  const teslaRateEl = document.getElementById("combined-teslaRateValue");
+  if (teslaRateEl) teslaRateEl.dataset.teslaRateText = teslaRateText;
   setText("combined-teslaLocationValue", teslaLocationText);
   ensureTeslaCardUnifiedContent();
   if (teslaCurrentDraftA === null) {
