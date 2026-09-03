@@ -5979,8 +5979,17 @@ def _build_solplanet_export_monitor(
         else reserve_floor_kwh
     )
     early_sell_floor_kwh = max(SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH, late_dynamic_reserve_floor_kwh)
+    estimated_net_export_power_w = (
+        max(SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W - current_home_load_w, 0.0)
+        if current_home_load_w is not None
+        else SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
+    )
     full_power_export_remaining_kwh = round(
         (SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W / 1000.0) * remaining_export_window_hours,
+        4,
+    )
+    net_export_remaining_kwh = round(
+        (estimated_net_export_power_w / 1000.0) * remaining_export_window_hours,
         4,
     )
 
@@ -5996,7 +6005,10 @@ def _build_solplanet_export_monitor(
         surplus_above_late_dynamic_reserve_kwh = round(usable_total_kwh - late_dynamic_reserve_floor_kwh, 4)
         surplus_above_early_sell_floor_kwh = round(usable_total_kwh - early_sell_floor_kwh, 4)
         early_sell_required_kwh = round(
-            max(surplus_above_early_sell_floor_kwh - full_power_export_remaining_kwh, 0.0),
+            min(
+                max(remaining_to_target_kwh - net_export_remaining_kwh, 0.0),
+                max(surplus_above_early_sell_floor_kwh, 0.0),
+            ),
             4,
         )
         if usable_total_kwh <= reserve_floor_kwh:
@@ -6019,9 +6031,12 @@ def _build_solplanet_export_monitor(
             reason = "pre_peak_selling_disabled"
         elif in_peak_hold_phase:
             if early_sell_required_kwh is not None and early_sell_required_kwh > 0.0:
-                target_sell_kwh = max(surplus_above_early_sell_floor_kwh or 0.0, 0.0)
+                target_sell_kwh = min(
+                    remaining_to_target_kwh,
+                    max(surplus_above_early_sell_floor_kwh or 0.0, 0.0),
+                )
                 recommendation = "sell"
-                reason = "peak_hold_full_power_cannot_clear_surplus_before_export_end"
+                reason = "peak_hold_net_export_cannot_reach_daily_target_before_export_end"
                 recommended_pout_w = SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
             else:
                 recommendation = "hold_until_late_phase"
@@ -6094,6 +6109,8 @@ def _build_solplanet_export_monitor(
         "late_dynamic_reserve_floor_kwh": late_dynamic_reserve_floor_kwh,
         "early_sell_floor_kwh": round(early_sell_floor_kwh, 4),
         "full_power_export_remaining_kwh": full_power_export_remaining_kwh,
+        "estimated_net_export_power_w": round(estimated_net_export_power_w, 1),
+        "net_export_remaining_kwh": net_export_remaining_kwh,
         "reserve_state": reserve_state,
         "usable_battery_total_kwh": usable_total_kwh,
         "usable_battery_by_system_kwh": {
@@ -6117,7 +6134,7 @@ def _build_solplanet_export_monitor(
             "do_not_sell_below_floor_kwh": reserve_floor_kwh,
             "pre_peak_selling": "disabled",
             "normal_keep_comfort_floor_kwh": SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH,
-            "peak_hold_early_sell_trigger": "sell when surplus above max(comfort floor, dynamic reserve) exceeds full-power export capacity to window end",
+            "peak_hold_early_sell_trigger": "sell when current net export capacity cannot reach the daily export target before window end",
             "late_phase_dynamic_floor": "reserve_floor_kwh + current_home_load_w projected to export_window_end_hour",
             "pre_peak_phase_end_hour": SOLPLANET_EXPORT_MONITOR_PRE_PEAK_END_HOUR,
             "early_phase_end_hour": SOLPLANET_EXPORT_MONITOR_LATE_START_HOUR,
