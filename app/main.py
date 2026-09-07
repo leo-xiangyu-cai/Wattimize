@@ -266,6 +266,8 @@ SOLPLANET_EXPORT_MONITOR_TARGET_KWH = 18.5
 SOLPLANET_EXPORT_MONITOR_RESERVE_FLOOR_KWH = CONST_SOLPLANET_EXPORT_RESERVE_FLOOR_KWH
 SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH = 20.0
 SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W = 10_000.0
+SOLPLANET_EXPORT_MONITOR_MIN_SELL_POUT_W = 500.0
+SOLPLANET_EXPORT_MONITOR_RESERVE_BUFFER_KWH = 0.5
 SOLPLANET_EXPORT_MONITOR_PRE_PEAK_END_HOUR = 18
 SOLPLANET_EXPORT_MONITOR_LATE_START_HOUR = 21
 SOLPLANET_EXPORT_MONITOR_FEED_IN_AUD_PER_KWH = 0.08
@@ -5947,6 +5949,8 @@ def _build_solplanet_export_monitor(
     usable_total_kwh = _to_number(usable_reference.get("usable_battery_total_kwh"))
     usable_by_system = usable_reference.get("usable_battery_by_system_kwh")
     usable_by_system_map = usable_by_system if isinstance(usable_by_system, dict) else {}
+    solplanet_usable_kwh = _to_number(usable_by_system_map.get("solplanet"))
+    control_usable_kwh = usable_total_kwh if usable_total_kwh is not None else solplanet_usable_kwh
     exported_kwh = max(_to_number(export_tracking.get("total_export_kwh")) or 0.0, 0.0)
     remaining_to_target_kwh = max(SOLPLANET_EXPORT_MONITOR_TARGET_KWH - exported_kwh, 0.0)
     after_target_export_kwh = max(exported_kwh - SOLPLANET_EXPORT_MONITOR_TARGET_KWH, 0.0)
@@ -5999,11 +6003,31 @@ def _build_solplanet_export_monitor(
     surplus_above_late_dynamic_reserve_kwh: float | None = None
     surplus_above_early_sell_floor_kwh: float | None = None
     early_sell_required_kwh: float | None = None
-    if usable_total_kwh is not None:
-        surplus_above_floor_kwh = round(usable_total_kwh - reserve_floor_kwh, 4)
-        surplus_above_comfort_kwh = round(usable_total_kwh - SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH, 4)
-        surplus_above_late_dynamic_reserve_kwh = round(usable_total_kwh - late_dynamic_reserve_floor_kwh, 4)
-        surplus_above_early_sell_floor_kwh = round(usable_total_kwh - early_sell_floor_kwh, 4)
+    end_target_kwh = reserve_floor_kwh
+    stop_floor_kwh = round(end_target_kwh + SOLPLANET_EXPORT_MONITOR_RESERVE_BUFFER_KWH, 4)
+    runway_target_kwh = round(
+        end_target_kwh + ((SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W / 1000.0) * remaining_export_window_hours),
+        4,
+    )
+    projected_usable_without_selling_kwh: float | None = None
+    exportable_after_home_load_kwh: float | None = None
+    target_total_discharge_power_w: float | None = None
+    target_net_export_power_w: float | None = None
+    solplanet_limited_pout_w: float | None = None
+    if control_usable_kwh is not None and projected_home_load_to_export_end_kwh is not None:
+        projected_usable_without_selling_kwh = round(
+            control_usable_kwh - projected_home_load_to_export_end_kwh,
+            4,
+        )
+        exportable_after_home_load_kwh = round(
+            projected_usable_without_selling_kwh - stop_floor_kwh,
+            4,
+        )
+    if control_usable_kwh is not None:
+        surplus_above_floor_kwh = round(control_usable_kwh - reserve_floor_kwh, 4)
+        surplus_above_comfort_kwh = round(control_usable_kwh - SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH, 4)
+        surplus_above_late_dynamic_reserve_kwh = round(control_usable_kwh - late_dynamic_reserve_floor_kwh, 4)
+        surplus_above_early_sell_floor_kwh = round(control_usable_kwh - early_sell_floor_kwh, 4)
         early_sell_required_kwh = round(
             min(
                 max(remaining_to_target_kwh - net_export_remaining_kwh, 0.0),
@@ -6011,63 +6035,95 @@ def _build_solplanet_export_monitor(
             ),
             4,
         )
-        if usable_total_kwh <= reserve_floor_kwh:
+        if control_usable_kwh <= stop_floor_kwh:
             reserve_state = "below_floor"
-        elif usable_total_kwh < SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH:
+        elif control_usable_kwh < SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH:
             reserve_state = "between_floor_and_comfort"
         else:
             reserve_state = "above_comfort"
+        if remaining_export_window_hours > 0.0:
+            target_total_discharge_power_w = max(
+                0.0,
+                min(
+                    SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W,
+                    ((control_usable_kwh - stop_floor_kwh) / remaining_export_window_hours) * 1000.0,
+                ),
+            )
+            if current_home_load_w is not None:
+                target_net_export_power_w = max(target_total_discharge_power_w - max(current_home_load_w, 0.0), 0.0)
+            else:
+                target_net_export_power_w = target_total_discharge_power_w
+        if solplanet_usable_kwh is not None and remaining_export_window_hours > 0.0:
+            solplanet_limited_pout_w = max(
+                0.0,
+                min(
+                    SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W,
+                    (solplanet_usable_kwh / remaining_export_window_hours) * 1000.0,
+                ),
+            )
+            if target_total_discharge_power_w is not None:
+                target_total_discharge_power_w = min(target_total_discharge_power_w, solplanet_limited_pout_w)
+                if current_home_load_w is not None:
+                    target_net_export_power_w = max(target_total_discharge_power_w - max(current_home_load_w, 0.0), 0.0)
+                else:
+                    target_net_export_power_w = target_total_discharge_power_w
 
     recommended_pout_w = 0.0
     target_sell_kwh = 0.0
     recommendation = "observe_only"
     reason = "battery_state_unavailable"
-    if usable_total_kwh is not None:
-        if usable_total_kwh <= reserve_floor_kwh:
+    if control_usable_kwh is not None:
+        if solplanet_usable_kwh is not None and solplanet_usable_kwh <= 0.0:
+            recommendation = "stop"
+            reason = "solplanet_reserve_floor_reached"
+        elif control_usable_kwh <= stop_floor_kwh:
             recommendation = "stop"
             reason = "reserve_floor_reached"
         elif in_pre_peak_phase:
             recommendation = "hold"
             reason = "pre_peak_selling_disabled"
         elif in_peak_hold_phase:
-            if early_sell_required_kwh is not None and early_sell_required_kwh > 0.0:
-                target_sell_kwh = min(
-                    remaining_to_target_kwh,
-                    max(surplus_above_early_sell_floor_kwh or 0.0, 0.0),
-                )
+            target_sell_kwh = max(exportable_after_home_load_kwh or 0.0, 0.0)
+            if (
+                target_sell_kwh > 0.0
+                and target_total_discharge_power_w is not None
+                and target_total_discharge_power_w >= SOLPLANET_EXPORT_MONITOR_MIN_SELL_POUT_W
+            ):
                 recommendation = "sell"
-                reason = "peak_hold_net_export_cannot_reach_daily_target_before_export_end"
-                recommended_pout_w = SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
+                reason = (
+                    "export_window_full_power_runway_guard"
+                    if control_usable_kwh > runway_target_kwh
+                    else "export_window_track_end_reserve"
+                )
+                recommended_pout_w = (
+                    SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
+                    if control_usable_kwh > runway_target_kwh
+                    else target_total_discharge_power_w
+                )
             else:
-                recommendation = "hold_until_late_phase"
-                reason = "evening_peak_reserve_period"
+                recommendation = "stop"
+                reason = "projected_reserve_floor_reached"
         elif in_late_phase:
-            if remaining_to_target_kwh > 0.0:
-                target_sell_kwh = min(
-                    remaining_to_target_kwh,
-                    max((surplus_above_late_dynamic_reserve_kwh or 0.0), 0.0),
+            target_sell_kwh = max(exportable_after_home_load_kwh or 0.0, 0.0)
+            if (
+                target_sell_kwh > 0.0
+                and target_total_discharge_power_w is not None
+                and target_total_discharge_power_w >= SOLPLANET_EXPORT_MONITOR_MIN_SELL_POUT_W
+            ):
+                recommendation = "sell_surplus" if remaining_to_target_kwh <= 0.0 else "sell"
+                reason = (
+                    "export_window_full_power_runway_guard"
+                    if control_usable_kwh > runway_target_kwh
+                    else "export_window_track_end_reserve"
                 )
-                if target_sell_kwh > 0.0:
-                    recommendation = "sell"
-                    reason = "late_phase_target_not_reached_above_dynamic_load_reserve"
-                    recommended_pout_w = SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
-                else:
-                    recommendation = "stop"
-                    reason = "daily_target_unreachable_without_dynamic_load_reserve_breach"
+                recommended_pout_w = (
+                    SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
+                    if control_usable_kwh > runway_target_kwh
+                    else target_total_discharge_power_w
+                )
             else:
-                surplus_after_target_floor_kwh = max(
-                    usable_total_kwh
-                    - max(SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH, late_dynamic_reserve_floor_kwh),
-                    0.0,
-                )
-                if surplus_after_target_floor_kwh > 0.0:
-                    target_sell_kwh = surplus_after_target_floor_kwh
-                    recommendation = "sell_surplus"
-                    reason = "daily_target_reached_sell_only_above_dynamic_load_reserve"
-                    recommended_pout_w = SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
-                else:
-                    recommendation = "stop"
-                    reason = "daily_target_reached_keep_dynamic_load_reserve"
+                recommendation = "stop"
+                reason = "projected_reserve_floor_reached"
         else:
             recommendation = "stop"
             reason = "outside_export_window"
@@ -6075,11 +6131,11 @@ def _build_solplanet_export_monitor(
     minutes_to_target_at_recommended_power = None
     if recommended_pout_w > 0.0 and target_sell_kwh > 0.0:
         minutes_to_target_at_recommended_power = round((target_sell_kwh / (recommended_pout_w / 1000.0)) * 60.0, 1)
-    projected_usable_after_target_kwh = (
-        round(max(usable_total_kwh - target_sell_kwh, 0.0), 4)
-        if usable_total_kwh is not None
-        else None
-    )
+    projected_usable_after_target_kwh = None
+    if projected_usable_without_selling_kwh is not None:
+        projected_usable_after_target_kwh = round(max(projected_usable_without_selling_kwh - target_sell_kwh, 0.0), 4)
+    elif control_usable_kwh is not None:
+        projected_usable_after_target_kwh = round(max(control_usable_kwh - target_sell_kwh, 0.0), 4)
     avoid_import_loss_aud_per_kwh = (
         SOLPLANET_EXPORT_MONITOR_POST_EXPORT_IMPORT_AUD_PER_KWH
         - SOLPLANET_EXPORT_MONITOR_FEED_IN_AUD_PER_KWH
@@ -6102,20 +6158,31 @@ def _build_solplanet_export_monitor(
             4,
         ),
         "reserve_floor_kwh": reserve_floor_kwh,
+        "stop_floor_kwh": stop_floor_kwh,
+        "runway_target_kwh": runway_target_kwh,
         "comfort_floor_kwh": SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH,
         "current_home_load_w": round(current_home_load_w, 1) if current_home_load_w is not None else None,
         "remaining_export_window_hours": round(remaining_export_window_hours, 4),
         "projected_home_load_to_export_end_kwh": projected_home_load_to_export_end_kwh,
+        "projected_usable_without_selling_kwh": projected_usable_without_selling_kwh,
+        "exportable_after_home_load_kwh": exportable_after_home_load_kwh,
         "late_dynamic_reserve_floor_kwh": late_dynamic_reserve_floor_kwh,
         "early_sell_floor_kwh": round(early_sell_floor_kwh, 4),
         "full_power_export_remaining_kwh": full_power_export_remaining_kwh,
         "estimated_net_export_power_w": round(estimated_net_export_power_w, 1),
         "net_export_remaining_kwh": net_export_remaining_kwh,
+        "target_total_discharge_power_w": (
+            round(target_total_discharge_power_w, 1) if target_total_discharge_power_w is not None else None
+        ),
+        "target_net_export_power_w": round(target_net_export_power_w, 1) if target_net_export_power_w is not None else None,
+        "solplanet_limited_pout_w": round(solplanet_limited_pout_w, 1) if solplanet_limited_pout_w is not None else None,
         "reserve_state": reserve_state,
         "usable_battery_total_kwh": usable_total_kwh,
+        "control_usable_battery_kwh": control_usable_kwh,
+        "control_usable_battery_source": "combined" if usable_total_kwh is not None else "solplanet",
         "usable_battery_by_system_kwh": {
             "saj": _to_number(usable_by_system_map.get("saj")),
-            "solplanet": _to_number(usable_by_system_map.get("solplanet")),
+            "solplanet": solplanet_usable_kwh,
         },
         "surplus_above_floor_kwh": surplus_above_floor_kwh,
         "surplus_above_comfort_kwh": surplus_above_comfort_kwh,
@@ -6132,10 +6199,13 @@ def _build_solplanet_export_monitor(
         "avoid_import_loss_aud_per_kwh": round(avoid_import_loss_aud_per_kwh, 4),
         "guardrails": {
             "do_not_sell_below_floor_kwh": reserve_floor_kwh,
+            "stop_before_floor_kwh": stop_floor_kwh,
+            "runway_target": "reserve floor plus remaining full-power discharge capacity; above this, sell at full power",
+            "sell_control_usable_source": "combined usable battery energy when available; SolPlanet only as fallback",
             "pre_peak_selling": "disabled",
             "normal_keep_comfort_floor_kwh": SOLPLANET_EXPORT_MONITOR_COMFORT_FLOOR_KWH,
-            "peak_hold_early_sell_trigger": "sell when current net export capacity cannot reach the daily export target before window end",
-            "late_phase_dynamic_floor": "reserve_floor_kwh + current_home_load_w projected to export_window_end_hour",
+            "peak_hold_early_sell_trigger": "track the configured end reserve using current load projection and proportional Pout",
+            "late_phase_dynamic_floor": "current load projection is part of the active stop calculation",
             "pre_peak_phase_end_hour": SOLPLANET_EXPORT_MONITOR_PRE_PEAK_END_HOUR,
             "early_phase_end_hour": SOLPLANET_EXPORT_MONITOR_LATE_START_HOUR,
             "export_window_end_hour": EXPORT_WINDOW_END_HOUR,
@@ -6162,7 +6232,10 @@ def _solplanet_export_monitor_desired_pout(monitor: dict[str, object] | None, no
     recommendation = str(monitor_map.get("recommendation") or "").strip()
     reserve_state = str(monitor_map.get("reserve_state") or "").strip()
     if recommendation in ("sell", "sell_surplus") and reserve_state != "below_floor":
-        return int(SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W), recommendation
+        recommended_pout = _to_number(monitor_map.get("recommended_pout_w"))
+        if recommended_pout is None:
+            recommended_pout = SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W
+        return int(round(max(0.0, min(SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W, recommended_pout)))), recommendation
     return 0, recommendation or "monitor_not_selling"
 
 
@@ -6172,8 +6245,7 @@ def _solplanet_export_monitor_slot_end_minutes(now_local: datetime, *, should_se
     if not _is_within_export_window(now_local):
         return start_minutes
     if should_sell:
-        next_hour_minutes = (now_local.hour + 1) * 60
-        return max(start_minutes, min(next_hour_minutes, end_minutes))
+        return end_minutes
     current_hour_minutes = now_local.hour * 60
     return max(start_minutes, min(current_hour_minutes, end_minutes))
 
@@ -6259,7 +6331,7 @@ async def _apply_solplanet_export_monitor_control(
         current_pout = int(_to_number(schedule.get("Pout")) or 0)
         day_key = _solplanet_day_key_for_local_date(now_local)
         update_payload: dict[str, object] = {}
-        target_pout = int(SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W)
+        target_pout = desired_pout
         if current_pout != target_pout:
             update_payload["Pout"] = target_pout
 
@@ -6290,6 +6362,22 @@ async def _apply_solplanet_export_monitor_control(
                 "schedule_slot_changed": day_key in update_payload,
             }
         )
+        mode_write_result: dict[str, object] | None = None
+        if should_sell:
+            mode_write_result = await _solplanet_set_work_mode_payload(SOLPLANET_WORK_MODE_CUSTOM)
+            result["mode_write_response"] = (
+                mode_write_result.get("response") if isinstance(mode_write_result, dict) else None
+            )
+            result["mode_request_payload"] = (
+                mode_write_result.get("request_payload") if isinstance(mode_write_result, dict) else None
+            )
+            result["readback_mode"] = (
+                mode_write_result.get("readback_mode") if isinstance(mode_write_result, dict) else None
+            )
+            result["readback_mode_register"] = (
+                mode_write_result.get("readback_mode_register") if isinstance(mode_write_result, dict) else None
+            )
+
         if not update_payload:
             result["action"] = {"type": "noop", "reason": "already_at_target"}
             combined_status["solplanet_export_monitor_control"] = {
@@ -6497,23 +6585,16 @@ async def _apply_saj_export_window_discharge_control(
     else:
         desired_reason = str(solplanet_control_map.get("desired_reason") or "").strip() or "monitor_not_selling"
     should_discharge = bool(_is_within_export_window(now_local) and desired_pout and desired_pout > 0)
-    target_power_w = SAJ_EXPORT_WINDOW_DISCHARGE_POWER_W if should_discharge else 0
+    target_power_w = 0
     base_result: dict[str, object] = {
         "mode": "auto_control",
         "desired_discharge_power_w": target_power_w,
         "desired_reason": desired_reason,
         "checked_live": False,
-        "action": {"type": "noop", "reason": "solplanet_not_selling"},
+        "action": {"type": "noop", "reason": "saj_export_discharge_disabled"},
     }
-    if not should_discharge:
-        combined_status["saj_export_window_discharge_control"] = {
-            **base_result,
-            "checked_at_utc": datetime.now(UTC).isoformat(),
-        }
-        return base_result
-
     now_utc = datetime.now(UTC)
-    target_power_percent = int(round((SAJ_EXPORT_WINDOW_DISCHARGE_POWER_W / SAJ_RATED_POWER_W) * 100.0))
+    target_power_percent = 0
     try:
         _, states_by_id = await _saj_control_states()
         control_state = _build_saj_control_state(states_by_id)
@@ -6538,7 +6619,7 @@ async def _apply_saj_export_window_discharge_control(
             and charge_time_enable == 0
             and discharge_map.get("control_switch") is True
             and discharge_time_enable == 1
-            and slot_power_percent == target_power_percent
+            and slot_power_percent == int(round((SAJ_EXPORT_WINDOW_DISCHARGE_POWER_W / SAJ_RATED_POWER_W) * 100.0))
             and slot_start == "00:00"
             and slot_end == "23:59"
             and slot_day_mask == 127
@@ -6562,25 +6643,28 @@ async def _apply_saj_export_window_discharge_control(
                 },
             }
         )
-        if configured_for_export_discharge:
-            result["action"] = {"type": "noop", "reason": "already_at_target"}
+        if configured_for_export_discharge or (not should_discharge and input_profile == "time_of_use"):
+            api_result = await put_saj_self_consumption(
+                SajSelfConsumptionPayload(settle_seconds=2.0),
+                trigger_source="worker:solplanet_export_monitor",
+            )
+            result["action"] = {"type": "apply", "reason": "clear_saj_export_discharge"}
+            result["api_path"] = "/api/saj/self-consumption"
+            result["api_result"] = api_result
             combined_status["saj_export_window_discharge_control"] = {
                 **result,
                 "checked_at_utc": now_utc.isoformat(),
+                "applied_at_utc": now_utc.isoformat(),
             }
             return result
 
-        api_result = await put_saj_manual_discharge_power(
-            SajManualDischargePowerPayload(power_w=SAJ_EXPORT_WINDOW_DISCHARGE_POWER_W, settle_seconds=2.0),
-            trigger_source="worker:solplanet_export_monitor",
-        )
-        result["action"] = {"type": "apply", "reason": desired_reason}
-        result["api_path"] = "/api/saj/manual-discharge-power"
-        result["api_result"] = api_result
+        result["action"] = {
+            "type": "noop",
+            "reason": "solplanet_pout_controls_export; saj_left_self_consumption",
+        }
         combined_status["saj_export_window_discharge_control"] = {
             **result,
             "checked_at_utc": now_utc.isoformat(),
-            "applied_at_utc": now_utc.isoformat(),
         }
         return result
     except Exception as exc:  # noqa: BLE001
@@ -13866,6 +13950,7 @@ def _worker_control_result_text(
                 f"reason={solplanet_monitor_map.get('reason') or '-'}, "
                 f"target_sell={_fmt_result_number(solplanet_monitor_map.get('target_sell_kwh'), 3, 'kWh')}, "
                 f"usable={_fmt_result_number(solplanet_monitor_map.get('usable_battery_total_kwh'), 1, 'kWh')}, "
+                f"control_usable={_fmt_result_number(solplanet_monitor_map.get('control_usable_battery_kwh'), 1, 'kWh')}, "
                 f"reserve={_fmt_result_number(solplanet_monitor_map.get('reserve_floor_kwh'), 1, 'kWh')}, "
                 f"late_dynamic_reserve={_fmt_result_number(solplanet_monitor_map.get('late_dynamic_reserve_floor_kwh'), 1, 'kWh')}, "
                 f"desired_pout={_fmt_result_number(monitor_control_map.get('desired_pout_w'), 0, 'W')}"

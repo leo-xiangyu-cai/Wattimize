@@ -146,11 +146,12 @@ The backend now exposes Solplanet manual control for `Pin`, `Pout`, and daily sl
 The automatic export policy is:
 
 - `16:00-18:00`: hold battery for evening home load; do not start automatic export selling.
-- `18:00-21:00`: hold the active discharge/sell slot outside the current time while current net export capacity can still reach the daily target before `23:00`; if home load leaves too little net export capacity, sell only the needed surplus above `max(20kWh comfort reserve, dynamic load reserve)`.
-- `21:00-23:00`: attempt to reach the `18.5kWh` daily export target only above the dynamic reserve: configured hard reserve plus current home load projected through `23:00`.
-- After reaching `18.5kWh`: sell only surplus above `max(20kWh comfort reserve, dynamic load reserve)`.
+- `18:00-23:00`: control toward the configured end reserve at `23:00`, not toward immediate sale of all surplus above the reserve.
+- The worker projects current home load through `23:00`, subtracts that from usable battery, and only sells energy above the configured reserve plus a small buffer.
+- `Pout` is proportional to the remaining surplus and remaining time. It is set to full power only when the current usable battery is above the runway line `reserve + full-power-discharge-capacity-until-23:00`; this is the case where full power is needed to avoid finishing above target.
+- If the projection says the reserve would be reached without export selling, or Solplanet is already at its minimum usable energy, the worker stops export selling.
+- SAJ is not force-discharged as part of the Solplanet export monitor. Solplanet `Pout` is the controlled export actuator; when export selling stops, Wattimize clears any SAJ export-discharge setup back to self-consumption.
 - Outside `16:00-23:00`: remove the active discharge/sell slot instead of lowering `Pout`.
-- At or below `18kWh` usable battery: remove the active discharge/sell slot instead of lowering `Pout`.
 
 ### Historical failed attempts
 
