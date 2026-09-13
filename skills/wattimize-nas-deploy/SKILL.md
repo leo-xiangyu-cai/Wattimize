@@ -71,6 +71,21 @@ Before running, state that the command:
 - skips local SQLite and bill artifact push
 - preserves NAS live runtime data
 
+## Required Deploy After Local Changes
+
+For Wattimize tasks that modify source code, static frontend files, app-served documentation/data, tests, skills, or deployment scripts, perform the normal safe deploy before the final response unless the user explicitly says not to deploy. This applies even when the user only asks to "change", "fix", "add", or "update" and does not separately ask to deploy.
+
+Do not deploy for read-only debugging, inspection, or explanation tasks where no files were changed.
+
+If deployment fails at the script's built-in health-check stage, immediately perform direct read-only NAS verification:
+
+```bash
+curl -fsS --max-time 5 http://tnas.local:18000/api/health
+curl -fsS --max-time 8 http://tnas.local:18000/api/collector/status
+```
+
+If these follow-up checks pass and the expected feature is observable, report the deployment as successful with a note that the script's initial health wait timed out during startup. If follow-up checks fail, inspect NAS container status/logs read-only and either fix the local change and redeploy or report the blocker.
+
 ## Preflight
 
 1. Work from `/Users/caixy/Leo/Wattimize`.
