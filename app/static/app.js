@@ -604,6 +604,7 @@ const I18N = {
     mobileDashboardFreshnessFresh: "Data updated",
     mobileDashboardFreshnessStale: "Data stale",
     mobileDashboardFreshnessFailed: "Refresh failed",
+    mobileDashboardFreshnessReasonPrefix: "Cause: {reason}",
     solarTitle: "Solar",
     gridTitle: "Grid",
     inverterTitle: "Inverter",
@@ -1215,6 +1216,7 @@ const I18N = {
     flowMetaDonePartial: "Partial ({count}/6) · {updated}",
     flowMetaDoneStale: "Cached ({count}/6) · {updated}",
     flowMetaDoneStaleCombined: "Stale snapshot, collector may be stuck ({count}/6) · {updated}",
+    flowMetaIssueReason: "Reason: {reason}",
     flowMetaFailed: "Load failed · {updated}",
     solplanetRawTitle: "Solplanet Raw API Dump",
     solplanetRawModeCards: "API Cards",
@@ -1807,6 +1809,7 @@ const I18N = {
     mobileDashboardFreshnessFresh: "数据已更新",
     mobileDashboardFreshnessStale: "数据已超时",
     mobileDashboardFreshnessFailed: "刷新失败",
+    mobileDashboardFreshnessReasonPrefix: "原因：{reason}",
     solarTitle: "太阳能",
     gridTitle: "电网",
     inverterTitle: "逆变器",
@@ -2418,6 +2421,7 @@ const I18N = {
     flowMetaDonePartial: "部分数据（{count}/6）· {updated}",
     flowMetaDoneStale: "缓存数据（{count}/6）· {updated}",
     flowMetaDoneStaleCombined: "快照未更新，collector 可能卡住（{count}/6）· {updated}",
+    flowMetaIssueReason: "原因：{reason}",
     flowMetaFailed: "加载失败 · {updated}",
     solplanetRawTitle: "Solplanet 原始接口数据",
     solplanetRawModeCards: "接口卡片",
@@ -2836,9 +2840,9 @@ const stateCache = {
     }
   })(),
   systemLoadMeta: {
-    saj: { phase: "idle", updatedAt: null, quality: "ok", count: 0, refreshing: false },
-    solplanet: { phase: "idle", updatedAt: null, quality: "ok", count: 0, refreshing: false },
-    combined: { phase: "idle", updatedAt: null, quality: "ok", count: 0, refreshing: false },
+    saj: { phase: "idle", updatedAt: null, quality: "ok", count: 0, refreshing: false, issueText: "" },
+    solplanet: { phase: "idle", updatedAt: null, quality: "ok", count: 0, refreshing: false, issueText: "" },
+    combined: { phase: "idle", updatedAt: null, quality: "ok", count: 0, refreshing: false, issueText: "" },
   },
 };
 let teslaControlBusy = false;
@@ -3994,23 +3998,25 @@ function isSajControlLocalEditing() {
 }
 
 function setSystemLoadMeta(system, patch = {}) {
-  const prev = stateCache.systemLoadMeta[system] || { phase: "idle", updatedAt: null, quality: "ok", count: 0, refreshing: false };
+  const prev = stateCache.systemLoadMeta[system] || { phase: "idle", updatedAt: null, quality: "ok", count: 0, refreshing: false, issueText: "" };
   stateCache.systemLoadMeta[system] = {
     phase: patch.phase || prev.phase,
     updatedAt: Object.prototype.hasOwnProperty.call(patch, "updatedAt") ? patch.updatedAt : prev.updatedAt,
     quality: patch.quality || prev.quality,
     count: Number.isFinite(Number(patch.count)) ? Number(patch.count) : prev.count,
     refreshing: Object.prototype.hasOwnProperty.call(patch, "refreshing") ? Boolean(patch.refreshing) : prev.refreshing,
+    issueText: Object.prototype.hasOwnProperty.call(patch, "issueText") ? String(patch.issueText || "") : String(prev.issueText || ""),
   };
   renderSystemLoadMeta(system);
 }
 
 function renderSystemLoadMeta(system) {
-  const meta = stateCache.systemLoadMeta[system] || { phase: "idle", updatedAt: null, quality: "ok", count: 0, refreshing: false };
+  const meta = stateCache.systemLoadMeta[system] || { phase: "idle", updatedAt: null, quality: "ok", count: 0, refreshing: false, issueText: "" };
   const updatedId = flowId(system, "updatedAt");
   const spinnerId = flowId(system, "loadingSpinner");
   const updatedText = formatUpdatedAt(meta.updatedAt);
   const combinedLate = system === "combined" && meta.phase === "done" && isIsoOlderThanSeconds(meta.updatedAt, 300);
+  const issueText = String(meta.issueText || "").trim();
   let lineText = t("flowMetaIdle");
   if (meta.refreshing) {
     lineText = t("flowMetaRefreshing", { updated: updatedText });
@@ -4023,10 +4029,15 @@ function renderSystemLoadMeta(system) {
     else if (meta.quality === "partial") lineText = t("flowMetaDonePartial", { count: meta.count, updated: updatedText });
     else lineText = t("flowMetaDoneOk", { updated: updatedText });
   }
+  if (issueText && (combinedLate || meta.phase === "failed" || meta.quality === "failed" || system === "combined")) {
+    lineText = `${lineText} · ${t("flowMetaIssueReason", { reason: issueText })}`;
+  }
   setText(updatedId, lineText);
   const updatedEl = document.getElementById(updatedId);
   if (updatedEl) {
-    updatedEl.classList.toggle("flow-meta-stale", combinedLate);
+    updatedEl.classList.toggle("flow-meta-stale", combinedLate || Boolean(issueText));
+    if (issueText) updatedEl.setAttribute("title", issueText);
+    else updatedEl.removeAttribute("title");
   }
   const spinner = document.getElementById(spinnerId);
   if (spinner) {
@@ -4039,6 +4050,7 @@ function renderMobileDashboardFreshness(meta, isStale = false) {
   const shell = document.getElementById("combinedMobileFreshness");
   const stateEl = document.getElementById("combinedMobileFreshnessState");
   const timeEl = document.getElementById("combinedMobileFreshnessTime");
+  const reasonEl = document.getElementById("combinedMobileFreshnessReason");
   if (!shell || !stateEl || !timeEl) return;
   let stateText = t("mobileDashboardFreshnessFresh");
   let tone = "fresh";
@@ -4058,6 +4070,12 @@ function renderMobileDashboardFreshness(meta, isStale = false) {
   shell.className = `mobile-dashboard-freshness is-${tone}`;
   stateEl.textContent = stateText;
   timeEl.textContent = formatDateTimeWithAgo(meta?.updatedAt || null);
+  const issueText = String(meta?.issueText || "").trim();
+  if (reasonEl) {
+    const showReason = Boolean(issueText);
+    reasonEl.textContent = showReason ? t("mobileDashboardFreshnessReasonPrefix", { reason: issueText }) : "";
+    reasonEl.classList.toggle("hidden", !showReason);
+  }
 }
 
 function applyTranslations() {
@@ -5773,6 +5791,58 @@ function getFlowQuality(flowPayload, matchedEntities) {
   return "partial";
 }
 
+function localizedCollectorMessage(message) {
+  if (!message || typeof message !== "object") return "";
+  const preferred = currentLang === "zh" ? message.zh : message.en;
+  const fallback = currentLang === "zh" ? message.en : message.zh;
+  return String(preferred || fallback || "").trim();
+}
+
+function compactDashboardIssueText(messages, limit = 3) {
+  const items = Array.isArray(messages)
+    ? messages.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  if (!items.length) return "";
+  const selected = items.slice(0, limit);
+  const suffix = items.length > limit ? ` +${items.length - limit}` : "";
+  return selected.join(" | ") + suffix;
+}
+
+function collectorHealthIssueText(collectorStatus) {
+  const health = collectorStatus?.health_summary;
+  if (health && typeof health === "object") {
+    if (health.ok === true || health.status === "ok") return "";
+    const localizedMessages = health.messages?.[currentLang === "zh" ? "zh" : "en"];
+    const compact = compactDashboardIssueText(localizedMessages);
+    if (compact) return compact;
+    return localizedCollectorMessage(health.message);
+  }
+
+  const systems = collectorStatus?.systems || {};
+  const fallbackMessages = [];
+  ["saj", "solplanet", "combined"].forEach((system) => {
+    const state = systems?.[system] || {};
+    const result = state.last_round_result || {};
+    if (result.stored_sample !== false && !state.last_error) return;
+    const reason = result.reason || state.last_error || "source_missing";
+    const missing = Array.isArray(result.missing_metrics) && result.missing_metrics.length
+      ? ` (${result.missing_metrics.slice(0, 6).join(", ")})`
+      : "";
+    fallbackMessages.push(`${system}: ${reason}${missing}`);
+  });
+  return compactDashboardIssueText(fallbackMessages);
+}
+
+function combinedDashboardIssueText(collectorStatus, combinedFlow, { isStale = false, failed = false } = {}) {
+  const healthText = collectorHealthIssueText(collectorStatus);
+  if (healthText) return healthText;
+  const staleReason = String(combinedFlow?.meta?.stale_reason || combinedFlow?.stale_reason || "").trim();
+  if (staleReason) return staleReason;
+  if (failed) return currentLang === "zh" ? "combined 数据接口请求失败" : "Combined data request failed";
+  if (isStale) return currentLang === "zh" ? "collector 没有写入新的 combined 快照" : "Collector has not written a new combined snapshot";
+  return "";
+}
+
 function setModeClass(id, mode) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -7418,7 +7488,7 @@ function renderMobileCombinedFlow({
   setHtml("energyFlowCombinedMobile", html);
 }
 
-function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null, poolPumpDevice = null) {
+function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null, poolPumpDevice = null, collectorStatus = null) {
   renderCombinedUsableBatteryNode(combinedFlow);
   const combined = buildCombinedFlowMetrics(combinedFlow);
   const {
@@ -7470,12 +7540,19 @@ function renderCombinedEnergyFlow(combinedFlow, teslaInfo = null, poolPumpDevice
   const combinedPending = !combinedLoadError && solarW === null && gridW === null;
   const hasCombinedBase = solarW !== null && gridW !== null;
   const preserveRefreshing = Boolean(stateCache.systemLoadMeta.combined?.refreshing) && hasCombinedBase;
+  const combinedUpdatedAt = latestIsoTime(combinedFlow?.updated_at, teslaInfo?.updatedAt);
+  const combinedLate = hasCombinedBase && isIsoOlderThanSeconds(combinedUpdatedAt, 300);
+  const issueText = combinedDashboardIssueText(collectorStatus, combinedFlow, {
+    isStale: combinedLate,
+    failed: combinedLoadError || (!combinedPending && !hasCombinedBase),
+  });
   setSystemLoadMeta("combined", {
     phase: combinedPending ? "loading" : (hasCombinedBase ? "done" : "failed"),
-    updatedAt: latestIsoTime(combinedFlow?.updated_at, teslaInfo?.updatedAt),
+    updatedAt: combinedUpdatedAt,
     quality: hasCombinedBase ? getFlowQuality(combinedFlow, combined.availableCount) : "failed",
     count: combined.availableCount,
     refreshing: preserveRefreshing,
+    issueText,
   });
 
   setHtml("combined-solarPowerValue", formatValueWithDataKindHtml(formatPowerKwFromWatts(solarW), dataKinds.solar));
@@ -7766,8 +7843,12 @@ function renderSummary(payload) {
   setSystemLoadMeta("combined", {
     quality: getFlowQuality(combinedFlow, Number(combinedCount) || 0),
     count: Number(combinedCount) || 0,
+    issueText: combinedDashboardIssueText(collectorStatus, combinedFlow, {
+      isStale: isIsoOlderThanSeconds(combinedFlow?.updated_at, 300),
+      failed: Boolean(combinedFlow?.__load_error),
+    }),
   });
-  renderCombinedEnergyFlow(combinedFlow, tesla, poolPump);
+  renderCombinedEnergyFlow(combinedFlow, tesla, poolPump, collectorStatus);
 }
 
 function dashboardNotificationLevelText(level) {

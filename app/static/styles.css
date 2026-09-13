@@ -5528,6 +5528,7 @@ td {
   margin: 6px 4px 2px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   min-height: 18px;
 }
@@ -5535,6 +5536,7 @@ td {
 .flow-meta-stale {
   color: #9b4d16;
   font-weight: 700;
+  line-height: 1.35;
 }
 
 .loading-spinner {
@@ -6623,13 +6625,33 @@ td {
     font-weight: 800;
   }
 
+  .mobile-dashboard-freshness-main {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+  }
+
   .mobile-dashboard-freshness-time {
     min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     text-align: right;
     text-overflow: ellipsis;
     white-space: nowrap;
     color: #49657c;
+    font-weight: 700;
+  }
+
+  .mobile-dashboard-freshness-reason {
+    max-width: 100%;
+    overflow: hidden;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #6f1d1d;
     font-weight: 700;
   }
 

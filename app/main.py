@@ -469,6 +469,15 @@ MANUAL_OPERATION_DEFINITIONS: tuple[dict[str, object], ...] = (
         "input_schema": {},
         "output_schema": {"running": "boolean", "restarted_at": "string"},
     },
+    {
+        "operation_code": "backend.auto.collector_watchdog_recover",
+        "system": "backend",
+        "operation_type": "maintenance",
+        "action": "collector_watchdog_recover",
+        "title": "Collector Watchdog Recovery",
+        "input_schema": {"trigger": "object"},
+        "output_schema": {"running": "boolean", "restarted_at": "string", "solplanet_client_recreated": "boolean"},
+    },
 )
 
 
@@ -517,6 +526,8 @@ collector_task: asyncio.Task[None] | None = None
 collector_stop_event = asyncio.Event()
 export_window_fast_guard_task: asyncio.Task[None] | None = None
 export_window_fast_guard_stop_event = asyncio.Event()
+collector_watchdog_task: asyncio.Task[None] | None = None
+collector_watchdog_stop_event = asyncio.Event()
 worker_log_cleanup_task: asyncio.Task[None] | None = None
 worker_log_cleanup_stop_event = asyncio.Event()
 database_backup_task: asyncio.Task[None] | None = None
@@ -537,6 +548,18 @@ COLLECTOR_ROUND_SLEEP_SECONDS = 60.0
 EXPORT_WINDOW_FAST_GUARD_INTERVAL_SECONDS = 5.0
 EXPORT_WINDOW_FAST_GUARD_IDLE_SLEEP_SECONDS = COLLECTOR_ROUND_SLEEP_SECONDS
 ENDPOINT_BACKOFF_MAX_SKIP_ROUNDS = 8
+COLLECTOR_WATCHDOG_INTERVAL_SECONDS = 60.0
+COLLECTOR_WATCHDOG_STALE_SECONDS = 10 * 60
+COLLECTOR_WATCHDOG_RECOVERY_COOLDOWN_SECONDS = 15 * 60
+COLLECTOR_WATCHDOG_MAX_RECOVERIES_PER_HOUR = 3
+COLLECTOR_WATCHDOG_RECOVERABLE_REASONS = {
+    "collector_task_done",
+    "endpoint_backoff",
+    "incomplete_flow",
+    "source_not_stored",
+    "worker_source_request_timeout",
+    "worker_round_incomplete",
+}
 SOLPLANET_ENDPOINTS: tuple[str, ...] = (
     "getdevdata_device_2",
     "getdevdata_device_3",
@@ -612,6 +635,18 @@ collector_status: dict[str, dict[str, object]] = {
         "success_count": 0,
         "failure_count": 0,
     },
+}
+collector_watchdog_state: dict[str, object] = {
+    "enabled": True,
+    "in_progress": False,
+    "last_checked_at": None,
+    "last_recovery_at": None,
+    "last_recovery_reason": None,
+    "last_recovery_result": None,
+    "last_skipped_at": None,
+    "last_skipped_reason": None,
+    "recovery_history": [],
+    "recovery_count": 0,
 }
 pool_pump_control_override: dict[str, object] = {
     "enabled": None,
@@ -5266,6 +5301,8 @@ def _operation_timeline_manual_text(run: dict[str, object], *, lang: Literal["zh
             base = title
     elif operation_code == "backend.manual.restart_collector":
         base = "Restart backend collector" if lang == "en" else "重启后台采集器"
+    elif operation_code == "backend.auto.collector_watchdog_recover":
+        base = "Collector watchdog recovery" if lang == "en" else "collector watchdog 自动恢复"
     elif operation_code == "solplanet.manual.restart_api":
         base = "Restart Solplanet API" if lang == "en" else "重启Solplanet接口"
     elif operation_code == "saj.manual.set_discharge_power":
@@ -12586,12 +12623,18 @@ async def _replace_runtime(new_settings: Settings) -> None:
         await old_solplanet.aclose()
 
 
-async def _recreate_solplanet_client() -> None:
+def _replace_solplanet_client() -> SolplanetCgiClient:
+    """Swap the Solplanet client while the caller owns ``runtime_lock``."""
     global solplanet_client  # noqa: PLW0603
+    old_solplanet = solplanet_client
+    solplanet_client = _new_solplanet_client(settings)
+    _reset_solplanet_caches()
+    return old_solplanet
+
+
+async def _recreate_solplanet_client() -> None:
     async with runtime_lock:
-        old_solplanet = solplanet_client
-        solplanet_client = _new_solplanet_client(settings)
-        _reset_solplanet_caches()
+        old_solplanet = _replace_solplanet_client()
     await old_solplanet.aclose()
 
 
@@ -15147,10 +15190,22 @@ async def _stop_daily_reports() -> None:
 
 
 async def _restart_collector() -> dict[str, object]:
+    return await _restart_collector_runtime(recreate_solplanet_client=False)
+
+
+async def _restart_collector_runtime(*, recreate_solplanet_client: bool) -> dict[str, object]:
+    old_solplanet: SolplanetCgiClient | None = None
     async with runtime_lock:
         was_running = bool(collector_task and not collector_task.done())
         await _stop_collector()
+        if recreate_solplanet_client:
+            # ``_recreate_solplanet_client`` normally takes runtime_lock itself.
+            # We already own it for this atomic restart, so take the unlocked swap
+            # path rather than deadlocking on asyncio's non-reentrant lock.
+            old_solplanet = _replace_solplanet_client()
         await _start_collector()
+    if old_solplanet is not None:
+        await old_solplanet.aclose()
     restarted_at = datetime.now(UTC).isoformat()
     return {
         "ok": True,
@@ -15158,7 +15213,186 @@ async def _restart_collector() -> dict[str, object]:
         "was_running": was_running,
         "running": bool(collector_task and not collector_task.done()),
         "restarted_at": restarted_at,
+        "solplanet_client_recreated": recreate_solplanet_client,
     }
+
+
+def _seconds_since_utc(value: object, now: datetime) -> float | None:
+    parsed = _safe_parse_utc(value)
+    if parsed is None:
+        return None
+    return max((now - parsed).total_seconds(), 0.0)
+
+
+def _collector_state_reason(state: dict[str, object]) -> str:
+    result = state.get("last_round_result")
+    result_map = result if isinstance(result, dict) else {}
+    for key in ("reason", "error"):
+        text = str(result_map.get(key) or "").strip()
+        if text:
+            return text
+    return str(state.get("last_error") or "").strip()
+
+
+def _collector_result_source_reasons(state: dict[str, object]) -> list[str]:
+    result = state.get("last_round_result")
+    result_map = result if isinstance(result, dict) else {}
+    source_details = result_map.get("source_details")
+    source_details_map = source_details if isinstance(source_details, dict) else {}
+    reasons: list[str] = []
+    for source_state in source_details_map.values():
+        source_state_map = source_state if isinstance(source_state, dict) else {}
+        reason = str(source_state_map.get("reason") or "").strip()
+        if reason:
+            reasons.append(reason)
+    return reasons
+
+
+def _collector_watchdog_recent_recovery_count(now: datetime) -> int:
+    history = collector_watchdog_state.get("recovery_history")
+    items = history if isinstance(history, list) else []
+    cutoff = now - timedelta(hours=1)
+    recent: list[dict[str, object]] = []
+    for item in items:
+        item_map = item if isinstance(item, dict) else {}
+        recovered_at = _safe_parse_utc(item_map.get("recovered_at"))
+        if recovered_at and recovered_at >= cutoff:
+            recent.append(item_map)
+    collector_watchdog_state["recovery_history"] = recent
+    return len(recent)
+
+
+def _collector_watchdog_recovery_trigger(now: datetime | None = None) -> dict[str, object] | None:
+    current = now or datetime.now(UTC)
+    last_recovery_age = _seconds_since_utc(collector_watchdog_state.get("last_recovery_at"), current)
+    if last_recovery_age is not None and last_recovery_age < COLLECTOR_WATCHDOG_RECOVERY_COOLDOWN_SECONDS:
+        collector_watchdog_state["last_skipped_at"] = current.isoformat()
+        collector_watchdog_state["last_skipped_reason"] = "recovery_cooldown"
+        return None
+    if _collector_watchdog_recent_recovery_count(current) >= COLLECTOR_WATCHDOG_MAX_RECOVERIES_PER_HOUR:
+        collector_watchdog_state["last_skipped_at"] = current.isoformat()
+        collector_watchdog_state["last_skipped_reason"] = "hourly_recovery_limit"
+        return None
+
+    if collector_task is not None and collector_task.done():
+        return {
+            "system": "collector",
+            "reason": "collector_task_done",
+            "age_seconds": None,
+            "threshold_seconds": COLLECTOR_WATCHDOG_STALE_SECONDS,
+            "action": "restart_collector",
+        }
+
+    for system in ("combined", "solplanet"):
+        state = collector_status.get(system) or {}
+        age = _seconds_since_utc(state.get("last_success_at"), current)
+        if age is None or age < COLLECTOR_WATCHDOG_STALE_SECONDS:
+            continue
+        reason = _collector_state_reason(state)
+        source_reasons = _collector_result_source_reasons(state)
+        reason_candidates = {reason, *source_reasons}
+        if not reason_candidates.intersection(COLLECTOR_WATCHDOG_RECOVERABLE_REASONS):
+            continue
+        return {
+            "system": system,
+            "reason": reason or "unknown",
+            "source_reasons": source_reasons,
+            "age_seconds": round(age),
+            "threshold_seconds": COLLECTOR_WATCHDOG_STALE_SECONDS,
+            "action": "recreate_solplanet_client_and_restart_collector",
+        }
+
+    return None
+
+
+async def _run_collector_watchdog_recovery(trigger: dict[str, object]) -> None:
+    collector_watchdog_state["in_progress"] = True
+    operation_run_id = await _start_operation_history_run(
+        "backend.auto.collector_watchdog_recover",
+        request_payload={"trigger": trigger},
+        previous_state={
+            "collector_status": {
+                "saj": dict(collector_status.get("saj") or {}),
+                "solplanet": dict(collector_status.get("solplanet") or {}),
+                "combined": dict(collector_status.get("combined") or {}),
+            },
+            "watchdog": dict(collector_watchdog_state),
+        },
+        trigger_source="worker.collector_watchdog",
+    )
+    try:
+        result = await _restart_collector_runtime(recreate_solplanet_client=True)
+        recovered_at = datetime.now(UTC).isoformat()
+        history = collector_watchdog_state.get("recovery_history")
+        recovery_history = history if isinstance(history, list) else []
+        recovery_history.append({
+            "recovered_at": recovered_at,
+            "trigger": trigger,
+            "result": result,
+        })
+        collector_watchdog_state["recovery_history"] = recovery_history[-COLLECTOR_WATCHDOG_MAX_RECOVERIES_PER_HOUR:]
+        collector_watchdog_state["recovery_count"] = int(collector_watchdog_state.get("recovery_count") or 0) + 1
+        collector_watchdog_state["last_recovery_at"] = recovered_at
+        collector_watchdog_state["last_recovery_reason"] = trigger
+        collector_watchdog_state["last_recovery_result"] = result
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_SUCCEEDED,
+            latest_state={"collector_status": collector_status, "watchdog": collector_watchdog_state},
+            response_payload=result,
+            completed=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        error_text = f"{type(exc).__name__}: {exc}"
+        collector_watchdog_state["last_skipped_at"] = datetime.now(UTC).isoformat()
+        collector_watchdog_state["last_skipped_reason"] = error_text
+        logger.exception("Collector watchdog recovery failed", extra={"trigger": trigger})
+        await _update_operation_history_run(
+            operation_run_id,
+            status=OPERATION_RUN_STATUS_FAILED,
+            latest_state={"collector_status": collector_status, "watchdog": collector_watchdog_state},
+            error_text=error_text,
+            completed=True,
+        )
+    finally:
+        collector_watchdog_state["in_progress"] = False
+
+
+async def _collector_watchdog_loop() -> None:
+    while not collector_watchdog_stop_event.is_set():
+        collector_watchdog_state["last_checked_at"] = datetime.now(UTC).isoformat()
+        if collector_watchdog_state.get("enabled") and not collector_watchdog_state.get("in_progress"):
+            trigger = _collector_watchdog_recovery_trigger()
+            if trigger:
+                await _run_collector_watchdog_recovery(trigger)
+        try:
+            await asyncio.wait_for(
+                collector_watchdog_stop_event.wait(),
+                timeout=COLLECTOR_WATCHDOG_INTERVAL_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            continue
+
+
+async def _start_collector_watchdog() -> None:
+    global collector_watchdog_task  # noqa: PLW0603
+    if collector_watchdog_task and not collector_watchdog_task.done():
+        return
+    collector_watchdog_stop_event.clear()
+    collector_watchdog_task = asyncio.create_task(_collector_watchdog_loop())
+
+
+async def _stop_collector_watchdog() -> None:
+    global collector_watchdog_task  # noqa: PLW0603
+    collector_watchdog_stop_event.set()
+    if collector_watchdog_task:
+        collector_watchdog_task.cancel()
+        try:
+            await collector_watchdog_task
+        except asyncio.CancelledError:
+            pass
+        collector_watchdog_task = None
+    collector_watchdog_state["in_progress"] = False
 
 
 @app.get("/api/health")
@@ -15802,6 +16036,259 @@ def _weather_apply_time_flags(cached: dict[str, object]) -> dict[str, object]:
     return {**cached, "hours": hours, "days": days}
 
 
+_COLLECTOR_SYSTEM_LABELS: dict[str, dict[str, str]] = {
+    "saj": {"en": "Home Assistant / SAJ", "zh": "Home Assistant / SAJ"},
+    "solplanet": {"en": "Solplanet CGI", "zh": "Solplanet CGI"},
+    "combined": {"en": "Combined assembly", "zh": "combined 组装"},
+    "tesla": {"en": "Tesla via Home Assistant", "zh": "Tesla / Home Assistant"},
+    "pool_pump": {"en": "Pool pump via Home Assistant", "zh": "水泵 / Home Assistant"},
+}
+
+_COLLECTOR_REASON_LABELS: dict[str, dict[str, str]] = {
+    "incomplete_flow": {"en": "required metrics are missing", "zh": "缺少必要数据"},
+    "source_not_stored": {"en": "a source did not store a fresh sample", "zh": "上游来源没有写入新样本"},
+    "ha_entities_stale": {"en": "Home Assistant entities are stale", "zh": "Home Assistant 实体数据过期"},
+    "endpoint_backoff": {"en": "endpoint is in backoff after failures", "zh": "接口连续失败后正在 backoff"},
+    "worker_source_request_timeout": {"en": "source request log did not settle", "zh": "来源请求日志未及时完成"},
+    "tesla_entities_unavailable": {"en": "Tesla entities are unavailable", "zh": "Tesla 实体不可用"},
+    "tesla_observation_unavailable": {"en": "Tesla observation is unavailable", "zh": "Tesla 观测不可用"},
+    "combined_saj_soc_unavailable": {"en": "combined flow has no SAJ SOC", "zh": "combined 数据缺少 SAJ SOC"},
+    "overnight_shared_power_budget_unavailable": {"en": "overnight shared power budget is unavailable", "zh": "夜间共享功率预算不可用"},
+    "shared_power_budget_unavailable": {"en": "shared power budget is unavailable", "zh": "共享功率预算不可用"},
+    "source_missing": {"en": "source data is missing", "zh": "来源数据缺失"},
+    "persistence_error": {"en": "database persistence failed", "zh": "数据库写入失败"},
+}
+
+
+def _collector_localized_label(
+    labels: dict[str, dict[str, str]],
+    key: object,
+    *,
+    fallback: object | None = None,
+) -> dict[str, str]:
+    text = str(key or fallback or "unknown").strip() or "unknown"
+    if text in labels:
+        return dict(labels[text])
+    return {"en": text, "zh": text}
+
+
+def _collector_issue(
+    *,
+    system: str,
+    code: object,
+    en: str,
+    zh: str,
+    details: dict[str, object] | None = None,
+) -> dict[str, object]:
+    return {
+        "system": system,
+        "code": str(code or "unknown"),
+        "message": {"en": en, "zh": zh},
+        "details": details or {},
+    }
+
+
+def _collector_compact_list(values: object, *, limit: int = 6) -> str:
+    if not isinstance(values, list):
+        return ""
+    items = [str(item) for item in values if str(item or "").strip()]
+    if len(items) > limit:
+        return ", ".join(items[:limit]) + f" +{len(items) - limit}"
+    return ", ".join(items)
+
+
+def _build_system_collector_issues(system: str, state: dict[str, object]) -> list[dict[str, object]]:
+    issues: list[dict[str, object]] = []
+    system_label = _collector_localized_label(_COLLECTOR_SYSTEM_LABELS, system)
+    result = state.get("last_round_result")
+    result_map = result if isinstance(result, dict) else {}
+    stored_sample = result_map.get("stored_sample")
+    reason = str(result_map.get("reason") or state.get("last_error") or "").strip()
+    missing_metrics = result_map.get("missing_metrics")
+    failed = result_map.get("failed")
+    skipped = result_map.get("skipped")
+
+    if state.get("last_persistence_error"):
+        operation = str(state.get("last_persistence_error_operation") or "").strip()
+        issues.append(_collector_issue(
+            system=system,
+            code="persistence_error",
+            en=f"{system_label['en']} database persistence failed" + (f" during {operation}" if operation else ""),
+            zh=f"{system_label['zh']} 数据库写入失败" + (f"：{operation}" if operation else ""),
+            details={
+                "last_persistence_error_at": state.get("last_persistence_error_at"),
+                "last_persistence_error": state.get("last_persistence_error"),
+                "last_persistence_error_operation": state.get("last_persistence_error_operation"),
+            },
+        ))
+
+    if stored_sample is False or reason:
+        reason_label = _collector_localized_label(_COLLECTOR_REASON_LABELS, reason or "source_missing")
+        parts_en = [f"{system_label['en']}: {reason_label['en']}"]
+        parts_zh = [f"{system_label['zh']}：{reason_label['zh']}"]
+        missing_text = _collector_compact_list(missing_metrics)
+        failed_text = _collector_compact_list(failed)
+        skipped_text = _collector_compact_list(skipped)
+        if missing_text:
+            parts_en.append(f"missing {missing_text}")
+            parts_zh.append(f"缺 {missing_text}")
+        if failed_text:
+            parts_en.append(f"failed {failed_text}")
+            parts_zh.append(f"失败 {failed_text}")
+        if skipped_text:
+            parts_en.append(f"skipped {skipped_text}")
+            parts_zh.append(f"跳过 {skipped_text}")
+        source_details = result_map.get("source_details")
+        source_details_map = source_details if isinstance(source_details, dict) else {}
+        source_parts_en: list[str] = []
+        source_parts_zh: list[str] = []
+        for source_name, source_state in source_details_map.items():
+            source_state_map = source_state if isinstance(source_state, dict) else {}
+            if source_state_map.get("stored_sample") is False:
+                source_reason = str(source_state_map.get("reason") or "not_stored").strip()
+                source_reason_label = _collector_localized_label(_COLLECTOR_REASON_LABELS, source_reason)
+                source_label = _collector_localized_label(_COLLECTOR_SYSTEM_LABELS, source_name)
+                source_parts_en.append(f"{source_label['en']} {source_reason_label['en']}")
+                source_parts_zh.append(f"{source_label['zh']} {source_reason_label['zh']}")
+        if source_parts_en:
+            parts_en.append("source: " + "; ".join(source_parts_en))
+            parts_zh.append("来源：" + "；".join(source_parts_zh))
+        issues.append(_collector_issue(
+            system=system,
+            code=reason or "source_missing",
+            en="; ".join(parts_en),
+            zh="；".join(parts_zh),
+            details={
+                "last_success_at": state.get("last_success_at"),
+                "last_error_at": state.get("last_error_at"),
+                "last_error": state.get("last_error"),
+                "last_round_result": result_map,
+            },
+        ))
+
+    endpoint_backoff = state.get("endpoint_backoff")
+    endpoint_backoff_map = endpoint_backoff if isinstance(endpoint_backoff, dict) else {}
+    endpoint_parts_en: list[str] = []
+    endpoint_parts_zh: list[str] = []
+    endpoint_details: dict[str, object] = {}
+    for endpoint, endpoint_state in endpoint_backoff_map.items():
+        endpoint_state_map = endpoint_state if isinstance(endpoint_state, dict) else {}
+        consecutive_failures = int(_to_number(endpoint_state_map.get("consecutive_failures")) or 0)
+        last_error = str(endpoint_state_map.get("last_error") or "").strip()
+        last_skipped_round = endpoint_state_map.get("last_skipped_round")
+        if consecutive_failures <= 0 and not last_error:
+            continue
+        endpoint_details[str(endpoint)] = endpoint_state_map
+        suffix = f": {last_error}" if last_error else ""
+        endpoint_parts_en.append(f"{endpoint} failed {consecutive_failures}x{suffix}")
+        endpoint_parts_zh.append(f"{endpoint} 连续失败 {consecutive_failures} 次{suffix}")
+        if last_skipped_round is not None:
+            endpoint_parts_en[-1] += f", skipped round {last_skipped_round}"
+            endpoint_parts_zh[-1] += f"，跳过轮次 {last_skipped_round}"
+    if endpoint_parts_en:
+        issues.append(_collector_issue(
+            system=system,
+            code="endpoint_backoff",
+            en=f"{system_label['en']} endpoint issue: " + "; ".join(endpoint_parts_en),
+            zh=f"{system_label['zh']} 接口异常：" + "；".join(endpoint_parts_zh),
+            details=endpoint_details,
+        ))
+
+    return issues
+
+
+def _build_combined_auxiliary_issues(combined_state: dict[str, object]) -> list[dict[str, object]]:
+    issues: list[dict[str, object]] = []
+    checks = (
+        ("tesla", "last_tesla_grid_support"),
+        ("pool_pump", "last_pool_pump_state"),
+        ("combined", "last_midday_window_check"),
+        ("pool_pump", "last_pool_pump_free_energy_check"),
+        ("pool_pump", "last_pool_pump_off_period_check"),
+        ("saj", "last_saj_morning_grid_import_guard_check"),
+        ("saj", "last_saj_battery_watch_check"),
+        ("pool_pump", "last_pool_pump_overnight_check"),
+    )
+    for system, key in checks:
+        payload = combined_state.get(key)
+        payload_map = payload if isinstance(payload, dict) else {}
+        error_text = str(payload_map.get("error") or "").strip()
+        skipped = str(payload_map.get("skipped") or "").strip()
+        action = payload_map.get("action")
+        action_map = action if isinstance(action, dict) else {}
+        action_reason = str(action_map.get("reason") or "").strip()
+        code = error_text or skipped or action_reason
+        if not error_text and not skipped:
+            continue
+        label = _collector_localized_label(_COLLECTOR_SYSTEM_LABELS, system)
+        code_label = _collector_localized_label(_COLLECTOR_REASON_LABELS, code, fallback=code)
+        if error_text:
+            en = f"{label['en']}: {key} failed with {error_text}"
+            zh = f"{label['zh']}：{key} 失败：{error_text}"
+        else:
+            en = f"{label['en']}: {code_label['en']}"
+            zh = f"{label['zh']}：{code_label['zh']}"
+        issues.append(_collector_issue(
+            system=system,
+            code=code,
+            en=en,
+            zh=zh,
+            details={"check": key, "payload": payload_map},
+        ))
+    return issues
+
+
+def _dedupe_collector_issues(issues: list[dict[str, object]]) -> list[dict[str, object]]:
+    seen: set[tuple[str, str, str]] = set()
+    deduped: list[dict[str, object]] = []
+    for issue in issues:
+        message = issue.get("message")
+        message_map = message if isinstance(message, dict) else {}
+        key = (
+            str(issue.get("system") or ""),
+            str(issue.get("code") or ""),
+            str(message_map.get("en") or message_map.get("zh") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(issue)
+    return deduped
+
+
+def _build_collector_health_summary(systems: dict[str, dict[str, object]]) -> dict[str, object]:
+    issues: list[dict[str, object]] = []
+    for system_name in ("saj", "solplanet", "combined"):
+        issues.extend(_build_system_collector_issues(system_name, systems.get(system_name) or {}))
+    issues.extend(_build_combined_auxiliary_issues(systems.get("combined") or {}))
+    issues = _dedupe_collector_issues(issues)
+    messages_en = [
+        str((issue.get("message") if isinstance(issue.get("message"), dict) else {}).get("en") or "")
+        for issue in issues
+    ]
+    messages_zh = [
+        str((issue.get("message") if isinstance(issue.get("message"), dict) else {}).get("zh") or "")
+        for issue in issues
+    ]
+    messages_en = [item for item in messages_en if item]
+    messages_zh = [item for item in messages_zh if item]
+    status = "ok" if not issues else "degraded"
+    return {
+        "ok": not issues,
+        "status": status,
+        "issue_count": len(issues),
+        "message": {
+            "en": "Collector healthy" if not issues else " | ".join(messages_en[:4]),
+            "zh": "采集正常" if not issues else " | ".join(messages_zh[:4]),
+        },
+        "messages": {
+            "en": messages_en,
+            "zh": messages_zh,
+        },
+        "issues": issues,
+    }
+
+
 @app.get("/api/weather/forecast")
 async def weather_forecast() -> dict[str, object]:
     now_ts = monotonic()
@@ -15904,14 +16391,17 @@ async def collector_runtime_status() -> dict[str, object]:
     solplanet_state["continuous"] = True
     combined_state["interval_seconds"] = None
     combined_state["continuous"] = True
+    systems = {
+        "saj": saj_state,
+        "solplanet": solplanet_state,
+        "combined": combined_state,
+    }
     return {
         "updated_at": datetime.now(UTC).isoformat(),
         "round_number": collector_round_number,
-        "systems": {
-            "saj": saj_state,
-            "solplanet": solplanet_state,
-            "combined": combined_state,
-        },
+        "systems": systems,
+        "health_summary": _build_collector_health_summary(systems),
+        "watchdog": dict(collector_watchdog_state),
     }
 
 
@@ -18276,6 +18766,7 @@ async def get_solplanet_cgi_explore() -> dict[str, object]:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    await _stop_collector_watchdog()
     await _stop_database_backups()
     await _stop_daily_reports()
     await _stop_worker_log_cleanup()
@@ -18308,6 +18799,7 @@ async def on_startup() -> None:
     await _start_database_backups()
     await _start_daily_reports()
     await _start_collector()
+    await _start_collector_watchdog()
 
 
 @app.get("/api/catalog/domains")
