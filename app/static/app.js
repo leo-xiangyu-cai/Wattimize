@@ -963,14 +963,14 @@ const I18N = {
     samplingZeroHeroFieldActiveReserve: "Active Reserve",
     samplingZeroHeroFieldReserve: "Reserve Margin",
     solplanetExportMonitorPhasePrePeak: "16:00-18:00, hold for home load",
-    solplanetExportMonitorPhasePeakHold: "18:00-21:00, hold battery for peak load",
-    solplanetExportMonitorPhaseLateTarget: "21:00-23:00, sell above dynamic reserve",
+    solplanetExportMonitorPhasePeakHold: "18:00-21:00, sell above SolPlanet reserve",
+    solplanetExportMonitorPhaseLateTarget: "21:00-23:00, sell above SolPlanet reserve",
     solplanetExportMonitorPhaseOutside: "Outside export window",
     solplanetExportMonitorRecommendationSell: "Sell at {power}",
     solplanetExportMonitorRecommendationSellSurplus: "Sell surplus at {power}",
     solplanetExportMonitorRecommendationStop: "Stop selling",
     solplanetExportMonitorRecommendationHold: "Hold",
-    solplanetExportMonitorRecommendationHoldUntilLate: "Hold until 21:00",
+    solplanetExportMonitorRecommendationHoldUntilLate: "Hold",
     solplanetExportMonitorRecommendationObserve: "Observe only",
     samplingZeroHeroAwaiting: "No live export-window observation yet.",
     samplingZeroHeroCoverageText: "{samples}/{expected} samples · {coverage}%",
@@ -2168,14 +2168,14 @@ const I18N = {
     samplingZeroHeroFieldActiveReserve: "当前保底",
     samplingZeroHeroFieldReserve: "保底余量",
     solplanetExportMonitorPhasePrePeak: "16:00-18:00，保留给家庭用电",
-    solplanetExportMonitorPhasePeakHold: "18:00-21:00，留电给晚高峰负载",
-    solplanetExportMonitorPhaseLateTarget: "21:00-23:00，仅卖动态保底以上",
+    solplanetExportMonitorPhasePeakHold: "18:00-21:00，卖 SolPlanet 保底以上",
+    solplanetExportMonitorPhaseLateTarget: "21:00-23:00，卖 SolPlanet 保底以上",
     solplanetExportMonitorPhaseOutside: "不在外送窗口",
     solplanetExportMonitorRecommendationSell: "按 {power} 卖电",
     solplanetExportMonitorRecommendationSellSurplus: "按 {power} 卖余电",
     solplanetExportMonitorRecommendationStop: "停止卖电",
     solplanetExportMonitorRecommendationHold: "等待",
-    solplanetExportMonitorRecommendationHoldUntilLate: "等到 21:00",
+    solplanetExportMonitorRecommendationHoldUntilLate: "等待",
     solplanetExportMonitorRecommendationObserve: "仅观察",
     samplingZeroHeroAwaiting: "当前还没有 export window 的实时观测。",
     samplingZeroHeroCoverageText: "{samples}/{expected} 个样本 · {coverage}%",
@@ -11883,12 +11883,7 @@ function formatSolplanetExportMonitorPhase(monitor) {
 }
 
 function solplanetExportMonitorActiveReserveKwh(monitor) {
-  const phase = String(monitor?.phase || "").trim();
   const hardReserveKwh = Number(monitor?.reserve_floor_kwh);
-  const lateDynamicReserveKwh = Number(monitor?.late_dynamic_reserve_floor_kwh);
-  const comfortFloorKwh = Number(monitor?.comfort_floor_kwh);
-  if (phase === "late_target" && Number.isFinite(lateDynamicReserveKwh)) return lateDynamicReserveKwh;
-  if (Number.isFinite(comfortFloorKwh) && Number.isFinite(hardReserveKwh)) return Math.max(comfortFloorKwh, hardReserveKwh);
   if (Number.isFinite(hardReserveKwh)) return hardReserveKwh;
   return null;
 }
@@ -11949,7 +11944,9 @@ function renderSamplingZeroHeroWindow() {
   if (solplanetExportMonitor) {
     const exportedKwh = Number(solplanetExportMonitor.exported_kwh);
     const targetKwh = Number(solplanetExportMonitor.daily_export_target_kwh);
-    const usableKwh = Number(solplanetExportMonitor.usable_battery_total_kwh);
+    const usableKwh = Number(
+      solplanetExportMonitor.control_usable_battery_kwh ?? solplanetExportMonitor.usable_battery_total_kwh,
+    );
     const activeReserveKwh = solplanetExportMonitorActiveReserveKwh(solplanetExportMonitor);
     metrics.push(
       {

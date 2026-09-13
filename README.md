@@ -258,3 +258,19 @@ First-run configuration:
 - Dashboard auto-refresh defaults to 30 seconds, keeps the last summary cached locally for instant first paint, reads the cached combined-flow and collector-status APIs without live Home Assistant recomputation, loads weather asynchronously, makes the manual `Refresh` button trigger a real reload, and only highlights the combined snapshot as stale when it is older than 5 minutes. Automatic refresh skips the `Time Window` tab so expanded panels and in-progress edits are preserved; opening the tab or using `Refresh` still reloads it.
 - The combined dashboard lets you click the Solplanet inverter node to read and update the live Solplanet `Pin` charging limit.
 - On phone-sized layouts, the dashboard now hides the weather panel and switches the combined flow card to a simplified mobile-first energy map with a central hub view that keeps load, remaining battery, live flow, pool pump, and Tesla state in view.
+
+### Paid-energy import priority
+
+Outside the 11:00–15:00 free-energy window, SAJ import protection operates all
+day and night. It reacts to measured grid import, adjusts discharge up to 5 kW,
+and retries ineffective commands with a 120-second interval. The existing 20%
+SAJ reserve remains enforced. The legacy rule identifier is
+`saj_morning_grid_import_guard`; see
+[SAJ control notes](docs/saj-manual-control-notes.md#paid-energy-grid-import-guard)
+for thresholds, arbitration, and readback limitations.
+
+From 17:00 to 20:00, SAJ has discharge priority toward its 20% floor while
+Solplanet runs in self-consumption to supply the household deficit. From 20:00
+to 23:00, the original combined reserve tracking resumes. Overnight reserves
+and paid-import protection remain in force in both phases. See the SAJ control
+notes for mode switching, target calculation, and readback constraints.

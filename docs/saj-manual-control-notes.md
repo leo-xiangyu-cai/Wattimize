@@ -82,45 +82,70 @@ During the free-energy window (`11:00-15:00`), Wattimize first targets SAJ self-
 
 If self-consumption is not discharging, including when SAJ is already charging, the guard keeps self-consumption and does not apply the slow-charge hold.
 
-## Morning grid-import guard
+## Paid-energy grid-import guard
 
-The morning protection rule is intentionally simple and does not depend on Solplanet state. Its goal is to avoid buying grid power when SAJ still has usable energy.
+The priority is to minimize paid grid imports whenever SAJ has usable energy.
+The legacy rule code `saj_morning_grid_import_guard` remains for saved settings
+and operation-history compatibility, but is no longer restricted to mornings.
 
-Rule code: `saj_morning_grid_import_guard`
+- Active every day from 15:00 until 11:00 the next day (Australia/Sydney).
+- The four-hour 11:00–15:00 free-energy window is exempt.
+- Start after two consecutive samples above 200 W import and SAJ SOC above 21%.
+- Stop at the existing SAJ reserve floor of 20%, on rule disable, or during free energy.
+- Missing grid, SAJ SOC or battery-power readings cannot trigger a new command.
+- Samples older than three minutes are rejected; repeated cached samples do not
+  count as consecutive observations or trigger retries.
 
-Window:
+The target is measured SAJ discharge plus measured grid import minus a 50 W
+margin, clamped to 0–5000 W and quantized to 50 W. Signed battery power is used:
+charging is subtracted so the controller does not mistake battery charging for
+household demand. The same narrow `PUT /api/saj/manual-discharge-power` wrapper
+clears TOU charging before setting the requested discharge target.
 
-- `05:00-09:00`
+An active guard retargets after at least 120 seconds when the target changes by
+200 W or more, or persistent import shows SAJ has not delivered the requested
+power. An API acknowledgement is recorded as `await_next_power_sample`, not
+as proof of actual discharge. Persistent imports remain visible in verification.
+The guard can increase support even when SAJ is already discharging.
 
-Start forced SAJ discharge when all are true:
+Near-zero import while supplying the home is success; it does not release the
+guard. When the measured load no longer needs discharge for five minutes, the
+guard returns to self-consumption. Export-window cleanup and the one-time
+post-free discharge command defer to an active paid-energy guard, preventing
+those rules from cancelling its target.
 
-- `combined.metrics.grid_w > 200 W` for 2 consecutive worker checks.
-- `combined.metrics.battery1_soc_percent > 25%`.
-- `combined.metrics.battery1_w` is not already discharging.
+Read current decisions at `GET /api/collector/status`, under
+`systems.combined.last_saj_morning_grid_import_guard_check`. Rule metadata is
+available from `GET /api/time-window-rules`. Reserve limits, inverter capacity,
+telemetry delay and device response still constrain achievable import reduction.
 
-Start action:
+## Evening dispatch in two phases
 
-- `PUT /api/saj/manual-discharge-power`
-- payload equivalent: `{"power_w":2000}`
+**17:00–20:00:** prioritize SAJ discharge, retaining its 20% SOC floor and
+5 kW power limit. The shared import/export controller owns the SAJ target and
+retry timer, so paid-import protection cannot accidentally cancel evening support.
+Solplanet runs in self-consumption mode (`mod_r = 2`) and supplies the actual
+household deficit. It is not assigned a forced selling target or a zero discharge
+limit. Mode writes are checked against device readback.
 
-Keep forced discharge while:
+SAJ's target is constrained by combined usable energy above the configured
+23:00 reserve plus its existing 0.5 kWh buffer, spread across the remaining time
+until 23:00 and capped at 5 kW. Forced selling additionally requires enough
+energy for the projected household load to 23:00. Missing/old battery or load
+data and the SAJ floor prevent forced export.
 
-- the guard is active,
-- current time is still inside `05:00-09:00`,
-- SAJ SOC stays above `20%`,
-- and grid import has not been below `100 W` for 5 minutes.
+**20:00–23:00:** end the special SAJ-first phase and resume the original combined
+reserve tracking. The Solplanet monitor uses its original total recommendation
+without subtracting SAJ output. When selling is warranted, it restores custom
+mode and the discharge schedule; otherwise it retains household support. The
+configured end-of-window reserve remains the target (currently 18 kWh on NAS,
+plus the existing 0.5 kWh control buffer). The phase transition bypasses the
+normal cooldown to reduce a previous SAJ export target to household support.
 
-Stop forced discharge when any are true:
-
-- current time leaves `05:00-09:00`,
-- `combined.metrics.battery1_soc_percent <= 20%`,
-- `combined.metrics.grid_w < 100 W` for 5 minutes.
-
-Stop action:
-
-- `PUT /api/saj/self-consumption`
-
-This guard treats Solplanet charging as context, not a trigger condition. The trigger is simply morning grid import while SAJ has enough charge.
+After 23:00, paid-energy import protection continues. Spending SAJ before then
+is best effort, subject to reserve requirements and actual device output.
+Read `saj_evening_plan` in the guard decision at `/api/collector/status` and
+`home_support_only` in the Solplanet control result to inspect the active phase.
 
 ## Local API wrapper
 

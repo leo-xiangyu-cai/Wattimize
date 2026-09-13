@@ -143,15 +143,25 @@ Important details:
 
 The backend now exposes Solplanet manual control for `Pin`, `Pout`, and daily slots, and the export-window worker can automatically manage active discharge/sell slots.
 
-The automatic export policy is:
+The current automatic policy (updated 2026-09-14) is:
 
-- `16:00-18:00`: hold battery for evening home load; do not start automatic export selling.
-- `18:00-23:00`: control toward the configured end reserve at `23:00`, not toward immediate sale of all surplus above the reserve.
-- The worker projects current home load through `23:00`, subtracts that from usable battery, and only sells energy above the configured reserve plus a small buffer.
-- `Pout` is proportional to the remaining surplus and remaining time. It is set to full power only when the current usable battery is above the runway line `reserve + full-power-discharge-capacity-until-23:00`; this is the case where full power is needed to avoid finishing above target.
-- If the projection says the reserve would be reached without export selling, or Solplanet is already at its minimum usable energy, the worker stops export selling.
-- SAJ is not force-discharged as part of the Solplanet export monitor. Solplanet `Pout` is the controlled export actuator; when export selling stops, Wattimize clears any SAJ export-discharge setup back to self-consumption.
-- Outside `16:00-23:00`: remove the active discharge/sell slot instead of lowering `Pout`.
+- `16:00-17:00`: retain the existing pre-peak hold behavior.
+- `17:00-20:00`: prioritize SAJ discharge; Solplanet uses self-consumption mode
+  to supply the household deficit without a forced export schedule.
+- `20:00-23:00`: restore the original Solplanet export calculation toward the
+  configured combined end reserve, accounting for projected household load,
+  remaining time and the control buffer. Restore custom mode when selling.
+- If the reserve projection does not permit selling or Solplanet is at its
+  minimum usable energy, stop forced Solplanet export.
+- SAJ's shared evening/import controller owns its forced discharge. Export
+  cleanup defers while that guard is active. Paid-import protection continues
+  outside the 11:00-15:00 free-energy window.
+- Outside the export window, end forced sell slots. The current implementation
+  also resets the schedule's `Pout`; this is not the 17:00-20:00 self-consumption
+  path, which leaves the schedule limits intact.
+
+See [SAJ control notes](saj-manual-control-notes.md) for the authoritative phase
+boundaries, SOC floors, retry behavior and device-readback limitations.
 
 ### Historical failed attempts
 

@@ -249,15 +249,17 @@ POST_EXPORT_PEAK_WINDOW_END_HOUR = 23
 OVERNIGHT_SHOULDER_WINDOW_START_HOUR = 23
 OVERNIGHT_SHOULDER_WINDOW_END_HOUR = 11
 OVERNIGHT_BUDGET_TARGET_HOUR = OVERNIGHT_SHOULDER_WINDOW_END_HOUR
-SAJ_MORNING_GRID_IMPORT_GUARD_START_HOUR = 5
-SAJ_MORNING_GRID_IMPORT_GUARD_END_HOUR = 9
+SAJ_MORNING_GRID_IMPORT_GUARD_START_HOUR = FREE_ENERGY_WINDOW_END_HOUR
+SAJ_MORNING_GRID_IMPORT_GUARD_END_HOUR = FREE_ENERGY_WINDOW_START_HOUR
 SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_W = 200.0
 SAJ_MORNING_GRID_IMPORT_GUARD_CLEAR_W = 100.0
 SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_CHECKS = 2
 SAJ_MORNING_GRID_IMPORT_GUARD_CLEAR_SECONDS = 5 * 60
-SAJ_MORNING_GRID_IMPORT_GUARD_START_SOC_PERCENT = 25.0
+SAJ_MORNING_GRID_IMPORT_GUARD_START_SOC_PERCENT = 21.0
 SAJ_MORNING_GRID_IMPORT_GUARD_STOP_SOC_PERCENT = 20.0
-SAJ_MORNING_GRID_IMPORT_GUARD_DISCHARGE_POWER_W = 2_000
+SAJ_MORNING_GRID_IMPORT_GUARD_DISCHARGE_POWER_W = 5_000
+SAJ_GRID_IMPORT_GUARD_RETRY_SECONDS = 120
+SAJ_GRID_IMPORT_GUARD_TARGET_MARGIN_W = 50.0
 SAJ_MORNING_GRID_IMPORT_GUARD_STATE_KEY = "operation_state.saj_morning_grid_import_guard"
 SAJ_POST_FREE_DISCHARGE_STATE_KEY = "operation_state.saj_post_free_discharge"
 EXPORT_WINDOW_BATTERY_SOFT_DISCHARGE_TARGET_W = 7_500.0
@@ -342,6 +344,8 @@ TIME_WINDOW_RULE_DEFINITIONS: tuple[dict[str, str], ...] = (
     {"code": "saj_profile_self_consumption", "window": "export_window", "kind": "operation"},
     {"code": "saj_profile_self_consumption", "window": "overnight_shoulder", "kind": "operation"},
     {"code": "saj_morning_grid_import_guard", "window": "overnight_shoulder", "kind": "operation"},
+    {"code": "saj_morning_grid_import_guard", "window": "after_free_shoulder", "kind": "operation"},
+    {"code": "saj_morning_grid_import_guard", "window": "export_window", "kind": "operation"},
     {"code": "tesla_overnight_shoulder_control", "window": "overnight_shoulder", "kind": "operation"},
     {"code": "pool_pump_overnight_control", "window": "overnight_shoulder", "kind": "operation"},
     {"code": "tesla_after_free_shoulder_control", "window": "after_free_shoulder", "kind": "operation"},
@@ -3731,12 +3735,8 @@ def _pool_pump_zero_fit_export_sink_context(
 
 
 def _is_within_saj_morning_grid_import_guard_window(now_local: datetime) -> bool:
-    hour = now_local.hour
-    return _is_hour_in_window(
-        hour,
-        SAJ_MORNING_GRID_IMPORT_GUARD_START_HOUR,
-        SAJ_MORNING_GRID_IMPORT_GUARD_END_HOUR,
-    )
+    # Keep the legacy rule identifier for saved settings and operation history.
+    return not _is_within_free_energy_window(now_local)
 
 
 def _overnight_shoulder_window_key(now_local: datetime) -> str:
@@ -3958,6 +3958,9 @@ async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str
         "free_energy_fallback_needed": free_energy_fallback_needed,
         "action": "noop",
     }
+    if not free_energy_window_active and (await _load_saj_morning_grid_import_guard_state()).get("active"):
+        result["reason"] = "paid_grid_import_guard_has_priority"
+        return result
     if not free_energy_window_active:
         target_power_percent = int(round((SAJ_POST_FREE_DISCHARGE_POWER_W / SAJ_RATED_POWER_W) * 100.0))
         trigger_date = now_local.date().isoformat()
@@ -5974,6 +5977,49 @@ def _update_solar_surplus_export_energy_tracking(
     }
 
 
+def _saj_evening_export_plan(metrics: dict[str, object], now_local: datetime) -> dict[str, object]:
+    """Spend SAJ first while preserving the combined overnight reserve."""
+    plan: dict[str, object] = {
+        "window_active": 17 <= now_local.hour < 20,
+        "start_hour": 17, "end_hour": 20, "reserve_target_hour": EXPORT_WINDOW_END_HOUR,
+        "target_soc_percent": BATTERY_MIN_DISCHARGE_SOC_PERCENT["saj"],
+        "target_power_w": 0, "reason": "outside_saj_evening_window",
+    }
+    if not plan["window_active"]:
+        return plan
+    reference = _combined_usable_battery_reference(metrics)
+    by_system = reference["usable_battery_by_system_kwh"]
+    saj_kwh = _to_number(by_system.get("saj"))
+    solplanet_kwh = _to_number(by_system.get("solplanet"))
+    soc = _to_number(metrics.get("battery1_soc_percent"))
+    load_w = _to_number(metrics.get("load_w"))
+    if saj_kwh is None or solplanet_kwh is None or soc is None or load_w is None:
+        plan["reason"] = "missing_battery_or_load_metrics"
+        return plan
+    if soc <= BATTERY_MIN_DISCHARGE_SOC_PERCENT["saj"] or saj_kwh <= 0:
+        plan["reason"] = "saj_reserve_floor_reached"
+        return plan
+    remaining_h = (now_local.replace(hour=EXPORT_WINDOW_END_HOUR, minute=0, second=0, microsecond=0) - now_local).total_seconds() / 3600
+    stop_floor = max(float(settings.solplanet_export_reserve_floor_kwh), 0.0) + SOLPLANET_EXPORT_MONITOR_RESERVE_BUFFER_KWH
+    spendable_kwh = max(saj_kwh + solplanet_kwh - stop_floor, 0.0)
+    budget_w = min(SAJ_EXPORT_WINDOW_DISCHARGE_POWER_W, spendable_kwh / remaining_h * 1000)
+    # Only force an evening export if the combined reserve can also cover the
+    # projected household load. Paid-import support remains a separate minimum.
+    exportable_kwh = spendable_kwh - max(load_w, 0.0) * remaining_h / 1000
+    target_w = int(budget_w // 50) * 50 if exportable_kwh > 0 else 0
+    plan.update({
+        "target_power_w": target_w,
+        "reason": "saj_first_before_23" if target_w > 0 else "preserve_overnight_reserve",
+        "saj_usable_kwh": saj_kwh,
+        "remaining_hours": round(remaining_h, 4),
+        "required_average_power_w": round(saj_kwh / remaining_h * 1000, 1),
+        "combined_stop_floor_kwh": stop_floor,
+        "exportable_after_home_load_kwh": round(exportable_kwh, 4),
+        "deadline_feasible_at_target": target_w * remaining_h / 1000 >= saj_kwh,
+    })
+    return plan
+
+
 def _build_solplanet_export_monitor(
     *,
     metrics_map: dict[str, object],
@@ -6165,6 +6211,16 @@ def _build_solplanet_export_monitor(
             recommendation = "stop"
             reason = "outside_export_window"
 
+    saj_evening_plan = _saj_evening_export_plan(metrics_map, now_local)
+    total_recommended_pout_w = recommended_pout_w
+    saj_measured_contribution_w = 0.0
+    if saj_evening_plan["window_active"]:
+        saj_measured_contribution_w = max(_to_number(metrics_map.get("battery1_w")) or 0.0, 0.0)
+        recommended_pout_w = 0.0
+        recommendation = "hold"
+        reason = "solplanet_home_support_during_saj_priority"
+
+
     minutes_to_target_at_recommended_power = None
     if recommended_pout_w > 0.0 and target_sell_kwh > 0.0:
         minutes_to_target_at_recommended_power = round((target_sell_kwh / (recommended_pout_w / 1000.0)) * 60.0, 1)
@@ -6183,6 +6239,9 @@ def _build_solplanet_export_monitor(
         "phase": phase,
         "recommendation": recommendation,
         "reason": reason,
+        "saj_evening_plan": saj_evening_plan,
+        "total_recommended_pout_w": round(total_recommended_pout_w, 1),
+        "saj_measured_contribution_w": round(saj_measured_contribution_w, 1),
         "recommended_pout_w": round(recommended_pout_w, 1),
         "target_pout_w": SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W,
         "exported_kwh": round(exported_kwh, 4),
@@ -6332,7 +6391,9 @@ async def _apply_solplanet_export_monitor_control(
         except ValueError:
             elapsed_since_check_s = None
 
-    target_changed = last_desired_pout is None or int(last_desired_pout) != desired_pout
+    home_support_only = 17 <= now_local.hour < 20
+    target_changed = (last_desired_pout is None or int(last_desired_pout) != desired_pout
+                      or home_support_only != bool(state_map.get("home_support_only")))
     min_interval_elapsed = (
         elapsed_since_check_s is None
         or elapsed_since_check_s >= SOLPLANET_EXPORT_MONITOR_CONTROL_MIN_INTERVAL_SECONDS
@@ -6364,6 +6425,25 @@ async def _apply_solplanet_export_monitor_control(
         return base_result
 
     try:
+        if home_support_only:
+            # Self-consumption supplies the actual household deficit. Do not
+            # impose a zero battery power limit or a forced selling schedule.
+            battery_info = await _solplanet_get_battery_info_live()
+            mode_register = _to_number(battery_info.get("mod_r"))
+            result = {**base_result, "home_support_only": True, "checked_live": True,
+                      "desired_pout_w": 0, "desired_reason": "solplanet_home_support_during_saj_priority",
+                      "target_work_mode": SOLPLANET_WORK_MODE_SELF_CONSUMPTION}
+            if mode_register == SOLPLANET_WORK_MODE_REGISTER_BY_ID[SOLPLANET_WORK_MODE_SELF_CONSUMPTION]:
+                result["action"] = {"type": "noop", "reason": "already_at_target"}
+            else:
+                write_result = await _solplanet_set_work_mode_payload(SOLPLANET_WORK_MODE_SELF_CONSUMPTION)
+                result["mode_write_result"] = write_result
+                if write_result.get("readback_mode") != SOLPLANET_WORK_MODE_SELF_CONSUMPTION:
+                    raise RuntimeError("Solplanet self-consumption mode readback did not match")
+                result["action"] = {"type": "apply", "reason": "solplanet_home_support_during_saj_priority"}
+            combined_status["solplanet_export_monitor_control"] = {**result, "checked_at_utc": now_utc.isoformat()}
+            return result
+
         schedule = await _solplanet_get_schedule_live()
         current_pout = int(_to_number(schedule.get("Pout")) or 0)
         day_key = _solplanet_day_key_for_local_date(now_local)
@@ -6615,6 +6695,10 @@ async def _apply_saj_export_window_discharge_control(
     now_local: datetime,
     combined_status: dict[str, object],
 ) -> dict[str, object]:
+    guard_state = await _load_saj_morning_grid_import_guard_state()
+    if _is_within_saj_morning_grid_import_guard_window(now_local) and guard_state.get("active"):
+        return {"mode": "auto_control", "checked_live": False,
+                "action": {"type": "noop", "reason": "paid_grid_import_guard_has_priority"}}
     solplanet_control_map = solplanet_control if isinstance(solplanet_control, dict) else {}
     desired_pout = _to_number(solplanet_control_map.get("desired_pout_w"))
     if desired_pout is None:
@@ -8819,263 +8903,172 @@ async def _run_saj_morning_grid_import_guard_check(
     requested_at_utc = str(requested_at_utc or "").strip() or datetime.now(UTC).isoformat()
     started_monotonic = monotonic()
     now_local, timezone_name = _tesla_grid_support_now_local()
+    now_utc = datetime.now(UTC)
     window_active = _is_within_saj_morning_grid_import_guard_window(now_local)
     result: dict[str, object] = {
-        "executed_at_utc": datetime.now(UTC).isoformat(),
+        "executed_at_utc": now_utc.isoformat(),
         "evaluated_at_local": now_local.isoformat(),
         "timezone": timezone_name,
         "window_active": window_active,
-        "window_mode": "saj_morning_grid_import_guard" if window_active else "off",
-        "window_schedule": (
-            f"{SAJ_MORNING_GRID_IMPORT_GUARD_START_HOUR:02d}:00-"
-            f"{SAJ_MORNING_GRID_IMPORT_GUARD_END_HOUR:02d}:00"
-        ),
+        "window_mode": "paid_energy_grid_import_guard" if window_active else "off",
+        "window_schedule": "15:00-11:00(+1d)",
         "target": "saj_battery",
         "thresholds": {
             "trigger_grid_import_w": SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_W,
             "trigger_checks": SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_CHECKS,
-            "clear_grid_import_w": SAJ_MORNING_GRID_IMPORT_GUARD_CLEAR_W,
-            "clear_seconds": SAJ_MORNING_GRID_IMPORT_GUARD_CLEAR_SECONDS,
             "start_soc_percent": SAJ_MORNING_GRID_IMPORT_GUARD_START_SOC_PERCENT,
             "stop_soc_percent": SAJ_MORNING_GRID_IMPORT_GUARD_STOP_SOC_PERCENT,
-            "discharge_power_w": SAJ_MORNING_GRID_IMPORT_GUARD_DISCHARGE_POWER_W,
+            "max_discharge_power_w": SAJ_MORNING_GRID_IMPORT_GUARD_DISCHARGE_POWER_W,
+            "retry_seconds": SAJ_GRID_IMPORT_GUARD_RETRY_SECONDS,
         },
     }
-    status = "ok"
-    ok = True
-    error_text: str | None = None
+    status, ok, error_text = "noop", True, None
     try:
         enabled_map = await _load_time_window_rule_enabled_map()
-        result["rule_enabled_map"] = enabled_map
         rule_code = "saj_morning_grid_import_guard"
-        rule_enabled = _is_time_window_rule_enabled(enabled_map, rule_code)
-        result["rule_code"] = rule_code
-        result["rule_enabled"] = rule_enabled
-        persisted_state = await _load_saj_morning_grid_import_guard_state()
-        active = bool(persisted_state.get("active"))
-        high_import_checks = int(_to_number(persisted_state.get("high_import_checks")) or 0)
-        low_import_since_utc = str(persisted_state.get("low_import_since_utc") or "").strip()
-        last_action_at_utc = str(persisted_state.get("last_action_at_utc") or "").strip()
-
+        enabled = _is_time_window_rule_enabled(enabled_map, rule_code)
+        state = dict(await _load_saj_morning_grid_import_guard_state())
+        active = bool(state.get("active"))
         metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
-        metrics_map = metrics if isinstance(metrics, dict) else {}
-        grid_w = _to_number(metrics_map.get("grid_w"))
-        saj_soc_percent = _to_number(metrics_map.get("battery1_soc_percent"))
-        saj_battery_w = _to_number(metrics_map.get("battery1_w"))
-        saj_battery_discharging = bool(
-            saj_battery_w is not None and saj_battery_w >= POWER_FLOW_ACTIVE_THRESHOLD_W
-        )
-        current_grid_import_w = max(float(grid_w), 0.0) if grid_w is not None else None
-        result.update(
-            {
-                "grid_w": round(grid_w, 1) if grid_w is not None else None,
-                "current_grid_import_w": (
-                    round(current_grid_import_w, 1) if current_grid_import_w is not None else None
-                ),
-                "saj_soc_percent": saj_soc_percent,
-                "saj_battery_w": round(saj_battery_w, 1) if saj_battery_w is not None else None,
-                "saj_battery_discharging": saj_battery_discharging,
-                "state_before": {
-                    "active": active,
-                    "high_import_checks": high_import_checks,
-                    "low_import_since_utc": low_import_since_utc or None,
-                    "last_action_at_utc": last_action_at_utc or None,
-                },
-            }
-        )
+        metrics = metrics if isinstance(metrics, dict) else {}
+        grid_w = _to_number(metrics.get("grid_w"))
+        soc = _to_number(metrics.get("battery1_soc_percent"))
+        battery_w = _to_number(metrics.get("battery1_w"))
+        result.update({
+            "rule_enabled_map": enabled_map, "rule_code": rule_code, "rule_enabled": enabled,
+            "state_before": dict(state), "grid_w": grid_w, "saj_soc_percent": soc,
+            "saj_battery_w": battery_w,
+            "current_grid_import_w": max(grid_w, 0.0) if grid_w is not None else None,
+            "saj_battery_discharging": battery_w is not None and battery_w >= POWER_FLOW_ACTIVE_THRESHOLD_W,
+        })
 
-        now_utc = datetime.now(UTC)
+        async def finish(reason: str, mode: str = "observe_only") -> dict[str, object]:
+            result.setdefault("action", {"type": "noop", "reason": reason})
+            result["decision"] = {"mode": mode, "reason": reason}
+            result["decision_reason"] = reason
+            state["updated_at_utc"] = now_utc.isoformat()
+            result["state_after"] = dict(state)
+            await _store_saj_morning_grid_import_guard_state(state)
+            return result
 
-        def _state_payload(**updates: object) -> dict[str, object]:
-            next_state = {
-                "active": active,
-                "high_import_checks": high_import_checks,
-                "low_import_since_utc": low_import_since_utc,
-                "last_action_at_utc": last_action_at_utc,
-                "updated_at_utc": now_utc.isoformat(),
-            }
-            next_state.update(updates)
-            return next_state
-
-        if not rule_enabled:
-            result["decision"] = {"mode": "observe_only"}
-            result["action"] = {"type": "noop", "reason": "rule_disabled"}
-            result["decision_reason"] = "rule_disabled"
-            status = "noop"
-            if high_import_checks or low_import_since_utc:
-                await _store_saj_morning_grid_import_guard_state(
-                    _state_payload(high_import_checks=0, low_import_since_utc="")
+        # Window/disable cleanup must work even when telemetry is unavailable.
+        exit_reason = "free_energy_window" if not window_active else "rule_disabled" if not enabled else None
+        if soc is not None and soc <= SAJ_MORNING_GRID_IMPORT_GUARD_STOP_SOC_PERCENT:
+            exit_reason = exit_reason or "saj_soc_below_stop_threshold"
+        if exit_reason is not None:
+            if active:
+                api_result = await put_saj_self_consumption(
+                    SajSelfConsumptionPayload(settle_seconds=2.0),
+                    trigger_source="worker:saj_morning_grid_import_guard",
                 )
-            return result
-
-        if grid_w is None or saj_soc_percent is None:
-            result["decision"] = {"mode": "observe_only"}
-            missing = []
-            if grid_w is None:
-                missing.append("combined_grid_w")
-            if saj_soc_percent is None:
-                missing.append("saj_soc_percent")
-            result["missing_metrics"] = missing
-            result["action"] = {"type": "noop", "reason": "missing_metrics"}
-            result["decision_reason"] = "missing_metrics"
+                result["action"] = {"type": "set_saj_self_consumption", "reason": exit_reason, "api_result": api_result}
+                result["actions"] = [result["action"]]
+                status = "applied"
+            state.update(active=False, high_import_checks=0, low_import_since_utc="", target_power_w=0)
+            return await finish(exit_reason, "stop_guard" if active else "observe_only")
+        if grid_w is None or soc is None or battery_w is None:
             status = "skipped"
-            return result
+            state["high_import_checks"] = 0
+            return await finish("missing_metrics")
 
-        exit_reason: str | None = None
-        if active and not window_active:
-            exit_reason = "outside_morning_window"
-        elif active and saj_soc_percent <= SAJ_MORNING_GRID_IMPORT_GUARD_STOP_SOC_PERCENT:
-            exit_reason = "saj_soc_below_stop_threshold"
+        sample_text = str(combined_flow.get("updated_at") or "")
+        try:
+            sample_at = datetime.fromisoformat(sample_text.replace("Z", "+00:00"))
+            sample_age_s = (now_utc - sample_at).total_seconds()
+        except (ValueError, TypeError):
+            sample_age_s = float("inf")
+        if combined_flow.get("stale") or not -30 <= sample_age_s <= 180:
+            status = "skipped"
+            state["high_import_checks"] = 0
+            return await finish("stale_metrics")
+        if state.get("last_sample_at_utc") == sample_text:
+            status = "skipped"
+            return await finish("waiting_for_new_sample", "keep_guard" if active else "observe_only")
+        state["last_sample_at_utc"] = sample_text
 
-        if active and exit_reason is None:
-            if current_grid_import_w is not None and current_grid_import_w < SAJ_MORNING_GRID_IMPORT_GUARD_CLEAR_W:
-                if not low_import_since_utc:
-                    low_import_since_utc = now_utc.isoformat()
-                try:
-                    low_import_since_dt = datetime.fromisoformat(low_import_since_utc.replace("Z", "+00:00"))
-                    if low_import_since_dt.tzinfo is None:
-                        low_import_since_dt = low_import_since_dt.replace(tzinfo=UTC)
-                    low_import_elapsed_seconds = max(
-                        (now_utc - low_import_since_dt.astimezone(UTC)).total_seconds(),
-                        0.0,
-                    )
-                except ValueError:
-                    low_import_elapsed_seconds = 0.0
-                result["low_import_elapsed_seconds"] = round(low_import_elapsed_seconds, 1)
-                if low_import_elapsed_seconds >= SAJ_MORNING_GRID_IMPORT_GUARD_CLEAR_SECONDS:
-                    exit_reason = "grid_import_clear_for_5_minutes"
-            elif low_import_since_utc:
-                low_import_since_utc = ""
+        evening_plan = _saj_evening_export_plan(metrics, now_local)
+        result["saj_evening_plan"] = evening_plan
+        evening_target_w = int(evening_plan["target_power_w"])
+        was_evening_export = bool(state.get("evening_export_active"))
+        state["evening_export_active"] = evening_target_w > 0
 
-        if active and exit_reason is not None:
-            api_result = await put_saj_self_consumption(
-                SajSelfConsumptionPayload(settle_seconds=2.0),
+        # Signed battery power removes charging from the import deficit. Never
+        # allocate hypothetical SAJ discharge that has not actually materialized.
+        required_w = max(0.0, battery_w + grid_w - SAJ_GRID_IMPORT_GUARD_TARGET_MARGIN_W)
+        target_w = min(SAJ_MORNING_GRID_IMPORT_GUARD_DISCHARGE_POWER_W, int((required_w + 49) // 50) * 50)
+        target_w = max(target_w, evening_target_w)
+        result["desired_discharge_power_w"] = target_w
+        high_import = grid_w > SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_W
+        checks = int(_to_number(state.get("high_import_checks")) or 0) + 1 if high_import else 0
+        state["high_import_checks"] = checks
+        result["high_import_checks"] = checks
+        if not active and evening_target_w <= 0 and soc <= SAJ_MORNING_GRID_IMPORT_GUARD_START_SOC_PERCENT:
+            state["high_import_checks"] = 0
+            return await finish("saj_soc_not_above_start_threshold")
+
+        # Near-zero grid import while discharging is success, not a reason to
+        # withdraw support. Release only when the actual load no longer needs it.
+        if active and target_w < SAJ_MORNING_GRID_IMPORT_GUARD_CLEAR_W and not high_import:
+            clear_since = str(state.get("low_import_since_utc") or now_utc.isoformat())
+            state["low_import_since_utc"] = clear_since
+            try:
+                elapsed = (now_utc - datetime.fromisoformat(clear_since.replace("Z", "+00:00"))).total_seconds()
+            except (ValueError, TypeError):
+                elapsed = 0.0
+                state["low_import_since_utc"] = now_utc.isoformat()
+            if elapsed >= SAJ_MORNING_GRID_IMPORT_GUARD_CLEAR_SECONDS:
+                api_result = await put_saj_self_consumption(
+                    SajSelfConsumptionPayload(settle_seconds=2.0),
+                    trigger_source="worker:saj_morning_grid_import_guard",
+                )
+                result["action"] = {"type": "set_saj_self_consumption", "reason": "load_no_longer_needs_discharge", "api_result": api_result}
+                result["actions"] = [result["action"]]
+                state.update(active=False, target_power_w=0, high_import_checks=0, low_import_since_utc="")
+                status = "applied"
+                return await finish("load_no_longer_needs_discharge", "stop_guard")
+        else:
+            state["low_import_since_utc"] = ""
+
+        last_action = str(state.get("last_action_at_utc") or "")
+        try:
+            elapsed = (now_utc - datetime.fromisoformat(last_action.replace("Z", "+00:00"))).total_seconds()
+        except (ValueError, TypeError):
+            elapsed = float("inf")
+        last_target = _to_number(state.get("target_power_w"))
+        target_changed = last_target is None or abs(target_w - last_target) >= 200
+        retry_needed = (high_import or evening_target_w > 0) and battery_w < target_w - 200
+        ready = elapsed >= SAJ_GRID_IMPORT_GUARD_RETRY_SECONDS or (was_evening_export and evening_target_w == 0)
+        should_apply = (
+            (not active and (evening_target_w > 0 or checks >= SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_CHECKS))
+            or (active and ready and (target_changed or retry_needed))
+        )
+        if should_apply:
+            # A zero target still disables unwanted TOU charging when solar
+            # could meet the load but the battery is consuming the surplus.
+            api_result = await put_saj_manual_discharge_power(
+                SajManualDischargePowerPayload(power_w=target_w, settle_seconds=2.0),
                 trigger_source="worker:saj_morning_grid_import_guard",
             )
-            action = {
-                "type": "set_saj_self_consumption",
-                "reason": exit_reason,
-                "api_path": "/api/saj/self-consumption",
-                "api_result": api_result,
-            }
-            result["decision"] = {"mode": "stop_guard", "reason": exit_reason}
-            result["action"] = action
-            result["actions"] = [action]
-            result["decision_reason"] = exit_reason
-            last_action_at_utc = now_utc.isoformat()
-            await _store_saj_morning_grid_import_guard_state(
-                _state_payload(
-                    active=False,
-                    high_import_checks=0,
-                    low_import_since_utc="",
-                    last_action_at_utc=last_action_at_utc,
-                    last_stop_reason=exit_reason,
-                )
-            )
+            reason = "saj_first_before_23" if evening_target_w > 0 else "paid_grid_import_with_saj_energy" if not active else "retarget_or_retry_saj_discharge"
+            result["action"] = {"type": "set_saj_manual_discharge_power", "reason": reason,
+                                "power_w": target_w, "api_path": "/api/saj/manual-discharge-power", "api_result": api_result}
+            result["actions"] = [result["action"]]
+            state.update(active=True, target_power_w=target_w, last_action_at_utc=now_utc.isoformat(), high_import_checks=0)
+            result["verification"] = "await_next_power_sample"
             status = "applied"
-            return result
-
-        if active:
-            result["decision"] = {"mode": "keep_guard"}
-            result["action"] = {"type": "noop", "reason": "guard_active"}
-            result["decision_reason"] = "guard_active"
-            status = "noop"
-            await _store_saj_morning_grid_import_guard_state(
-                _state_payload(low_import_since_utc=low_import_since_utc)
-            )
-            return result
-
-        if not window_active:
-            result["decision"] = {"mode": "observe_only"}
-            result["action"] = {"type": "noop", "reason": "outside_morning_window"}
-            result["decision_reason"] = "outside_morning_window"
-            status = "outside_window"
-            await _store_saj_morning_grid_import_guard_state(
-                _state_payload(active=False, high_import_checks=0, low_import_since_utc="")
-            )
-            return result
-
-        if saj_soc_percent <= SAJ_MORNING_GRID_IMPORT_GUARD_START_SOC_PERCENT:
-            result["decision"] = {"mode": "observe_only"}
-            result["action"] = {"type": "noop", "reason": "saj_soc_not_above_start_threshold"}
-            result["decision_reason"] = "saj_soc_not_above_start_threshold"
-            status = "noop"
-            await _store_saj_morning_grid_import_guard_state(
-                _state_payload(active=False, high_import_checks=0, low_import_since_utc="")
-            )
-            return result
-
-        if current_grid_import_w is not None and current_grid_import_w > SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_W:
-            high_import_checks += 1
-        else:
-            high_import_checks = 0
-        result["high_import_checks"] = high_import_checks
-
-        if high_import_checks >= SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_CHECKS and not saj_battery_discharging:
-            api_result = await put_saj_manual_discharge_power(
-                SajManualDischargePowerPayload(
-                    power_w=SAJ_MORNING_GRID_IMPORT_GUARD_DISCHARGE_POWER_W,
-                    settle_seconds=2.0,
-                )
-            )
-            action = {
-                "type": "set_saj_manual_discharge_power",
-                "reason": "morning_grid_import_with_saj_energy",
-                "api_path": "/api/saj/manual-discharge-power",
-                "power_w": SAJ_MORNING_GRID_IMPORT_GUARD_DISCHARGE_POWER_W,
-                "api_result": api_result,
-            }
-            result["decision"] = {"mode": "start_guard", "power_w": SAJ_MORNING_GRID_IMPORT_GUARD_DISCHARGE_POWER_W}
-            result["action"] = action
-            result["actions"] = [action]
-            result["decision_reason"] = "morning_grid_import_with_saj_energy"
-            last_action_at_utc = now_utc.isoformat()
-            await _store_saj_morning_grid_import_guard_state(
-                _state_payload(
-                    active=True,
-                    high_import_checks=0,
-                    low_import_since_utc="",
-                    last_action_at_utc=last_action_at_utc,
-                    last_start_reason="morning_grid_import_with_saj_energy",
-                )
-            )
-            status = "applied"
-            return result
-
-        reason = "saj_already_discharging" if saj_battery_discharging else "waiting_for_second_import_check"
-        result["decision"] = {"mode": "observe_only"}
-        result["action"] = {"type": "noop", "reason": reason}
-        result["decision_reason"] = reason
-        status = "noop"
-        await _store_saj_morning_grid_import_guard_state(
-            _state_payload(
-                active=False,
-                high_import_checks=high_import_checks,
-                low_import_since_utc="",
-            )
-        )
-        return result
+            return await finish(reason, "start_guard" if not active else "adjust_guard")
+        result["verification"] = "grid_import_persists" if high_import else "grid_import_within_tolerance"
+        return await finish("guard_active" if active else "waiting_for_second_import_check", "keep_guard" if active else "observe_only")
     except Exception as exc:  # noqa: BLE001
-        status = "failed"
-        ok = False
-        error_text = f"{type(exc).__name__}: {exc}"
+        status, ok, error_text = "failed", False, f"{type(exc).__name__}: {exc}"
         result["error"] = error_text
         raise
     finally:
-        result["log_status"] = status
-        result["log_ok"] = ok
-        if error_text:
-            result["log_error_text"] = error_text
+        result["log_status"], result["log_ok"] = status, ok
         await _persist_worker_control_log(
-            round_id=round_id,
-            system="saj",
-            service="saj_morning_grid_import_guard",
-            requested_at_utc=requested_at_utc,
-            started_monotonic=started_monotonic,
-            ok=ok,
-            status=status,
-            payload=result,
-            error_text=error_text,
+            round_id=round_id, system="saj", service="saj_morning_grid_import_guard",
+            requested_at_utc=requested_at_utc, started_monotonic=started_monotonic,
+            ok=ok, status=status, payload=result, error_text=error_text,
         )
 
 
