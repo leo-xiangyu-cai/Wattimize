@@ -183,7 +183,7 @@ def _env_values() -> dict[str, object]:
     return {
         "ha_url": os.getenv("HA_URL", "").strip(),
         "ha_token": os.getenv("HA_TOKEN", "").strip(),
-        "local_timezone": os.getenv("WATTIMIZE_LOCAL_TIMEZONE", os.getenv("TZ", "")).strip(),
+        "local_timezone": os.getenv("WATTIMIZE_LOCAL_TIMEZONE", "Australia/Sydney").strip(),
         "solplanet_dongle_host": os.getenv("SOLPLANET_DONGLE_HOST", "").strip(),
         "solplanet_inverter_sn": os.getenv("SOLPLANET_INVERTER_SN", "").strip(),
         "solplanet_battery_sn": os.getenv("SOLPLANET_BATTERY_SN", "").strip(),
@@ -200,7 +200,7 @@ def _build_settings(raw: dict[str, object]) -> Settings:
     return Settings(
         ha_url=str(raw.get("ha_url") or "").strip().rstrip("/"),
         ha_token=str(raw.get("ha_token") or "").strip(),
-        local_timezone=str(raw.get("local_timezone") or "").strip(),
+        local_timezone=str(raw.get("local_timezone") or "Australia/Sydney").strip() or "Australia/Sydney",
         saj_target_profile=str(raw.get("saj_target_profile") or "").strip(),
         saj_core_entity_ids=DEFAULT_SAJ_ENTITY_IDS,
         solplanet_core_entity_ids=DEFAULT_SOLPLANET_ENTITY_IDS,

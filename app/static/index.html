@@ -2,6 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="wattimize-timezone" content="__SITE_TIMEZONE__" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dashboard</title>
     <link rel="stylesheet" href="/static/styles.css?v=20260901-meter-usage-billing" />
@@ -10,6 +11,7 @@
     <main class="page">
       <header class="topbar">
         <div class="topbar-actions">
+          <span class="muted"><span data-i18n="siteTimeLabel">Site time</span>: <span id="siteClock"></span></span>
           <label class="lang-switch">
             <span data-i18n="languageLabel">Language</span>
             <select id="langSelect">
@@ -897,6 +899,8 @@
     <script src="/static/vendor/dagre.min.js"></script>
     <script src="/static/vendor/x6.min.js"></script>
     <script src="/static/energy-flow-diagram.js"></script>
-    <script src="/static/app.js?v=20260901-meter-usage-billing"></script>
+    <script src="/static/vendor/date-fns-tz.js?v=1.5.0"></script>
+    <script src="/static/site-time.js"></script>
+    <script src="/static/app.js?v=20261009-site-time"></script>
   </body>
 </html>

@@ -224,6 +224,12 @@ First-run configuration:
 - `GET /api/storage/samples?system=combined` now includes `tesla_charge_power_w` and `pool_pump_power_w` so frontend charts can separate home load from Tesla/pool-pump overlays.
 - The frontend can export, import, view backup status, and manually trigger a full SQLite backup from the Database tab.
 
+## Site timezone
+
+The dashboard and automatic controls use the configured site timezone (default
+`Australia/Sydney`), including daylight saving. Browser location does not change
+displayed times or history query boundaries. See [site time and DST](docs/site-timezone.md).
+
 ## 7) Time Window Rules And Tesla Control
 
 - The `Time Window` tab shows rule switches for each automation window, covering both notifications and automated operations.

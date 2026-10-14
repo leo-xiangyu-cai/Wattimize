@@ -73,6 +73,7 @@ function xhrRequest(url, options = {}) {
 const I18N = {
   en: {
     subtitle: "SAJ + Solplanet monitoring panel",
+    siteTimeLabel: "Site time",
     languageLabel: "Language",
     autoRefreshLabel: "Auto Refresh",
     autoRefreshOff: "Off",
@@ -1278,6 +1279,7 @@ const I18N = {
   },
   zh: {
     subtitle: "SAJ + Solplanet 监控面板",
+    siteTimeLabel: "电站时间",
     languageLabel: "语言",
     autoRefreshLabel: "自动刷新",
     autoRefreshOff: "关闭",
@@ -3086,8 +3088,8 @@ const initialReportDayParts = localDateParts(initialReportDay);
 const REPORT_CALENDAR_FOUR4FREE_START_DAY = "2026-07-28";
 const reportCalendarState = {
   selectedDay: initialReportDay,
-  month: initialReportDayParts ? initialReportDayParts.monthIndex + 1 : new Date().getMonth() + 1,
-  monthYear: initialReportDayParts ? initialReportDayParts.year : new Date().getFullYear(),
+  month: initialReportDayParts ? initialReportDayParts.monthIndex + 1 : new SiteDate().getMonth() + 1,
+  monthYear: initialReportDayParts ? initialReportDayParts.year : new SiteDate().getFullYear(),
   availableDays: new Map(),
   loadedMonths: new Set(),
   loadingIndex: false,
@@ -3101,9 +3103,9 @@ const reportBillsState = {
   error: "",
 };
 const monthlyReportState = {
-  month: initialReportDayParts ? initialReportDayParts.monthIndex + 1 : new Date().getMonth() + 1,
-  monthYear: initialReportDayParts ? initialReportDayParts.year : new Date().getFullYear(),
-  pickerYear: initialReportDayParts ? initialReportDayParts.year : new Date().getFullYear(),
+  month: initialReportDayParts ? initialReportDayParts.monthIndex + 1 : new SiteDate().getMonth() + 1,
+  monthYear: initialReportDayParts ? initialReportDayParts.year : new SiteDate().getFullYear(),
+  pickerYear: initialReportDayParts ? initialReportDayParts.year : new SiteDate().getFullYear(),
   availableMonths: new Map(),
   loadedYears: new Set(),
   loadingIndex: false,
@@ -3422,7 +3424,7 @@ function formatUpdatedAt(isoText) {
 
 function isIsoOlderThanSeconds(isoText, seconds) {
   if (!isoText) return false;
-  const dt = new Date(isoText);
+  const dt = new SiteDate(isoText);
   if (Number.isNaN(dt.getTime())) return false;
   return (Date.now() - dt.getTime()) / 1000 > seconds;
 }
@@ -3433,7 +3435,7 @@ function formatNoWrapText(text) {
 
 function formatDateTimeWithAgo(isoText, options = {}) {
   if (!isoText) return "-";
-  const dt = new Date(isoText);
+  const dt = new SiteDate(isoText);
   if (Number.isNaN(dt.getTime())) return "-";
   const absoluteText = dt.toLocaleString();
   const agoText = formatRelativeAgo(isoText);
@@ -3444,7 +3446,7 @@ function formatDateTimeWithAgo(isoText, options = {}) {
 function formatWorkerLogLocalTimeFromEpoch(epochSeconds) {
   const raw = Number(epochSeconds);
   if (!Number.isFinite(raw)) return "-";
-  const dt = new Date(raw * 1000);
+  const dt = new SiteDate(raw * 1000);
   if (Number.isNaN(dt.getTime())) return "-";
   return formatDateTimeWithAgo(dt.toISOString());
 }
@@ -3454,7 +3456,7 @@ function looksLikeIsoDateTime(value) {
   const text = value.trim();
   if (!text) return false;
   if (!/^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}/.test(text)) return false;
-  const dt = new Date(text);
+  const dt = new SiteDate(text);
   return !Number.isNaN(dt.getTime());
 }
 
@@ -3483,11 +3485,11 @@ function databaseTimeToggleInfo(key, rawValue) {
   const normalizedValue = unwrapDatabaseStringValue(rawValue);
   if (looksLikeIsoDateTime(normalizedValue)) {
     const rawText = String(rawValue);
-    return { rawText, localText: new Date(String(normalizedValue)).toLocaleString() };
+    return { rawText, localText: new SiteDate(String(normalizedValue)).toLocaleString() };
   }
   if (looksLikeEpochTime(key, normalizedValue)) {
     const numeric = Number(normalizedValue);
-    const dt = new Date(numeric * 1000);
+    const dt = new SiteDate(numeric * 1000);
     if (!Number.isNaN(dt.getTime())) {
       return { rawText: String(rawValue), localText: dt.toLocaleString() };
     }
@@ -3598,7 +3600,7 @@ function formatSamplingDateTime(isoText) {
 }
 
 function formatSamplingClock(value, withZone = false) {
-  const dt = value instanceof Date ? value : new Date(value);
+  const dt = new SiteDate(value);
   if (Number.isNaN(dt.getTime())) return "-";
   const text = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
   if (!withZone) return text;
@@ -3633,7 +3635,7 @@ function buildSamplingTimeAxisConfig(xMin, xMax) {
       color: "#6b7f72",
       hideOverlap: false,
       formatter: (value) => {
-        const dt = new Date(value);
+        const dt = new SiteDate(value);
         if (Number.isNaN(dt.getTime())) return "";
         return `${String(dt.getHours()).padStart(2, "0")}:00`;
       },
@@ -3935,7 +3937,7 @@ function renderHomePlan(payload = stateCache.lastHomePlan) {
 
 function formatRelativeAgo(isoText) {
   if (!isoText) return "-";
-  const dt = new Date(isoText);
+  const dt = new SiteDate(isoText);
   if (Number.isNaN(dt.getTime())) return "-";
   const seconds = Math.max(0, Math.floor((Date.now() - dt.getTime()) / 1000));
   if (seconds < 3) return t("rawAgoJustNow");
@@ -4417,7 +4419,7 @@ function batteryUsableKwh(system, batterySoc) {
 
 function formatBatteryRuntimeTargetTime(targetAt) {
   if (!(targetAt instanceof Date) || Number.isNaN(targetAt.getTime())) return null;
-  const now = new Date();
+  const now = new SiteDate();
   const timeText = targetAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const sameDay =
     targetAt.getFullYear() === now.getFullYear() &&
@@ -4427,8 +4429,8 @@ function formatBatteryRuntimeTargetTime(targetAt) {
   return currentLang === "zh" ? `明天 ${timeText}` : `tmr ${timeText}`;
 }
 
-function getNextWindowEndLocalTime(endHour, now = new Date()) {
-  const candidate = new Date(now);
+function getNextWindowEndLocalTime(endHour, now = new SiteDate()) {
+  const candidate = new SiteDate(now);
   candidate.setHours(endHour, 0, 0, 0);
   if (candidate.getTime() <= now.getTime()) {
     candidate.setDate(candidate.getDate() + 1);
@@ -4467,7 +4469,7 @@ function projectBatterySocAtTarget(system, batterySoc, batteryW, targetAt) {
 }
 
 function formatSolplanetWindowForecastHtml(batterySoc, batteryW) {
-  const now = new Date();
+  const now = new SiteDate();
   const activeWindows = SOLPLANET_WINDOW_FORECASTS.filter((item) => (
     isLocalTimeInHourWindow(now, Number(item.startHour), Number(item.endHour))
   ));
@@ -4511,7 +4513,7 @@ function getBatteryRuntimeProjection(system, batterySoc, batteryW) {
     if (remainingKwh <= 0) return null;
     const runtimeHours = remainingKwh / (Math.abs(powerW) / 1000);
     if (!Number.isFinite(runtimeHours) || runtimeHours < 0) return null;
-    const targetAt = new Date(Date.now() + runtimeHours * 3600 * 1000);
+    const targetAt = new SiteDate(Date.now() + runtimeHours * 3600 * 1000);
     const timeText = formatBatteryRuntimeTargetTime(targetAt);
     if (!timeText) return null;
     return { mode: "charging", runtimeHours, timeText };
@@ -4522,7 +4524,7 @@ function getBatteryRuntimeProjection(system, batterySoc, batteryW) {
   const usableKwh = (capacityKwh * usableSoc) / 100;
   const runtimeHours = usableKwh / (powerW / 1000);
   if (!Number.isFinite(runtimeHours) || runtimeHours < 0) return null;
-  const targetAt = new Date(Date.now() + runtimeHours * 3600 * 1000);
+  const targetAt = new SiteDate(Date.now() + runtimeHours * 3600 * 1000);
   const timeText = formatBatteryRuntimeTargetTime(targetAt);
   if (!timeText) return null;
   return { mode: "discharging", runtimeHours, timeText };
@@ -6374,7 +6376,7 @@ function latestIsoTime(...isoTexts) {
   let latestIso = null;
   for (const iso of isoTexts) {
     if (!iso) continue;
-    const ms = new Date(iso).getTime();
+    const ms = new SiteDate(iso).getTime();
     if (!Number.isFinite(ms)) continue;
     if (latestMs === null || ms > latestMs) {
       latestMs = ms;
@@ -6387,8 +6389,8 @@ function latestIsoTime(...isoTexts) {
 function pickLatestPoolPumpDevice(previousDevice, nextDevice) {
   if (!previousDevice || typeof previousDevice !== "object") return nextDevice || null;
   if (!nextDevice || typeof nextDevice !== "object") return previousDevice;
-  const previousMs = new Date(previousDevice.updated_at || 0).getTime();
-  const nextMs = new Date(nextDevice.updated_at || 0).getTime();
+  const previousMs = new SiteDate(previousDevice.updated_at || 0).getTime();
+  const nextMs = new SiteDate(nextDevice.updated_at || 0).getTime();
   if (Number.isFinite(previousMs) && Number.isFinite(nextMs) && previousMs > nextMs) {
     return previousDevice;
   }
@@ -6548,7 +6550,7 @@ function formatTeslaBatteryEnergyValue(currentKwh, totalKwh) {
 function formatTeslaChargeEtaSummary(teslaInfo = null) {
   const completionAtText = String(teslaInfo?.chargeCompletionAt || "").trim();
   if (completionAtText) {
-    const dt = new Date(completionAtText);
+    const dt = new SiteDate(completionAtText);
     if (!Number.isNaN(dt.getTime())) {
       const timeText = formatBatteryRuntimeTargetTime(dt);
       if (timeText) return t("batteryRuntimeCharging", { time: timeText });
@@ -6571,7 +6573,7 @@ function formatTeslaChargeEtaSummary(teslaInfo = null) {
   if (minutesToFull === null || !Number.isFinite(minutesToFull) || minutesToFull < 0) {
     return t("teslaChargeEtaUnavailable");
   }
-  const targetAt = new Date(Date.now() + minutesToFull * 60 * 1000);
+  const targetAt = new SiteDate(Date.now() + minutesToFull * 60 * 1000);
   const timeText = formatBatteryRuntimeTargetTime(targetAt);
   if (!timeText) return t("teslaChargeEtaUnavailable");
   return t("batteryRuntimeCharging", { time: timeText });
@@ -8403,7 +8405,7 @@ function renderNotificationMatrix() {
   }
 }
 
-function getCurrentNotificationMatrixWindowId(summary = null, now = new Date()) {
+function getCurrentNotificationMatrixWindowId(summary = null, now = new SiteDate()) {
   const visibleWindowIds = new Set(NOTIFICATION_MATRIX_WINDOWS.map((item) => item.id));
   const combined = summary?.collectorStatus?.systems?.combined || {};
   const middayWindow = String(combined?.last_midday_window_check?.window_mode || "").trim();
@@ -8918,7 +8920,7 @@ async function updateTimeWindowRuleState(ruleCode, enabled) {
     else items.push(nextItem);
     stateCache.lastTimeWindowRules = {
       ...current,
-      updated_at: payload?.updated_at_utc || new Date().toISOString(),
+      updated_at: payload?.updated_at_utc || new SiteDate().toISOString(),
       items,
     };
   } catch (err) {
@@ -9061,7 +9063,7 @@ function localDateParts(dateText) {
 function toUtcIsoFromDateOnly(dateText) {
   const parts = localDateParts(dateText);
   if (!parts) return null;
-  const d = new Date(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0);
+  const d = new SiteDate(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0);
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString();
 }
@@ -9069,19 +9071,19 @@ function toUtcIsoFromDateOnly(dateText) {
 function toUtcIsoFromDateEndExclusive(dateText) {
   const parts = localDateParts(dateText);
   if (!parts) return null;
-  const d = new Date(parts.year, parts.monthIndex, parts.day + 1, 0, 0, 0, 0);
+  const d = new SiteDate(parts.year, parts.monthIndex, parts.day + 1, 0, 0, 0, 0);
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString();
 }
 
 function toUtcIsoFromDateTimeLocal(dateTimeText) {
-  const d = new Date(dateTimeText);
+  const d = new SiteDate(dateTimeText);
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString();
 }
 
 function toLocalDateTimeInputValueFromMs(ms) {
-  const d = new Date(ms);
+  const d = new SiteDate(ms);
   if (Number.isNaN(d.getTime())) return "";
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -9098,7 +9100,7 @@ function toEpochMs(value) {
     return value > 1e11 ? value : value * 1000;
   }
   if (typeof value === "string") {
-    const d = new Date(value);
+    const d = new SiteDate(value);
     if (Number.isNaN(d.getTime())) return null;
     return d.getTime();
   }
@@ -9187,7 +9189,7 @@ function bindSamplingBrushGlobalHandlers() {
 }
 
 function getLocalDateText(offsetDays = 0) {
-  const d = new Date();
+  const d = new SiteDate();
   d.setDate(d.getDate() + offsetDays);
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -9197,26 +9199,26 @@ function getLocalDateText(offsetDays = 0) {
 
 function getWeekInfo(anchorDateText) {
   const anchorParts = localDateParts(anchorDateText);
-  const now = new Date();
+  const now = new SiteDate();
   const anchor = anchorParts
-    ? new Date(anchorParts.year, anchorParts.monthIndex, anchorParts.day, 0, 0, 0, 0)
-    : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    ? new SiteDate(anchorParts.year, anchorParts.monthIndex, anchorParts.day, 0, 0, 0, 0)
+    : new SiteDate(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
   const day = anchor.getDay();
   const diffToMonday = day === 0 ? -6 : 1 - day;
-  const monday = new Date(anchor);
+  const monday = new SiteDate(anchor);
   monday.setDate(anchor.getDate() + diffToMonday);
-  const endExclusive = new Date(monday);
+  const endExclusive = new SiteDate(monday);
   endExclusive.setDate(monday.getDate() + 7);
-  const sunday = new Date(monday);
+  const sunday = new SiteDate(monday);
   sunday.setDate(monday.getDate() + 6);
 
-  const thursday = new Date(monday);
+  const thursday = new SiteDate(monday);
   thursday.setDate(monday.getDate() + 3);
   const year = thursday.getFullYear();
-  const jan4 = new Date(year, 0, 4, 0, 0, 0, 0);
+  const jan4 = new SiteDate(year, 0, 4, 0, 0, 0, 0);
   const jan4Day = jan4.getDay() || 7;
-  const firstThursday = new Date(year, 0, 4 + (4 - jan4Day), 0, 0, 0, 0);
-  const week = 1 + Math.floor((thursday.getTime() - firstThursday.getTime()) / (7 * 86400000));
+  const firstThursday = new SiteDate(year, 0, 4 + (4 - jan4Day), 0, 0, 0, 0);
+  const week = 1 + Math.round((thursday.getTime() - firstThursday.getTime()) / (7 * 86400000));
 
   const localDateText = (date) => {
     const y = date.getFullYear();
@@ -9239,13 +9241,13 @@ function getDayInfo(dayText) {
   const fallback = getLocalDateText();
   const parts = localDateParts(dayText || fallback);
   const target = parts
-    ? new Date(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0)
-    : new Date();
+    ? new SiteDate(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0)
+    : new SiteDate();
   const yyyy = target.getFullYear();
   const mm = String(target.getMonth() + 1).padStart(2, "0");
   const dd = String(target.getDate()).padStart(2, "0");
   const normalized = `${yyyy}-${mm}-${dd}`;
-  const endUtc = normalized === getLocalDateText() ? new Date().toISOString() : toUtcIsoFromDateEndExclusive(normalized);
+  const endUtc = normalized === getLocalDateText() ? new SiteDate().toISOString() : toUtcIsoFromDateEndExclusive(normalized);
   return {
     day: normalized,
     startUtc: toUtcIsoFromDateOnly(normalized),
@@ -9255,9 +9257,9 @@ function getDayInfo(dayText) {
 }
 
 function getRecentPumpStatusRange(anchorRange = null) {
-  const anchorEndMs = new Date(anchorRange?.endUtc || "").getTime();
-  const end = Number.isFinite(anchorEndMs) ? new Date(anchorEndMs) : new Date();
-  const start = new Date(end.getTime() - 48 * 3600000);
+  const anchorEndMs = new SiteDate(anchorRange?.endUtc || "").getTime();
+  const end = Number.isFinite(anchorEndMs) ? new SiteDate(anchorEndMs) : new SiteDate();
+  const start = new SiteDate(end.getTime() - 48 * 3600000);
   return {
     startUtc: start.toISOString(),
     endUtc: end.toISOString(),
@@ -9266,11 +9268,11 @@ function getRecentPumpStatusRange(anchorRange = null) {
 }
 
 function getMonthInfo(monthText, yearText) {
-  const now = new Date();
+  const now = new SiteDate();
   const year = Number(yearText || now.getFullYear());
   const month = Math.max(1, Math.min(12, Number(monthText || `${now.getMonth() + 1}`) || 1));
-  const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
-  const end = new Date(year, month, 1, 0, 0, 0, 0);
+  const start = new SiteDate(year, month - 1, 1, 0, 0, 0, 0);
+  const end = new SiteDate(year, month, 1, 0, 0, 0, 0);
   return {
     year,
     month,
@@ -9292,7 +9294,7 @@ function localDateTextFromDate(date) {
 function dateFromLocalDateText(dayText) {
   const parts = localDateParts(dayText);
   if (!parts) return null;
-  return new Date(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0);
+  return new SiteDate(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0);
 }
 
 function getReportMonthInfo() {
@@ -9316,7 +9318,7 @@ function isReportGeneratableDay(dayText) {
 
 function getReportMonthCompletedDayCount(info = getReportMonthInfo()) {
   const today = getLocalDateText();
-  const daysInMonth = new Date(info.year, info.month, 0).getDate();
+  const daysInMonth = new SiteDate(info.year, info.month, 0).getDate();
   let count = 0;
   for (let day = 1; day <= daysInMonth; day += 1) {
     const dayText = `${info.year}-${String(info.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -9357,7 +9359,7 @@ function invalidateReportCalendarMonthsForBill(bill) {
   if (!startDate || !endDate || startDate > endDate) return;
 
   const invoice = String(bill?.invoice_number || "");
-  const cursor = new Date(startDate.getTime());
+  const cursor = new SiteDate(startDate.getTime());
   let guard = 0;
   while (cursor <= endDate && guard < 370) {
     const dayText = localDateTextFromDate(cursor);
@@ -9712,7 +9714,7 @@ function renderMonthlyAnomalies(payload) {
 
   const year = Number(monthMatch[1]);
   const month = Number(monthMatch[2]);
-  const daysInMonth = Number(payload?.days_in_month) || new Date(year, month, 0).getDate();
+  const daysInMonth = Number(payload?.days_in_month) || new SiteDate(year, month, 0).getDate();
   const dailyItems = Array.isArray(payload?.daily?.items) ? payload.daily.items : [];
   const dailyByDate = new Map(dailyItems.filter((item) => item?.date_local).map((item) => [String(item.date_local), item]));
   const eventsByDate = new Map();
@@ -9772,7 +9774,7 @@ function renderMonthlyAnomalies(payload) {
     "reportWeekdaySun",
   ];
   const weekdayHtml = weekdayKeys.map((key) => `<div class="monthly-report-anomaly-weekday">${escapeHtml(t(key))}</div>`).join("");
-  const leadingEmptyCells = (new Date(year, month - 1, 1, 12, 0, 0, 0).getDay() + 6) % 7;
+  const leadingEmptyCells = (new SiteDate(year, month - 1, 1, 12, 0, 0, 0).getDay() + 6) % 7;
   const cells = Array.from({ length: leadingEmptyCells }, () => '<div class="monthly-report-anomaly-empty" aria-hidden="true"></div>');
   for (let day = 1; day <= daysInMonth; day += 1) {
     const dateLocal = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -9841,7 +9843,7 @@ function getMonthlyReportStatus(report) {
 
 function formatMonthlyPickerMonth(year, month) {
   return new Intl.DateTimeFormat(currentLang === "zh" ? "zh-CN" : "en-AU", { month: "short" }).format(
-    new Date(year, month - 1, 1, 12, 0, 0, 0),
+    new SiteDate(year, month - 1, 1, 12, 0, 0, 0),
   );
 }
 
@@ -10042,7 +10044,7 @@ function renderReportCalendar() {
   const info = getReportMonthInfo();
   const monthKey = info.label;
   const today = getLocalDateText();
-  const daysInMonth = new Date(info.year, info.month, 0).getDate();
+  const daysInMonth = new SiteDate(info.year, info.month, 0).getDate();
   const completedDays = getReportMonthCompletedDayCount(info);
   const savedDays = Array.from(reportCalendarState.availableDays.keys()).filter((day) => day.startsWith(monthKey)).length;
   setText("reportCalendarTitle", info.display);
@@ -10061,7 +10063,7 @@ function renderReportCalendar() {
     prevBtn.setAttribute("aria-label", t("reportCalendarPrevMonth"));
     prevBtn.disabled = reportCalendarState.loadingIndex || Boolean(reportCalendarState.loadingDay);
     prevBtn.onclick = async () => {
-      const current = new Date(info.year, info.month - 1, 1, 0, 0, 0, 0);
+      const current = new SiteDate(info.year, info.month - 1, 1, 0, 0, 0, 0);
       current.setMonth(current.getMonth() - 1);
       reportCalendarState.monthYear = current.getFullYear();
       reportCalendarState.month = current.getMonth() + 1;
@@ -10074,7 +10076,7 @@ function renderReportCalendar() {
     nextBtn.setAttribute("aria-label", t("reportCalendarNextMonth"));
     nextBtn.disabled = reportCalendarState.loadingIndex || Boolean(reportCalendarState.loadingDay);
     nextBtn.onclick = async () => {
-      const current = new Date(info.year, info.month - 1, 1, 0, 0, 0, 0);
+      const current = new SiteDate(info.year, info.month - 1, 1, 0, 0, 0, 0);
       current.setMonth(current.getMonth() + 1);
       reportCalendarState.monthYear = current.getFullYear();
       reportCalendarState.month = current.getMonth() + 1;
@@ -10101,7 +10103,7 @@ function renderReportCalendar() {
 
   const grid = document.getElementById("reportCalendarGrid");
   if (!grid) return;
-  const firstDay = new Date(info.year, info.month - 1, 1, 0, 0, 0, 0);
+  const firstDay = new SiteDate(info.year, info.month - 1, 1, 0, 0, 0, 0);
   const leadingEmptyCells = (firstDay.getDay() + 6) % 7;
   const cells = [];
   for (let i = 0; i < leadingEmptyCells; i += 1) {
@@ -10728,13 +10730,13 @@ function parseSamplingRelativeInput(rawValue) {
 
 function applyRelativeOffset(date, relative) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime()) || !relative) return null;
-  const next = new Date(date.getTime());
+  const next = new SiteDate(date.getTime());
   if (relative.unit === "m") {
-    next.setMinutes(next.getMinutes() - relative.amount);
+    next.setTime(next.getTime() - relative.amount * 60000);
     return next;
   }
   if (relative.unit === "h") {
-    next.setHours(next.getHours() - relative.amount);
+    next.setTime(next.getTime() - relative.amount * 3600000);
     return next;
   }
   if (relative.unit === "d") {
@@ -10752,8 +10754,8 @@ function getSamplingRange() {
   const mode = document.getElementById("samplingRangeModeSelect")?.value || "day";
   const dayText = samplingRangeState.day || getLocalDateText();
   const weekText = samplingRangeState.week || dayText;
-  const monthNumber = Number(samplingRangeState.month || `${new Date().getMonth() + 1}`);
-  const monthYear = Number(samplingRangeState.monthYear || new Date().getFullYear());
+  const monthNumber = Number(samplingRangeState.month || `${new SiteDate().getMonth() + 1}`);
+  const monthYear = Number(samplingRangeState.monthYear || new SiteDate().getFullYear());
   const relativeText = samplingRangeState.relative || "";
   const startDate = samplingRangeState.startDate || "";
   const endDate = samplingRangeState.endDate || "";
@@ -10780,7 +10782,7 @@ function getSamplingRange() {
   }
   if (mode === "relative") {
     const relative = parseSamplingRelativeInput(relativeText);
-    const end = new Date();
+    const end = new SiteDate();
     const start = relative ? applyRelativeOffset(end, relative) : null;
     return {
       mode,
@@ -10869,7 +10871,7 @@ function buildSamplingRangeCurrentBadge(mode) {
   }
   if (mode === "month") {
     const selected = getMonthInfo(samplingRangeState.month, samplingRangeState.monthYear);
-    const now = new Date();
+    const now = new SiteDate();
     return selected.year === now.getFullYear() && selected.month === now.getMonth() + 1 ? t("samplingRangeThisMonthBadge") : "";
   }
   return "";
@@ -11036,8 +11038,8 @@ function bindSamplingRangeInputEvents() {
     const moveDay = async (deltaDays) => {
       const parts = localDateParts(samplingRangeState.day || getLocalDateText());
       const current = parts
-        ? new Date(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0)
-        : new Date();
+        ? new SiteDate(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0)
+        : new SiteDate();
       current.setDate(current.getDate() + deltaDays);
       samplingRangeState.day = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`;
       renderSamplingRangeInputContainer();
@@ -11058,8 +11060,8 @@ function bindSamplingRangeInputEvents() {
     const moveWeek = async (deltaDays) => {
       const parts = localDateParts(samplingRangeState.week || getLocalDateText());
       const current = parts
-        ? new Date(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0)
-        : new Date();
+        ? new SiteDate(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0)
+        : new SiteDate();
       current.setDate(current.getDate() + deltaDays);
       samplingRangeState.week = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`;
       renderSamplingRangeInputContainer();
@@ -11075,7 +11077,7 @@ function bindSamplingRangeInputEvents() {
     const nextBtn = document.getElementById("samplingMonthNextBtn");
     const moveMonth = async (deltaMonths) => {
       const info = getMonthInfo(samplingRangeState.month, samplingRangeState.monthYear);
-      const current = new Date(info.year, info.month - 1, 1, 0, 0, 0, 0);
+      const current = new SiteDate(info.year, info.month - 1, 1, 0, 0, 0, 0);
       current.setMonth(current.getMonth() + deltaMonths);
       samplingRangeState.monthYear = current.getFullYear();
       samplingRangeState.month = String(current.getMonth() + 1);
@@ -11994,7 +11996,7 @@ function renderSamplingZeroHeroWindow() {
 function formatSamplingZeroHeroHistoryDayLabel(dayItem) {
   const parts = localDateParts(dayItem?.date_local);
   if (!parts) return String(dayItem?.date_local || "-");
-  const dt = new Date(parts.year, parts.monthIndex, parts.day);
+  const dt = new SiteDate(parts.year, parts.monthIndex, parts.day);
   const locale = currentLang === "zh" ? "zh-CN" : "en-AU";
   const weekday = dt.toLocaleDateString(locale, { weekday: "short" });
   if (currentLang === "zh") {
@@ -12803,7 +12805,7 @@ function pickActiveOverallValue(latest, ts, maxGapMs, key) {
 function normalizeOverallSeriesItems(items, system) {
   return (Array.isArray(items) ? items : [])
     .map((item) => {
-      const ts = new Date(item.sampled_at_utc || "").getTime();
+      const ts = new SiteDate(item.sampled_at_utc || "").getTime();
       if (!Number.isFinite(ts)) return null;
       const pv = Math.max(Number(item.pv_w || 0), 0);
       const grid = Number(item.grid_w || 0);
@@ -12876,7 +12878,7 @@ function buildOverallSeriesPayload(seriesBySystem, status, range) {
     const gridImport = pickActiveOverallValue(latestCombined, ts, combinedGapMs, "grid_import_w");
     const gridExport = pickActiveOverallValue(latestCombined, ts, combinedGapMs, "grid_export_w");
     return {
-      sampled_at_utc: new Date(ts).toISOString(),
+      sampled_at_utc: new SiteDate(ts).toISOString(),
       pv_total_w: pvTotal,
       grid_import_w: gridImport,
       grid_export_w: gridExport,
@@ -12919,7 +12921,7 @@ function buildBatteryTimelinePayload(seriesBySystem, range) {
     const payload = seriesBySystem?.[meta.source];
     const items = Array.isArray(payload?.items) ? payload.items : [];
     const data = items
-      .map((item) => [new Date(item.sampled_at_utc || "").getTime(), Number(item[meta.valueKey || "battery_soc_percent"])])
+      .map((item) => [new SiteDate(item.sampled_at_utc || "").getTime(), Number(item[meta.valueKey || "battery_soc_percent"])])
       .filter((pair) => Number.isFinite(pair[0]) && Number.isFinite(pair[1]));
     return {
       key: meta.key,
@@ -12953,13 +12955,13 @@ function buildBatteryTimelinePayload(seriesBySystem, range) {
 function buildTeslaFreeChargePayload(combinedSeriesPayload, dayText) {
   const parts = localDateParts(dayText);
   if (!parts) return { day: dayText || "", hasData: false, charged_percent: null, used_percent: null, net_percent: null };
-  const windowStart = new Date(parts.year, parts.monthIndex, parts.day, SAMPLING_GRID_IMPORT_WINDOW.startHour, 0, 0, 0);
-  const windowEnd = new Date(parts.year, parts.monthIndex, parts.day, SAMPLING_GRID_IMPORT_WINDOW.endHour, 0, 0, 0);
+  const windowStart = new SiteDate(parts.year, parts.monthIndex, parts.day, SAMPLING_GRID_IMPORT_WINDOW.startHour, 0, 0, 0);
+  const windowEnd = new SiteDate(parts.year, parts.monthIndex, parts.day, SAMPLING_GRID_IMPORT_WINDOW.endHour, 0, 0, 0);
   const startMs = windowStart.getTime();
   const endMs = windowEnd.getTime();
   const items = (Array.isArray(combinedSeriesPayload?.items) ? combinedSeriesPayload.items : [])
     .map((item) => {
-      const ts = new Date(item?.sampled_at_utc || "").getTime();
+      const ts = new SiteDate(item?.sampled_at_utc || "").getTime();
       const soc = Number(item?.tesla_battery_soc_percent);
       return { ts, soc };
     })
@@ -12994,8 +12996,8 @@ function buildTeslaFreeChargePayload(combinedSeriesPayload, dayText) {
     sample_count: items.length,
     start_soc_percent: startSample.soc,
     end_soc_percent: endSample.soc,
-    start_sampled_at_utc: new Date(startSample.ts).toISOString(),
-    end_sampled_at_utc: new Date(endSample.ts).toISOString(),
+    start_sampled_at_utc: new SiteDate(startSample.ts).toISOString(),
+    end_sampled_at_utc: new SiteDate(endSample.ts).toISOString(),
     charged_percent: chargedPercent,
     used_percent: usedPercent,
     net_percent: endSample.soc - startSample.soc,
@@ -13021,14 +13023,14 @@ function buildFreeEnergyUsePayload(overallSeriesPayload, dayText, targetFreeGrid
       total_kwh: normalizedTargetKwh,
     };
   }
-  const windowStart = new Date(parts.year, parts.monthIndex, parts.day, SAMPLING_GRID_IMPORT_WINDOW.startHour, 0, 0, 0);
-  const windowEnd = new Date(parts.year, parts.monthIndex, parts.day, SAMPLING_GRID_IMPORT_WINDOW.endHour, 0, 0, 0);
+  const windowStart = new SiteDate(parts.year, parts.monthIndex, parts.day, SAMPLING_GRID_IMPORT_WINDOW.startHour, 0, 0, 0);
+  const windowEnd = new SiteDate(parts.year, parts.monthIndex, parts.day, SAMPLING_GRID_IMPORT_WINDOW.endHour, 0, 0, 0);
   const startMs = windowStart.getTime();
   const endMs = windowEnd.getTime();
   const rawItems = Array.isArray(overallSeriesPayload?.items) ? overallSeriesPayload.items : [];
   const items = rawItems
     .map((item) => ({
-      ts: new Date(item?.sampled_at_utc || "").getTime(),
+      ts: new SiteDate(item?.sampled_at_utc || "").getTime(),
       gridImportW: Math.max(Number(item?.grid_import_w || 0), 0),
       teslaW: Math.max(Number(item?.tesla_charge_power_w || 0), 0),
       homeLoadW: Math.max(Number(item?.load_w || 0), 0) + Math.max(Number(item?.pool_pump_power_w || 0), 0),
@@ -13118,8 +13120,8 @@ function renderTeslaFreeCharge(payload, freeEnergyUsePayload = stateCache.lastSa
   const hasData = Boolean(payload?.hasData);
   const valueText = hasData ? formatTeslaFreeChargePercent(payload.charged_percent, { signed: true }) : "-";
   const teslaKwhText = formatFreeEnergyUseKwh(freeEnergyUsePayload?.tesla_kwh);
-  const startTs = new Date(payload?.start_sampled_at_utc || "").getTime();
-  const endTs = new Date(payload?.end_sampled_at_utc || "").getTime();
+  const startTs = new SiteDate(payload?.start_sampled_at_utc || "").getTime();
+  const endTs = new SiteDate(payload?.end_sampled_at_utc || "").getTime();
   const detailText = hasData
     ? t("samplingTeslaFreeChargeDetail", {
         kwh: teslaKwhText,
@@ -13226,7 +13228,7 @@ function findNearestSeriesSampleAt(seriesPayload, targetMs, toleranceMs = SAMPLI
   let best = null;
   let bestDelta = Infinity;
   for (const item of items) {
-    const ts = new Date(item?.sampled_at_utc || "").getTime();
+    const ts = new SiteDate(item?.sampled_at_utc || "").getTime();
     if (!Number.isFinite(ts)) continue;
     const delta = Math.abs(ts - targetMs);
     if (delta > toleranceMs || delta >= bestDelta) continue;
@@ -13240,7 +13242,7 @@ function buildSamplingPhaseBatteryPayload(seriesBySystem, dayText) {
   const parts = localDateParts(dayText);
   if (!parts) return { day: dayText || "", items: [] };
   const items = SAMPLING_PHASE_BATTERY_ENDS.map((stage) => {
-    const target = new Date(parts.year, parts.monthIndex, parts.day, stage.endHour, 0, 0, 0);
+    const target = new SiteDate(parts.year, parts.monthIndex, parts.day, stage.endHour, 0, 0, 0);
     const targetMs = target.getTime();
     const sajSample = findNearestSeriesSampleAt(seriesBySystem?.saj, targetMs);
     const solplanetSample = findNearestSeriesSampleAt(seriesBySystem?.solplanet, targetMs);
@@ -13343,7 +13345,7 @@ function buildPumpStatusTimelinePayload(combinedSeriesPayload, range) {
   const items = Array.isArray(combinedSeriesPayload?.items) ? combinedSeriesPayload.items : [];
   const data = items
     .map((item) => {
-      const ts = new Date(item.sampled_at_utc || "").getTime();
+      const ts = new SiteDate(item.sampled_at_utc || "").getTime();
       const availableRaw = item?.pool_pump_available;
       let pumpAvailable = null;
       if (typeof availableRaw === "boolean") pumpAvailable = availableRaw;
@@ -13370,7 +13372,7 @@ function buildPumpStatusTimelinePayload(combinedSeriesPayload, range) {
         if (normalized === "true" || normalized === "1" || normalized === "yes") powerStale = true;
       }
       if (!powerStale) {
-        const powerLastUpdatedTs = new Date(item?.pool_pump_power_last_updated || "").getTime();
+        const powerLastUpdatedTs = new SiteDate(item?.pool_pump_power_last_updated || "").getTime();
         if (Number.isFinite(ts) && Number.isFinite(powerLastUpdatedTs)) {
           powerStale = (ts - powerLastUpdatedTs) > (POOL_PUMP_POWER_STALE_SECONDS * 1000);
         }
@@ -13381,13 +13383,13 @@ function buildPumpStatusTimelinePayload(combinedSeriesPayload, range) {
   let dayOnMs = 0;
   let nightOnMs = 0;
   const nextBoundaryAfter = (ts) => {
-    const current = new Date(ts);
+    const current = new SiteDate(ts);
     const candidates = [];
     for (const offsetDays of [0, 1]) {
-      const candidate = new Date(current);
+      const candidate = new SiteDate(current);
       candidate.setDate(candidate.getDate() + offsetDays);
       for (const hour of [11, 23]) {
-        const boundary = new Date(candidate);
+        const boundary = new SiteDate(candidate);
         boundary.setHours(hour, 0, 0, 0);
         if (boundary.getTime() > ts) candidates.push(boundary.getTime());
       }
@@ -13395,11 +13397,11 @@ function buildPumpStatusTimelinePayload(combinedSeriesPayload, range) {
     return candidates.length ? Math.min(...candidates) : ts;
   };
   const periodForTs = (ts) => {
-    const hour = new Date(ts).getHours();
+    const hour = new SiteDate(ts).getHours();
     return hour >= 11 && hour < 23 ? "day" : "night";
   };
-  const rangeStartMs = new Date(range.startUtc || "").getTime();
-  const rangeEndMs = new Date(range.endUtc || "").getTime();
+  const rangeStartMs = new SiteDate(range.startUtc || "").getTime();
+  const rangeEndMs = new SiteDate(range.endUtc || "").getTime();
   const observedDurationMs = Number.isFinite(rangeStartMs) && Number.isFinite(rangeEndMs) && rangeEndMs > rangeStartMs
     ? rangeEndMs - rangeStartMs
     : 0;
@@ -13409,7 +13411,7 @@ function buildPumpStatusTimelinePayload(combinedSeriesPayload, range) {
     const current = data[index];
     const next = data[index + 1];
     let cursor = Number(current?.[0]);
-    const end = Number(next?.[0] ?? new Date(range.endUtc || "").getTime());
+    const end = Number(next?.[0] ?? new SiteDate(range.endUtc || "").getTime());
     const isOn = Number(current?.[1]) === PUMP_STATUS_ON;
     if (!isOn || !Number.isFinite(cursor) || !Number.isFinite(end) || end <= cursor) continue;
     const previous = data[index - 1];
@@ -13717,8 +13719,8 @@ function renderSamplingChart(seriesPayload) {
   chart.hideLoading();
   const items = Array.isArray(seriesPayload?.items) ? seriesPayload.items : [];
   const chartSeriesMeta = normalizeSamplingFocusSeries(seriesPayload?.system || getSelectedSamplingSystem());
-  const startMs = new Date(seriesPayload?.start_at_utc || "").getTime();
-  const endMs = new Date(seriesPayload?.end_at_utc || "").getTime();
+  const startMs = new SiteDate(seriesPayload?.start_at_utc || "").getTime();
+  const endMs = new SiteDate(seriesPayload?.end_at_utc || "").getTime();
   const xMin = Number.isFinite(startMs) ? startMs : null;
   const xMax = Number.isFinite(endMs) ? endMs : null;
   const timeAxisConfig = buildSamplingTimeAxisConfig(xMin, xMax);
@@ -13730,7 +13732,7 @@ function renderSamplingChart(seriesPayload) {
     const lineOpacity = focused ? 0.95 : 0.35;
     const lineWidth = focused ? 2.8 : 1.4;
     const rawData = items
-      .map((item) => [new Date(item.sampled_at_utc || "").getTime(), Number(item[meta.key])])
+      .map((item) => [new SiteDate(item.sampled_at_utc || "").getTime(), Number(item[meta.key])])
       .filter((pair) => Number.isFinite(pair[0]) && Number.isFinite(pair[1]));
     // Visual-only heavy smoothing for dashboard readability.
     const sampledData = downsampleByBucket(rawData, smoothCfg.targetCount);
@@ -13886,8 +13888,8 @@ function renderSamplingChart(seriesPayload) {
 function renderSamplingBatteryTimeline(payload) {
   samplingBatteryTimelineLastPayload = payload;
   const rangeSeries = Array.isArray(payload?.series) ? payload.series : [];
-  const startMs = new Date(payload?.start_at_utc || "").getTime();
-  const endMs = new Date(payload?.end_at_utc || "").getTime();
+  const startMs = new SiteDate(payload?.start_at_utc || "").getTime();
+  const endMs = new SiteDate(payload?.end_at_utc || "").getTime();
   const xMin = Number.isFinite(startMs) ? startMs : null;
   const xMax = Number.isFinite(endMs) ? endMs : null;
   const timeAxisConfig = buildSamplingTimeAxisConfig(xMin, xMax);
@@ -13917,7 +13919,7 @@ function renderSamplingBatteryTimeline(payload) {
           fontSize: 11,
           rotate: 45,
           formatter: (value) => {
-            const dt = new Date(value);
+            const dt = new SiteDate(value);
             if (Number.isNaN(dt.getTime())) return "";
             return `${String(dt.getHours()).padStart(2, "0")}:00`;
         },
@@ -14952,7 +14954,7 @@ async function loadSolplanetKvTable() {
     stateCache.lastSolplanetKv = {
       phase: "done",
       items: Array.isArray(payload?.items) ? payload.items : [],
-      updated_at: payload?.updated_at || new Date().toISOString(),
+      updated_at: payload?.updated_at || new SiteDate().toISOString(),
       error: null,
     };
   } catch (err) {
@@ -15708,8 +15710,8 @@ function renderSamplingPumpStatusTimeline(payload) {
   if (!chart) return;
   chart.hideLoading();
   const data = Array.isArray(payload?.data) ? payload.data : [];
-  const startMs = new Date(payload?.start_at_utc || "").getTime();
-  const endMs = new Date(payload?.end_at_utc || "").getTime();
+  const startMs = new SiteDate(payload?.start_at_utc || "").getTime();
+  const endMs = new SiteDate(payload?.end_at_utc || "").getTime();
   const xMin = Number.isFinite(startMs) ? startMs : null;
   const xMax = Number.isFinite(endMs) ? endMs : null;
   const timeAxisConfig = buildSamplingTimeAxisConfig(xMin, xMax);
@@ -16210,7 +16212,7 @@ async function loadSolplanetControl() {
     }
     stateCache.lastSolplanetControlLive = liveResult.status === "fulfilled" ? liveResult.value : null;
     stateCache.lastSolplanetControlFetch = {
-      requested_at: new Date().toISOString(),
+      requested_at: new SiteDate().toISOString(),
       state_ms: stateMs,
       live_ms: liveMs,
       total_ms: totalMs,
@@ -16524,7 +16526,7 @@ async function loadWeatherForecast() {
   try {
     const data = await fetchJson("/api/weather/forecast", { timeoutMs: 12000 });
     renderWeatherHourly(data.hours || [], data.days || []);
-    const fetched = data.fetched_at ? new Date(data.fetched_at).toLocaleTimeString() : "-";
+    const fetched = data.fetched_at ? new SiteDate(data.fetched_at).toLocaleTimeString() : "-";
     setText("weatherUpdatedAt", fetched);
   } catch (err) {
     if (errorEl) {
@@ -16576,7 +16578,7 @@ async function loadSummary() {
       summary.poolPump = pickLatestPoolPumpDevice(summary.poolPump, combinedFlow?.pool_pump);
       setSystemLoadMeta("combined", {
         phase: "done",
-        updatedAt: combinedFlow?.updated_at || new Date().toISOString(),
+        updatedAt: combinedFlow?.updated_at || new SiteDate().toISOString(),
         refreshing: false,
       });
       writeCachedDashboardSummary(summary);
@@ -16654,7 +16656,7 @@ async function loadRawPanel(apis, stateMap, bodyId, metaId, updatedId) {
       fetch_ms: prev.fetch_ms ?? null,
       updated_at: prev.updated_at || null,
       status: prev.status || null,
-      last_requested_at: new Date().toISOString(),
+      last_requested_at: new SiteDate().toISOString(),
       last_success_at: prev.last_success_at || null,
     };
     renderRawCard(api, stateMap[api.key], bodyId);
@@ -16670,7 +16672,7 @@ async function loadRawPanel(apis, stateMap, bodyId, metaId, updatedId) {
         payload: response?.payload ?? null,
         error: response?.error || null,
         fetch_ms: response?.fetch_ms ?? null,
-        updated_at: response?.updated_at || new Date().toISOString(),
+        updated_at: response?.updated_at || new SiteDate().toISOString(),
         status: response?.status || (response?.ok ? "success" : "failed"),
         last_requested_at: response?.last_requested_at || response?.updated_at || null,
         last_success_at: response?.last_success_at || null,
@@ -16684,7 +16686,7 @@ async function loadRawPanel(apis, stateMap, bodyId, metaId, updatedId) {
         payload: prev.payload ?? null,
         error: String(err),
         fetch_ms: prev.fetch_ms ?? null,
-        updated_at: new Date().toISOString(),
+        updated_at: new SiteDate().toISOString(),
         status: "failed",
         last_requested_at: prev.last_requested_at || null,
         last_success_at: prev.last_success_at || null,
@@ -18118,7 +18120,7 @@ bindClickIfPresent("samplingRangeJumpBtn", async () => {
   } else if (mode === "week") {
     samplingRangeState.week = getLocalDateText();
   } else if (mode === "month") {
-    const now = new Date();
+    const now = new SiteDate();
     samplingRangeState.monthYear = now.getFullYear();
     samplingRangeState.month = String(now.getMonth() + 1);
   } else {
@@ -18672,17 +18674,17 @@ bindClickIfPresent("combined-poolPumpToggleBtn", () => {
   void togglePoolPump();
 });
 applyTranslations();
-samplingRangeState.day = new Date().toISOString().slice(0, 10);
+samplingRangeState.day = getLocalDateText();
 samplingRangeState.week = samplingRangeState.day;
 samplingRangeState.day = getLocalDateText();
 samplingRangeState.week = samplingRangeState.day;
-samplingRangeState.monthYear = new Date().getFullYear();
-samplingRangeState.month = String(new Date().getMonth() + 1);
+samplingRangeState.monthYear = new SiteDate().getFullYear();
+samplingRangeState.month = String(new SiteDate().getMonth() + 1);
 samplingRangeState.relative = "-6h";
 samplingRangeState.endDate = samplingRangeState.day;
 samplingRangeState.startDate = getLocalDateText(-1);
 {
-  const now = new Date();
+  const now = new SiteDate();
   now.setMinutes(0, 0, 0);
   samplingRangeState.endDateTime = toLocalDateTimeInputValueFromMs(now.getTime());
   samplingRangeState.startDateTime = toLocalDateTimeInputValueFromMs(now.getTime() - 6 * 3600 * 1000);
@@ -18696,3 +18698,11 @@ void ensureConfigReady().then((ready) => {
     void loadCurrentTab();
   }
 });
+
+function renderSiteClock() {
+  const clock = document.getElementById("siteClock");
+  if (!clock) return;
+  clock.textContent = `${new SiteDate().toLocaleString(currentLang === "zh" ? "zh-CN" : "en-AU", {hour12: false, timeZoneName: "short"})} · ${SITE_TIME_ZONE}`;
+}
+renderSiteClock();
+window.setInterval(renderSiteClock, 1000);

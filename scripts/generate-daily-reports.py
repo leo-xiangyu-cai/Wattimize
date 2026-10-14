@@ -59,11 +59,8 @@ def resolve_local_timezone() -> tuple[object, str]:
         try:
             return ZoneInfo(configured), configured
         except ZoneInfoNotFoundError:
-            print(f"Warning: invalid configured local timezone {configured!r}; falling back to system timezone.", file=sys.stderr)
-    fallback = datetime.now().astimezone()
-    tz = fallback.tzinfo or UTC
-    name = getattr(tz, "key", None) or fallback.tzname() or "system_local"
-    return tz, str(name)
+            print(f"Warning: invalid configured local timezone {configured!r}; falling back to Australia/Sydney.", file=sys.stderr)
+    return ZoneInfo("Australia/Sydney"), "Australia/Sydney"
 
 
 def sample_interval_for_system(system: str) -> float:

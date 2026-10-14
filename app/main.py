@@ -659,7 +659,7 @@ pool_pump_control_override: dict[str, object] = {
 
 
 def _compute_static_asset_version() -> str:
-    assets = [static_dir / "app.js", static_dir / "styles.css"]
+    assets = [static_dir / "app.js", static_dir / "styles.css", static_dir / "site-time.js"]
     digest = hashlib.sha256()
     found = False
     for asset in assets:
@@ -679,6 +679,9 @@ def _render_index_html() -> str:
     version = _compute_static_asset_version() or static_asset_version or "dev"
     html = re.sub(r"/static/styles\.css(?:\?v=[^\"']*)?", f"/static/styles.css?v={version}", html)
     html = re.sub(r"/static/app\.js(?:\?v=[^\"']*)?", f"/static/app.js?v={version}", html)
+    html = re.sub(r"/static/site-time\.js(?:\?v=[^\"']*)?", f"/static/site-time.js?v={version}", html)
+    _, site_timezone = _tesla_grid_support_now_local()
+    html = html.replace('content="__SITE_TIMEZONE__"', 'content=' + json.dumps(site_timezone))
     return html
 collector_endpoint_state: dict[str, dict[str, dict[str, object]]] = {
     "saj": {
@@ -1796,7 +1799,9 @@ async def _build_device_priority_snapshot(
     metrics_map = metrics if isinstance(metrics, dict) else {}
 
     window_defs = _priority_window_definitions(now_local)
-    rolling_runtime_start_local = now_local - timedelta(hours=POOL_PUMP_FORCE_MIN_RUNTIME_LOOKBACK_HOURS)
+    rolling_runtime_start_local = (
+        now_local.astimezone(UTC) - timedelta(hours=POOL_PUMP_FORCE_MIN_RUNTIME_LOOKBACK_HOURS)
+    ).astimezone(now_local.tzinfo)
     history_start_local = min(window_defs[0]["start_local"], rolling_runtime_start_local)
     history_end_local = now_local
     history_rows = await asyncio.to_thread(
@@ -2672,14 +2677,14 @@ def _build_overnight_home_load_reference(
         return None
 
     target_at_local = _next_projection_target_local(now_local, target_hour)
-    duration = target_at_local - now_local
+    duration = target_at_local.astimezone(UTC) - now_local.astimezone(UTC)
     if duration.total_seconds() <= 0:
         return None
 
     history_windows: list[dict[str, object]] = []
     for day_offset in range(1, lookback_days + 1):
         window_end_local = target_at_local - timedelta(days=day_offset)
-        window_start_local = window_end_local - duration
+        window_start_local = (window_end_local.astimezone(UTC) - duration).astimezone(local_tz)
         usage = compute_usage_between(
             storage_db_path,
             system="combined",
@@ -2759,10 +2764,10 @@ def _build_pool_pump_night_schedule_reference(
         return None
 
     pump_power_w = pool_pump_power_w if pool_pump_power_w is not None and pool_pump_power_w > 0 else POOL_PUMP_ASSUMED_POWER_W
-    if schedule_end_hour > schedule_start_hour:
-        duration_hours = float(schedule_end_hour - schedule_start_hour)
-    else:
-        duration_hours = float((24 - schedule_start_hour) + schedule_end_hour)
+    wall_hours = (schedule_end_hour - schedule_start_hour) % 24 or 24
+    schedule_end_local = _next_projection_target_local(now_local, schedule_end_hour)
+    schedule_start_local = schedule_end_local - timedelta(hours=wall_hours)
+    duration_hours = (schedule_end_local.astimezone(UTC) - schedule_start_local.astimezone(UTC)).total_seconds() / 3600.0
     pump_energy_kwh = round((pump_power_w * duration_hours) / 1000.0, 4)
 
     history_windows: list[dict[str, object]] = []
@@ -2773,7 +2778,7 @@ def _build_pool_pump_night_schedule_reference(
             time(hour=schedule_start_hour),
             tzinfo=local_tz,
         )
-        window_end_local = window_start_local + timedelta(hours=duration_hours)
+        window_end_local = window_start_local + timedelta(hours=wall_hours)
         usage = compute_usage_between(
             storage_db_path,
             system="combined",
@@ -6872,9 +6877,7 @@ def _tesla_grid_support_now_local() -> tuple[datetime, str]:
             return datetime.now(zone), configured_timezone
         except ZoneInfoNotFoundError:
             logger.warning("Invalid local timezone configured for Tesla grid support: %s", configured_timezone)
-    fallback = datetime.now().astimezone()
-    tz_name = getattr(fallback.tzinfo, "key", None) or fallback.tzname() or "system_local"
-    return fallback, str(tz_name)
+    return datetime.now(ZoneInfo("Australia/Sydney")), "Australia/Sydney"
 
 
 def _calculate_tesla_grid_support_target(
@@ -17200,7 +17203,10 @@ async def storage_daily_cost(
 @app.get("/api/config/status")
 async def config_status() -> dict[str, object]:
     missing = _missing_required_config()
+    now_local, site_timezone = _tesla_grid_support_now_local()
     return {
+        "local_timezone": site_timezone,
+        "now_local": now_local.isoformat(),
         "configured": len(missing) == 0,
         "missing_required": missing,
         "config_path": str(get_config_path()),
