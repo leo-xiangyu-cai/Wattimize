@@ -1,6 +1,6 @@
 ---
 name: wattimize-current-system-debug
-description: Debug the currently running Wattimize system on the NAS without changing code or starting local services. Use when the user asks to debug the current system, inspect current state, check what is happening now, compare live behavior with local source code, or describes a production/NAS Wattimize issue and wants read-only diagnosis.
+description: Debug the currently running Wattimize system on the NAS over LAN or the remote NAS web interface, without changing code or starting local services. Use when the user asks to debug the current system, inspect current state, compare live behavior with local source code, or diagnose a production/NAS Wattimize issue.
 ---
 
 # Wattimize Current System Debug
@@ -21,7 +21,43 @@ The expected workflow is: first inspect live state from the NAS service, then us
   - no `DELETE`
 - Do not import, export, repair, mutate, or directly write the SQLite database.
 - Prefer HTTP GET requests to the NAS backend over SSH or direct database inspection.
-- If a command fails because sandbox DNS/network blocks `tnas.local`, rerun the same read-only request with `sandbox_permissions: "require_escalated"`.
+- If a request is blocked by execution permissions, follow the current tool permission policy; do not assume escalation is available. Distinguish a tool restriction from an unreachable LAN.
+
+## Select LAN or Remote Access First
+
+If the user says they are outside the LAN, go directly to the remote workflow below. Otherwise probe the LAN service once with a short timeout:
+
+```bash
+curl -fsS --connect-timeout 3 --max-time 5 http://tnas.local:18000/api/health
+```
+
+If it returns healthy, use the LAN endpoint. If name resolution or connection fails, switch to the remote workflow instead of repeatedly retrying LAN SSH or asking the user for the known remote address. A failed probe only means this LAN route is unavailable; it does not prove the user is outside the LAN or the NAS is down. An HTTP error from the service is a live diagnostic signal, not evidence of network location.
+
+### Remote workflow
+
+Known entry points, verified on 2026-10-09:
+
+- Wattimize: `https://solar.leocai.me`
+- NAS administration: `https://nas.leocai.me/tos/#/desktop`
+
+1. Use the public Wattimize endpoint for the same read-only GET snapshot listed below, replacing the LAN base URL. Verify the actual response; a login page or redirect is not an API result. Continue accessible public checks while authentication is pending.
+2. When container state, logs, or LAN-only device reads are needed, open the NAS administration page in the browser and use its existing Cloudflare Access/TOS login. Do not ask for a remote SSH address or VPN when this web route is available.
+3. If authentication expires, reuse existing user authorization. When the user has explicitly authorized reading the connected mailbox for this NAS login, use the mailbox connector to identify the account and retrieve only the relevant recent login code, then complete the login. Do not print or persist the code, credentials, cookies, or session URLs. Otherwise let the user complete authentication; this skill does not itself authorize mailbox access. Never change Access policies to get past a login failure.
+4. Open TOS **Terminal** for read-only commands on the NAS. These examples run in the NAS web terminal, never in the Mac shell:
+
+   ```bash
+   curl -fsS --max-time 8 http://127.0.0.1:18000/api/health
+   curl -fsS --max-time 8 http://127.0.0.1:18000/api/collector/status
+   /Volume1/@apps/DockerEngine/dockerd/bin/docker ps --filter name=wattimize
+   /Volume1/@apps/DockerEngine/dockerd/bin/docker logs --since 10m --tail 100 wattimize
+   ```
+
+   The Docker path and container name are known defaults; verify them if the command fails. Inspect only relevant configuration fields and avoid dumping environment variables or secrets. For LAN-only Home Assistant reads, prefer Wattimize's readback endpoints; if insufficient, perform narrowly scoped GET requests from the NAS using its existing configuration without copying credentials to chat or local files.
+5. Verify the user-visible issue on the public Wattimize page. Report live timestamps with the effective site timezone (`/api/config/status`: `local_timezone`, `now_local`), current control window, and freshness. A running container alone does not prove the application or control loop is healthy.
+
+If both public API and NAS web access fail, report which layer failed (DNS, Access, Tunnel, or application) and what remains unverified. Do not start a local runtime, expose SSH, alter routing, restart containers, or upload code as a debugging fallback. If the user asks for a fix, switch to the implementation/deployment workflow and preserve the NAS database; TOS File Manager plus Terminal is the remote code-deployment route already used successfully.
+
+For additional NAS access troubleshooting, consult `/Users/caixy/Leo/Tnas/.agents/skills/tnas-remote-access/SKILL.md` if present. Current explicit user authorization takes precedence over that skill's default manual-login instructions.
 
 ## NAS Endpoint
 
@@ -31,7 +67,7 @@ Default live service:
 http://tnas.local:18000
 ```
 
-If the user provides another NAS IP or host, use that host with port `18000` unless they specify otherwise.
+If the user provides another LAN NAS IP or host, use that host with port `18000` unless they specify otherwise. Remote HTTPS entry points use their normal HTTPS port, not `18000`.
 
 Quote URLs that contain `?` in shell commands:
 
@@ -41,7 +77,7 @@ curl -fsS --max-time 8 'http://tnas.local:18000/api/operations/timeline?limit=20
 
 ## Initial Read-Only Snapshot
 
-Start with a small status snapshot unless the user asks for a specific subsystem.
+Start with a small status snapshot unless the user asks for a specific subsystem. Use the base URL selected above; the examples below show the LAN form.
 
 Recommended GET endpoints:
 

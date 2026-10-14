@@ -75,7 +75,7 @@ Before running, state that the command:
 
 For Wattimize tasks that modify source code, static frontend files, app-served documentation/data, tests, skills, or deployment scripts, perform the normal safe deploy before the final response unless the user explicitly says not to deploy. This applies even when the user only asks to "change", "fix", "add", or "update" and does not separately ask to deploy.
 
-Do not deploy for read-only debugging, inspection, or explanation tasks where no files were changed.
+Do not deploy for read-only debugging, inspection, or explanation tasks where no files were changed. Updates solely to agent workflow instructions or skill documentation do not require a runtime deployment; validate those files locally. The deployment requirement above applies when changes affect the app, its runtime assets, or its deployment behavior.
 
 If deployment fails at the script's built-in health-check stage, immediately perform direct read-only NAS verification:
 
