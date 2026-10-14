@@ -68,19 +68,21 @@ This is not necessarily a device fault. Each inverter is acting reasonably from 
 
 Control implication: do not use non-zero SAJ battery discharge power alone as proof that self-consumption mode failed. For self-consumption switching, judge success from `number.saj_app_mode_input`, `sensor.saj_app_mode`, and `switch.saj_discharging_control`; treat battery power as diagnostic context.
 
-## Free-energy self-consumption guard
+## Free-energy full-power charging
 
-During the free-energy window (`11:00-15:00`), Wattimize first targets SAJ self-consumption and observes. If self-consumption is already the written target and `sensor.saj_battery_power` still shows active discharge (`>= 30W`), the worker applies a slow-charge hold that mirrors the locally verified app state:
+During 11:00–15:00 Sydney time the worker enforces SAJ TOU mode, disables
+scheduled discharge, enables only charge slot 1 at 100% for 11:00–15:00 every
+day, and restores both battery/grid charge limits to 1000 (permille = 100%).
+It verifies effective mode, masks, slot and charge-limit sensors; PV charging
+alone does not prove the configuration is correct. The bounded slot prevents
+forced charging beyond the free window if the worker becomes unavailable.
+SAJ writes have a five-minute cooldown: repeated optimistic HA switch updates
+can reset its regular polling timer and starve effective readback.
+The previous self-consumption/40% slow-charge policy is superseded.
 
-- `number.saj_app_mode_input = 0`
-- `switch.saj_discharging_control = off`
-- `number.saj_discharge_time_enable_input = 0`
-- `switch.saj_charging_control = on`
-- `number.saj_charge_time_enable_input = 1`
-- `number.saj_battery_charge_power_limit_input = 400`
-- `number.saj_grid_max_charge_power_input = 400`
-
-If self-consumption is not discharging, including when SAJ is already charging, the guard keeps self-consumption and does not apply the slow-charge hold.
+Solplanet checks Custom mode, the 11:00–15:00 charge slot and 10 kW Pin even
+when already charging from PV. Its 95% target and five-minute write cooldown
+remain. BMS and inverter limits still determine actual power.
 
 ## Paid-energy grid-import guard
 
@@ -119,33 +121,34 @@ Read current decisions at `GET /api/collector/status`, under
 available from `GET /api/time-window-rules`. Reserve limits, inverter capacity,
 telemetry delay and device response still constrain achievable import reduction.
 
-## Evening dispatch in two phases
+## Evening SAJ-first dispatch (2026-09-16)
 
-**17:00–20:00:** prioritize SAJ discharge, retaining its 20% SOC floor and
-5 kW power limit. The shared import/export controller owns the SAJ target and
-retry timer, so paid-import protection cannot accidentally cancel evening support.
-Solplanet runs in self-consumption mode (`mod_r = 2`) and supplies the actual
-household deficit. It is not assigned a forced selling target or a zero discharge
-limit. Mode writes are checked against device readback.
+From 17:00 to 23:00 Australia/Sydney, SAJ is requested to discharge at up to
+5 kW while its SOC exceeds 20%. The combined overnight reserve calculation
+no longer vetoes this SAJ-first target. At 20:00 the priority continues;
+Solplanet's normal export allocation resumes only once SAJ reaches its 20%
+floor, subject to the existing reserve calculation. Unknown SAJ SOC prevents
+forced SAJ discharge and does not authorize Solplanet selling.
 
-SAJ's target is constrained by combined usable energy above the configured
-23:00 reserve plus its existing 0.5 kWh buffer, spread across the remaining time
-until 23:00 and capped at 5 kW. Forced selling additionally requires enough
-energy for the projected household load to 23:00. Missing/old battery or load
-data and the SAJ floor prevent forced export.
+During SAJ priority, Solplanet uses custom mode and an active discharge slot.
+Its Pout is limited to the measured residual (`battery2_w + grid_w`, clamped to
+0–10 kW), not an export target. When SAJ covers the load, that target falls to
+zero; when SAJ fails to deliver or home load exceeds its capacity, Solplanet
+may cover the actual deficit to avoid grid imports. Missing residual telemetry
+falls back to self-consumption until readings recover. Both the schedule and
+work mode are read back before reporting configuration confirmation.
 
-**20:00–23:00:** end the special SAJ-first phase and resume the original combined
-reserve tracking. The Solplanet monitor uses its original total recommendation
-without subtracting SAJ output. When selling is warranted, it restores custom
-mode and the discharge schedule; otherwise it retains household support. The
-configured end-of-window reserve remains the target (currently 18 kWh on NAS,
-plus the existing 0.5 kWh control buffer). The phase transition bypasses the
-normal cooldown to reduce a previous SAJ export target to household support.
+The SAJ controller checks actual battery power every sample and retries
+undelivered evening targets after 60 seconds, even without grid import.
+`last_saj_morning_grid_import_guard_check.saj_delivery` distinguishes measured
+output from a requested target. SAJ commands explicitly reassert TOU mode after
+HA switch handlers, which can queue their own AppMode changes. The manual API
+also exposes effective slot/mask verification separately from command receipt.
 
-After 23:00, paid-energy import protection continues. Spending SAJ before then
-is best effort, subject to reserve requirements and actual device output.
-Read `saj_evening_plan` in the guard decision at `/api/collector/status` and
-`home_support_only` in the Solplanet control result to inspect the active phase.
+This is a control-policy and command-order fix, not proof that the inverter
+has delivered 5 kW. Evening power, SOC and grid readings must confirm that.
+Solar surplus, inverter limits and device response can prevent requested output.
+The morning Tesla protection remains in force independently.
 
 ## Local API wrapper
 
@@ -213,3 +216,69 @@ The self-consumption API writes:
 - `switch.saj_discharging_control = off`
 
 The success criteria are mode/control readback, not zero battery power, because the cross-system conflict can still make SAJ serve Solplanet charging as household load.
+
+## 2026-09-16: morning Tesla import protection
+
+Update 2026-09-21: the rules below now apply before 08:00. The 08:00–11:00
+window uses [pre-free-energy dispatch](pre-free-energy.md): shared Tesla/pump
+power budgeting, five-minute persisted import cooldown and clean-sample retry
+replace the whole-morning latch. Import still sheds flexible loads first.
+
+The NAS showed about 4.7 kW solar, SAJ charging at 2 kW, Tesla charging at
+3 kW, and 1.7–1.9 kW grid import. The existing SAJ guard targeted 0 W
+but actual battery power remained negative. Stopping Tesla removed import.
+
+Before 11:00 Australia/Sydney, fresh positive grid power while Tesla is
+charging/requested at home now stops Tesla on the first sample and persists
+`tesla_stop_until_11_date` in the import-guard state. Start and restart commands
+cannot bypass this date latch. The stop is independent of the SAJ rule toggle,
+SOC floor, and inverter retry cooldown; failed stops retry while latched.
+The latch expires at 11:00 and does not carry into the next day.
+
+Morning automatic allocation is additionally capped by measured Tesla power
+minus signed grid power minus 200 W headroom. Positive import, missing metrics,
+or stale samples provide no charging budget. Battery energy estimates and
+low-Tesla-SOC priority cannot override this cap. This deliberately prefers
+leaving Tesla stopped when SAJ cannot deliver power. The guard reacts at collector
+sample cadence; vehicle/HA command and telemetry latency still apply.
+
+### 17:12 live follow-up: effective discharge limits were 50%
+
+On 2026-09-16 the evening priority held Solplanet near 0 W, but SAJ delivered
+only about 1.8–1.9 kW with roughly 1 kW PV and inverter output around 2.5 kW.
+Slot 1 and TOU mode had taken effect. Both effective discharge limit sensors
+were 50%, although the HA input entities displayed their stale/default 1100.
+
+Nonzero manual/worker discharge commands now inspect
+`sensor.saj_battery_discharge_power_limit` and
+`sensor.saj_grid_discharge_power_limit`. When below 100% or unavailable, they
+write 1000 (100% in permille, not 110%) to the corresponding input entities.
+Slot targets remain bounded by the existing 5 kW inverter rating. Effective
+limits are exposed in `/api/saj/control/state` and included in configuration
+verification; input values alone are never proof of applied capacity.
+
+### 20:12 follow-up: latch the exhausted evening state
+
+SAJ supplied about 5 kW after 18:00 and reached 20% at 19:36. Its reported SOC
+then rebounded to 21% without usable discharge, which incorrectly restarted
+SAJ priority and put Solplanet back into slow residual-power tracking.
+The worker now persists `evening_depleted_date` once a fresh evening sample
+hits 20%, or shows at most 21% with no meaningful discharge. That evening's
+handover survives SOC rebound and process restarts. A zero-power TOU discharge
+hold ends the SAJ discharge request. The initial implementation also stopped
+Solplanet selling; that was incorrect and was removed on 2026-09-17. SAJ priority
+means order of discharge, not a prohibition on subsequent Solplanet export.
+After handover, Solplanet resumes the normal selling target toward the configured
+23:00 reserve (including its existing buffer and household-load projection).
+Self-consumption is used only when the reserve budget permits no sale.
+Cross-charging is addressed by the SAJ charge limits below, not by disabling sales.
+The latch applies only to its calendar-date evening; next day's normal charging
+and SAJ priority remain available. Missing/stale samples cannot set a new latch.
+
+Further live verification found SAJ still charging near 2 kW after the
+Solplanet mode change. The exhausted-state hold therefore also saves the two
+effective SAJ charge limits and writes zero to both charge-limit inputs. The
+saved values persist across restarts and are restored at the next free-energy
+window (11:00), or if the guard is disabled. Do not clear the saved limits
+without restoring them. This prevents overnight battery-to-battery charging
+without permanently disabling next day's charging.

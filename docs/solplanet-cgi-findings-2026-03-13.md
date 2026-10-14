@@ -146,19 +146,16 @@ The backend now exposes Solplanet manual control for `Pin`, `Pout`, and daily sl
 The current automatic policy (updated 2026-09-14) is:
 
 - `16:00-17:00`: retain the existing pre-peak hold behavior.
-- `17:00-20:00`: prioritize SAJ discharge; Solplanet uses self-consumption mode
-  to supply the household deficit without a forced export schedule.
-- `20:00-23:00`: restore the original Solplanet export calculation toward the
-  configured combined end reserve, accounting for projected household load,
-  remaining time and the control buffer. Restore custom mode when selling.
-- If the reserve projection does not permit selling or Solplanet is at its
-  minimum usable energy, stop forced Solplanet export.
-- SAJ's shared evening/import controller owns its forced discharge. Export
-  cleanup defers while that guard is active. Paid-import protection continues
-  outside the 11:00-15:00 free-energy window.
-- Outside the export window, end forced sell slots. The current implementation
-  also resets the schedule's `Pout`; this is not the 17:00-20:00 self-consumption
-  path, which leaves the schedule limits intact.
+- `17:00-23:00`: while SAJ is above its 20% floor, request SAJ discharge first.
+  Solplanet uses custom mode with active discharge slots and Pout limited to the
+  measured residual household deficit; zero residual means zero requested Pout.
+- Reaching 20:00 does not end SAJ priority. At the SAJ floor, resume normal
+  Solplanet allocation subject to the configured reserve.
+- Schedule and mode readbacks confirm configuration, not actual power delivery.
+  Unknown residual telemetry temporarily falls back to self-consumption.
+- SAJ's shared import/evening controller owns the discharge target. Other export
+  cleanup paths defer to it; undelivered evening power is retried after 60 seconds.
+- Outside the export window, the existing slot cleanup applies.
 
 See [SAJ control notes](saj-manual-control-notes.md) for the authoritative phase
 boundaries, SOC floors, retry behavior and device-readback limitations.

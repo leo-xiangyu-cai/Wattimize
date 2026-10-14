@@ -34,6 +34,9 @@ def _build_monitor(
             export_tracking={"total_export_kwh": 0.0},
             current_grid_import_w=0.0,
             current_grid_export_w=0.0,
+            # These exercise Solplanet's sale/reserve policy after the SAJ
+            # priority phase. That phase has its own integration tests.
+            saj_depleted=True,
         )
     finally:
         main.settings = original_settings

@@ -275,8 +275,11 @@ SAJ reserve remains enforced. The legacy rule identifier is
 [SAJ control notes](docs/saj-manual-control-notes.md#paid-energy-grid-import-guard)
 for thresholds, arbitration, and readback limitations.
 
-From 17:00 to 20:00, SAJ has discharge priority toward its 20% floor while
-Solplanet runs in self-consumption to supply the household deficit. From 20:00
-to 23:00, the original combined reserve tracking resumes. Overnight reserves
-and paid-import protection remain in force in both phases. See the SAJ control
-notes for mode switching, target calculation, and readback constraints.
+From 17:00 to 23:00, SAJ has discharge priority toward its 20% floor.
+Solplanet covers measured household deficits during SAJ priority and resumes
+normal reserve-based export allocation after SAJ reaches its floor. See the
+SAJ control notes for command verification and actual-power constraints.
+
+From 08:00 to 11:00, [pre-free-energy dispatch](docs/pre-free-energy.md) shares
+available power between Tesla and the pool pump while preserving home reserves.
+During 11:00–15:00, the worker restores full-power battery charging settings.

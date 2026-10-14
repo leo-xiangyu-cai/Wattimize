@@ -52,6 +52,7 @@ from app.config import (
     settings_to_dict,
 )
 from app.home_assistant import HomeAssistantClient
+from app import pre_free_energy
 from app.persistence import (
     DEFAULT_DB_PATH,
     EnergySample,
@@ -167,6 +168,7 @@ TESLA_CONTROL_FEEDBACK_PENDING_TIMEOUT_SECONDS = 15.0
 TESLA_CONTROL_FEEDBACK_SUCCESS_TTL_SECONDS = 4.0
 TESLA_CONTROL_FEEDBACK_FAILURE_TTL_SECONDS = 30.0
 TESLA_OPERATION_PENDING_TIMEOUT_SECONDS = 180.0
+TESLA_PLUG_REMINDER_STATE_KEY = "notification_state.tesla_free_energy_plug_reminder"
 WORKER_API_LOG_TTL_DAYS = 3
 WORKER_API_LOG_CLEANUP_INTERVAL_SECONDS = 6 * 60 * 60
 DATABASE_BACKUP_RETENTION_COUNT = 3
@@ -348,6 +350,8 @@ TIME_WINDOW_RULE_DEFINITIONS: tuple[dict[str, str], ...] = (
     {"code": "saj_morning_grid_import_guard", "window": "export_window", "kind": "operation"},
     {"code": "tesla_overnight_shoulder_control", "window": "overnight_shoulder", "kind": "operation"},
     {"code": "pool_pump_overnight_control", "window": "overnight_shoulder", "kind": "operation"},
+    {"code": "tesla_overnight_shoulder_control", "window": "pre_free_energy", "kind": "operation"},
+    {"code": "pool_pump_overnight_control", "window": "pre_free_energy", "kind": "operation"},
     {"code": "tesla_after_free_shoulder_control", "window": "after_free_shoulder", "kind": "operation"},
     {"code": "grid_import_started", "window": "export_window", "kind": "notification"},
 )
@@ -3519,7 +3523,133 @@ async def _tesla_control_states() -> list[dict[str, object]]:
     return await ha_client.all_states()
 
 
+def _tesla_morning_measured_power_budget(flow: dict[str, object] | None) -> float:
+    """Only measured export/current EV load can fund morning charging."""
+    flow = flow if isinstance(flow, dict) else {}
+    metrics = flow.get("metrics") or {}
+    grid_w = _to_number(metrics.get("grid_w"))
+    tesla_w = _to_number(metrics.get("tesla_charge_power_w"))
+    try:
+        sample_at = datetime.fromisoformat(str(flow.get("updated_at") or "").replace("Z", "+00:00"))
+        fresh = not flow.get("stale") and -30 <= (datetime.now(UTC) - sample_at).total_seconds() <= 180
+    except (ValueError, TypeError):
+        fresh = False
+    if not fresh or grid_w is None or tesla_w is None or grid_w > 0:
+        return 0.0
+    return max(0.0, max(tesla_w, 0.0) - grid_w - 200.0)
+
+
+async def _tesla_morning_import_locked() -> bool:
+    now_local, _ = _tesla_grid_support_now_local()
+    if now_local.hour >= FREE_ENERGY_WINDOW_START_HOUR:
+        return False
+    state = await _load_saj_morning_grid_import_guard_state()
+    if pre_free_energy.window_active(now_local) and _pre_free_cooldown_active(state, now_local):
+        return True
+    return state.get("tesla_stop_until_11_date") == now_local.date().isoformat()
+
+
+def _pre_free_cooldown_active(state: dict, now: datetime) -> bool:
+    try:
+        return datetime.fromisoformat(state["pre_free_retry_after"]) > now
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _pre_free_fresh(flow: dict | None) -> bool:
+    flow = flow or {}
+    try:
+        stamp = datetime.fromisoformat(str(flow.get("updated_at", "")).replace("Z", "+00:00"))
+        return not flow.get("stale") and -30 <= (datetime.now(UTC) - stamp).total_seconds() <= 180
+    except (TypeError, ValueError):
+        return False
+
+
+async def _pre_free_import_guard(flow: dict | None, state: dict, now: datetime) -> dict:
+    """Shed both flexible loads before any attempt to increase inverter output."""
+    if state.get("tesla_stop_until_11_date") == now.date().isoformat():
+        state.pop("tesla_stop_until_11_date", None)
+        state["pre_free_retry_after"] = (now + timedelta(seconds=pre_free_energy.IMPORT_COOLDOWN_SECONDS)).isoformat()
+        state["pre_free_clean_samples"] = 0
+        await _store_saj_morning_grid_import_guard_state(state)
+    grid = _to_number(((flow or {}).get("metrics") or {}).get("grid_w"))
+    importing = _pre_free_fresh(flow) and grid is not None and grid > 0
+    locked = _pre_free_cooldown_active(state, now)
+    if not importing and not locked:
+        return {"reason": "no_fresh_grid_import"}
+    async def latch_before_stop():
+        if importing:
+            state["pre_free_retry_after"] = (now + timedelta(seconds=pre_free_energy.IMPORT_COOLDOWN_SECONDS)).isoformat()
+            state["pre_free_clean_samples"] = 0
+            state.pop("pre_free_clean_sample_at", None)
+            await _store_saj_morning_grid_import_guard_state(state)
+    actions, errors = [], []
+    # A failed car command must not prevent shedding the pump (or vice versa).
+    try:
+        charge = _tesla_observation_charge_state(_build_tesla_observation_payload(await _tesla_control_states()))
+        if _tesla_auto_control_location_block_reason(charge) is None and (
+            charge.get("enabled") or charge.get("requested_enabled") or (_to_number(charge.get("power_w")) or 0) > 0
+        ):
+            await latch_before_stop()
+            await _tesla_set_charging(False)
+            actions.append("stop_charging")
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"Tesla: {exc}")
+    try:
+        if await _load_pool_pump_auto_control_enabled():
+            pump = _build_pool_pump_state(await _pool_pump_states_by_id())
+            if (pump.get("control") or {}).get("enabled"):
+                await latch_before_stop()
+                await _pool_pump_set_enabled(False)
+                actions.append("stop_pool_pump")
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"Pool pump: {exc}")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    return {"reason": "pre_free_import_protection", "locked": _pre_free_cooldown_active(state, now), "grid_w": grid,
+            "actions": actions, "retry_after": state.get("pre_free_retry_after")}
+
+
+async def _enforce_tesla_morning_import_guard(
+    combined_flow: dict[str, object] | None,
+    state: dict[str, object],
+    now_local: datetime,
+) -> dict[str, object]:
+    """Stop on measured morning import; latch until 11 even if SAJ fails."""
+    if now_local.hour >= FREE_ENERGY_WINDOW_START_HOUR:
+        return {"reason": "outside_morning_window"}
+    if pre_free_energy.window_active(now_local):
+        return await _pre_free_import_guard(combined_flow, state, now_local)
+    today = now_local.date().isoformat()
+    locked = state.get("tesla_stop_until_11_date") == today
+    flow = combined_flow if isinstance(combined_flow, dict) else {}
+    metrics = flow.get("metrics") or {}
+    grid_w = _to_number(metrics.get("grid_w"))
+    try:
+        sample_at = datetime.fromisoformat(str(flow.get("updated_at") or "").replace("Z", "+00:00"))
+        fresh = not flow.get("stale") and -30 <= (datetime.now(UTC) - sample_at).total_seconds() <= 180
+    except (ValueError, TypeError):
+        fresh = False
+    if not locked and not (fresh and grid_w is not None and grid_w > 0):
+        return {"reason": "no_fresh_grid_import"}
+    states = await _tesla_control_states()
+    charge = _tesla_observation_charge_state(_build_tesla_observation_payload(states))
+    if _tesla_auto_control_location_block_reason(charge) is not None:
+        return {"reason": "tesla_not_at_home"}
+    running = bool(charge.get("enabled") or charge.get("requested_enabled") or (_to_number(charge.get("power_w")) or 0) > 0)
+    if not running:
+        return {"reason": "locked_until_11" if locked else "tesla_already_stopped", "locked": locked}
+    # Persist before the command so failures/restarts cannot re-enable charging.
+    state["tesla_stop_until_11_date"] = today
+    await _store_saj_morning_grid_import_guard_state(state)
+    response = await _tesla_set_charging(False)
+    return {"reason": "morning_grid_import_stop_until_11", "locked": True,
+            "grid_w": grid_w, "api_result": response, "verification": "await_vehicle_readback"}
+
+
 async def _tesla_set_charging(enabled: bool) -> dict[str, object]:
+    if enabled and await _tesla_morning_import_locked():
+        raise HTTPException(status_code=409, detail="Morning grid import protection: Tesla stopped until 11:00 Australia/Sydney")
     states = await _tesla_control_states()
     control_state = _build_tesla_control_state(states)
     switch_entity = control_state.get("switch_entity")
@@ -3554,6 +3684,8 @@ async def _tesla_set_charging(enabled: bool) -> dict[str, object]:
 
 
 async def _tesla_restart_charging() -> dict[str, object]:
+    if await _tesla_morning_import_locked():
+        raise HTTPException(status_code=409, detail="Morning grid import protection: Tesla stopped until 11:00 Australia/Sydney")
     states = await _tesla_control_states()
     control_state = _build_tesla_control_state(states)
     switch_entity = control_state.get("switch_entity")
@@ -3761,6 +3893,8 @@ def _tesla_midday_window_mode(now_local: datetime) -> Literal["free_energy", "af
 
 
 def _window_schedule_text(window_mode: str) -> str:
+    if window_mode == "pre_free_energy":
+        return "08:00-11:00"
     if window_mode == "free_energy":
         return (
             f"{FREE_ENERGY_WINDOW_START_HOUR:02d}:00-"
@@ -3892,7 +4026,7 @@ def _is_time_window_rule_enabled(enabled_map: dict[str, bool] | None, rule_code:
 
 def _saj_target_profile_for_time(now_local: datetime) -> tuple[str, str]:
     if _is_within_free_energy_window(now_local):
-        return "self_consumption", "free_energy_window_force_self_consumption"
+        return "time_of_use", "free_energy_full_power_charge"
     return "time_of_use", "post_free_window_one_time_discharge"
 
 
@@ -3939,11 +4073,6 @@ async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str
             "action": "noop",
             "reason": "rule_disabled",
         }
-    needs_apply = (
-        input_profile != desired_profile
-        or (not free_energy_window_active and actual_profile != "" and actual_profile != desired_profile)
-        or free_energy_fallback_needed
-    )
     result: dict[str, object] = {
         "desired_profile": desired_profile,
         "desired_reason": desired_reason,
@@ -4044,56 +4173,58 @@ async def _guard_saj_profile_for_time(now_local: datetime, enabled_map: dict[str
             }
         )
         return result
-    if not needs_apply:
-        if free_energy_window_active and desired_profile == "self_consumption":
-            result["reason"] = "free_energy_self_consumption_observe"
+    # Free energy must explicitly permit grid charging at rated power. Merely
+    # observing PV charging can leave old 40% limits and self-consumption active.
+    charge = control_state.get("charge") or {}
+    slots = charge.get("effective_slots") or []
+    slot = slots[0] if slots else {}
+    charge_window = (f"{FREE_ENERGY_WINDOW_START_HOUR:02d}:00", f"{FREE_ENERGY_WINDOW_END_HOUR:02d}:00")
+    limits_ok = all(
+        (_entity_number_value(states_by_id, entity) or 0) >= 100
+        for entity in ("sensor.saj_battery_charge_power_limit", "sensor.saj_grid_charge_power_limit")
+    )
+    configured = (
+        actual_profile == "time_of_use"
+        and charge.get("control_switch") is True
+        and int(charge.get("actual_time_enable_mask") or 0) == 1
+        and discharge_control_switch is False
+        and int(discharge_map.get("actual_time_enable_mask") or 0) == 0
+        and slot.get("start_time") == charge_window[0]
+        and slot.get("end_time") == charge_window[1]
+        and (_to_number(slot.get("power_percent")) or 0) == 100
+        and int(slot.get("day_mask") or 0) == 127
+        and limits_ok
+    )
+    result["desired_charge_power_w"] = SAJ_RATED_POWER_W
+    if configured:
+        result["reason"] = "free_energy_full_power_charge_configured"
         return result
-
-    if desired_profile != "self_consumption":
-        result.update(
-            {
-                "reason": "unsupported_desired_profile",
-                "would_apply_profile": desired_profile,
-            }
-        )
+    # HA publishes optimistic switch updates and resets its polling timer.
+    # Rewriting each minute can therefore indefinitely defer real readback.
+    runtime_state = collector_status.setdefault("combined", {}).get("saj_free_energy_charge") or {}
+    applied_at = str(runtime_state.get("applied_at_utc") or "")
+    try:
+        elapsed = (datetime.now(UTC) - datetime.fromisoformat(applied_at)).total_seconds()
+    except (ValueError, TypeError):
+        elapsed = None
+    if elapsed is not None and 0 <= elapsed < 300:
+        result["reason"] = "awaiting_charge_readback"
+        result["elapsed_since_apply_s"] = round(elapsed, 1)
         return result
-
-    if free_energy_fallback_needed:
-        api_result = await _apply_saj_free_energy_slow_charge_hold(settle_seconds=2.0)
-        result.update(
-            {
-                "action": "applied",
-                "reason": "self_consumption_still_discharging_apply_slow_charge_hold",
-                "applied_profile": desired_profile,
-                "api_path": "internal:_apply_saj_free_energy_slow_charge_hold",
-                "api_result": api_result,
-            }
-        )
-        return result
-
-    saj_charging = bool(battery_power_w is not None and battery_power_w <= -POWER_FLOW_ACTIVE_THRESHOLD_W)
-    if input_profile == desired_profile and actual_profile and actual_profile != desired_profile and not saj_charging:
-        result.update(
-            {
-                "reason": "pending_remote_sync",
-                "would_apply_profile": desired_profile,
-            }
-        )
-        return result
-
-    api_result = await put_saj_self_consumption(
-        SajSelfConsumptionPayload(settle_seconds=2.0),
+    api_result = await _put_saj_charge_power(
+        SajManualChargePowerPayload(power_percent=100, settle_seconds=2.0),
         trigger_source="worker:saj_profile_guard",
+        charge_window=charge_window,
+        restore_charge_limits=True,
     )
-    result.update(
-        {
-            "action": "applied",
-            "reason": "reapply_self_consumption_while_still_charging" if saj_charging else "applied_self_consumption",
-            "applied_profile": desired_profile,
-            "api_path": "/api/saj/self-consumption",
-            "api_result": api_result,
-        }
-    )
+    collector_status.setdefault("combined", {})["saj_free_energy_charge"] = {
+        "applied_at_utc": datetime.now(UTC).isoformat(),
+    }
+    result.update({
+        "action": "applied", "reason": "free_energy_full_power_charge",
+        "applied_profile": "time_of_use", "api_path": "/api/saj/manual-charge-power",
+        "api_result": api_result,
+    })
     return result
 
 
@@ -4221,6 +4352,14 @@ def _worker_operation_action_detail(action_map: dict[str, object], *, lang: Lite
 
 
 def _operation_reason_label(reason: object, *, lang: Literal["zh", "en"] = "zh") -> str:
+    pre_free_labels = {
+        "pre_free_make_charge_room": ("免费电前使用富余电量，为电池预留充电空间", "Use surplus energy before free charging"),
+        "pre_free_urgent_tesla": ("免费电前优先补充 Tesla 低电量，受防买电保护限制", "Prioritize low Tesla SOC within import protection"),
+        "pre_free_import_protection": ("免费电前买电保护：降载并等待稳定后重试", "Shed loads and wait for stable supply before retry"),
+        "pre_free_telemetry_unavailable": ("免费电前数据不足或过期，暂停可调负载", "Pause flexible loads while telemetry is unavailable"),
+    }
+    if str(reason) in pre_free_labels:
+        return pre_free_labels[str(reason)][0 if lang == "zh" else 1]
     raw = str(reason or "").strip()
     code = raw.lower()
     if not raw:
@@ -4637,6 +4776,8 @@ def _operation_reason_logic_summary(check: dict[str, object], *, lang: Literal["
     window_mode = str(check.get("window_mode") or "").strip().lower()
     target = str(check.get("target") or "").strip().lower()
     schedule = str(check.get("service_window_schedule") or check.get("window_schedule") or "").strip()
+    if window_mode == "pre_free_energy":
+        return "Pre-free energy dispatch (08:00-11:00)" if lang == "en" else "免费电前调度（08:00-11:00）"
     base: str | None = None
     if check_name == "midday_window_check":
         if window_mode == "export_window":
@@ -4680,6 +4821,9 @@ def _operation_reason_why_summary(
     action_type = str(action_code or "").strip().lower()
     reason_code = str(action_map.get("reason") or "").strip().lower()
     details_map = check.get("details") if isinstance(check.get("details"), dict) else {}
+
+    if window_mode == "pre_free_energy":
+        return _operation_reason_label(reason_code, lang=lang)
 
     if check_name == "midday_window_check" and window_mode == "export_window":
         export_map = details_map.get("export_window") if isinstance(details_map.get("export_window"), dict) else {}
@@ -4910,6 +5054,14 @@ def _operation_reason_math_summary(
     target = str(check.get("target") or "").strip().lower()
     action_type = str(action_code or "").strip().lower()
     details_map = check.get("details") if isinstance(check.get("details"), dict) else {}
+
+    if window_mode == "pre_free_energy":
+        plan = details_map.get("pre_free_energy") or {}
+        reserve = _operation_reason_fmt_kwh(plan.get("retained_usable_kwh"))
+        budget = _operation_reason_fmt_w(plan.get("flexible_power_budget_w"))
+        reclaim = _operation_reason_fmt_w(plan.get("reclaim_charging_power_w"))
+        return (f"retain {reserve}; flexible budget {budget}; redirected charging {reclaim}" if lang == "en"
+                else f"保留可用电量 {reserve}；可调负载预算 {budget}；可转用的电池充电功率 {reclaim}")
 
     if check_name == "midday_window_check" and window_mode == "export_window":
         export_map = details_map.get("export_window") if isinstance(details_map.get("export_window"), dict) else {}
@@ -5545,6 +5697,7 @@ def _operation_check_summary(source: dict[str, object]) -> dict[str, object]:
         "threshold_soc_percent",
         "runtime_budget",
         "overnight_allocation",
+        "pre_free_energy",
         "resource_reservation",
         "tesla_priority_score",
         "pool_pump_priority_score",
@@ -5982,45 +6135,68 @@ def _update_solar_surplus_export_energy_tracking(
     }
 
 
-def _saj_evening_export_plan(metrics: dict[str, object], now_local: datetime) -> dict[str, object]:
-    """Spend SAJ first while preserving the combined overnight reserve."""
+async def _saj_ensure_discharge_capacity(states_by_id: dict[str, dict[str, object]]) -> list[dict[str, object]]:
+    """HA input defaults are not device readback; permille 1000 means 100%."""
+    changed = []
+    for sensor, entity in (
+        ("sensor.saj_battery_discharge_power_limit", "number.saj_battery_discharge_power_limit_input"),
+        ("sensor.saj_grid_discharge_power_limit", "number.saj_grid_max_discharge_power_input"),
+    ):
+        actual_percent = _entity_number_value(states_by_id, sensor)
+        if actual_percent is None or actual_percent < 100:
+            await _saj_set_number(entity, 1000)
+            changed.append({"entity_id": entity, "value": 1000, "actual_percent_before": actual_percent})
+    return changed
+
+
+def _saj_discharge_readback(state: dict[str, object], power_percent: int) -> dict[str, object]:
+    discharge = state.get("discharge") or {}
+    slots = discharge.get("effective_slots") or []
+    slot = slots[0] if slots else {}
+    confirmed = (
+        (state.get("working_mode") or {}).get("mode_sensor") == SAJ_PROFILE_MODE_CODES["time_of_use"]
+        and discharge.get("actual_time_enable_mask") == 1
+        and (state.get("charge") or {}).get("actual_time_enable_mask") == 0
+        and slot.get("start_time") == "00:00" and slot.get("end_time") == "23:59"
+        and slot.get("power_percent") == power_percent and slot.get("day_mask") == 127
+        and (_to_number((state.get("limits") or {}).get("actual_battery_discharge_power_limit_percent")) or 0) >= power_percent
+        and (_to_number((state.get("limits") or {}).get("actual_grid_discharge_power_limit_percent")) or 0) >= power_percent
+    )
+    return {"configuration_confirmed": confirmed,
+            "status": "configuration_confirmed_await_power_sample" if confirmed else "await_effective_configuration",
+            "actual_power_w": (state.get("battery") or {}).get("power_w"),
+            "actual_power_percent": slot.get("power_percent")}
+
+
+def _saj_evening_export_plan(metrics: dict[str, object], now_local: datetime, *, depleted: bool = False) -> dict[str, object]:
+    """Use SAJ before Solplanet throughout the evening, down to its SOC floor."""
+    soc = _to_number(metrics.get("battery1_soc_percent"))
+    window_active = 17 <= now_local.hour < EXPORT_WINDOW_END_HOUR
+    priority_active = window_active and not depleted and (soc is None or soc > BATTERY_MIN_DISCHARGE_SOC_PERCENT["saj"])
     plan: dict[str, object] = {
-        "window_active": 17 <= now_local.hour < 20,
-        "start_hour": 17, "end_hour": 20, "reserve_target_hour": EXPORT_WINDOW_END_HOUR,
+        "window_active": window_active, "priority_active": priority_active, "depleted_for_evening": depleted,
+        "start_hour": 17, "end_hour": EXPORT_WINDOW_END_HOUR,
+        "reserve_target_hour": EXPORT_WINDOW_END_HOUR,
         "target_soc_percent": BATTERY_MIN_DISCHARGE_SOC_PERCENT["saj"],
         "target_power_w": 0, "reason": "outside_saj_evening_window",
     }
-    if not plan["window_active"]:
+    if not window_active:
         return plan
-    reference = _combined_usable_battery_reference(metrics)
-    by_system = reference["usable_battery_by_system_kwh"]
-    saj_kwh = _to_number(by_system.get("saj"))
-    solplanet_kwh = _to_number(by_system.get("solplanet"))
-    soc = _to_number(metrics.get("battery1_soc_percent"))
-    load_w = _to_number(metrics.get("load_w"))
-    if saj_kwh is None or solplanet_kwh is None or soc is None or load_w is None:
-        plan["reason"] = "missing_battery_or_load_metrics"
+    if soc is None:
+        plan["reason"] = "missing_saj_soc"
         return plan
-    if soc <= BATTERY_MIN_DISCHARGE_SOC_PERCENT["saj"] or saj_kwh <= 0:
+    if not priority_active:
         plan["reason"] = "saj_reserve_floor_reached"
         return plan
+    reference = _combined_usable_battery_reference(metrics)
+    saj_kwh = _to_number(reference["usable_battery_by_system_kwh"].get("saj")) or 0.0
     remaining_h = (now_local.replace(hour=EXPORT_WINDOW_END_HOUR, minute=0, second=0, microsecond=0) - now_local).total_seconds() / 3600
-    stop_floor = max(float(settings.solplanet_export_reserve_floor_kwh), 0.0) + SOLPLANET_EXPORT_MONITOR_RESERVE_BUFFER_KWH
-    spendable_kwh = max(saj_kwh + solplanet_kwh - stop_floor, 0.0)
-    budget_w = min(SAJ_EXPORT_WINDOW_DISCHARGE_POWER_W, spendable_kwh / remaining_h * 1000)
-    # Only force an evening export if the combined reserve can also cover the
-    # projected household load. Paid-import support remains a separate minimum.
-    exportable_kwh = spendable_kwh - max(load_w, 0.0) * remaining_h / 1000
-    target_w = int(budget_w // 50) * 50 if exportable_kwh > 0 else 0
     plan.update({
-        "target_power_w": target_w,
-        "reason": "saj_first_before_23" if target_w > 0 else "preserve_overnight_reserve",
-        "saj_usable_kwh": saj_kwh,
+        "target_power_w": SAJ_EXPORT_WINDOW_DISCHARGE_POWER_W,
+        "reason": "saj_first_before_23", "saj_usable_kwh": saj_kwh,
         "remaining_hours": round(remaining_h, 4),
         "required_average_power_w": round(saj_kwh / remaining_h * 1000, 1),
-        "combined_stop_floor_kwh": stop_floor,
-        "exportable_after_home_load_kwh": round(exportable_kwh, 4),
-        "deadline_feasible_at_target": target_w * remaining_h / 1000 >= saj_kwh,
+        "deadline_feasible_at_target": SAJ_EXPORT_WINDOW_DISCHARGE_POWER_W * remaining_h / 1000 >= saj_kwh,
     })
     return plan
 
@@ -6032,6 +6208,7 @@ def _build_solplanet_export_monitor(
     export_tracking: dict[str, object],
     current_grid_import_w: float,
     current_grid_export_w: float,
+    saj_depleted: bool = False,
 ) -> dict[str, object]:
     usable_reference = _combined_usable_battery_reference(metrics_map)
     usable_total_kwh = _to_number(usable_reference.get("usable_battery_total_kwh"))
@@ -6216,15 +6393,28 @@ def _build_solplanet_export_monitor(
             recommendation = "stop"
             reason = "outside_export_window"
 
-    saj_evening_plan = _saj_evening_export_plan(metrics_map, now_local)
+    saj_evening_plan = _saj_evening_export_plan(metrics_map, now_local, depleted=saj_depleted)
     total_recommended_pout_w = recommended_pout_w
     saj_measured_contribution_w = 0.0
-    if saj_evening_plan["window_active"]:
+    if saj_evening_plan["priority_active"]:
         saj_measured_contribution_w = max(_to_number(metrics_map.get("battery1_w")) or 0.0, 0.0)
-        recommended_pout_w = 0.0
-        recommendation = "hold"
-        reason = "solplanet_home_support_during_saj_priority"
+        # Solplanet only covers an observed residual household deficit. Never
+        # allocate it a selling target while SAJ still has usable energy.
+        solplanet_w = _to_number(metrics_map.get("battery2_w"))
+        grid_w = _to_number(metrics_map.get("grid_w"))
+        telemetry_available = solplanet_w is not None and grid_w is not None
+        residual_w = max(0.0, solplanet_w + grid_w) if telemetry_available else 0.0
+        recommended_pout_w = min(SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W, residual_w)
+        if solplanet_usable_kwh is None or solplanet_usable_kwh <= 0:
+            recommended_pout_w = 0.0
+        recommendation = "saj_priority"
+        reason = "solplanet_residual_home_support" if recommended_pout_w > 0 else "preserve_solplanet_until_saj_floor"
+        saj_evening_plan["residual_telemetry_available"] = telemetry_available
+        saj_evening_plan["solplanet_residual_support_w"] = recommended_pout_w
 
+
+    # Exhausting SAJ ends its priority, not the sale. Keep the normal Solplanet
+    # reserve/deadline target; the SAJ guard separately blocks cross-charging.
 
     minutes_to_target_at_recommended_power = None
     if recommended_pout_w > 0.0 and target_sell_kwh > 0.0:
@@ -6332,6 +6522,9 @@ def _solplanet_export_monitor_desired_pout(monitor: dict[str, object] | None, no
     monitor_map = monitor if isinstance(monitor, dict) else {}
     recommendation = str(monitor_map.get("recommendation") or "").strip()
     reserve_state = str(monitor_map.get("reserve_state") or "").strip()
+    if recommendation == "saj_priority":
+        return int(round(max(0.0, min(SOLPLANET_EXPORT_MONITOR_TARGET_POUT_W,
+                                     _to_number(monitor_map.get("recommended_pout_w")) or 0.0)))), str(monitor_map.get("reason") or "saj_priority")
     if recommendation in ("sell", "sell_surplus") and reserve_state != "below_floor":
         recommended_pout = _to_number(monitor_map.get("recommended_pout_w"))
         if recommended_pout is None:
@@ -6396,9 +6589,11 @@ async def _apply_solplanet_export_monitor_control(
         except ValueError:
             elapsed_since_check_s = None
 
-    home_support_only = 17 <= now_local.hour < 20
+    priority_plan = (monitor or {}).get("saj_evening_plan") or {}
+    home_support_only = bool(priority_plan.get("priority_active"))
     target_changed = (last_desired_pout is None or int(last_desired_pout) != desired_pout
-                      or home_support_only != bool(state_map.get("home_support_only")))
+                      or home_support_only != bool(state_map.get("home_support_only"))
+                      or state_map.get("verification") == "missing_residual_telemetry")
     min_interval_elapsed = (
         elapsed_since_check_s is None
         or elapsed_since_check_s >= SOLPLANET_EXPORT_MONITOR_CONTROL_MIN_INTERVAL_SECONDS
@@ -6430,22 +6625,53 @@ async def _apply_solplanet_export_monitor_control(
         return base_result
 
     try:
-        if home_support_only:
-            # Self-consumption supplies the actual household deficit. Do not
-            # impose a zero battery power limit or a forced selling schedule.
-            battery_info = await _solplanet_get_battery_info_live()
-            mode_register = _to_number(battery_info.get("mod_r"))
+        if priority_plan.get("window_active") and not home_support_only and desired_pout == 0:
+            # SAJ has reached its floor and the reserve budget permits no sale.
+            # Release the zero-power custom hold so Solplanet can supply home.
+            write_result = await _solplanet_set_work_mode_payload(SOLPLANET_WORK_MODE_SELF_CONSUMPTION)
+            if write_result.get("readback_mode") != SOLPLANET_WORK_MODE_SELF_CONSUMPTION:
+                raise RuntimeError("Solplanet SAJ-floor handover readback did not match")
+            result = {**base_result, "home_support_only": False, "checked_live": True,
+                      "action": {"type": "apply", "reason": "saj_floor_solplanet_home_support"}}
+            combined_status["solplanet_export_monitor_control"] = {**result, "checked_at_utc": now_utc.isoformat()}
+            return result
+        if home_support_only and priority_plan.get("residual_telemetry_available") is False:
+            write_result = await _solplanet_set_work_mode_payload(SOLPLANET_WORK_MODE_SELF_CONSUMPTION)
+            if write_result.get("readback_mode") != SOLPLANET_WORK_MODE_SELF_CONSUMPTION:
+                raise RuntimeError("Solplanet telemetry fallback mode readback did not match")
             result = {**base_result, "home_support_only": True, "checked_live": True,
-                      "desired_pout_w": 0, "desired_reason": "solplanet_home_support_during_saj_priority",
-                      "target_work_mode": SOLPLANET_WORK_MODE_SELF_CONSUMPTION}
-            if mode_register == SOLPLANET_WORK_MODE_REGISTER_BY_ID[SOLPLANET_WORK_MODE_SELF_CONSUMPTION]:
-                result["action"] = {"type": "noop", "reason": "already_at_target"}
-            else:
-                write_result = await _solplanet_set_work_mode_payload(SOLPLANET_WORK_MODE_SELF_CONSUMPTION)
-                result["mode_write_result"] = write_result
-                if write_result.get("readback_mode") != SOLPLANET_WORK_MODE_SELF_CONSUMPTION:
-                    raise RuntimeError("Solplanet self-consumption mode readback did not match")
-                result["action"] = {"type": "apply", "reason": "solplanet_home_support_during_saj_priority"}
+                      "verification": "missing_residual_telemetry",
+                      "action": {"type": "apply", "reason": "self_consumption_until_telemetry_recovers"}}
+            combined_status["solplanet_export_monitor_control"] = {**result, "checked_at_utc": now_utc.isoformat()}
+            return result
+        if home_support_only:
+            # An active custom discharge slot with a measured residual target
+            # prevents self-consumption from competing with SAJ for home load.
+            schedule = await _solplanet_get_schedule_live()
+            day_key = _solplanet_day_key_for_local_date(now_local)
+            slots = _solplanet_day_slots(schedule.get(day_key))
+            target_slots = _solplanet_export_monitor_discharge_slots(now_local, should_sell=True)
+            for index, target_slot in zip(SOLPLANET_EXPORT_MONITOR_DISCHARGE_SLOT_INDEXES, target_slots):
+                slots[index] = target_slot
+            update = {"Pout": desired_pout, day_key: slots}
+            schedule_changed = int(_to_number(schedule.get("Pout")) or 0) != desired_pout or _solplanet_day_slots(schedule.get(day_key)) != slots
+            if schedule_changed:
+                await _solplanet_set_schedule_payload(update, current_schedule=schedule)
+            # Always verify both the active schedule and the effective mode.
+            readback = await _solplanet_get_schedule_live()
+            if int(_to_number(readback.get("Pout")) or 0) != desired_pout or _solplanet_day_slots(readback.get(day_key)) != slots:
+                raise RuntimeError("Solplanet SAJ-priority schedule readback did not match")
+            battery_info = await _solplanet_get_battery_info_live()
+            mode_changed = _to_number(battery_info.get("mod_r")) != SOLPLANET_WORK_MODE_REGISTER_BY_ID[SOLPLANET_WORK_MODE_CUSTOM]
+            if mode_changed:
+                write_result = await _solplanet_set_work_mode_payload(SOLPLANET_WORK_MODE_CUSTOM)
+                if write_result.get("readback_mode") != SOLPLANET_WORK_MODE_CUSTOM:
+                    raise RuntimeError("Solplanet SAJ-priority custom mode readback did not match")
+            result = {**base_result, "home_support_only": True, "checked_live": True,
+                      "target_work_mode": SOLPLANET_WORK_MODE_CUSTOM,
+                      "verification": "schedule_confirmed_await_power_sample",
+                      "action": {"type": "apply" if schedule_changed or mode_changed else "noop",
+                                 "reason": desired_reason if schedule_changed or mode_changed else "already_at_target"}}
             combined_status["solplanet_export_monitor_control"] = {**result, "checked_at_utc": now_utc.isoformat()}
             return result
 
@@ -6597,9 +6823,6 @@ async def _apply_solplanet_free_energy_recovery(
             "target_reached": target_reached,
         }
     )
-    if charging:
-        result["action"] = {"type": "noop", "reason": "already_charging"}
-        return result
     if target_reached:
         result["action"] = {"type": "noop", "reason": "target_soc_reached"}
         return result
@@ -6653,11 +6876,16 @@ async def _apply_solplanet_free_energy_recovery(
                 "current_charge_slot_active": _solplanet_charge_slot_active(current_charge_slot, now_local),
             }
         )
+        battery_info = await _solplanet_get_battery_info_live()
+        mode_matches = int(_to_number(battery_info.get("mod_r")) or 0) == SOLPLANET_WORK_MODE_REGISTER_BY_ID[SOLPLANET_WORK_MODE_CUSTOM]
+        if mode_matches and result["current_pin_w"] == SOLPLANET_FREE_ENERGY_TARGET_PIN_W and current_slots[SOLPLANET_FREE_ENERGY_CHARGE_SLOT_INDEX] == desired_charge_slot:
+            result["action"] = {"type": "noop", "reason": "full_power_charge_configured"}
+            return result
         mode_write_result = await _solplanet_set_work_mode_payload(SOLPLANET_WORK_MODE_CUSTOM)
         write_result = await _solplanet_set_schedule_payload(update_payload, current_schedule=schedule)
         result["action"] = {
             "type": "apply",
-            "reason": "free_energy_not_charging_set_custom_mode_and_charge_schedule",
+            "reason": "free_energy_ensure_full_power_charge_schedule",
             "payload": update_payload,
             "work_mode": SOLPLANET_WORK_MODE_CUSTOM,
         }
@@ -6700,6 +6928,9 @@ async def _apply_saj_export_window_discharge_control(
     now_local: datetime,
     combined_status: dict[str, object],
 ) -> dict[str, object]:
+    if ((solplanet_monitor or {}).get("saj_evening_plan") or {}).get("priority_active"):
+        return {"mode": "auto_control", "checked_live": False,
+                "action": {"type": "noop", "reason": "saj_evening_priority_has_control"}}
     guard_state = await _load_saj_morning_grid_import_guard_state()
     if _is_within_saj_morning_grid_import_guard_window(now_local) and guard_state.get("active"):
         return {"mode": "auto_control", "checked_live": False,
@@ -7806,6 +8037,7 @@ async def _run_midday_window_check(
                 export_tracking=result["solar_surplus_export_tracking"],
                 current_grid_import_w=current_grid_import_w,
                 current_grid_export_w=current_grid_export_w,
+                saj_depleted=(await _load_saj_morning_grid_import_guard_state()).get("evening_depleted_date") == now_local.date().isoformat(),
             )
             result["export_window"]["solplanet_export_monitor_control"] = await _apply_solplanet_export_monitor_control(
                 monitor=result["export_window"]["solplanet_export_monitor"],
@@ -8251,6 +8483,7 @@ async def _run_midday_window_check(
                 export_tracking=export_tracking,
                 current_grid_import_w=current_grid_import_w,
                 current_grid_export_w=current_grid_export_w,
+                saj_depleted=(await _load_saj_morning_grid_import_guard_state()).get("evening_depleted_date") == now_local.date().isoformat(),
             )
             export_window_map["solplanet_export_monitor_control"] = await _apply_solplanet_export_monitor_control(
                 monitor=export_window_map["solplanet_export_monitor"],
@@ -8954,6 +9187,61 @@ async def _run_saj_morning_grid_import_guard_check(
             await _store_saj_morning_grid_import_guard_state(state)
             return result
 
+        # This safety stop is independent of SAJ SOC, rule switches and retries.
+        # A failed inverter command must never leave the car buying energy.
+        result["tesla_import_safety"] = await _enforce_tesla_morning_import_guard(
+            combined_flow, state, now_local,
+        )
+        # A floor hit ends SAJ priority for this evening. SOC can rebound to
+        # 21% without the BMS permitting discharge, so never oscillate ownership.
+        evening_window = 17 <= now_local.hour < EXPORT_WINDOW_END_HOUR
+        try:
+            sample_at = datetime.fromisoformat(str((combined_flow or {}).get("updated_at") or "").replace("Z", "+00:00"))
+            fresh_floor_sample = not (combined_flow or {}).get("stale") and -30 <= (now_utc - sample_at).total_seconds() <= 180
+        except (ValueError, TypeError):
+            fresh_floor_sample = False
+        if evening_window and fresh_floor_sample and soc is not None and (
+            soc <= 20 or (soc <= 21 and battery_w is not None and battery_w < POWER_FLOW_ACTIVE_THRESHOLD_W)
+        ):
+            state["evening_depleted_date"] = now_local.date().isoformat()
+        if state.get("depleted_charge_limits_saved") and (not enabled or not window_active):
+            for entity, value in state["depleted_charge_limits_saved"].items():
+                await _saj_set_number(entity, value)
+            state.pop("depleted_charge_limits_saved", None)
+            state.pop("depleted_charge_limits_applied", None)
+        if evening_window and enabled and state.get("evening_depleted_date") == now_local.date().isoformat():
+            if not state.get("depleted_charge_limits_saved"):
+                _, live_states = await _saj_control_states()
+                saved_limits = {}
+                for sensor, entity in (
+                    ("sensor.saj_battery_charge_power_limit", "number.saj_battery_charge_power_limit_input"),
+                    ("sensor.saj_grid_charge_power_limit", "number.saj_grid_max_charge_power_input"),
+                ):
+                    actual = _entity_number_value(live_states, sensor)
+                    previous = int(round(actual * 10)) if actual is not None else _entity_number_value(live_states, entity)
+                    if previous is None:
+                        raise RuntimeError("Cannot preserve SAJ charge limit before depleted hold")
+                    saved_limits[entity] = previous
+                state["depleted_charge_limits_saved"] = saved_limits
+                await _store_saj_morning_grid_import_guard_state(state)
+            if not state.get("depleted_charge_limits_applied"):
+                for entity in state["depleted_charge_limits_saved"]:
+                    await _saj_set_number(entity, 0)
+                state["depleted_charge_limits_applied"] = True
+            if not state.get("evening_depleted_hold_applied") or state.get("target_power_w") != 0:
+                api_result = await put_saj_manual_discharge_power(
+                    SajManualDischargePowerPayload(power_w=0, settle_seconds=2.0),
+                    trigger_source="worker:saj_evening_depleted_hold",
+                )
+                result["action"] = {"type": "set_saj_manual_discharge_power", "power_w": 0,
+                                    "reason": "saj_exhausted_solplanet_takes_over", "api_result": api_result}
+                status = "applied"
+            state.update(active=True, target_power_w=0, evening_export_active=False,
+                         evening_depleted_hold_applied=True, high_import_checks=0)
+            result["saj_evening_plan"] = _saj_evening_export_plan(metrics, now_local, depleted=True)
+            return await finish("saj_exhausted_solplanet_takes_over", "depleted_hold")
+        if not evening_window:
+            state["evening_depleted_hold_applied"] = False
         # Window/disable cleanup must work even when telemetry is unavailable.
         exit_reason = "free_energy_window" if not window_active else "rule_disabled" if not enabled else None
         if soc is not None and soc <= SAJ_MORNING_GRID_IMPORT_GUARD_STOP_SOC_PERCENT:
@@ -8992,6 +9280,12 @@ async def _run_saj_morning_grid_import_guard_check(
         evening_plan = _saj_evening_export_plan(metrics, now_local)
         result["saj_evening_plan"] = evening_plan
         evening_target_w = int(evening_plan["target_power_w"])
+        if evening_target_w > 0:
+            result["saj_delivery"] = {
+                "requested_power_w": evening_target_w, "measured_power_w": battery_w,
+                "confirmed": battery_w >= evening_target_w - 200,
+                "status": "delivering" if battery_w >= evening_target_w - 200 else "not_delivering_retry_required",
+            }
         was_evening_export = bool(state.get("evening_export_active"))
         state["evening_export_active"] = evening_target_w > 0
 
@@ -9040,7 +9334,8 @@ async def _run_saj_morning_grid_import_guard_check(
         last_target = _to_number(state.get("target_power_w"))
         target_changed = last_target is None or abs(target_w - last_target) >= 200
         retry_needed = (high_import or evening_target_w > 0) and battery_w < target_w - 200
-        ready = elapsed >= SAJ_GRID_IMPORT_GUARD_RETRY_SECONDS or (was_evening_export and evening_target_w == 0)
+        retry_seconds = 60 if evening_target_w > 0 else SAJ_GRID_IMPORT_GUARD_RETRY_SECONDS
+        ready = elapsed >= retry_seconds or (was_evening_export and evening_target_w == 0)
         should_apply = (
             (not active and (evening_target_w > 0 or checks >= SAJ_MORNING_GRID_IMPORT_GUARD_TRIGGER_CHECKS))
             or (active and ready and (target_changed or retry_needed))
@@ -9073,6 +9368,116 @@ async def _run_saj_morning_grid_import_guard_check(
             requested_at_utc=requested_at_utc, started_monotonic=started_monotonic,
             ok=ok, status=status, payload=result, error_text=error_text,
         )
+
+
+async def _run_pre_free_tesla_check(flow: dict | None, observation_result: dict | None, now: datetime) -> dict:
+    result = {"window_mode": "pre_free_energy", "window_schedule": "08:00-11:00",
+              "target": "saj_battery", "decision": {"mode": "off", "charge_current_amps": 0}}
+    metrics = (flow or {}).get("metrics") or {}
+    observation = (observation_result or {}).get("observation") or {}
+    charge = _tesla_observation_charge_state(observation)
+    result["tesla_state_before"] = charge
+    priority = await _build_device_priority_snapshot(flow, now_local=now)
+    car_priority = priority.get("tesla") or {}
+    pump_priority = priority.get("pool_pump") or {}
+    car_auto = bool(car_priority.get("auto_control_enabled", True))
+    at_home = _tesla_auto_control_location_block_reason(charge) is None
+    eligible = bool(car_auto and at_home and observation.get("observed_entity_count", 0) > 0
+                    and charge.get("cable_connected")
+                    and charge.get("status_text") not in ("unknown", "unavailable", "disconnected"))
+    soc = _to_number((observation.get("battery") or {}).get("level_percent"))
+    pump = _build_pool_pump_state(await _pool_pump_states_by_id())
+    pump_control = pump.get("control") or {}
+    pump_w = max(POOL_PUMP_ASSUMED_POWER_W, _to_number((pump.get("metrics") or {}).get("power_w")) or 0)
+    pump_running_w = max(0, _to_number(metrics.get("pool_pump_power_w")) or 0) if pump_control.get("enabled") else 0.0
+    pump_eligible = bool(pump_priority.get("auto_control_enabled", True) and pump_control.get("available")
+                         and (_to_number(pump_priority.get("rolling_runtime_hours_24h")) or 0) < 9)
+    reference = _build_overnight_energy_reference(metrics) or {}
+    projection = (reference.get("projections") or {}).get(_projection_key_for_target_hour(11)) or {}
+    home_values = [_to_number(((projection.get("averages") or {}).get(k) or {}).get("average_home_load_kwh"))
+                   for k in ("days_3", "days_7")]
+    home_reserve = max((v for v in home_values if v is not None), default=0)
+    state = dict(await _load_saj_morning_grid_import_guard_state())
+    fresh = _pre_free_fresh(flow)
+    stamp = str((flow or {}).get("updated_at") or "")
+    clean = fresh and _to_number(metrics.get("grid_w")) is not None and metrics["grid_w"] <= 0
+    if state.get("pre_free_day") != now.date().isoformat():
+        state.update(pre_free_day=now.date().isoformat(), pre_free_clean_samples=0, pre_free_clean_sample_at=None)
+    if not clean:
+        state["pre_free_clean_samples"] = 0
+    elif state.get("pre_free_clean_sample_at") != stamp:
+        state["pre_free_clean_samples"] = min(3, int(state.get("pre_free_clean_samples") or 0) + 1)
+        state["pre_free_clean_sample_at"] = stamp
+    await _store_saj_morning_grid_import_guard_state(state)
+    locked = await _tesla_morning_import_locked()
+    running = bool(charge.get("enabled") or charge.get("requested_enabled"))
+    starting_unstable = not running and int(state.get("pre_free_clean_samples") or 0) < 3
+    # A large SOC never overrides an actual inverter output limit (including 0).
+    try:
+        schedule = await _solplanet_get_schedule_live()
+        discharge_limit_w = max(0, _to_number(schedule.get("Pout")) or 0)
+    except Exception as exc:  # noqa: BLE001
+        discharge_limit_w = 0.0
+        result["solplanet_limit_read_error"] = f"{type(exc).__name__}: {exc}"
+    allocation = pre_free_energy.plan(
+        metrics, now=now, fresh=fresh, home_reserve_kwh=home_reserve,
+        tesla_eligible=eligible, tesla_soc=soc,
+        force_soc=_to_number(car_priority.get("force_max_charge_threshold_soc_percent")) or 40,
+        tesla_max_amps=_to_number(charge.get("max_current_amps")) or 15,
+        tesla_current_amps=(_to_number(charge.get("current_amps")) or 0) if running else 0,
+        pump_eligible=pump_eligible, pump_power_w=pump_w, pump_running_w=pump_running_w,
+        locked=locked or starting_unstable,
+        solplanet_discharge_limit_w=discharge_limit_w,
+    )
+    result["pre_free_energy"] = allocation
+    result["decision_reason"] = allocation["reason"]
+    result["tesla_rule_enabled"] = car_auto
+    amps = allocation["tesla_amps"]
+    result["decision"] = {"mode": "charge" if amps else "off", "charge_current_amps": amps}
+    result["action"] = {"type": "noop", "reason": allocation["reason"]}
+    if car_auto and at_home:
+        if not amps and running:
+            await _tesla_set_charging(False)
+            result["action"] = {"type": "stop_charging", "reason": allocation["reason"]}
+        elif amps:
+            configured = _to_number(charge.get("configured_current_amps"))
+            if configured != amps:
+                await _tesla_set_charge_current(amps)
+                result["action"] = {"type": "set_charge_current", "reason": allocation["reason"]}
+            # A stopped car must report the requested current on a later round
+            # before starting; an accepted HA command alone is not readback.
+            if not running and configured == amps:
+                await _tesla_set_charging(True)
+                result["action"] = {"type": "start_charging", "reason": allocation["reason"]}
+    # Do not spend the power freed by a car command until a later meter sample.
+    if result["action"]["type"] != "noop" and not pump_control.get("enabled"):
+        allocation["pump_run"] = False
+    result["log_status"] = "noop" if result["action"]["type"] == "noop" else "applied"
+    return result
+
+
+async def _run_pre_free_pump_check(flow: dict | None, car_result: dict | None, now: datetime) -> dict:
+    result = {"window_mode": "pre_free_energy", "window_schedule": "08:00-11:00",
+              "target": "pool_pump", "decision_reason": "pre_free_make_charge_room"}
+    if not await _load_pool_pump_auto_control_enabled():
+        return {**result, "decision": {"mode": "observe_only"}, "log_status": "noop",
+                "action": {"type": "noop", "reason": "pool_pump_auto_control_disabled"}}
+    pump = _build_pool_pump_state(await _pool_pump_states_by_id())
+    control = pump.get("control") or {}
+    state = await _load_saj_morning_grid_import_guard_state()
+    allocation = (car_result or {}).get("pre_free_energy") or {}
+    run = bool(allocation.get("pump_run") and not (car_result or {}).get("error")
+               and _pre_free_fresh(flow) and not _pre_free_cooldown_active(state, now)
+               and not await _tesla_morning_import_locked())
+    result["pre_free_energy"] = allocation
+    result["decision"] = {"mode": "run" if run else "off"}
+    result["action"] = {"type": "noop", "reason": "pre_free_keep_pump_state"}
+    if control.get("available") and bool(control.get("enabled")) != run:
+        await _pool_pump_set_enabled(run)
+        result["action"] = {"type": "start_pool_pump" if run else "stop_pool_pump",
+                            "reason": allocation.get("reason", "pre_free_telemetry_unavailable")}
+    result["log_status"] = "noop" if result["action"]["type"] == "noop" else "applied"
+    return result
 
 
 async def _run_saj_battery_watch_check(
@@ -9109,6 +9514,11 @@ async def _run_saj_battery_watch_check(
             result["decision"] = {"mode": "observe_only"}
             result["action"] = {"type": "noop", "reason": "outside_window"}
             status = "outside_window"
+            return result
+
+        if pre_free_energy.window_active(now_local):
+            result.update(await _run_pre_free_tesla_check(combined_flow, tesla_observation_result, now_local))
+            status = str(result["log_status"])
             return result
 
         metrics = combined_flow.get("metrics") if isinstance(combined_flow, dict) else None
@@ -9176,8 +9586,9 @@ async def _run_saj_battery_watch_check(
             pump_end_local = datetime.combine(now_local.date(), time(hour=POOL_PUMP_OVERNIGHT_TARGET_END_HOUR), tzinfo=now_local.tzinfo)
             if pump_end_local <= now_local:
                 pump_end_local += timedelta(days=1)
-            pump_duration_hours = (pump_end_local - now_local).total_seconds() / 3600.0
-            pump_max_hours = float((24 - POOL_PUMP_OVERNIGHT_TARGET_START_HOUR) + POOL_PUMP_OVERNIGHT_TARGET_END_HOUR)
+            pump_duration_hours = (pump_end_local.astimezone(UTC) - now_local.astimezone(UTC)).total_seconds() / 3600.0
+            pump_start_local = (pump_end_local - timedelta(days=1)).replace(hour=POOL_PUMP_OVERNIGHT_TARGET_START_HOUR)
+            pump_max_hours = (pump_end_local.astimezone(UTC) - pump_start_local.astimezone(UTC)).total_seconds() / 3600.0
             pump_remaining_hours = (
                 max(0.0, min(pump_duration_hours, pump_max_hours))
                 if pool_pump_auto_control_enabled and pool_pump_rule_enabled
@@ -9255,6 +9666,12 @@ async def _run_saj_battery_watch_check(
         active_or_requested = charging_enabled or charge_requested_enabled
         tesla_location_block_reason = _tesla_auto_control_location_block_reason(charge_state)
         result["tesla_auto_control_location_block_reason"] = tesla_location_block_reason
+
+        if await _tesla_morning_import_locked():
+            result["decision"] = {"mode": "off", "charge_current_amps": 0}
+            result["decision_reason"] = "morning_grid_import_stop_until_11"
+            result["action"] = {"type": "noop", "reason": "morning_grid_import_stop_until_11"}
+            return result
 
         tesla_block_reason: str | None = None
         if not tesla_rule_enabled:
@@ -9450,6 +9867,15 @@ async def _run_saj_battery_watch_check(
                 if remaining_alloc_power_w >= pump_power_w:
                     pool_pump_target_mode = "run"
                     remaining_alloc_power_w = max(remaining_alloc_power_w - pump_power_w, 0.0)
+        if now_local.hour < FREE_ENERGY_WINDOW_START_HOUR:
+            measured_budget_w = _tesla_morning_measured_power_budget(combined_flow)
+            result["morning_measured_power_budget_w"] = measured_budget_w
+            if float(tesla_target.get("tesla_power_w") or 0.0) > measured_budget_w:
+                tesla_target = _calculate_tesla_target_for_power_budget(charge_state, measured_budget_w)
+                tesla_allocation_block_reason = "morning_measured_power_limit"
+                if int(tesla_target.get("charge_current_amps") or 0) < TESLA_OVERNIGHT_MIN_EFFECTIVE_CHARGE_CURRENT_A:
+                    tesla_target = {"mode": "off", "charge_current_amps": 0, "tesla_power_w": 0.0}
+
         tesla_allocated = str(tesla_target.get("mode") or "").strip().lower() == "charge"
         pool_pump_allocated = pool_pump_target_mode == "run"
         result["tesla_priority_score"] = round(tesla_priority_score, 1)
@@ -9632,7 +10058,7 @@ async def _run_saj_battery_watch_check(
         except Exception as state_exc:  # noqa: BLE001
             result["final_switch_states_error"] = f"{type(state_exc).__name__}: {state_exc}"
         result["service_window"] = OVERNIGHT_SHOULDER_SERVICE
-        result["service_window_schedule"] = _window_schedule_text("overnight_shoulder")
+        result["service_window_schedule"] = "08:00-11:00" if pre_free_energy.window_active(now_local) else _window_schedule_text("overnight_shoulder")
         result["service_window_active"] = window_active
         result["log_ok"] = ok
         result["log_status"] = status
@@ -9661,7 +10087,7 @@ async def _run_pool_pump_off_period_check(
         _is_hour_in_window(now_local.hour, POOL_PUMP_OFF_PERIOD_MORNING_START_HOUR, POOL_PUMP_OFF_PERIOD_MORNING_END_HOUR)
         or _is_hour_in_window(now_local.hour, POOL_PUMP_OFF_PERIOD_AFTERNOON_START_HOUR, POOL_PUMP_OFF_PERIOD_AFTERNOON_END_HOUR)
     )
-    if midday_window_mode == "export_window":
+    if midday_window_mode == "export_window" or pre_free_energy.window_active(now_local):
         window_active = False
     result: dict[str, object] = {
         "executed_at_utc": datetime.now(UTC).isoformat(),
@@ -9819,6 +10245,10 @@ async def _run_pool_pump_overnight_control_check(
     try:
         enabled_map = await _load_time_window_rule_enabled_map()
         result["rule_enabled_map"] = enabled_map
+        if pre_free_energy.window_active(now_local):
+            result.update(await _run_pre_free_pump_check(combined_flow, tesla_overnight_result, now_local))
+            status = str(result["log_status"])
+            return result
         if not window_active:
             result["decision"] = {"mode": "observe_only"}
             result["action"] = {"type": "noop", "reason": "outside_window"}
@@ -10247,7 +10677,7 @@ async def _run_pool_pump_overnight_control_check(
         except Exception as state_exc:  # noqa: BLE001
             result["final_switch_states_error"] = f"{type(state_exc).__name__}: {state_exc}"
         result["service_window"] = OVERNIGHT_SHOULDER_SERVICE
-        result["service_window_schedule"] = _window_schedule_text("overnight_shoulder")
+        result["service_window_schedule"] = "08:00-11:00" if pre_free_energy.window_active(now_local) else _window_schedule_text("overnight_shoulder")
         result["service_window_active"] = window_active
         result["log_ok"] = ok
         result["log_status"] = status
@@ -12215,12 +12645,14 @@ def _build_saj_control_state(
         },
         "charge": {
             "time_enable_mask": _entity_number_value(states_by_id, "number.saj_charge_time_enable_input"),
+            "actual_time_enable_mask": _entity_number_value(states_by_id, "sensor.saj_charge_time_enable_bitmask"),
             "control_switch": _entity_switch_value(states_by_id, "switch.saj_charging_control"),
             "slots": charge_slots,
             "effective_slots": charge_effective_slots,
         },
         "discharge": {
             "time_enable_mask": _entity_number_value(states_by_id, "number.saj_discharge_time_enable_input"),
+            "actual_time_enable_mask": _entity_number_value(states_by_id, "sensor.saj_discharge_time_enable_bitmask"),
             "control_switch": _entity_switch_value(states_by_id, "switch.saj_discharging_control"),
             "slots": discharge_slots,
             "effective_slots": discharge_effective_slots,
@@ -12228,6 +12660,8 @@ def _build_saj_control_state(
         "limits": {
             "battery_charge_power_limit": charge_power_limit,
             "battery_discharge_power_limit": discharge_power_limit,
+            "actual_battery_discharge_power_limit_percent": _entity_number_value(states_by_id, "sensor.saj_battery_discharge_power_limit"),
+            "actual_grid_discharge_power_limit_percent": _entity_number_value(states_by_id, "sensor.saj_grid_discharge_power_limit"),
             "grid_max_charge_power": _entity_number_value(states_by_id, "number.saj_grid_max_charge_power_input"),
             "grid_max_discharge_power": _entity_number_value(states_by_id, "number.saj_grid_max_discharge_power_input"),
         },
@@ -14114,6 +14548,73 @@ async def _persist_worker_control_log(
         return None
 
 
+async def _check_tesla_free_energy_plug_reminder(
+    observation_result: dict[str, object] | None,
+    *,
+    now_local: datetime,
+    round_id: str | None = None,
+) -> dict[str, object]:
+    """One informational dashboard reminder per local free-energy day."""
+    code = "tesla_free_energy_plug_reminder"
+    day = now_local.date().isoformat()
+    notification_key = f"{code}::tesla::{day}"
+    observation = (observation_result or {}).get("observation") or {}
+    battery = observation.get("battery") or {}
+    charging = observation.get("charging") or {}
+    location = observation.get("location") or {}
+    soc = _to_number(battery.get("level_percent"))
+    eligible = (
+        not (observation_result or {}).get("error")
+        and _is_within_free_energy_window(now_local)
+        and location.get("at_home") is True
+        and soc is not None and 0 <= soc < 80
+        and charging.get("cable_connected") is False
+        and charging.get("connection_state") == "unplugged"
+    )
+    result = {"eligible": eligible, "soc_percent": soc, "status": "not_applicable"}
+    kv = await asyncio.to_thread(get_realtime_kv_by_prefix, storage_db_path, prefix=TESLA_PLUG_REMINDER_STATE_KEY)
+    value = (kv.get(TESLA_PLUG_REMINDER_STATE_KEY) or {}).get("value")
+    state = value if isinstance(value, dict) else json.loads(value) if isinstance(value, str) else {}
+    if not isinstance(state, dict):
+        state = {}
+    now_utc = now_local.astimezone(UTC).isoformat()
+    if not eligible or state.get("notified_date") != day:
+        if state.get("active"):
+            cleared = await asyncio.to_thread(dismiss_notification_entry, storage_db_path,
+                notification_key=state.get("notification_key") or notification_key, dismissed_at_utc=now_utc)
+            if not cleared:
+                raise RuntimeError("Failed to clear Tesla plug reminder")
+            state["active"] = False
+            await asyncio.to_thread(upsert_realtime_kv, storage_db_path,
+                [(TESLA_PLUG_REMINDER_STATE_KEY, json.dumps(state), "worker")])
+        if not eligible:
+            return result
+    if state.get("notified_date") == day:
+        result["status"] = "already_reminded_today"
+        return result
+    notification = _notification_entity_from_payload({
+        "code": code, "target": "tesla", "level": "info", "window": _window_schedule_text("free_energy"),
+        "message": f"免费电时段：Tesla 在家，电量 {soc:g}%（低于 80%），尚未插枪，请连接充电枪。 / Free energy: Tesla is home at {soc:g}% (below 80%) and unplugged. Please plug in.",
+    })
+    notification["notification_key"] = notification_key
+    count = await asyncio.to_thread(upsert_notification_entries, storage_db_path,
+        notifications=[notification], requested_at_utc=now_utc,
+        source_system=NOTIFICATION_LOG_SYSTEM, source_service=NOTIFICATION_SUMMARY_SERVICE)
+    if count != 1:
+        raise RuntimeError("Failed to persist Tesla plug reminder")
+    await asyncio.to_thread(upsert_realtime_kv, storage_db_path,
+        [(TESLA_PLUG_REMINDER_STATE_KEY, json.dumps({"notified_date": day, "active": True, "notification_key": notification_key}), "worker")])
+    await _persist_worker_control_log(
+        round_id=round_id, system=NOTIFICATION_LOG_SYSTEM, service=NOTIFICATION_SUMMARY_SERVICE,
+        requested_at_utc=now_utc, started_monotonic=monotonic(), ok=True,
+        status=WORKER_LOG_STATUS_SEND,
+        payload={"record_kind": "notification", "window_mode": "free_energy",
+                 "window_active": True, "notifications": [notification]}, error_text=None,
+    )
+    result["status"] = "reminded"
+    return result
+
+
 async def _persist_worker_summary_logs(
     *,
     round_id: str | None,
@@ -14648,6 +15149,14 @@ async def _collector_loop() -> None:
                 "error": f"{type(pool_pump_exc).__name__}: {pool_pump_exc}",
                 "executed_at": datetime.now(UTC).isoformat(),
             }
+
+        try:
+            reminder = await _check_tesla_free_energy_plug_reminder(
+                tesla_observation_result, now_local=_tesla_grid_support_now_local()[0], round_id=round_id,
+            )
+            collector_status.setdefault("combined", {})["last_tesla_plug_reminder"] = reminder
+        except Exception as reminder_exc:  # noqa: BLE001
+            _append_worker_failure_log("tesla", stage="plug_reminder", error=reminder_exc)
 
         try:
             summary_started_monotonic = monotonic()
@@ -16208,12 +16717,24 @@ def _build_combined_auxiliary_issues(combined_state: dict[str, object]) -> list[
     for system, key in checks:
         payload = combined_state.get(key)
         payload_map = payload if isinstance(payload, dict) else {}
+        for child_key, child_system in (("saj_profile_guard", "saj"), ("solplanet_free_energy_recovery", "solplanet")):
+            child = payload_map.get(child_key)
+            if isinstance(child, dict) and child.get("error"):
+                issues.append(_collector_issue(
+                    system=child_system, code="control_failed",
+                    en=f"{child_system}: {child['error']}", zh=f"{child_system}：{child['error']}",
+                    details={"check": child_key, "payload": child},
+                ))
         error_text = str(payload_map.get("error") or "").strip()
         skipped = str(payload_map.get("skipped") or "").strip()
         action = payload_map.get("action")
         action_map = action if isinstance(action, dict) else {}
         action_reason = str(action_map.get("reason") or "").strip()
         code = error_text or skipped or action_reason
+        if not error_text and skipped == "tesla_unplugged":
+            continue
+        if not error_text and skipped == "tesla_not_ready" and payload_map.get("tesla_status") == "disconnected":
+            continue
         if not error_text and not skipped:
             continue
         label = _collector_localized_label(_COLLECTOR_SYSTEM_LABELS, system)
@@ -17826,6 +18347,9 @@ async def put_saj_manual_discharge_power(
             trigger_source=trigger_source,
         )
 
+        if power_percent > 0:
+            changed.extend(await _saj_ensure_discharge_capacity(initial_states_by_id))
+
         await _saj_set_number("number.saj_app_mode_input", SAJ_PROFILE_MODE_CODES["time_of_use"])
         changed.append({"entity_id": "number.saj_app_mode_input", "value": SAJ_PROFILE_MODE_CODES["time_of_use"]})
         await _saj_set_switch("switch.saj_charging_control", False)
@@ -17845,6 +18369,11 @@ async def put_saj_manual_discharge_power(
         await _saj_set_switch("switch.saj_discharging_control", True)
         changed.append({"entity_id": "switch.saj_discharging_control", "value": True})
 
+        # HA power-switch handlers can queue their own AppMode update. Make
+        # the final queued mode explicit after masks, slots and switches.
+        await _saj_set_number("number.saj_app_mode_input", SAJ_PROFILE_MODE_CODES["time_of_use"])
+        changed.append({"entity_id": "number.saj_app_mode_input", "value": SAJ_PROFILE_MODE_CODES["time_of_use"]})
+
         if payload.settle_seconds > 0:
             await asyncio.sleep(float(payload.settle_seconds))
         _, states_by_id = await _saj_control_states()
@@ -17857,6 +18386,7 @@ async def put_saj_manual_discharge_power(
             "changed": changed,
             "state": _build_saj_control_state(states_by_id),
         }
+        result["verification"] = _saj_discharge_readback(result["state"], power_percent)
         await _update_operation_history_run(
             operation_run_id,
             status=OPERATION_RUN_STATUS_SUCCEEDED,
@@ -17894,6 +18424,16 @@ async def put_saj_manual_charge_power(
     *,
     trigger_source: str = "manual_ui",
 ) -> dict[str, object]:
+    return await _put_saj_charge_power(payload, trigger_source=trigger_source)
+
+
+async def _put_saj_charge_power(
+    payload: SajManualChargePowerPayload,
+    *,
+    trigger_source: str = "manual_ui",
+    charge_window: tuple[str, str] = ("00:00", "23:59"),
+    restore_charge_limits: bool = False,
+) -> dict[str, object]:
     _ensure_ha_configured()
     requested_power_w, power_percent = _resolve_saj_power_request(payload)
 
@@ -17903,8 +18443,8 @@ async def put_saj_manual_charge_power(
         "resolved_power_percent": power_percent,
         "resolved_power_w_estimate": int(round(SAJ_RATED_POWER_W * power_percent / 100.0)),
         "slot": 1,
-        "start_time": "00:00",
-        "end_time": "23:59",
+        "start_time": charge_window[0],
+        "end_time": charge_window[1],
         "day_mask": 127,
         "mode_code": SAJ_PROFILE_MODE_CODES["time_of_use"],
         "discharging_control": False,
@@ -17928,14 +18468,18 @@ async def put_saj_manual_charge_power(
         changed.append({"entity_id": "number.saj_discharge_time_enable_input", "value": 0})
         await _saj_set_number("number.saj_charge_time_enable_input", 1)
         changed.append({"entity_id": "number.saj_charge_time_enable_input", "value": 1})
-        await _saj_set_text("text.saj_charge1_start_time_time", "00:00")
-        changed.append({"entity_id": "text.saj_charge1_start_time_time", "value": "00:00"})
-        await _saj_set_text("text.saj_charge1_end_time_time", "23:59")
-        changed.append({"entity_id": "text.saj_charge1_end_time_time", "value": "23:59"})
+        await _saj_set_text("text.saj_charge1_start_time_time", charge_window[0])
+        changed.append({"entity_id": "text.saj_charge1_start_time_time", "value": charge_window[0]})
+        await _saj_set_text("text.saj_charge1_end_time_time", charge_window[1])
+        changed.append({"entity_id": "text.saj_charge1_end_time_time", "value": charge_window[1]})
         await _saj_set_number("number.saj_charge1_power_percent_input", power_percent)
         changed.append({"entity_id": "number.saj_charge1_power_percent_input", "value": power_percent})
         await _saj_set_number("number.saj_charge1_day_mask_input", 127)
         changed.append({"entity_id": "number.saj_charge1_day_mask_input", "value": 127})
+        if restore_charge_limits:
+            for entity in ("number.saj_battery_charge_power_limit_input", "number.saj_grid_max_charge_power_input"):
+                await _saj_set_number(entity, 1000)  # Permille: 1000 = 100%.
+                changed.append({"entity_id": entity, "value": 1000})
         await _saj_set_switch("switch.saj_charging_control", True)
         changed.append({"entity_id": "switch.saj_charging_control", "value": True})
 

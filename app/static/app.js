@@ -5800,48 +5800,57 @@ function localizedCollectorMessage(message) {
   return String(preferred || fallback || "").trim();
 }
 
-function compactDashboardIssueText(messages, limit = 3) {
-  const items = Array.isArray(messages)
-    ? messages.map((item) => String(item || "").trim()).filter(Boolean)
-    : [];
-  if (!items.length) return "";
-  const selected = items.slice(0, limit);
-  const suffix = items.length > limit ? ` +${items.length - limit}` : "";
-  return selected.join(" | ") + suffix;
-}
-
 function collectorHealthIssueText(collectorStatus) {
   const health = collectorStatus?.health_summary;
-  if (health && typeof health === "object") {
-    if (health.ok === true || health.status === "ok") return "";
-    const localizedMessages = health.messages?.[currentLang === "zh" ? "zh" : "en"];
-    const compact = compactDashboardIssueText(localizedMessages);
-    if (compact) return compact;
-    return localizedCollectorMessage(health.message);
-  }
-
+  if (health?.ok === true || health?.status === "ok") return "";
   const systems = collectorStatus?.systems || {};
-  const fallbackMessages = [];
-  ["saj", "solplanet", "combined"].forEach((system) => {
-    const state = systems?.[system] || {};
-    const result = state.last_round_result || {};
-    if (result.stored_sample !== false && !state.last_error) return;
-    const reason = result.reason || state.last_error || "source_missing";
-    const missing = Array.isArray(result.missing_metrics) && result.missing_metrics.length
-      ? ` (${result.missing_metrics.slice(0, 6).join(", ")})`
-      : "";
-    fallbackMessages.push(`${system}: ${reason}${missing}`);
+  const affected = new Set();
+  const labels = {
+    saj: "SAJ",
+    solplanet: "Solplanet",
+    tesla: currentLang === "zh" ? "特斯拉" : "Tesla",
+    pool_pump: currentLang === "zh" ? "水泵" : "Pool pump",
+  };
+  const addSystem = (system) => {
+    if (labels[system]) affected.add(system);
+  };
+  const sourceDetails = systems.combined?.last_round_result?.source_details || {};
+  Object.entries(sourceDetails).forEach(([system, state]) => {
+    if (state?.stored_sample === false) addSystem(system);
   });
-  return compactDashboardIssueText(fallbackMessages);
+  const sourceFailed = Object.values(sourceDetails).some((state) => state?.stored_sample === false);
+  const issues = Array.isArray(health?.issues) ? health.issues : [];
+  issues.forEach((issue) => {
+    // Missing combined SOC is a consequence of a failed source, not a SAJ outage.
+    if (sourceFailed && issue.code === "combined_saj_soc_unavailable") return;
+    addSystem(issue.system);
+    const sources = issue.details?.last_round_result?.source_details || {};
+    Object.entries(sources).forEach(([system, state]) => {
+      if (state?.stored_sample === false) addSystem(system);
+    });
+  });
+  Object.keys(labels).forEach((system) => {
+    const state = systems[system] || {};
+    if (state.last_round_result?.stored_sample === false || state.last_error || state.last_persistence_error) {
+      addSystem(system);
+    }
+  });
+  if (affected.size) {
+    const names = Object.keys(labels).filter((system) => affected.has(system)).map((system) => labels[system]);
+    return currentLang === "zh" ? `${names.join("、")} 异常` : `${names.join(", ")} unavailable`;
+  }
+  if (health?.ok === false || health?.status === "degraded" || systems.combined?.last_error) {
+    return currentLang === "zh" ? "数据服务异常" : "Data service unavailable";
+  }
+  return "";
 }
 
 function combinedDashboardIssueText(collectorStatus, combinedFlow, { isStale = false, failed = false } = {}) {
   const healthText = collectorHealthIssueText(collectorStatus);
   if (healthText) return healthText;
-  const staleReason = String(combinedFlow?.meta?.stale_reason || combinedFlow?.stale_reason || "").trim();
-  if (staleReason) return staleReason;
-  if (failed) return currentLang === "zh" ? "combined 数据接口请求失败" : "Combined data request failed";
-  if (isStale) return currentLang === "zh" ? "collector 没有写入新的 combined 快照" : "Collector has not written a new combined snapshot";
+  if (failed || isStale || combinedFlow?.meta?.stale_reason || combinedFlow?.stale_reason) {
+    return currentLang === "zh" ? "数据服务异常" : "Data service unavailable";
+  }
   return "";
 }
 
@@ -7835,7 +7844,36 @@ async function togglePoolPump() {
   }
 }
 
+function renderTeslaPlugReminder(payload) {
+  const root = document.getElementById("teslaPlugReminder");
+  if (!root) return;
+  const item = payload?.dashboardNotifications?.items?.find((entry) => entry.code === "tesla_free_energy_plug_reminder");
+  const eligible = payload?.collectorStatus?.systems?.combined?.last_tesla_plug_reminder?.eligible;
+  root.classList.toggle("hidden", !item || eligible === false);
+  if (!item || eligible === false) return;
+  const messages = String(item.message || "").split(" / ");
+  setText("teslaPlugReminderMessage", currentLang === "zh" ? messages[0] : (messages[1] || messages[0]));
+  const button = document.getElementById("teslaPlugReminderDismiss");
+  button.textContent = currentLang === "zh" ? "知道了" : "Dismiss";
+  button.onclick = async () => {
+    button.disabled = true;
+    try {
+      await fetchJson("/api/dashboard/notifications/dismiss", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notification_key: item.notification_key }),
+      });
+      payload.dashboardNotifications.items = payload.dashboardNotifications.items.filter((entry) => entry.notification_key !== item.notification_key);
+      renderTeslaPlugReminder(payload);
+    } catch (error) {
+      window.alert(String(error));
+    } finally {
+      button.disabled = false;
+    }
+  };
+}
+
 function renderSummary(payload) {
+  renderTeslaPlugReminder(payload);
   const { combinedFlow, collectorStatus } = payload;
   const tesla = teslaInfoFromCombinedFlow(combinedFlow);
   const poolPump = payload.poolPump || combinedFlow?.pool_pump || null;
@@ -16608,6 +16646,7 @@ async function loadSummary() {
 
   const baseResults = await Promise.allSettled([
     fetchJson("/api/collector/status", { timeoutMs: 6000 }),
+    fetchJson("/api/dashboard/notifications", { timeoutMs: 6000 }),
   ]);
   void loadWeatherForecast();
   if (requestId !== summaryRequestId) return;
@@ -16616,6 +16655,7 @@ async function loadSummary() {
     summary.collectorStatus = baseResults[0].value;
     stateCache.lastCollectorStatus = baseResults[0].value;
   }
+  summary.dashboardNotifications = baseResults[1].status === "fulfilled" ? baseResults[1].value : null;
   renderSummary(summary);
 }
 

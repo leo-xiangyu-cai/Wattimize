@@ -17,6 +17,7 @@ def test_paid_window(hour, minute, expected):
 
 def setup_guard(monkeypatch, *, hour=9, state=None, enabled=True):
     state = dict(state or {})
+    monkeypatch.setattr(main, '_enforce_tesla_morning_import_guard', AsyncMock(return_value={}))
     now = datetime(2026,9,13,hour,0,tzinfo=ZoneInfo('Australia/Sydney'))
     monkeypatch.setattr(main, '_tesla_grid_support_now_local', lambda: (now, 'Australia/Sydney'))
     monkeypatch.setattr(main, '_load_time_window_rule_enabled_map', AsyncMock(return_value={'saj_morning_grid_import_guard': enabled}))
