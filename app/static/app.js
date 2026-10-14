@@ -126,6 +126,24 @@ const I18N = {
     configSaved: "Saved",
     configSaveFailed: "Save failed: {error}",
     configMustSaveFirst: "Configuration is not complete yet. Complete setup first.",
+    reserveManual: "Manual",
+    reserveAutomatic: "Use automatic forecast",
+    reservePredicted: "Forecast",
+    reserveHistory: "Forecast history and accuracy",
+    reserveNight: "Night starting",
+    reserveActual: "Observed need (kWh)",
+    reserveError: "Error (kWh)",
+    reserveMargin: "Margin (kWh)",
+    reserveAccuracyNote: "One result per night using the last forecast before 23:00. Observed-load replay is an estimate, not a guarantee or realized savings. Return-home demand can differ.",
+    reserveSummary: "{mode} · Active reserve {value} kWh · {night} 23:00–11:00 · Forecast updated {updated} · {days} training nights · Load {load} / PV {pv} kWh",
+    reserveModeManual: "Manual / observing",
+    reserveModeAuto: "Automatic",
+    reserveModeFallback: "Automatic unavailable; conservative fallback",
+    reserveWaiting: "Collecting forecast; current manual reserve remains active.",
+    reserveStats: "{count} evaluated nights · Mean absolute error {error} kWh · Reserve sufficient {coverage}%",
+    reservePending: "Pending",
+    reserveIncomplete: "Incomplete data",
+    reserveUnavailable: "Forecast unavailable: {reason}",
     dashboardReserveFloorLabel: "Export reserve",
     dashboardReserveFloorInputLabel: "Keep",
     dashboardReserveFloorSaveBtn: "Save",
@@ -1332,6 +1350,24 @@ const I18N = {
     configSaved: "保存成功",
     configSaveFailed: "保存失败: {error}",
     configMustSaveFirst: "当前配置还不完整，请先完成配置",
+    reserveManual: "手动值",
+    reserveAutomatic: "采用自动预测",
+    reservePredicted: "预测值",
+    reserveHistory: "每日预测记录与准确性",
+    reserveNight: "夜间开始日期",
+    reserveActual: "实际需求（度）",
+    reserveError: "预测误差（度）",
+    reserveMargin: "备用余量（度）",
+    reserveAccuracyNote: "每晚采用 23 点前最后一次有效预测评估。按实际负载回放为估算，不代表保证或已实现收益；回家后的用电变化可能增加误差。",
+    reserveSummary: "{mode} · 当前采用 {value} 度 · {night} 23:00 至次日 11:00 · 更新 {updated} · {days} 个训练夜间 · 预计用电 {load} / 光伏 {pv} 度",
+    reserveModeManual: "手动控制／预测观察中",
+    reserveModeAuto: "自动调节",
+    reserveModeFallback: "自动预测不可用，采用保守备用值",
+    reserveWaiting: "正在计算预测，当前保留手动备用值。",
+    reserveStats: "已评估 {count} 晚 · 平均绝对误差 {error} 度 · 备用覆盖率 {coverage}%",
+    reservePending: "待次日验证",
+    reserveIncomplete: "数据不完整",
+    reserveUnavailable: "预测暂不可用：{reason}",
     dashboardReserveFloorLabel: "卖电保留线",
     dashboardReserveFloorInputLabel: "保留",
     dashboardReserveFloorSaveBtn: "保存",
@@ -6912,6 +6948,58 @@ function renderCombinedUsableBatteryNode(combinedFlow) {
   renderDashboardReserveFloorControl(combinedFlow);
 }
 
+let reserveForecastData = null;
+let reserveForecastFetchedAt = 0;
+let reserveForecastLoading = false;
+let reserveControlSaving = false;
+
+function renderReserveForecast(data) {
+  reserveForecastData = data;
+  const checkbox = document.getElementById("combinedReserveAuto");
+  const manual = document.getElementById("combinedReserveFloorInput");
+  const predicted = document.getElementById("combinedReservePrediction");
+  if (checkbox) {
+    checkbox.disabled = reserveControlSaving;
+    if (!reserveControlSaving) checkbox.checked = data.automatic;
+  }
+  const saveButton = document.getElementById("combinedReserveFloorSaveBtn");
+  if (saveButton) saveButton.disabled = reserveControlSaving;
+  if (manual) {
+    manual.disabled = data.automatic || reserveControlSaving;
+    if (document.activeElement !== manual && !reserveControlSaving) manual.value = data.manual_kwh;
+  }
+  const p = data.prediction || {};
+  if (predicted) predicted.value = p.recommended_kwh ?? "";
+  const mode = t(data.source === "automatic" ? "reserveModeAuto" : data.source === "fallback" ? "reserveModeFallback" : "reserveModeManual");
+  setText("combinedReserveFloorDisplay", `${mode} · ${data.effective_kwh} kWh`);
+  setText("combined-usableBatteryReserve", t("dashboardReserveFloorDisplay", {value: `${data.effective_kwh} kWh`}));
+  setText("reserveForecastSummary", p.generated_at ? t("reserveSummary", {
+    mode, value: data.effective_kwh, night: p.night,
+    updated: formatLocalDateTime(p.generated_at), days: p.training_nights,
+    load: p.predicted_load_kwh ?? "—", pv: p.predicted_pv_kwh ?? "—",
+  }) + (p.status !== "ready" ? ` · ${t("reserveUnavailable", {reason: p.reason})}` : "") : t("reserveWaiting"));
+  const stats = data.stats || {};
+  setText("reserveForecastStats", t("reserveStats", {count: stats.evaluated_nights || 0, error: stats.mae_kwh ?? "—", coverage: stats.coverage_percent ?? "—"}));
+  const body = document.getElementById("reserveForecastRows");
+  if (body) body.innerHTML = (data.items || []).map(item => {
+    const o = item.outcome || {};
+    const actual = o.status === "complete" ? o.actual_need_kwh : t(o.status === "incomplete" ? "reserveIncomplete" : "reservePending");
+    return `<tr>${[item.night, item.recommended_kwh, actual, o.error_kwh ?? "—", o.margin_kwh ?? "—"].map(v => `<td>${escapeHtml(String(v))}</td>`).join("")}</tr>`;
+  }).join("");
+}
+
+async function loadReserveForecast() {
+  if (reserveForecastLoading || Date.now() - reserveForecastFetchedAt < 30000) return;
+  reserveForecastLoading = true;
+  try {
+    const data = await fetchJson("/api/reserve-forecast", {timeoutMs: 10000});
+    reserveForecastFetchedAt = Date.now();
+    if (!reserveControlSaving) renderReserveForecast(data);
+  } catch (err) {
+    setText("reserveForecastSummary", t("reserveUnavailable", {reason: String(err)}));
+  } finally { reserveForecastLoading = false; }
+}
+
 function dashboardReserveFloorFromSource(combinedFlow = null, configPayload = null) {
   return toFiniteNumber(configPayload?.solplanet_export_reserve_floor_kwh)
     ?? toFiniteNumber(combinedFlow?.energy_reference?.solplanet_export_reserve_floor_kwh)
@@ -6925,12 +7013,19 @@ function renderDashboardReserveFloorControl(combinedFlow = null, configPayload =
   setText("combined-usableBatteryReserve", t("dashboardReserveFloorDisplay", { value: formatted }));
   setText("combinedReserveFloorDisplay", t("dashboardReserveFloorDisplay", { value: formatted }));
   const input = document.getElementById("combinedReserveFloorInput");
+  void loadReserveForecast();
+  if (reserveForecastData) {
+    renderReserveForecast(reserveForecastData);
+    return;
+  }
   if (input && document.activeElement !== input) {
     input.value = String(Number.isInteger(reserveFloorKwh) ? reserveFloorKwh : reserveFloorKwh.toFixed(1));
   }
 }
 
 async function saveDashboardReserveFloor() {
+  if (reserveControlSaving || !reserveForecastData) return;
+  const checkbox = document.getElementById("combinedReserveAuto");
   const input = document.getElementById("combinedReserveFloorInput");
   const statusEl = document.getElementById("combinedReserveFloorStatus");
   const button = document.getElementById("combinedReserveFloorSaveBtn");
@@ -6946,26 +7041,24 @@ async function saveDashboardReserveFloor() {
   if (statusEl) statusEl.textContent = t("dashboardReserveFloorSaving");
   if (button) button.disabled = true;
   try {
-    const current = await fetchJson("/api/config", { timeoutMs: 5000 });
-    const payload = {
-      ...current,
-      solplanet_export_reserve_floor_kwh: reserveFloorKwh,
-    };
-    const result = await fetchJson("/api/config", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      timeoutMs: 10000,
+    reserveControlSaving = true;
+    if (checkbox) checkbox.disabled = true;
+    const automatic = Boolean(document.getElementById("combinedReserveAuto")?.checked);
+    const result = await fetchJson("/api/reserve-forecast", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({automatic, manual_kwh: reserveFloorKwh}), timeoutMs: 10000,
     });
-    stateCache.lastConfig = result;
-    fillConfigForm(result);
-    renderDashboardReserveFloorControl(stateCache.lastSummary?.combinedFlow || null, result);
+    reserveControlSaving = false;
+    if (stateCache.lastConfig) stateCache.lastConfig.solplanet_export_reserve_floor_kwh = result.manual_kwh;
+    renderReserveForecast(result);
     if (statusEl) statusEl.textContent = t("dashboardReserveFloorSaved");
     void loadCurrentTab();
   } catch (err) {
     if (statusEl) statusEl.textContent = t("dashboardReserveFloorSaveFailed", { error: String(err) });
   } finally {
+    reserveControlSaving = false;
     if (button) button.disabled = false;
+    if (reserveForecastData) renderReserveForecast(reserveForecastData);
   }
 }
 
@@ -18036,6 +18129,7 @@ bindClickIfPresent("combined-teslaChargingToggleBtn", () => {
 bindClickIfPresent("configBtn", () => {
   void openConfigModal();
 });
+bindChangeIfPresent("combinedReserveAuto", () => { void saveDashboardReserveFloor(); });
 bindClickIfPresent("combinedReserveFloorSaveBtn", () => {
   void saveDashboardReserveFloor();
 });

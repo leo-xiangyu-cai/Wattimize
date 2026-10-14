@@ -52,7 +52,7 @@ from app.config import (
     settings_to_dict,
 )
 from app.home_assistant import HomeAssistantClient
-from app import pre_free_energy
+from app import pre_free_energy, reserve_forecast
 from app.persistence import (
     DEFAULT_DB_PATH,
     EnergySample,
@@ -2210,10 +2210,8 @@ def _build_public_combined_flow(flow: dict[str, object]) -> dict[str, object]:
     else:
         display = _build_combined_display(metrics)
     energy_reference = _combined_usable_battery_reference(metrics)
-    energy_reference["solplanet_export_reserve_floor_kwh"] = max(
-        float(settings.solplanet_export_reserve_floor_kwh),
-        0.0,
-    )
+    energy_reference["solplanet_export_reserve_floor_kwh"] = _effective_export_reserve(_tesla_grid_support_now_local()[0], metrics)[0]
+    energy_reference["reserve_forecast"] = _reserve_forecast_status(metrics)
     raw_obj = flow.get("raw")
     raw_map = raw_obj if isinstance(raw_obj, dict) else {}
     tesla_raw_obj = raw_map.get("tesla")
@@ -6230,7 +6228,7 @@ def _build_solplanet_export_monitor(
         if in_pre_peak_phase
         else ("peak_hold" if in_peak_hold_phase else ("late_target" if in_late_phase else "outside_export_window"))
     )
-    reserve_floor_kwh = max(float(settings.solplanet_export_reserve_floor_kwh), 0.0)
+    reserve_floor_kwh = _effective_export_reserve(now_local, metrics_map)[0]
     current_home_load_w = _to_number(metrics_map.get("load_w"))
     minutes_since_midnight = now_local.hour * 60 + now_local.minute + (now_local.second / 60.0)
     remaining_export_window_hours = max(
@@ -16806,6 +16804,121 @@ def _build_collector_health_summary(systems: dict[str, dict[str, object]]) -> di
     }
 
 
+# The forecasting worker is independent of collection/control latency.
+_reserve_records: dict = {}
+_reserve_prediction: dict = {}
+_reserve_task: asyncio.Task | None = None
+_reserve_lock = asyncio.Lock()
+_reserve_threshold = 50.0
+
+
+def _effective_export_reserve(now: datetime, metrics: dict | None = None) -> tuple[float, str]:
+    enabled = bool(_reserve_records.get("settings", {}).get("automatic", False))
+    value, source = reserve_forecast.effective(
+        settings.solplanet_export_reserve_floor_kwh, enabled, _reserve_prediction, now)
+    if enabled and metrics:
+        soc = _to_number(metrics.get("tesla_battery_soc_percent"))
+        if soc is not None:
+            urgent = max(0., _reserve_threshold - soc) * .75 / .90
+            budgeted = (float(_reserve_prediction.get("ev_kwh") or 0.)
+                        if _reserve_prediction.get("night") == now.date().isoformat()
+                        and reserve_forecast.finite(_reserve_prediction.get("recommended_kwh")) else 0.)
+            value += max(0., urgent - budgeted)
+    return value, source
+
+
+def _reserve_forecast_status(metrics: dict | None = None) -> dict:
+    now, _ = _tesla_grid_support_now_local()
+    value, source = _effective_export_reserve(now, metrics)
+    return dict(automatic=bool(_reserve_records.get("settings", {}).get("automatic", False)),
+                manual_kwh=settings.solplanet_export_reserve_floor_kwh,
+                effective_kwh=round(value, 2), source=source,
+                prediction={k: v for k, v in _reserve_prediction.items()
+                            if k not in ("forecast", "pv_bins_kwh", "training_dates")})
+
+
+async def _reserve_forecast_loop() -> None:
+    global _reserve_prediction, _reserve_threshold
+    history = []
+    history_day = None
+    last_slot = None
+    while True:
+        try:
+            now, _ = _tesla_grid_support_now_local()
+            # Train after each completed 11:00 boundary; keep all 28 days' upper tail.
+            training_day = (now - timedelta(hours=11)).date()
+            if training_day != history_day:
+                history = await asyncio.to_thread(reserve_forecast.training_history, storage_db_path, now)
+                history_day = training_day
+                for night in sorted({p["night"] for k, p in _reserve_records.items() if k.startswith("prediction:")}):
+                    _, end = reserve_forecast.period(date.fromisoformat(night), now.tzinfo)
+                    if end <= now and "actual:" + night not in _reserve_records:
+                        actual = await asyncio.to_thread(reserve_forecast.read_night, storage_db_path, date.fromisoformat(night), now.tzinfo)
+                        await asyncio.to_thread(reserve_forecast.write_record, storage_db_path, "actual:" + night, actual)
+                        _reserve_records["actual:" + night] = actual
+            slot = now.strftime("%Y-%m-%dT%H:") + str(now.minute // 30)
+            # Produce an initial preview immediately; update every half hour from 15:00.
+            if last_slot is None or (15 <= now.hour < 23 and slot != last_slot):
+                weather = await weather_forecast()
+                flow = await _get_energy_flow_from_realtime_kv("combined", allow_storage_fallback=False)
+                metrics = flow.get("metrics") or {}
+                soc = _to_number(metrics.get("tesla_battery_soc_percent"))
+                _reserve_threshold = await _load_tesla_force_max_charge_threshold_soc_percent()
+                ev_kwh = max(0., _reserve_threshold - soc) * .75 / .90 if soc is not None else 0.
+                recent = await asyncio.to_thread(get_series_samples, storage_db_path, system="combined", hours=1, max_points=500)
+                loads = [max(0., r["load_w"] - (r.get("tesla_charge_power_w") or 0.)) for r in recent["items"] if r.get("load_w") is not None]
+                prediction = reserve_forecast.predict(now, history, weather, ev_kwh=ev_kwh,
+                    ev_known=soc is not None and not (flow.get("meta") or {}).get("stale", False),
+                    manual_kwh=settings.solplanet_export_reserve_floor_kwh,
+                    recent_load_w=sum(loads) / len(loads) if loads else 0.)
+                previous = _reserve_prediction
+                if (prediction["status"] == "ready" and reserve_forecast.finite(previous.get("recommended_kwh"))
+                        and previous.get("night") == prediction["night"]):
+                    prediction["raw_recommended_kwh"] = prediction["recommended_kwh"]
+                    prediction["recommended_kwh"] = max(prediction["recommended_kwh"], previous["recommended_kwh"] - 1.)
+                if (prediction["status"] == "unavailable" and previous.get("night") == prediction["night"]):
+                    prediction["recommended_kwh"] = previous.get("recommended_kwh")
+                prediction["automatic_at_prediction"] = bool(_reserve_records.get("settings", {}).get("automatic", False))
+                key = "prediction:" + prediction["generated_at"]
+                await asyncio.to_thread(reserve_forecast.write_record, storage_db_path, key, prediction, immutable=True)
+                _reserve_records[key] = prediction
+                _reserve_prediction = prediction
+                last_slot = slot
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Reserve forecast update failed; manual/last conservative reserve remains available")
+        await asyncio.sleep(60)
+
+
+class ReserveControlPayload(BaseModel):
+    automatic: bool
+    manual_kwh: float = Field(ge=0, le=100, allow_inf_nan=False)
+
+
+@app.get("/api/reserve-forecast")
+async def get_reserve_forecast() -> dict:
+    try:
+        flow = await _get_energy_flow_from_realtime_kv("combined", allow_storage_fallback=False)
+        metrics = flow.get("metrics") or {}
+    except HTTPException:
+        metrics = None
+    return _reserve_forecast_status(metrics) | reserve_forecast.history_view(_reserve_records)
+
+
+@app.put("/api/reserve-forecast")
+async def put_reserve_forecast(payload: ReserveControlPayload) -> dict:
+    global settings
+    async with _reserve_lock:
+        # A narrow update avoids changing credentials or restarting device clients.
+        persisted = await asyncio.to_thread(save_settings, {"solplanet_export_reserve_floor_kwh": payload.manual_kwh})
+        mode = dict(automatic=payload.automatic, updated_at=datetime.now(UTC).isoformat())
+        await asyncio.to_thread(reserve_forecast.write_record, storage_db_path, "settings", mode)
+        settings = persisted
+        _reserve_records["settings"] = mode
+    return await get_reserve_forecast()
+
+
 @app.get("/api/weather/forecast")
 async def weather_forecast() -> dict[str, object]:
     now_ts = monotonic()
@@ -19309,6 +19422,14 @@ async def get_solplanet_cgi_explore() -> dict[str, object]:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    global _reserve_task
+    if _reserve_task:
+        _reserve_task.cancel()
+        try:
+            await _reserve_task
+        except asyncio.CancelledError:
+            pass
+        _reserve_task = None
     await _stop_collector_watchdog()
     await _stop_database_backups()
     await _stop_daily_reports()
@@ -19319,7 +19440,7 @@ async def on_shutdown() -> None:
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    global static_asset_version
+    global static_asset_version, _reserve_records, _reserve_prediction, _reserve_task
     static_asset_version = await asyncio.to_thread(_compute_static_asset_version)
     await asyncio.to_thread(init_db, storage_db_path)
     await asyncio.to_thread(_rebuild_meter_usage_uploads_from_raw)
@@ -19341,8 +19462,12 @@ async def on_startup() -> None:
     await _start_worker_log_cleanup()
     await _start_database_backups()
     await _start_daily_reports()
+    _reserve_records = await asyncio.to_thread(reserve_forecast.read_records, storage_db_path)
+    versions = [v for k, v in _reserve_records.items() if k.startswith("prediction:")]
+    _reserve_prediction = max(versions, key=lambda v: v["generated_at"]) if versions else {}
     await _start_collector()
     await _start_collector_watchdog()
+    _reserve_task = asyncio.create_task(_reserve_forecast_loop())
 
 
 @app.get("/api/catalog/domains")

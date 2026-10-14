@@ -283,3 +283,5 @@ SAJ control notes for command verification and actual-power constraints.
 From 08:00 to 11:00, [pre-free-energy dispatch](docs/pre-free-energy.md) shares
 available power between Tesla and the pool pump while preserving home reserves.
 During 11:00–15:00, the worker restores full-power battery charging settings.
+
+Dashboard supports an optional deterministic dynamic overnight reserve: a checkbox selects automatic prediction or the independently saved manual value. Predictions start before the evening export window, are archived even in manual observation mode, and are evaluated after the next 11:00 boundary. See [dynamic reserve model and validation](docs/dynamic-reserve.md).
