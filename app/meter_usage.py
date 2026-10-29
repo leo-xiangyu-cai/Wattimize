@@ -6,7 +6,7 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -109,7 +109,7 @@ def _stream_id(row: list[str]) -> str:
 
 def _number(value: object) -> float | None:
     try:
-        number = float(str(value or "").strip())
+        number = float(str(value if value is not None else "").strip())
     except (TypeError, ValueError):
         return None
     return number if number == number else None
@@ -244,6 +244,25 @@ def _local_dt(day: date, value: time, timezone_name: str | None) -> datetime:
     return datetime.combine(day, value, tzinfo=tz)
 
 
+def _meter_timezone(usage: dict[str, Any], fallback: str | None):
+    labels = {
+        str(stream.get("timezone") or "").strip()
+        for stream in usage.get("streams", [])
+        if isinstance(stream, dict) and stream.get("kind") in {"import", "export"}
+    } - {""}
+    if len(labels) > 1:
+        raise ValueError("Meter import/export streams must use the same timezone")
+    label = next(iter(labels), fallback or "Australia/Sydney")
+    # Retailer AEST exports stay at UTC+10, including during Sydney daylight saving.
+    fixed_offsets = {"AEST": 10, "AEDT": 11, "UTC": 0, "GMT": 0}
+    if label.upper() in fixed_offsets:
+        return label, timezone(timedelta(hours=fixed_offsets[label.upper()]))
+    try:
+        return label, ZoneInfo(label)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Unsupported meter timezone: {label}") from exc
+
+
 def _usage_cost_variant(
     *,
     fixed_aud: float,
@@ -276,6 +295,7 @@ def compute_meter_usage_actuals(
     source_label: str,
 ) -> dict[str, dict[str, Any]]:
     actuals: dict[str, dict[str, Any]] = {}
+    source_timezone_name, source_timezone = _meter_timezone(usage, timezone_name)
     for day_payload in usage.get("days") if isinstance(usage.get("days"), list) else []:
         if not isinstance(day_payload, dict):
             continue
@@ -321,7 +341,8 @@ def compute_meter_usage_actuals(
             if interval_time is None:
                 continue
             duration_minutes = int(_number(raw_interval.get("duration_minutes")) or 5)
-            local_start = _local_dt(day, interval_time, timezone_name)
+            tariff_timezone = _local_dt(day, interval_time, timezone_name).tzinfo
+            local_start = datetime.combine(day, interval_time, tzinfo=source_timezone).astimezone(tariff_timezone)
             import_kwh = max(0.0, float(_number(raw_interval.get("import_kwh")) or 0.0))
             export_kwh = max(0.0, float(_number(raw_interval.get("export_kwh")) or 0.0))
             if _time_in_window(local_start, free_import_window):
@@ -390,6 +411,9 @@ def compute_meter_usage_actuals(
             "invoice_number": source_label,
             "source_filename": usage.get("source_filename") or "",
             "day": day.isoformat(),
+            "day_basis": "meter_source_day",
+            "source_timezone": source_timezone_name,
+            "tariff_timezone": timezone_name or "Australia/Sydney",
             "currency": "AUD",
             "actual_daily_cost_aud": no_daily_cap_variant["total_aud"],
             "interval_count": len(intervals),
